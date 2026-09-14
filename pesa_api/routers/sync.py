@@ -189,7 +189,8 @@ async def sync_pull(
             os.alcance_max, os.div_minima, os.div_verificacion,
             os.id_equipo, os.numero_cca, os.holograma_anterior,
             os.valor_repetibilidad, os.valor_excentricidad,
-            os.sync_version, os.updated_at,
+            COALESCE(os.sync_version, 1) AS sync_version,
+            os.updated_at,
             cl.razon_social   AS cliente,
             cl.direccion      AS direccion_cliente,
             ts.nombre         AS tipo_servicio,
@@ -243,8 +244,9 @@ async def sync_push(
     # Obtener OS actual del servidor
     row = await db.fetchrow(
         """
-        SELECT id, estado, sync_version, id_tecnico,
-               id_tipo_servicio, id_clase_exactitud
+        SELECT id, estado,
+               COALESCE(sync_version, 0) AS sync_version,
+               id_tecnico, id_tipo_servicio, id_clase_exactitud
         FROM ordenes_servicio
         WHERE folio_os = $1
         """,

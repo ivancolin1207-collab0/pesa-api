@@ -33,6 +33,21 @@ async def lifespan(app: FastAPI):
     logger.info("🚀 Servicios PESA API v2.0 iniciando — Entorno: %s", env_mode)
     logger.info("   PostgreSQL: %s:%s/%s", settings.DB_HOST, settings.DB_PORT, settings.DB_NAME)
     await init_db_pool()
+    # ── Migración automática de columnas opcionales ───────────────────────────
+    # Agrega columnas que pueden faltar en instalaciones antiguas de la BD.
+    # ADD COLUMN IF NOT EXISTS es idempotente: no falla si ya existen.
+    try:
+        from pesa_api.core.database import get_pool
+        async with get_pool().acquire() as conn:
+            for ddl in [
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sync_version  INTEGER DEFAULT 1",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sync_at       TIMESTAMPTZ",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS device_id     TEXT",
+            ]:
+                await conn.execute(ddl)
+        logger.info("✅ Migración de columnas de sync completada")
+    except Exception as e:
+        logger.warning("⚠️  Migración automática no pudo completarse: %s", e)
     yield
     await close_db_pool()
     logger.info("API detenida.")
