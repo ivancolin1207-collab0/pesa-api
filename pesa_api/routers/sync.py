@@ -296,35 +296,66 @@ async def sync_push(
             id_clase = clase_row["id"]
 
     # Actualizar OS en el servidor
-    await db.execute(
-        """
-        UPDATE ordenes_servicio SET
-            estado                = $1,
-            observaciones         = COALESCE($2, observaciones),
-            valor_repetibilidad   = COALESCE($3, valor_repetibilidad),
-            valor_excentricidad   = COALESCE($4, valor_excentricidad),
-            id_clase_exactitud    = COALESCE($5, id_clase_exactitud),
-            marca                 = COALESCE($6, marca),
-            modelo                = COALESCE($7, modelo),
-            ns                    = COALESCE($8, ns),
-            ubicacion             = COALESCE($9, ubicacion),
-            id_equipo             = COALESCE($10, id_equipo),
-            sync_version          = sync_version + 1,
-            sync_at               = NOW(),
-            device_id             = $11,
-            updated_at            = NOW()
-        WHERE id = $12
-        """,
-        nuevo_estado,
-        payload.observaciones,
-        payload.valor_repetibilidad,
-        payload.valor_excentricidad,
-        id_clase,
-        payload.marca, payload.modelo, payload.ns, payload.ubicacion,
-        payload.id_equipo,
-        payload.device_id,
-        os_id,
-    )
+    # [FIX] Primer intento con sync_version, sync_at, device_id.
+    # Si la columna no existe todavía (BD antigua), reintenta sin ellas.
+    try:
+        await db.execute(
+            """
+            UPDATE ordenes_servicio SET
+                estado                = $1,
+                observaciones         = COALESCE($2, observaciones),
+                valor_repetibilidad   = COALESCE($3, valor_repetibilidad),
+                valor_excentricidad   = COALESCE($4, valor_excentricidad),
+                id_clase_exactitud    = COALESCE($5, id_clase_exactitud),
+                marca                 = COALESCE($6, marca),
+                modelo                = COALESCE($7, modelo),
+                ns                    = COALESCE($8, ns),
+                ubicacion             = COALESCE($9, ubicacion),
+                id_equipo             = COALESCE($10, id_equipo),
+                sync_version          = COALESCE(sync_version, 0) + 1,
+                sync_at               = NOW(),
+                device_id             = $11,
+                updated_at            = NOW()
+            WHERE id = $12
+            """,
+            nuevo_estado,
+            payload.observaciones,
+            payload.valor_repetibilidad,
+            payload.valor_excentricidad,
+            id_clase,
+            payload.marca, payload.modelo, payload.ns, payload.ubicacion,
+            payload.id_equipo,
+            payload.device_id,
+            os_id,
+        )
+    except Exception as e_full:
+        logger.warning("UPDATE con sync_version falló (%s) — reintentando sin columnas opcionales", e_full)
+        # Fallback sin sync_version / sync_at / device_id (BD sin migración)
+        await db.execute(
+            """
+            UPDATE ordenes_servicio SET
+                estado              = $1,
+                observaciones       = COALESCE($2, observaciones),
+                valor_repetibilidad = COALESCE($3, valor_repetibilidad),
+                valor_excentricidad = COALESCE($4, valor_excentricidad),
+                id_clase_exactitud  = COALESCE($5, id_clase_exactitud),
+                marca               = COALESCE($6, marca),
+                modelo              = COALESCE($7, modelo),
+                ns                  = COALESCE($8, ns),
+                ubicacion           = COALESCE($9, ubicacion),
+                id_equipo           = COALESCE($10, id_equipo),
+                updated_at          = NOW()
+            WHERE id = $11
+            """,
+            nuevo_estado,
+            payload.observaciones,
+            payload.valor_repetibilidad,
+            payload.valor_excentricidad,
+            id_clase,
+            payload.marca, payload.modelo, payload.ns, payload.ubicacion,
+            payload.id_equipo,
+            os_id,
+        )
 
     # Upsert de pruebas metrológicas
     await _upsert_pruebas(db, os_id, payload)
@@ -468,21 +499,38 @@ async def upload_firmas(
     if row["estado"] in ("CANCELADA", "COMPLETADA"):
         raise HTTPException(status_code=400, detail=f"OS en estado {row['estado']!r}, no se pueden añadir firmas")
 
-    await db.execute(
-        """
-        UPDATE ordenes_servicio SET
-            firma_tecnico_png = $1,
-            firma_cliente_png = $2,
-            estado            = 'FIRMADA',
-            sync_version      = sync_version + 1,
-            sync_at           = NOW(),
-            updated_at        = NOW()
-        WHERE id = $3
-        """,
-        payload.firma_tecnico_png,
-        payload.firma_cliente_png,
-        row["id"],
-    )
+    # [FIX] Intenta con sync_version y sync_at; si no existen, usa fallback
+    try:
+        await db.execute(
+            """
+            UPDATE ordenes_servicio SET
+                firma_tecnico_png = $1,
+                firma_cliente_png = $2,
+                estado            = 'FIRMADA',
+                sync_version      = COALESCE(sync_version, 0) + 1,
+                sync_at           = NOW(),
+                updated_at        = NOW()
+            WHERE id = $3
+            """,
+            payload.firma_tecnico_png,
+            payload.firma_cliente_png,
+            row["id"],
+        )
+    except Exception as e_firmas:
+        logger.warning("UPDATE firmas con sync_version falló (%s) — reintentando sin columnas opcionales", e_firmas)
+        await db.execute(
+            """
+            UPDATE ordenes_servicio SET
+                firma_tecnico_png = $1,
+                firma_cliente_png = $2,
+                estado            = 'FIRMADA',
+                updated_at        = NOW()
+            WHERE id = $3
+            """,
+            payload.firma_tecnico_png,
+            payload.firma_cliente_png,
+            row["id"],
+        )
 
     logger.info("Firmas subidas para folio=%s por tecnico_id=%d", folio_os, id_tecnico)
     return {
