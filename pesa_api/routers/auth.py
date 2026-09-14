@@ -3,7 +3,6 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from fastapi.security import OAuth2PasswordRequestForm
 from pydantic import BaseModel
 
 from pesa_api.core.database import get_db
@@ -17,7 +16,6 @@ from pesa_api.core.security import (
 
 router = APIRouter()
 
-
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
@@ -26,10 +24,8 @@ class TokenResponse(BaseModel):
     nombre: str
     id_tecnico: Optional[int] = None
 
-
 class RefreshRequest(BaseModel):
     refresh_token: str
-
 
 class UserProfile(BaseModel):
     id: int
@@ -38,31 +34,19 @@ class UserProfile(BaseModel):
     role: str
     id_tecnico: Optional[int] = None
 
-
-class LoginJsonRequest(BaseModel):
-    username: Optional[str] = None
-    usuario: Optional[str] = None
-    password: Optional[str] = None
-    contrasena: Optional[str] = None
-
-
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
-
 
 def _check_password(plain_password: str, stored_hash: str) -> bool:
     if not stored_hash:
         return False
-    # 1. Comprobación SHA-256 (formato app escritorio / cat_tecnicos)
     sha256_hash = hashlib.sha256(plain_password.encode()).hexdigest()
     if sha256_hash.lower() == stored_hash.lower():
         return True
-    # 2. Comprobación Bcrypt (si fue hasheado con passlib/bcrypt)
     try:
         return verify_password(plain_password, stored_hash)
     except Exception:
         return False
-
 
 @router.post(
     "/login",
@@ -99,16 +83,8 @@ async def login(
             detail="Faltan credenciales (usuario y contrasena obligatorios)",
         )
 
-    # Consulta directa a cat_tecnicos
-    row = await db.fetchrow(
-        """
-        SELECT id, usuario AS username, nombre_completo, password_hash,
-               activo, id AS id_tecnico, rol AS role
-        FROM cat_tecnicos
-        WHERE usuario = 
-        """,
-        username,
-    )
+    query = "SELECT id, usuario, nombre_completo, password_hash, activo, rol FROM cat_tecnicos WHERE LOWER(usuario) = LOWER();"
+    row = await db.fetchrow(query, str(username).strip())
 
     if row is None or not row["activo"]:
         raise HTTPException(
@@ -116,23 +92,23 @@ async def login(
             detail="Credenciales incorrectas",
         )
 
-    if not _check_password(password, row["password_hash"]):
+    if not _check_password(str(password), row["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales incorrectas",
         )
 
-    access = create_access_token({"sub": str(row["id"]), "role": str(row["role"] or "tecnico")})
+    user_role = str(row["rol"] or "tecnico")
+    access = create_access_token({"sub": str(row["id"]), "role": user_role})
     refresh = create_refresh_token(row["id"])
 
     return TokenResponse(
         access_token=access,
         refresh_token=refresh,
-        role=str(row["role"] or "tecnico"),
+        role=user_role,
         nombre=row["nombre_completo"],
-        id_tecnico=row["id_tecnico"],
+        id_tecnico=row["id"],
     )
-
 
 @router.post(
     "/refresh",
@@ -151,14 +127,8 @@ async def refresh_token_endpoint(
         )
 
     user_id = int(payload["sub"])
-    row = await db.fetchrow(
-        """
-        SELECT id, usuario AS username, nombre_completo, activo, id AS id_tecnico, rol AS role
-        FROM cat_tecnicos
-        WHERE id = 
-        """,
-        user_id,
-    )
+    query = "SELECT id, usuario, nombre_completo, activo, rol FROM cat_tecnicos WHERE id = ;"
+    row = await db.fetchrow(query, user_id)
 
     if not row or not row["activo"]:
         raise HTTPException(
@@ -166,17 +136,17 @@ async def refresh_token_endpoint(
             detail="Usuario no encontrado o inactivo",
         )
 
-    access = create_access_token({"sub": str(row["id"]), "role": str(row["role"] or "tecnico")})
+    user_role = str(row["rol"] or "tecnico")
+    access = create_access_token({"sub": str(row["id"]), "role": user_role})
     refresh = create_refresh_token(row["id"])
 
     return TokenResponse(
         access_token=access,
         refresh_token=refresh,
-        role=str(row["role"] or "tecnico"),
+        role=user_role,
         nombre=row["nombre_completo"],
-        id_tecnico=row["id_tecnico"],
+        id_tecnico=row["id"],
     )
-
 
 @router.get(
     "/me",
@@ -191,7 +161,6 @@ async def get_me(current_user=Depends(get_current_user)):
         role=current_user.get("role", "tecnico"),
         id_tecnico=current_user.get("id_tecnico"),
     )
-
 
 @router.post(
     "/logout",
