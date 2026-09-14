@@ -40,15 +40,16 @@ def _hash_token(token: str) -> str:
 def _check_password(plain_password: str, stored_hash: str) -> bool:
     if not stored_hash:
         return False
-    # 1. SHA-256 (app escritorio)
     sha256_hash = hashlib.sha256(plain_password.encode()).hexdigest()
     if sha256_hash.lower() == stored_hash.lower():
         return True
-    # 2. Bcrypt fallback
     try:
         return verify_password(plain_password, stored_hash)
     except Exception:
         return False
+
+SQL_LOGIN = "SELECT id, usuario, nombre_completo, password_hash, activo, rol FROM cat_tecnicos WHERE usuario = $1"
+SQL_REFRESH = "SELECT id, usuario, nombre_completo, activo, rol FROM cat_tecnicos WHERE id = $1"
 
 @router.post(
     "/login",
@@ -85,12 +86,10 @@ async def login(
             detail="Faltan credenciales (usuario y contrasena obligatorios)",
         )
 
-    # Busqueda directa sin lower() conflictivo en asyncpg
     clean_user = str(username).strip()
-    row = await db.fetchrow(
-        "SELECT id, usuario, nombre_completo, password_hash, activo, rol FROM cat_tecnicos WHERE usuario = ",
-        clean_user,
-    )
+    clean_pass = str(password).strip()
+
+    row = await db.fetchrow(SQL_LOGIN, clean_user)
 
     if row is None or not row["activo"]:
         raise HTTPException(
@@ -98,7 +97,7 @@ async def login(
             detail="Credenciales incorrectas",
         )
 
-    if not _check_password(str(password).strip(), row["password_hash"]):
+    if not _check_password(clean_pass, row["password_hash"]):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Credenciales incorrectas",
@@ -133,10 +132,7 @@ async def refresh_token_endpoint(
         )
 
     user_id = int(payload["sub"])
-    row = await db.fetchrow(
-        "SELECT id, usuario, nombre_completo, activo, rol FROM cat_tecnicos WHERE id = ",
-        user_id,
-    )
+    row = await db.fetchrow(SQL_REFRESH, user_id)
 
     if not row or not row["activo"]:
         raise HTTPException(
