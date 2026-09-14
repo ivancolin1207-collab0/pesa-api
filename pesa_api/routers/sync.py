@@ -180,6 +180,12 @@ async def sync_pull(
             detail      = "El usuario no tiene técnico asignado",
         )
 
+    # [FIX-TZ] asyncpg/PostgreSQL no puede comparar datetime aware con TIMESTAMP
+    # WITHOUT TIME ZONE. Convertimos since a UTC y eliminamos tzinfo antes de
+    # pasarlo como parámetro. El cast SQL ::timestamp es una segunda protección.
+    if since.tzinfo is not None:
+        since = since.astimezone(timezone.utc).replace(tzinfo=None)
+
     rows = await db.fetch(
         """
         SELECT
@@ -206,7 +212,7 @@ async def sync_pull(
         WHERE os.id_tecnico = $1
           AND os.modalidad  = 'DIGITAL'
           AND os.estado     NOT IN ('CANCELADA', 'COMPLETADA')
-          AND os.updated_at > $2
+          AND os.updated_at > $2::timestamp
         ORDER BY os.updated_at DESC
         LIMIT $3
         """,
