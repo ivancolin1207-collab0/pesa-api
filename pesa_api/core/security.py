@@ -25,6 +25,12 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 SQL_CURRENT_USER = "SELECT id, usuario AS username, nombre_completo, activo, id AS id_tecnico, rol AS role FROM cat_tecnicos WHERE id = $1"
 
+# Duraciones por defecto con fallback seguro
+EXPIRE_MINUTES = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 480)
+EXPIRE_DAYS = getattr(settings, "REFRESH_TOKEN_EXPIRE_DAYS", 30)
+SECRET = getattr(settings, "SECRET_KEY", "pesa-secret-key-default-change-me")
+ALGO = getattr(settings, "ALGORITHM", "HS256")
+
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
@@ -37,25 +43,25 @@ def get_password_hash(password: str) -> str:
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
     expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        expires_delta or timedelta(minutes=EXPIRE_MINUTES)
     )
     to_encode.update({"exp": expire, "type": "access"})
-    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return jwt.encode(to_encode, SECRET, algorithm=ALGO)
 
 
 def create_refresh_token(user_id: int) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
+    expire = datetime.now(timezone.utc) + timedelta(days=EXPIRE_DAYS)
     payload = {
         "sub": str(user_id),
         "exp": expire,
         "type": "refresh",
     }
-    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return jwt.encode(payload, SECRET, algorithm=ALGO)
 
 
 def decode_token(token: str) -> Optional[dict]:
     try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        payload = jwt.decode(token, SECRET, algorithms=[ALGO])
         return payload
     except JWTError:
         return None
