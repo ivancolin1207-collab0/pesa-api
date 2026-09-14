@@ -1,111 +1,114 @@
+﻿"""
+pesa_api/core/security.py — JWT, hashing de contraseñas y RBAC.
 """
-pesa_api/core/security.py — JWT, bcrypt y dependencias de autenticación.
-"""
-from __future__ import annotations
-
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-import bcrypt
-from jose import JWTError, jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
-from pesa_api.core.config   import settings
+from pesa_api.core.config import settings
 from pesa_api.core.database import get_db
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+pwd_context = CryptContext(
+    schemes=["bcrypt"],
+    deprecated="auto",
+    bcrypt__rounds=12,
+)
 
-# ─── Hashing ─────────────────────────────────────────────────────────────────
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/auth/login",
+    auto_error=True,
+)
 
-def hash_password(plain: str) -> str:
-    """Genera hash bcrypt de la contraseña."""
-    return bcrypt.hashpw(plain.encode(), bcrypt.gensalt(rounds=12)).decode()
-
-
-def verify_password(plain: str, hashed: str) -> bool:
-    """Verifica contraseña contra hash bcrypt."""
-    return bcrypt.checkpw(plain.encode(), hashed.encode())
+SQL_CURRENT_USER = "SELECT id, usuario AS username, nombre_completo, activo, id AS id_tecnico, rol AS role FROM cat_tecnicos WHERE id = $1"
 
 
-# ─── JWT ─────────────────────────────────────────────────────────────────────
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
-    payload = data.copy()
-    expire  = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + (
+        expires_delta or timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     )
-    payload.update({"exp": expire, "type": "access"})
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
 def create_refresh_token(user_id: int) -> str:
+    expire = datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {
-        "sub":  str(user_id),
+        "sub": str(user_id),
+        "exp": expire,
         "type": "refresh",
-        "exp":  datetime.now(timezone.utc) + timedelta(days=settings.REFRESH_EXPIRE_DAYS),
     }
-    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
 
 
-def decode_token(token: str) -> dict:
-    """Decodifica y valida un JWT. Lanza JWTError si es inválido."""
-    return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+def decode_token(token: str) -> Optional[dict]:
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        return payload
+    except JWTError:
+        return None
 
-
-# ─── Dependencias FastAPI ─────────────────────────────────────────────────────
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db          = Depends(get_db),
+    db=Depends(get_db),
 ) -> dict:
-    """
-    Dependency: valida el JWT y retorna el usuario activo desde la BD.
-    Inyectable en cualquier endpoint protegido.
-    """
     credentials_exc = HTTPException(
-        status_code = status.HTTP_401_UNAUTHORIZED,
-        detail      = "Token inválido o expirado",
-        headers     = {"WWW-Authenticate": "Bearer"},
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token inválido o expirado",
+        headers={"WWW-Authenticate": "Bearer"},
     )
     try:
         payload = decode_token(token)
+        if not payload or payload.get("type") != "access":
+            raise credentials_exc
         user_id = int(payload.get("sub", 0))
-        role    = payload.get("role", "")
+        role = payload.get("role", "")
         if not user_id or not role:
             raise credentials_exc
-    except JWTError:
+    except Exception:
         raise credentials_exc
 
-    row = await db.fetchrow(
-        """
-        SELECT u.id, u.username, u.nombre_completo, u.activo,
-               u.id_tecnico, r.nombre AS role
-        FROM usuarios u JOIN roles r ON u.id_rol = r.id
-        WHERE u.id = $1 AND u.activo = TRUE
-        """,
-        user_id,
-    )
+    row = await db.fetchrow(SQL_CURRENT_USER, user_id)
+
     if row is None:
         raise credentials_exc
+    if not row["activo"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuario inactivo",
+        )
 
-    return dict(row)
+    return {
+        "id": row["id"],
+        "username": row["username"],
+        "nombre_completo": row["nombre_completo"],
+        "role": row["role"] or "tecnico",
+        "id_tecnico": row["id_tecnico"],
+    }
 
 
 def require_roles(*roles: str):
-    """
-    Dependency factory para restringir endpoint a roles específicos.
-
-    Uso:
-        @router.get("/admin-only")
-        async def endpoint(user = Depends(require_roles("admin", "logistica"))):
-            ...
-    """
-    async def _inner(current_user: dict = Depends(get_current_user)) -> dict:
-        if current_user["role"] not in roles:
+    async def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
+        user_role = str(current_user.get("role", "")).lower()
+        allowed = [r.lower() for r in roles]
+        if user_role not in allowed and "administrador" not in user_role and "admin" not in user_role:
             raise HTTPException(
-                status_code = status.HTTP_403_FORBIDDEN,
-                detail      = f"Acceso denegado. Roles permitidos: {list(roles)}",
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Acceso denegado. Se requiere uno de los siguientes roles: {list(roles)}",
             )
         return current_user
-    return _inner
+
+    return role_checker
