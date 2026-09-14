@@ -25,11 +25,11 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 SQL_CURRENT_USER = "SELECT id, usuario AS username, nombre_completo, activo, id AS id_tecnico, rol AS role FROM cat_tecnicos WHERE id = $1"
 
-# Duraciones por defecto con fallback seguro
-EXPIRE_MINUTES = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", 480)
-EXPIRE_DAYS = getattr(settings, "REFRESH_TOKEN_EXPIRE_DAYS", 30)
-SECRET = getattr(settings, "SECRET_KEY", "pesa-secret-key-default-change-me")
-ALGO = getattr(settings, "ALGORITHM", "HS256")
+# Obtener valores con fallback
+_SECRET = getattr(settings, "SECRET_KEY", getattr(settings, "JWT_SECRET", "pesa-secret-key-prod-2026"))
+_ALGO = getattr(settings, "ALGORITHM", getattr(settings, "JWT_ALGORITHM", "HS256"))
+_ACCESS_MINUTES = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", getattr(settings, "ACCESS_TOKEN_EXPIRE", 480))
+_REFRESH_DAYS = getattr(settings, "REFRESH_TOKEN_EXPIRE_DAYS", getattr(settings, "REFRESH_TOKEN_EXPIRE", 30))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -42,26 +42,25 @@ def get_password_hash(password: str) -> str:
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
-        expires_delta or timedelta(minutes=EXPIRE_MINUTES)
-    )
+    delta = expires_delta if expires_delta is not None else timedelta(minutes=int(_ACCESS_MINUTES))
+    expire = datetime.now(timezone.utc) + delta
     to_encode.update({"exp": expire, "type": "access"})
-    return jwt.encode(to_encode, SECRET, algorithm=ALGO)
+    return jwt.encode(to_encode, _SECRET, algorithm=_ALGO)
 
 
 def create_refresh_token(user_id: int) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(days=EXPIRE_DAYS)
+    expire = datetime.now(timezone.utc) + timedelta(days=int(_REFRESH_DAYS))
     payload = {
         "sub": str(user_id),
         "exp": expire,
         "type": "refresh",
     }
-    return jwt.encode(payload, SECRET, algorithm=ALGO)
+    return jwt.encode(payload, _SECRET, algorithm=_ALGO)
 
 
 def decode_token(token: str) -> Optional[dict]:
     try:
-        payload = jwt.decode(token, SECRET, algorithms=[ALGO])
+        payload = jwt.decode(token, _SECRET, algorithms=[_ALGO])
         return payload
     except JWTError:
         return None
