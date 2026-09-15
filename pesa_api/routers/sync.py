@@ -231,19 +231,19 @@ async def sync_pull(
 
     try:
         if is_admin:
-            # Admin: TODAS las OS (Física + Digital) sin filtro de técnico ni estado
+            # Admin: TODAS las OS (Física + Digital) sin filtro de técnico ni fecha
+            # El admin siempre descarga el set completo para tener visión total
             rows = await db.fetch(
                 _SELECT + """
                 WHERE os.estado NOT IN ('CANCELADA')
-                  AND os.updated_at > $1::timestamp
                 ORDER BY os.updated_at DESC
-                LIMIT $2
+                LIMIT $1
                 """,
-                since, settings.SYNC_MAX_BATCH_SIZE,
+                settings.SYNC_MAX_BATCH_SIZE,
             )
             logger.info(
-                "Sync PULL [ADMIN %s]: since=%s → %d OS",
-                current_user.get("username"), since.isoformat(), len(rows),
+                "Sync PULL [ADMIN %s]: %d OS totales (físicas + digitales)",
+                current_user.get("username"), len(rows),
             )
         else:
             # Técnico: solo sus órdenes digitales asignadas
