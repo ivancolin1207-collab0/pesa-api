@@ -23,8 +23,9 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import traceback
 from datetime import datetime, timezone
-from typing import Optional
+from typing   import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
@@ -51,38 +52,41 @@ class OSResumen(BaseModel):
 
 
 class OSCompleta(BaseModel):
-    """OS completa para descargar a la tablet."""
-    folio_os:           str
-    estado:             str
-    modalidad:          str                      # 'DIGITAL' o 'FISICO'
-    fecha:              Optional[str]   = None
-    cliente:            Optional[str]   = None
-    direccion_cliente:  Optional[str]   = None
-    sucursal_id:        Optional[int]   = None
-    sucursal_nombre:    Optional[str]   = None
-    tipo_servicio:      Optional[str]   = None
-    tecnico:            Optional[str]   = None
-    marca:              Optional[str]   = None
-    modelo:             Optional[str]   = None
-    ns:                 Optional[str]   = None
-    ubicacion:          Optional[str]   = None
-    alcance_max:        Optional[float] = None
-    div_minima:         Optional[float] = None
-    div_verificacion:   Optional[float] = None
-    id_equipo:          Optional[str]   = None
-    equipo_catalogo_id: Optional[int]   = None
-    tipo_instrumento:   Optional[str]   = None
-    numero_cca:         Optional[str]   = None
-    holograma_anterior: Optional[str]   = None
-    valor_repetibilidad: Optional[float] = None
-    valor_excentricidad: Optional[float] = None
-    clase_exactitud_codigo: Optional[str] = None
-    observaciones:      Optional[str]   = None
-    aplica_excentricidad:  Optional[bool] = True
-    num_celdas_camionera:  Optional[int]  = 0
-    pdf_url:            Optional[str]   = None   # URL para descargar PDF (modalidad FISICO)
-    sync_version:       int              = 1
-    updated_at:         datetime
+    """OS completa para descargar a la tablet.
+    Todos los campos salvo folio_os son Optional para tolerar
+    órdenes físicas con columnas NULL en la BD.
+    """
+    folio_os:              str
+    estado:                Optional[str]   = 'PROCESO'
+    modalidad:             Optional[str]   = 'DIGITAL'
+    fecha:                 Optional[str]   = None
+    cliente:               Optional[str]   = None
+    direccion_cliente:     Optional[str]   = None
+    sucursal_id:           Optional[int]   = None
+    sucursal_nombre:       Optional[int]   = None
+    tipo_servicio:         Optional[str]   = None
+    tecnico:               Optional[str]   = None
+    marca:                 Optional[str]   = None
+    modelo:                Optional[str]   = None
+    ns:                    Optional[str]   = None
+    ubicacion:             Optional[str]   = None
+    alcance_max:           Optional[float] = None
+    div_minima:            Optional[float] = None
+    div_verificacion:      Optional[float] = None
+    id_equipo:             Optional[str]   = None
+    equipo_catalogo_id:    Optional[int]   = None
+    tipo_instrumento:      Optional[str]   = None
+    numero_cca:            Optional[str]   = None
+    holograma_anterior:    Optional[str]   = None
+    valor_repetibilidad:   Optional[float] = None
+    valor_excentricidad:   Optional[float] = None
+    clase_exactitud_codigo: Optional[str]  = None
+    observaciones:         Optional[str]   = None
+    aplica_excentricidad:  Optional[bool]  = True
+    num_celdas_camionera:  Optional[int]   = 0
+    pdf_url:               Optional[str]   = None
+    sync_version:          Optional[int]   = 1
+    updated_at:            Optional[datetime] = None
 
 
 class PushDetalle(BaseModel):
@@ -181,37 +185,42 @@ async def sync_pull(
     role       = str(current_user.get("role", "")).lower()
     is_admin   = "admin" in role or not id_tecnico
 
-    # [FIX-TZ] asyncpg/PostgreSQL no puede comparar datetime aware con TIMESTAMP
-    # WITHOUT TIME ZONE. Convertimos since a UTC y eliminamos tzinfo antes de
-    # pasarlo como parámetro. El cast SQL ::timestamp es una segunda protección.
+    # [FIX-TZ] asyncpg no puede comparar datetime aware con TIMESTAMP WITHOUT TIME ZONE
     if since.tzinfo is not None:
         since = since.astimezone(timezone.utc).replace(tzinfo=None)
 
-    # ── Admin: descarga TODAS las OS activas DIGITAL ──────────────────────────
-    # ── Técnico: solo las asignadas a él ─────────────────────────────────────
+    # ── SELECT blindado con COALESCE en todos los campos de texto ─────────────
+    # Garantiza que ningún NULL en órdenes físicas rompa la validación Pydantic.
     _SELECT = """
         SELECT
-            os.folio_os, os.estado, os.modalidad,
-            os.fecha::text, os.observaciones,
-            os.marca, os.modelo, os.ns, os.ubicacion,
+            os.folio_os,
+            COALESCE(os.estado,    'PROCESO') AS estado,
+            COALESCE(os.modalidad, 'DIGITAL') AS modalidad,
+            os.fecha::text,
+            os.observaciones,
+            COALESCE(os.marca,    '') AS marca,
+            COALESCE(os.modelo,   '') AS modelo,
+            COALESCE(os.ns,       '') AS ns,
+            COALESCE(os.ubicacion,'') AS ubicacion,
             os.alcance_max, os.div_minima, os.div_verificacion,
-            os.id_equipo, os.numero_cca, os.holograma_anterior,
+            os.id_equipo::text,
+            os.numero_cca, os.holograma_anterior,
             os.valor_repetibilidad, os.valor_excentricidad,
-            COALESCE(os.aplica_excentricidad, true)   AS aplica_excentricidad,
-            COALESCE(os.num_celdas_camionera, 0)      AS num_celdas_camionera,
-            COALESCE(os.sync_version, 1)              AS sync_version,
-            os.updated_at,
-            COALESCE(cl.razon_social,    '')           AS cliente,
-            COALESCE(cl.direccion,       '')           AS direccion_cliente,
-            COALESCE(ts.nombre,          '')           AS tipo_servicio,
-            COALESCE(tc.nombre_completo, '')           AS tecnico,
-            ce.codigo                                 AS clase_exactitud_codigo,
-            ti.nombre                                 AS tipo_instrumento,
+            COALESCE(os.aplica_excentricidad, true) AS aplica_excentricidad,
+            COALESCE(os.num_celdas_camionera, 0)    AS num_celdas_camionera,
+            COALESCE(os.sync_version, 1)            AS sync_version,
+            COALESCE(os.updated_at, NOW())          AS updated_at,
+            COALESCE(cl.razon_social,    '') AS cliente,
+            COALESCE(cl.direccion,       '') AS direccion_cliente,
+            COALESCE(ts.nombre,          '') AS tipo_servicio,
+            COALESCE(tc.nombre_completo, '') AS tecnico,
+            ce.codigo                        AS clase_exactitud_codigo,
+            ti.nombre                        AS tipo_instrumento,
             CASE
-                WHEN os.modalidad = 'FISICO'
+                WHEN UPPER(os.modalidad) = 'FISICO'
                 THEN '/api/v1/os/' || os.folio_os || '/pdf'
                 ELSE NULL
-            END                                       AS pdf_url
+            END AS pdf_url
         FROM ordenes_servicio os
         LEFT JOIN cat_clientes         cl ON os.id_cliente         = cl.id
         LEFT JOIN cat_tipo_servicio    ts ON os.id_tipo_servicio    = ts.id
@@ -220,48 +229,57 @@ async def sync_pull(
         LEFT JOIN cat_tipo_instrumento ti ON os.id_tipo_instrumento = ti.id
     """
 
-
-    if is_admin:
-        # Admin: TODAS las OS sin filtro de técnico ni modalidad
-        # Incluye COMPLETADA/FIRMADA para ver físicos ya cerrados
-        rows = await db.fetch(
-            _SELECT + """
-            WHERE os.estado NOT IN ('CANCELADA')
-              AND os.updated_at > $1::timestamp
-            ORDER BY os.updated_at DESC
-            LIMIT $2
-            """,
-            since, settings.SYNC_MAX_BATCH_SIZE,
-        )
-        logger.info(
-            "Sync PULL [ADMIN %s]: since=%s → %d OS (físicas + digitales, todos estados)",
-            current_user.get("username"), since.isoformat(), len(rows),
-        )
-
-    else:
-        # Técnico: solo sus órdenes asignadas
-        if not id_tecnico:
-            raise HTTPException(
-                status_code = status.HTTP_400_BAD_REQUEST,
-                detail      = "El usuario no tiene técnico asignado",
+    try:
+        if is_admin:
+            # Admin: TODAS las OS (Física + Digital) sin filtro de técnico ni estado
+            rows = await db.fetch(
+                _SELECT + """
+                WHERE os.estado NOT IN ('CANCELADA')
+                  AND os.updated_at > $1::timestamp
+                ORDER BY os.updated_at DESC
+                LIMIT $2
+                """,
+                since, settings.SYNC_MAX_BATCH_SIZE,
             )
-        rows = await db.fetch(
-            _SELECT + """
-            WHERE os.id_tecnico = $1
-              AND os.modalidad  = 'DIGITAL'
-              AND os.estado     NOT IN ('CANCELADA', 'COMPLETADA')
-              AND os.updated_at > $2::timestamp
-            ORDER BY os.updated_at DESC
-            LIMIT $3
-            """,
-            id_tecnico, since, settings.SYNC_MAX_BATCH_SIZE,
-        )
-        logger.info(
-            "Sync PULL: tecnico_id=%d since=%s → %d OS",
-            id_tecnico, since.isoformat(), len(rows),
+            logger.info(
+                "Sync PULL [ADMIN %s]: since=%s → %d OS",
+                current_user.get("username"), since.isoformat(), len(rows),
+            )
+        else:
+            # Técnico: solo sus órdenes digitales asignadas
+            if not id_tecnico:
+                raise HTTPException(
+                    status_code = status.HTTP_400_BAD_REQUEST,
+                    detail      = "El usuario no tiene técnico asignado",
+                )
+            rows = await db.fetch(
+                _SELECT + """
+                WHERE os.id_tecnico = $1
+                  AND UPPER(os.modalidad) = 'DIGITAL'
+                  AND os.estado NOT IN ('CANCELADA', 'COMPLETADA')
+                  AND os.updated_at > $2::timestamp
+                ORDER BY os.updated_at DESC
+                LIMIT $3
+                """,
+                id_tecnico, since, settings.SYNC_MAX_BATCH_SIZE,
+            )
+            logger.info(
+                "Sync PULL: tecnico_id=%d since=%s → %d OS",
+                id_tecnico, since.isoformat(), len(rows),
+            )
+
+        return [OSCompleta(**dict(r)) for r in rows]
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("[SYNC PULL CRITICAL ERROR]: %s", exc)
+        traceback.print_exc()
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail      = f"Error interno al generar el payload de sync: {exc}",
         )
 
-    return [dict(r) for r in rows]
 
 
 @router.post(
