@@ -54,14 +54,14 @@ class OSCompleta(BaseModel):
     """OS completa para descargar a la tablet."""
     folio_os:           str
     estado:             str
-    modalidad:          str
-    fecha:              Optional[str]   = None   # puede ser NULL en BDs antiguas
-    cliente:            Optional[str]   = None   # LEFT JOIN puede no encontrar cliente
-    direccion_cliente:  Optional[str]   = None   # idem
+    modalidad:          str                      # 'DIGITAL' o 'FISICO'
+    fecha:              Optional[str]   = None
+    cliente:            Optional[str]   = None
+    direccion_cliente:  Optional[str]   = None
     sucursal_id:        Optional[int]   = None
     sucursal_nombre:    Optional[str]   = None
-    tipo_servicio:      Optional[str]   = None   # LEFT JOIN puede no encontrar tipo
-    tecnico:            Optional[str]   = None   # campo extra devuelto por el SELECT
+    tipo_servicio:      Optional[str]   = None
+    tecnico:            Optional[str]   = None
     marca:              Optional[str]   = None
     modelo:             Optional[str]   = None
     ns:                 Optional[str]   = None
@@ -78,6 +78,9 @@ class OSCompleta(BaseModel):
     valor_excentricidad: Optional[float] = None
     clase_exactitud_codigo: Optional[str] = None
     observaciones:      Optional[str]   = None
+    aplica_excentricidad:  Optional[bool] = True
+    num_celdas_camionera:  Optional[int]  = 0
+    pdf_url:            Optional[str]   = None   # URL para descargar PDF (modalidad FISICO)
     sync_version:       int              = 1
     updated_at:         datetime
 
@@ -194,14 +197,21 @@ async def sync_pull(
             os.alcance_max, os.div_minima, os.div_verificacion,
             os.id_equipo, os.numero_cca, os.holograma_anterior,
             os.valor_repetibilidad, os.valor_excentricidad,
-            COALESCE(os.sync_version, 1)          AS sync_version,
+            COALESCE(os.aplica_excentricidad, true)   AS aplica_excentricidad,
+            COALESCE(os.num_celdas_camionera, 0)      AS num_celdas_camionera,
+            COALESCE(os.sync_version, 1)              AS sync_version,
             os.updated_at,
-            COALESCE(cl.razon_social,    '')       AS cliente,
-            COALESCE(cl.direccion,       '')       AS direccion_cliente,
-            COALESCE(ts.nombre,          '')       AS tipo_servicio,
-            COALESCE(tc.nombre_completo, '')       AS tecnico,
-            ce.codigo                             AS clase_exactitud_codigo,
-            ti.nombre                             AS tipo_instrumento
+            COALESCE(cl.razon_social,    '')           AS cliente,
+            COALESCE(cl.direccion,       '')           AS direccion_cliente,
+            COALESCE(ts.nombre,          '')           AS tipo_servicio,
+            COALESCE(tc.nombre_completo, '')           AS tecnico,
+            ce.codigo                                 AS clase_exactitud_codigo,
+            ti.nombre                                 AS tipo_instrumento,
+            CASE
+                WHEN os.modalidad = 'FISICO'
+                THEN '/api/v1/os/' || os.folio_os || '/pdf'
+                ELSE NULL
+            END                                       AS pdf_url
         FROM ordenes_servicio os
         LEFT JOIN cat_clientes         cl ON os.id_cliente         = cl.id
         LEFT JOIN cat_tipo_servicio    ts ON os.id_tipo_servicio    = ts.id
@@ -210,12 +220,12 @@ async def sync_pull(
         LEFT JOIN cat_tipo_instrumento ti ON os.id_tipo_instrumento = ti.id
     """
 
+
     if is_admin:
-        # Admin: todas las OS digitales activas sin filtro de técnico
+        # Admin: TODAS las OS activas (Física + Digital) sin filtro de técnico
         rows = await db.fetch(
             _SELECT + """
-            WHERE os.modalidad = 'DIGITAL'
-              AND os.estado    NOT IN ('CANCELADA', 'COMPLETADA')
+            WHERE os.estado NOT IN ('CANCELADA', 'COMPLETADA')
               AND os.updated_at > $1::timestamp
             ORDER BY os.updated_at DESC
             LIMIT $2
@@ -223,7 +233,7 @@ async def sync_pull(
             since, settings.SYNC_MAX_BATCH_SIZE,
         )
         logger.info(
-            "Sync PULL [ADMIN %s]: since=%s → %d OS",
+            "Sync PULL [ADMIN %s]: since=%s → %d OS (todas modalidades)",
             current_user.get("username"), since.isoformat(), len(rows),
         )
     else:
