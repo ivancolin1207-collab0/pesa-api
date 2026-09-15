@@ -207,7 +207,7 @@ async def sync_pull(
             os.numero_cca, os.holograma_anterior,
             os.valor_repetibilidad, os.valor_excentricidad,
             COALESCE(os.aplica_excentricidad, true) AS aplica_excentricidad,
-            COALESCE(os.num_celdas_camionera, 0)    AS num_celdas_camionera,
+            0                                       AS num_celdas_camionera,
             COALESCE(os.sync_version, 1)            AS sync_version,
             COALESCE(os.updated_at, NOW())          AS updated_at,
             COALESCE(cl.razon_social,    '') AS cliente,
