@@ -174,11 +174,8 @@ async def sync_pull(
     El campo `since` debe ser el `updated_at` del último pull exitoso.
     """
     id_tecnico = current_user.get("id_tecnico")
-    if not id_tecnico:
-        raise HTTPException(
-            status_code = status.HTTP_400_BAD_REQUEST,
-            detail      = "El usuario no tiene técnico asignado",
-        )
+    role       = str(current_user.get("role", "")).lower()
+    is_admin   = "admin" in role or not id_tecnico
 
     # [FIX-TZ] asyncpg/PostgreSQL no puede comparar datetime aware con TIMESTAMP
     # WITHOUT TIME ZONE. Convertimos since a UTC y eliminamos tzinfo antes de
@@ -186,8 +183,9 @@ async def sync_pull(
     if since.tzinfo is not None:
         since = since.astimezone(timezone.utc).replace(tzinfo=None)
 
-    rows = await db.fetch(
-        """
+    # ── Admin: descarga TODAS las OS activas DIGITAL ──────────────────────────
+    # ── Técnico: solo las asignadas a él ─────────────────────────────────────
+    _SELECT = """
         SELECT
             os.folio_os, os.estado, os.modalidad,
             os.fecha::text, os.observaciones,
@@ -197,32 +195,59 @@ async def sync_pull(
             os.valor_repetibilidad, os.valor_excentricidad,
             COALESCE(os.sync_version, 1) AS sync_version,
             os.updated_at,
-            cl.razon_social   AS cliente,
-            cl.direccion      AS direccion_cliente,
-            ts.nombre         AS tipo_servicio,
+            cl.razon_social    AS cliente,
+            cl.direccion       AS direccion_cliente,
+            ts.nombre          AS tipo_servicio,
             tc.nombre_completo AS tecnico,
-            ce.codigo         AS clase_exactitud_codigo,
-            ti.nombre         AS tipo_instrumento
+            ce.codigo          AS clase_exactitud_codigo,
+            ti.nombre          AS tipo_instrumento
         FROM ordenes_servicio os
         LEFT JOIN cat_clientes         cl ON os.id_cliente         = cl.id
         LEFT JOIN cat_tipo_servicio    ts ON os.id_tipo_servicio    = ts.id
         LEFT JOIN cat_tecnicos         tc ON os.id_tecnico          = tc.id
         LEFT JOIN cat_clase_exactitud  ce ON os.id_clase_exactitud  = ce.id
         LEFT JOIN cat_tipo_instrumento ti ON os.id_tipo_instrumento = ti.id
-        WHERE os.id_tecnico = $1
-          AND os.modalidad  = 'DIGITAL'
-          AND os.estado     NOT IN ('CANCELADA', 'COMPLETADA')
-          AND os.updated_at > $2::timestamp
-        ORDER BY os.updated_at DESC
-        LIMIT $3
-        """,
-        id_tecnico, since, settings.SYNC_MAX_BATCH_SIZE,
-    )
+    """
 
-    logger.info(
-        "Sync PULL: tecnico_id=%d since=%s -> %d OS",
-        id_tecnico, since.isoformat(), len(rows)
-    )
+    if is_admin:
+        # Admin: todas las OS digitales activas sin filtro de técnico
+        rows = await db.fetch(
+            _SELECT + """
+            WHERE os.modalidad = 'DIGITAL'
+              AND os.estado    NOT IN ('CANCELADA', 'COMPLETADA')
+              AND os.updated_at > $1::timestamp
+            ORDER BY os.updated_at DESC
+            LIMIT $2
+            """,
+            since, settings.SYNC_MAX_BATCH_SIZE,
+        )
+        logger.info(
+            "Sync PULL [ADMIN %s]: since=%s → %d OS",
+            current_user.get("username"), since.isoformat(), len(rows),
+        )
+    else:
+        # Técnico: solo sus órdenes asignadas
+        if not id_tecnico:
+            raise HTTPException(
+                status_code = status.HTTP_400_BAD_REQUEST,
+                detail      = "El usuario no tiene técnico asignado",
+            )
+        rows = await db.fetch(
+            _SELECT + """
+            WHERE os.id_tecnico = $1
+              AND os.modalidad  = 'DIGITAL'
+              AND os.estado     NOT IN ('CANCELADA', 'COMPLETADA')
+              AND os.updated_at > $2::timestamp
+            ORDER BY os.updated_at DESC
+            LIMIT $3
+            """,
+            id_tecnico, since, settings.SYNC_MAX_BATCH_SIZE,
+        )
+        logger.info(
+            "Sync PULL: tecnico_id=%d since=%s → %d OS",
+            id_tecnico, since.isoformat(), len(rows),
+        )
+
     return [dict(r) for r in rows]
 
 
