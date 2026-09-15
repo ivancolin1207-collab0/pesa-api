@@ -222,10 +222,11 @@ async def sync_pull(
 
 
     if is_admin:
-        # Admin: TODAS las OS activas (Física + Digital) sin filtro de técnico
+        # Admin: TODAS las OS sin filtro de técnico ni modalidad
+        # Incluye COMPLETADA/FIRMADA para ver físicos ya cerrados
         rows = await db.fetch(
             _SELECT + """
-            WHERE os.estado NOT IN ('CANCELADA', 'COMPLETADA')
+            WHERE os.estado NOT IN ('CANCELADA')
               AND os.updated_at > $1::timestamp
             ORDER BY os.updated_at DESC
             LIMIT $2
@@ -233,9 +234,10 @@ async def sync_pull(
             since, settings.SYNC_MAX_BATCH_SIZE,
         )
         logger.info(
-            "Sync PULL [ADMIN %s]: since=%s → %d OS (todas modalidades)",
+            "Sync PULL [ADMIN %s]: since=%s → %d OS (físicas + digitales, todos estados)",
             current_user.get("username"), since.isoformat(), len(rows),
         )
+
     else:
         # Técnico: solo sus órdenes asignadas
         if not id_tecnico:
