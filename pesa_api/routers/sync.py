@@ -177,7 +177,10 @@ async def sync_pull(
         description = "Timestamp del último sync exitoso (ISO 8601). Se retornan solo OS modificadas después de este tiempo.",
     ),
     db          = Depends(get_db),
-    current_user: dict = Depends(require_roles("servicio", "tecnico", "admin", "administrador", "logistica")),
+    current_user: dict = Depends(require_roles(
+        "servicio", "tecnico", "tecnico_campo", "admin", "administrador",
+        "logistica", "operativo",
+    )),
 ):
     """
     La tablet llama a este endpoint al reconectar al WiFi.
@@ -187,8 +190,12 @@ async def sync_pull(
     El campo `since` debe ser el `updated_at` del último pull exitoso.
     """
     id_tecnico = current_user.get("id_tecnico")
-    role       = str(current_user.get("role", "")).lower()
-    is_admin   = "admin" in role or not id_tecnico
+    role       = str(current_user.get("role", "")).lower().strip()
+    # Admin y logística ven todo; técnicos en cualquier variante solo ven sus OS
+    _ADMIN_ROLES = {"admin", "administrador", "logistica"}
+    is_admin   = any(ar in role for ar in _ADMIN_ROLES) or (not id_tecnico and role not in {
+        "tecnico", "tecnico_campo", "tecnico_externo", "servicio", "operativo"
+    })
 
     # [FIX-TZ] asyncpg no puede comparar datetime aware con TIMESTAMP WITHOUT TIME ZONE
     if since.tzinfo is not None:

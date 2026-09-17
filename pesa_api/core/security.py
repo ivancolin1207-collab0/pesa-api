@@ -1,4 +1,4 @@
-﻿"""
+"""
 pesa_api/core/security.py — JWT, hashing de contraseñas y RBAC.
 """
 from datetime import datetime, timedelta, timezone
@@ -105,15 +105,32 @@ async def get_current_user(
     }
 
 
+# Roles que son equivalentes a 'tecnico' para efectos de autorización
+_TECNICO_ROLES = frozenset({
+    "tecnico", "tecnico_campo", "tecnico_externo", "servicio", "operativo",
+})
+
+
 def require_roles(*roles: str):
     async def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
-        user_role = str(current_user.get("role", "")).lower()
-        allowed = [r.lower() for r in roles]
-        if user_role not in allowed and "administrador" not in user_role and "admin" not in user_role:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Acceso denegado. Se requiere uno de los siguientes roles: {list(roles)}",
-            )
-        return current_user
+        user_role = str(current_user.get("role", "")).lower().strip()
+        allowed   = {r.lower() for r in roles}
+
+        # Acceso directo si el rol está en la lista
+        if user_role in allowed:
+            return current_user
+
+        # Admin siempre puede
+        if "admin" in user_role or "administrador" in user_role:
+            return current_user
+
+        # Cualquier variante de 'tecnico' es válida cuando se acepta tecnico/servicio
+        if user_role in _TECNICO_ROLES and (allowed & {"tecnico", "servicio", "tecnico_campo", "operativo"}):
+            return current_user
+
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Acceso denegado. Se requiere uno de los siguientes roles: {list(roles)}",
+        )
 
     return role_checker
