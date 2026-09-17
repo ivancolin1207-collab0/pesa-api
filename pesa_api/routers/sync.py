@@ -61,17 +61,22 @@ class OSCompleta(BaseModel):
     modalidad:             Optional[str]   = 'DIGITAL'
     fecha:                 Optional[str]   = None
     cliente:               Optional[str]   = None
+    cliente_nombre:        Optional[str]   = None
     direccion_cliente:     Optional[str]   = None
     sucursal_id:           Optional[int]   = None
-    sucursal_nombre:       Optional[int]   = None
+    sucursal_nombre:       Optional[str]   = None
     tipo_servicio:         Optional[str]   = None
     tecnico:               Optional[str]   = None
+    tecnico_nombre:        Optional[str]   = None
     marca:                 Optional[str]   = None
     modelo:                Optional[str]   = None
     ns:                    Optional[str]   = None
+    serie:                 Optional[str]   = None
     ubicacion:             Optional[str]   = None
     alcance_max:           Optional[float] = None
+    capacidad_maxima:      Optional[float] = None
     div_minima:            Optional[float] = None
+    division_minima:       Optional[float] = None
     div_verificacion:      Optional[float] = None
     id_equipo:             Optional[str]   = None
     equipo_catalogo_id:    Optional[int]   = None
@@ -172,7 +177,7 @@ async def sync_pull(
         description = "Timestamp del último sync exitoso (ISO 8601). Se retornan solo OS modificadas después de este tiempo.",
     ),
     db          = Depends(get_db),
-    current_user: dict = Depends(require_roles("servicio")),
+    current_user: dict = Depends(require_roles("servicio", "tecnico", "admin", "administrador", "logistica")),
 ):
     """
     La tablet llama a este endpoint al reconectar al WiFi.
@@ -201,8 +206,13 @@ async def sync_pull(
             COALESCE(os.marca,    '') AS marca,
             COALESCE(os.modelo,   '') AS modelo,
             COALESCE(os.ns,       '') AS ns,
+            COALESCE(os.ns,       '') AS serie,
             COALESCE(os.ubicacion,'') AS ubicacion,
-            os.alcance_max, os.div_minima, os.div_verificacion,
+            os.alcance_max, 
+            os.alcance_max AS capacidad_maxima,
+            os.div_minima, 
+            os.div_minima AS division_minima,
+            os.div_verificacion,
             os.id_equipo::text,
             os.numero_cca, os.holograma_anterior,
             os.valor_repetibilidad, os.valor_excentricidad,
@@ -211,9 +221,12 @@ async def sync_pull(
             COALESCE(os.sync_version, 1)            AS sync_version,
             COALESCE(os.updated_at, NOW())          AS updated_at,
             COALESCE(cl.razon_social,    '') AS cliente,
+            COALESCE(cl.razon_social,    '') AS cliente_nombre,
             COALESCE(cl.direccion,       '') AS direccion_cliente,
+            COALESCE(suc.nombre_sucursal, '') AS sucursal_nombre,
             COALESCE(ts.nombre,          '') AS tipo_servicio,
             COALESCE(tc.nombre_completo, '') AS tecnico,
+            COALESCE(tc.nombre_completo, '') AS tecnico_nombre,
             ce.codigo                        AS clase_exactitud_codigo,
             ti.nombre                        AS tipo_instrumento,
             CASE
@@ -227,6 +240,7 @@ async def sync_pull(
         LEFT JOIN cat_tecnicos         tc ON os.id_tecnico          = tc.id
         LEFT JOIN cat_clase_exactitud  ce ON os.id_clase_exactitud  = ce.id
         LEFT JOIN cat_tipo_instrumento ti ON os.id_tipo_instrumento = ti.id
+        LEFT JOIN cliente_sucursales   suc ON os.sucursal_id        = suc.id
     """
 
     try:
@@ -290,7 +304,7 @@ async def sync_pull(
 async def sync_push(
     payload:      PushPayload,
     db            = Depends(get_db),
-    current_user: dict = Depends(require_roles("servicio")),
+    current_user: dict = Depends(require_roles("servicio", "tecnico", "admin", "administrador", "logistica")),
 ) -> PushResponse:
     """
     La tablet envía los cambios acumulados en SQLite offline.
@@ -539,7 +553,7 @@ async def upload_firmas(
     folio_os:     str,
     payload:      FirmasPayload,
     db            = Depends(get_db),
-    current_user: dict = Depends(require_roles("servicio")),
+    current_user: dict = Depends(require_roles("servicio", "tecnico", "admin", "administrador", "logistica")),
 ):
     """
     Sube las firmas digitales del técnico y del cliente.
