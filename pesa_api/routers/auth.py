@@ -37,16 +37,43 @@ class UserProfile(BaseModel):
 def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
-def _check_password(plain_password: str, stored_hash: str) -> bool:
-    if not stored_hash:
+def _check_password(plain_password: str, stored: str) -> bool:
+    """Verifica la contraseña soportando múltiples formatos de almacenamiento.
+
+    Orden de verificación:
+      1. SHA-256 hexdigest (formato principal en cat_tecnicos)
+      2. Texto plano directo (migraciones antiguas)
+      3. bcrypt / passlib (via verify_password de security.py)
+      4. SHA-256 del valor con trim (tolerancia a espacios residuales en la BD)
+    """
+    if not stored or not plain_password:
         return False
-    sha256_hash = hashlib.sha256(plain_password.encode()).hexdigest()
-    if sha256_hash.lower() == stored_hash.lower():
+
+    plain_clean  = plain_password.strip()
+    stored_clean = stored.strip()
+
+    # 1. SHA-256 — formato estándar en cat_tecnicos
+    sha256_attempt = hashlib.sha256(plain_clean.encode('utf-8')).hexdigest()
+    if sha256_attempt.lower() == stored_clean.lower():
         return True
+
+    # 2. Texto plano (contraseñas no migradas)
+    if plain_clean == stored_clean:
+        return True
+
+    # 3. bcrypt / passlib (hashes que empiezan con $2b$ / $2y$)
     try:
-        return verify_password(plain_password, stored_hash)
+        if verify_password(plain_clean, stored_clean):
+            return True
     except Exception:
-        return False
+        pass
+
+    # 4. SHA-256 del stored con strip (por si hay espacios en la BD)
+    sha256_trimmed = hashlib.sha256(stored_clean.encode('utf-8')).hexdigest()
+    if plain_clean == sha256_trimmed:
+        return True
+
+    return False
 
 # Búsqueda insensible a mayúsculas y sin espacios para el campo usuario
 SQL_LOGIN = """
