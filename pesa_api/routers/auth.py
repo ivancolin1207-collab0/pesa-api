@@ -1,4 +1,4 @@
-﻿import hashlib
+import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -48,7 +48,14 @@ def _check_password(plain_password: str, stored_hash: str) -> bool:
     except Exception:
         return False
 
-SQL_LOGIN = "SELECT id, usuario, nombre_completo, password_hash, activo, rol FROM cat_tecnicos WHERE usuario = $1"
+# Búsqueda insensible a mayúsculas y sin espacios para el campo usuario
+SQL_LOGIN = """
+    SELECT id, usuario, nombre_completo, password_hash, activo, rol
+    FROM cat_tecnicos
+    WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1))
+       OR LOWER(TRIM(COALESCE(email, ''))) = LOWER(TRIM($1))
+"""
+
 SQL_REFRESH = "SELECT id, usuario, nombre_completo, activo, rol FROM cat_tecnicos WHERE id = $1"
 
 @router.post(
