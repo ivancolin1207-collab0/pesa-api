@@ -587,8 +587,10 @@ class _DashboardLoader(QThread):
             where_clause += " AND " + " AND ".join(where_extra)
 
         # LEFT JOIN adjuntos_os — elimina el EXISTS() por fila (N+1 fix)
+        # DISTINCT ON (os.id) — defensa permanente contra JOIN multiplication
+        # por filas duplicadas en catálogos (cat_tipo_instrumento, etc.)
         sql = f"""
-            SELECT
+            SELECT DISTINCT ON (os.id)
                 os.folio_os,
                 os.fecha::text,
                 cl.razon_social,
@@ -622,10 +624,10 @@ class _DashboardLoader(QThread):
             LEFT JOIN LATERAL (
                 SELECT id FROM adjuntos_os WHERE id_os = os.id LIMIT 1
             ) adj ON TRUE
-            WHERE 1=1 {where_clause}
-            ORDER BY os.id_lote NULLS LAST, os.fecha DESC, os.created_at DESC
+            WHERE 1=1 {{where_clause}}
+            ORDER BY os.id, os.id_lote NULLS LAST, os.fecha DESC, os.created_at DESC
             LIMIT 500
-        """
+        """.format(where_clause=where_clause)
         try:
             with conn.cursor() as cur:
                 cur.execute(sql, params or None)
