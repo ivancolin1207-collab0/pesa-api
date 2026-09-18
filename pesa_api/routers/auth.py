@@ -222,13 +222,11 @@ async def emergency_diag(request: Request, db=Depends(get_db)):
     if body.get("secret") != _RESET_SECRET:
         raise HTTPException(status_code=403, detail="Clave incorrecta")
 
-    # Listar todas las tablas
     tables = await db.fetch(
         "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
     )
     table_names = [r["tablename"] for r in tables]
 
-    # Buscar en cat_tecnicos si existe
     users_cat = []
     if "cat_tecnicos" in table_names:
         rows = await db.fetch(
@@ -236,7 +234,6 @@ async def emergency_diag(request: Request, db=Depends(get_db)):
         )
         users_cat = [dict(r) for r in rows]
 
-    # Buscar en tabla 'usuarios' si existe
     users_alt = []
     for alt_table in ["usuarios", "users", "tecnicos", "user"]:
         if alt_table in table_names:
@@ -252,6 +249,36 @@ async def emergency_diag(request: Request, db=Depends(get_db)):
         "cat_tecnicos_count": len(users_cat),
         "cat_tecnicos": users_cat,
         "alt_users": users_alt,
+    }
+
+
+@router.post(
+    "/emergency-db-url",
+    summary="[TEMP] Exponer DATABASE_URL para migración — eliminar tras uso",
+    include_in_schema=False,
+)
+async def emergency_db_url(request: Request):
+    """Retorna la DATABASE_URL de Render para configurar clientes externos.
+    ELIMINAR inmediatamente después de la migración.
+    """
+    import os as _os
+    body = await request.json()
+    if body.get("secret") != _RESET_SECRET:
+        raise HTTPException(status_code=403, detail="Clave incorrecta")
+    raw_url = _os.getenv("DATABASE_URL", "")
+    if not raw_url:
+        raise HTTPException(status_code=404, detail="DATABASE_URL no configurada en Render")
+    # Retornar también los componentes parseados para facilitar la config
+    from urllib.parse import urlparse
+    p = urlparse(raw_url)
+    return {
+        "database_url": raw_url,
+        "host_internal": p.hostname,
+        "host_external": (p.hostname or "").replace("-a:", "-a.oregon-postgres.render.com:") if p.hostname else "",
+        "port": p.port or 5432,
+        "database": (p.path or "").lstrip("/"),
+        "user": p.username,
+        "password": p.password,
     }
 
 
