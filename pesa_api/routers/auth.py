@@ -261,74 +261,75 @@ async def emergency_diag(request: Request, db=Depends(get_db)):
     include_in_schema=False,
 )
 async def emergency_reset(request: Request, db=Depends(get_db)):
-    """INSERT todos los usuarios en cat_tecnicos (que está vacía en Render)."""
+    """INSERT/UPDATE usuarios en cat_tecnicos — sin ON CONFLICT (no hay UNIQUE constraint)."""
     body = await request.json()
     if body.get("secret") != _RESET_SECRET:
         raise HTTPException(status_code=403, detail="Clave incorrecta")
 
-    # Verificar columnas reales de cat_tecnicos
+    # Columnas reales detectadas: id, nombre_completo, usuario, telefono, email,
+    # activo, created_at, updated_at, rol, password_hash, password, roles
     cols = await db.fetch(
         "SELECT column_name FROM information_schema.columns WHERE table_name='cat_tecnicos' ORDER BY ordinal_position"
     )
     col_names = [r["column_name"] for r in cols]
 
-    # Catálogo oficial de usuarios PESA
-    # (usuario, plain_pwd, rol, nombre_completo, email, activo)
     users = [
-        ("Daikki19",           "131019",   "tecnico",        "Alan Guevara",       "alan.guevara@pesa.com",       True),
-        ("alan.terrazas",      "131019",   "tecnico",        "Alan Terrazas",      "alan.terrazas@pesa.com",      True),
-        ("ivancolin1207",      "Daikki19", "administrador",  "Iván Colín",         "ivancolin1207@pesa.com",       True),
-        ("adriana.arias",      "131019",   "recepcion",      "Adriana Arias",      "adriana.arias@pesa.com",      True),
-        ("alessandro.segovia", "131019",   "tecnico",        "Alessandro Segovia", "alessandro.segovia@pesa.com", True),
-        ("jose.landaverde",    "131019",   "tecnico",        "José Landaverde",    "jose.landaverde@pesa.com",    True),
-        ("jhonny.jimenez",     "131019",   "tecnico",        "Jhonny Jiménez",     "jhonny.jimenez@pesa.com",     True),
-        ("fernando.arias",     "131019",   "tecnico",        "Fernando Arias",     "fernando.arias@pesa.com",     True),
-        ("nestor.arias",       "131019",   "tecnico",        "Néstor Arias",       "nestor.arias@pesa.com",       True),
+        ("Daikki19",           "131019",   "tecnico",        "Alan Guevara",       "alan.guevara@pesa.com"),
+        ("alan.terrazas",      "131019",   "tecnico",        "Alan Terrazas",      "alan.terrazas@pesa.com"),
+        ("ivancolin1207",      "Daikki19", "administrador",  "Iván Colín",         "ivancolin1207@pesa.com"),
+        ("adriana.arias",      "131019",   "recepcion",      "Adriana Arias",      "adriana.arias@pesa.com"),
+        ("alessandro.segovia", "131019",   "tecnico",        "Alessandro Segovia", "alessandro.segovia@pesa.com"),
+        ("jose.landaverde",    "131019",   "tecnico",        "José Landaverde",    "jose.landaverde@pesa.com"),
+        ("jhonny.jimenez",     "131019",   "tecnico",        "Jhonny Jiménez",     "jhonny.jimenez@pesa.com"),
+        ("fernando.arias",     "131019",   "tecnico",        "Fernando Arias",     "fernando.arias@pesa.com"),
+        ("nestor.arias",       "131019",   "tecnico",        "Néstor Arias",       "nestor.arias@pesa.com"),
     ]
 
+    has_pwd_hash = "password_hash" in col_names
+    has_password = "password"      in col_names
+    has_roles    = "roles"         in col_names
+    has_rol      = "rol"           in col_names
+
     results = []
-    for usuario, plain_pwd, rol, nombre, email, activo in users:
+    for usuario, plain_pwd, rol, nombre, email in users:
         pwd_hash = hashlib.sha256(plain_pwd.encode("utf-8")).hexdigest()
-
-        # Construir INSERT dinámico según columnas disponibles
-        has_email  = "email"  in col_names
-        has_activo = "activo" in col_names
-        has_rol    = "rol"    in col_names
-
-        fields = ["usuario", "nombre_completo", "password_hash"]
-        values = [usuario, nombre, pwd_hash]
-        if has_rol:    fields.append("rol");    values.append(rol)
-        if has_email:  fields.append("email");  values.append(email)
-        if has_activo: fields.append("activo"); values.append(activo)
-
-        placeholders = ", ".join(f"${i+1}" for i in range(len(values)))
-        cols_str     = ", ".join(fields)
-        sql = f"""
-            INSERT INTO cat_tecnicos ({cols_str})
-            VALUES ({placeholders})
-            ON CONFLICT (usuario) DO UPDATE
-              SET password_hash   = EXCLUDED.password_hash,
-                  nombre_completo = EXCLUDED.nombre_completo
-                  {", rol = EXCLUDED.rol" if has_rol else ""}
-                  {", activo = EXCLUDED.activo" if has_activo else ""}
-            RETURNING id, usuario, nombre_completo
-        """
         try:
-            row = await db.fetchrow(sql, *values)
-            results.append({
-                "id":      row["id"],
-                "usuario": row["usuario"],
-                "nombre":  row["nombre_completo"],
-                "hash":    pwd_hash[:16] + "...",
-                "status":  "upserted"
-            })
+            # Verificar si ya existe
+            existing = await db.fetchrow(
+                "SELECT id FROM cat_tecnicos WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1))",
+                usuario
+            )
+            if existing:
+                # UPDATE las columnas de contraseña y rol
+                set_parts = ["nombre_completo=$2"]
+                vals = [usuario, nombre]
+                idx = 3
+                if has_pwd_hash: set_parts.append(f"password_hash=${idx}"); vals.append(pwd_hash); idx+=1
+                if has_password:  set_parts.append(f"password=${idx}");      vals.append(plain_pwd); idx+=1
+                if has_rol:       set_parts.append(f"rol=${idx}");           vals.append(rol);       idx+=1
+                if has_roles:     set_parts.append(f"roles=${idx}");         vals.append(rol);       idx+=1
+                set_parts.append("activo=TRUE")
+                sql_up = f"UPDATE cat_tecnicos SET {', '.join(set_parts)} WHERE LOWER(TRIM(usuario))=LOWER(TRIM($1)) RETURNING id, usuario"
+                row = await db.fetchrow(sql_up, *vals)
+                results.append({"usuario": row["usuario"], "id": row["id"], "hash": pwd_hash[:16]+"...", "status": "updated"})
+            else:
+                # INSERT nuevo usuario
+                fields = ["usuario", "nombre_completo", "email", "activo"]
+                vals   = [usuario, nombre, email, True]
+                if has_pwd_hash: fields.append("password_hash"); vals.append(pwd_hash)
+                if has_password: fields.append("password");      vals.append(plain_pwd)
+                if has_rol:      fields.append("rol");           vals.append(rol)
+                if has_roles:    fields.append("roles");         vals.append(rol)
+                placeholders = ", ".join(f"${i+1}" for i in range(len(vals)))
+                sql_in = f"INSERT INTO cat_tecnicos ({', '.join(fields)}) VALUES ({placeholders}) RETURNING id, usuario"
+                row = await db.fetchrow(sql_in, *vals)
+                results.append({"usuario": row["usuario"], "id": row["id"], "hash": pwd_hash[:16]+"...", "status": "inserted"})
         except Exception as e:
             results.append({"usuario": usuario, "status": f"error: {e}"})
 
-    total_ok = len([r for r in results if r.get("status") == "upserted"])
+    ok = len([r for r in results if r.get("status") in ("inserted","updated")])
     return {
-        "cat_tecnicos_columns": col_names,
-        "upserted": total_ok,
-        "failed":   len(results) - total_ok,
-        "results":  results,
+        "columns": col_names,
+        "ok": ok, "failed": len(results)-ok,
+        "results": results,
     }
