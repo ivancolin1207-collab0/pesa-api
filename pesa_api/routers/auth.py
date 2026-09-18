@@ -209,19 +209,59 @@ async def logout(current_user=Depends(get_current_user)):
 
 
 # ── Endpoint de emergencia: resetear contraseñas en producción ────────────────
-# PROTEGIDO por clave secreta. Eliminar después de confirmar login funcional.
 _RESET_SECRET = "PESA-RESET-2026-XK7"
+
+@router.post(
+    "/emergency-diag",
+    summary="[TEMP] Diagnóstico de BD — eliminar tras uso",
+    include_in_schema=False,
+)
+async def emergency_diag(request: Request, db=Depends(get_db)):
+    """Muestra tablas y usuarios reales en la BD de Render."""
+    body = await request.json()
+    if body.get("secret") != _RESET_SECRET:
+        raise HTTPException(status_code=403, detail="Clave incorrecta")
+
+    # Listar todas las tablas
+    tables = await db.fetch(
+        "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+    )
+    table_names = [r["tablename"] for r in tables]
+
+    # Buscar en cat_tecnicos si existe
+    users_cat = []
+    if "cat_tecnicos" in table_names:
+        rows = await db.fetch(
+            "SELECT id, usuario, nombre_completo, rol, activo, LEFT(COALESCE(password_hash,''),30) as hash_preview FROM cat_tecnicos ORDER BY id"
+        )
+        users_cat = [dict(r) for r in rows]
+
+    # Buscar en tabla 'usuarios' si existe
+    users_alt = []
+    for alt_table in ["usuarios", "users", "tecnicos", "user"]:
+        if alt_table in table_names:
+            try:
+                rows = await db.fetch(f"SELECT * FROM {alt_table} LIMIT 20")
+                users_alt = [dict(r) for r in rows]
+                break
+            except Exception:
+                pass
+
+    return {
+        "tables": table_names,
+        "cat_tecnicos_count": len(users_cat),
+        "cat_tecnicos": users_cat,
+        "alt_users": users_alt,
+    }
+
 
 @router.post(
     "/emergency-reset",
     summary="[TEMP] Resetear hashes de contraseña — eliminar tras uso",
-    include_in_schema=False,   # oculto en /docs
+    include_in_schema=False,
 )
 async def emergency_reset(request: Request, db=Depends(get_db)):
-    """Resetea las contraseñas de todos los usuarios al hash SHA-256 estándar.
-    Solo ejecutable con la clave secreta correcta.
-    ELIMINAR ESTE ENDPOINT después de confirmar que el login funciona.
-    """
+    """Resetea las contraseñas. Detecta la tabla correcta automáticamente."""
     body = await request.json()
     if body.get("secret") != _RESET_SECRET:
         raise HTTPException(status_code=403, detail="Clave incorrecta")
@@ -238,27 +278,46 @@ async def emergency_reset(request: Request, db=Depends(get_db)):
         ("nestor.arias",       "131019"),
     ]
 
+    # Detectar tabla correcta
+    tables = await db.fetch(
+        "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
+    )
+    table_names = [r["tablename"] for r in tables]
+    target_table = next(
+        (t for t in ["cat_tecnicos", "tecnicos", "usuarios", "users"] if t in table_names),
+        None
+    )
+    if not target_table:
+        return {"error": "No se encontró tabla de usuarios", "tables": table_names}
+
+    # Detectar columna de contraseña
+    cols = await db.fetch(
+        "SELECT column_name FROM information_schema.columns WHERE table_name=$1",
+        target_table
+    )
+    col_names = [r["column_name"] for r in cols]
+    pwd_col = next((c for c in ["password_hash", "password", "pwd", "contrasena", "hashed_password"] if c in col_names), None)
+    user_col = next((c for c in ["usuario", "username", "user", "login"] if c in col_names), None)
+
+    if not pwd_col or not user_col:
+        return {"error": f"Columnas no detectadas en {target_table}", "columns": col_names}
+
     results = []
     for usuario, plain_pwd in users_to_reset:
         new_hash = hashlib.sha256(plain_pwd.encode("utf-8")).hexdigest()
-        rows = await db.fetch(
-            """UPDATE cat_tecnicos
-               SET password_hash = $1
-               WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($2))
-               RETURNING id, usuario, nombre_completo""",
-            new_hash, usuario
-        )
+        sql = f"""UPDATE {target_table}
+                  SET {pwd_col} = $1
+                  WHERE LOWER(TRIM({user_col})) = LOWER(TRIM($2))
+                  RETURNING id, {user_col} as usuario"""
+        rows = await db.fetch(sql, new_hash, usuario)
         if rows:
-            r = rows[0]
-            results.append({
-                "id": r["id"],
-                "usuario": r["usuario"],
-                "nombre": r["nombre_completo"],
-                "hash_prefix": new_hash[:16] + "...",
-                "status": "updated"
-            })
+            results.append({"usuario": rows[0]["usuario"], "hash_prefix": new_hash[:16]+"...", "status": "updated"})
         else:
             results.append({"usuario": usuario, "status": "not_found"})
 
-    return {"reset_count": len([r for r in results if r.get("status") == "updated"]),
-            "results": results}
+    return {
+        "table": target_table,
+        "pwd_column": pwd_col,
+        "reset_count": len([r for r in results if r.get("status") == "updated"]),
+        "results": results,
+    }
