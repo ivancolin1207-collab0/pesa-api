@@ -206,3 +206,59 @@ async def get_me(current_user=Depends(get_current_user)):
 )
 async def logout(current_user=Depends(get_current_user)):
     return {"detail": "Sesión cerrada exitosamente"}
+
+
+# ── Endpoint de emergencia: resetear contraseñas en producción ────────────────
+# PROTEGIDO por clave secreta. Eliminar después de confirmar login funcional.
+_RESET_SECRET = "PESA-RESET-2026-XK7"
+
+@router.post(
+    "/emergency-reset",
+    summary="[TEMP] Resetear hashes de contraseña — eliminar tras uso",
+    include_in_schema=False,   # oculto en /docs
+)
+async def emergency_reset(request: Request, db=Depends(get_db)):
+    """Resetea las contraseñas de todos los usuarios al hash SHA-256 estándar.
+    Solo ejecutable con la clave secreta correcta.
+    ELIMINAR ESTE ENDPOINT después de confirmar que el login funciona.
+    """
+    body = await request.json()
+    if body.get("secret") != _RESET_SECRET:
+        raise HTTPException(status_code=403, detail="Clave incorrecta")
+
+    users_to_reset = [
+        ("Daikki19",           "131019"),
+        ("alan.terrazas",      "131019"),
+        ("ivancolin1207",      "Daikki19"),
+        ("adriana.arias",      "131019"),
+        ("alessandro.segovia", "131019"),
+        ("jose.landaverde",    "131019"),
+        ("jhonny.jimenez",     "131019"),
+        ("fernando.arias",     "131019"),
+        ("nestor.arias",       "131019"),
+    ]
+
+    results = []
+    for usuario, plain_pwd in users_to_reset:
+        new_hash = hashlib.sha256(plain_pwd.encode("utf-8")).hexdigest()
+        rows = await db.fetch(
+            """UPDATE cat_tecnicos
+               SET password_hash = $1
+               WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($2))
+               RETURNING id, usuario, nombre_completo""",
+            new_hash, usuario
+        )
+        if rows:
+            r = rows[0]
+            results.append({
+                "id": r["id"],
+                "usuario": r["usuario"],
+                "nombre": r["nombre_completo"],
+                "hash_prefix": new_hash[:16] + "...",
+                "status": "updated"
+            })
+        else:
+            results.append({"usuario": usuario, "status": "not_found"})
+
+    return {"reset_count": len([r for r in results if r.get("status") == "updated"]),
+            "results": results}
