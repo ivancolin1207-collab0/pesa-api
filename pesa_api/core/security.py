@@ -80,9 +80,10 @@ async def get_current_user(
         if not payload or payload.get("type") != "access":
             raise credentials_exc
         user_id = int(payload.get("sub", 0))
-        role = payload.get("role", "")
-        if not user_id or not role:
+        if not user_id:
             raise credentials_exc
+        # role puede estar vacío en tokens legacy — se resuelve desde la BD más abajo
+        role_from_token = payload.get("role", "")
     except Exception:
         raise credentials_exc
 
@@ -96,36 +97,79 @@ async def get_current_user(
             detail="Usuario inactivo",
         )
 
+    # Prioridad: rol de BD (siempre actualizado) > rol del token
+    db_role = str(row["role"] or "").strip()
+    effective_role = db_role if db_role else (str(role_from_token).strip() or "tecnico")
+
     return {
         "id": row["id"],
         "username": row["username"],
         "nombre_completo": row["nombre_completo"],
-        "role": row["role"] or "tecnico",
+        "role": effective_role,
         "id_tecnico": row["id_tecnico"],
     }
 
 
+# ---------------------------------------------------------------------------
+# Normalización robusta de roles — maneja tildes, mayúsculas y espacios
+# ---------------------------------------------------------------------------
+import unicodedata as _ud
+
+def _normalizar_rol(rol: str) -> str:
+    """Convierte rol a forma canónica: sin tildes, lowercase, sin espacios."""
+    if not rol:
+        return ""
+    s = _ud.normalize('NFKD', str(rol)).encode('ASCII', 'ignore').decode('utf-8')
+    return s.lower().strip().replace(" ", "_").replace("-", "_")
+
+
 # Roles que son equivalentes a 'tecnico' para efectos de autorización
 _TECNICO_ROLES = frozenset({
-    "tecnico", "tecnico_campo", "tecnico_externo", "servicio", "operativo",
+    "tecnico", "tecnico_campo", "tecnico_externo", "tecnico_de_campo",
+    "servicio", "operativo", "calibrador", "inspector",
+    "tecnico_calibrador", "tecnico_inspector",
 })
+
+# Mapa de roles normalizados con tildes → canónico
+_ROL_MAP = {
+    "tecnico":            "tecnico",
+    "tecnico_campo":      "tecnico",
+    "tecnico_de_campo":   "tecnico",
+    "servicio":           "tecnico",
+    "operativo":          "tecnico",
+    "calibrador":         "tecnico",
+    "inspector":          "tecnico",
+    "tecnico_calibrador": "tecnico",
+    "tecnico_inspector":  "tecnico",
+    "admin":              "admin",
+    "administrador":      "admin",
+    "logistica":          "logistica",
+    "recepcion":          "recepcion",
+}
 
 
 def require_roles(*roles: str):
     async def role_checker(current_user: dict = Depends(get_current_user)) -> dict:
-        user_role = str(current_user.get("role", "")).lower().strip()
-        allowed   = {r.lower() for r in roles}
+        raw_role  = str(current_user.get("role", ""))
+        user_role = _normalizar_rol(raw_role)
+        # Mapear al rol canónico si existe
+        user_role_canon = _ROL_MAP.get(user_role, user_role)
 
-        # Acceso directo si el rol está en la lista
-        if user_role in allowed:
+        allowed      = {_normalizar_rol(r) for r in roles}
+        allowed_also = {_ROL_MAP.get(r, r) for r in allowed}
+
+        # 1. Rol exacto (normalizado)
+        if user_role in allowed or user_role_canon in allowed_also:
             return current_user
 
-        # Admin siempre puede
-        if "admin" in user_role or "administrador" in user_role:
+        # 2. Admin siempre puede
+        if user_role_canon == "admin" or "admin" in user_role:
             return current_user
 
-        # Cualquier variante de 'tecnico' es válida cuando se acepta tecnico/servicio
-        if user_role in _TECNICO_ROLES and (allowed & {"tecnico", "servicio", "tecnico_campo", "operativo"}):
+        # 3. Cualquier variante de técnico es válida cuando se acepta tecnico/servicio
+        if user_role in _TECNICO_ROLES and (
+            allowed & (_TECNICO_ROLES | {"tecnico", "servicio", "tecnico_campo", "operativo"})
+        ):
             return current_user
 
         raise HTTPException(
