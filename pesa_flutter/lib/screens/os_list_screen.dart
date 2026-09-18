@@ -2,10 +2,12 @@
 // Paleta limpia: fondo #F8F9FA, blanco, rojo corporativo #C8102E
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:go_router/go_router.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/local_db_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/app_shell.dart';
@@ -44,6 +46,16 @@ class _OsListScreenState extends State<OsListScreen> {
     context.read<SyncService>().startNetworkMonitor();
     context.read<SyncService>().addListener(_onSyncChanged);
     _loadLocal();
+    // Para técnicos: fijar filtro en su propio nombre desde el inicio
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      final auth = context.read<AuthService>();
+      final r = (auth.role ?? '').toLowerCase();
+      const tecRoles = {'tecnico','servicio','tecnico_campo','calibrador',
+          'inspector','tecnico_calibrador','tecnico_inspector','operativo'};
+      if (tecRoles.contains(r) && auth.nombreCompleto != null) {
+        setState(() => _tecnico = auth.nombreCompleto);
+      }
+    });
   }
 
   @override
@@ -60,7 +72,18 @@ class _OsListScreenState extends State<OsListScreen> {
   Future<void> _loadLocal() async {
     setState(() => _loading = true);
     try {
-      final list = await LocalDbService.instance.getAllOs();
+      // RBAC: si el usuario es técnico, cargar solo sus órdenes de SQLite local
+      final auth = context.read<AuthService>();
+      final r = (auth.role ?? '').toLowerCase();
+      const tecRoles = {'tecnico','servicio','tecnico_campo','calibrador',
+          'inspector','tecnico_calibrador','tecnico_inspector','operativo'};
+      final isTecnico = tecRoles.contains(r);
+      final nombre = auth.nombreCompleto ?? '';
+
+      final list = isTecnico && nombre.isNotEmpty
+          ? await LocalDbService.instance.getOsForTecnico(nombre)
+          : await LocalDbService.instance.getAllOs();
+
       if (mounted) {
         setState(() { _all = list; _loading = false; });
         // Usar compute() para filtrado en isolate si hay >20 elementos
@@ -633,11 +656,33 @@ class _OsRow extends StatelessWidget {
     final isEven    = index % 2 == 0;
 
     final Color estadoFg = switch (estado) {
-      'COMPLETADA' || 'FIRMADA' || 'CERRADO' => Colors.green.shade700,
+      'COMPLETADA' || 'FIRMADA' || 'CERRADO'
+      || 'COMPLETADA_DIGITAL' || 'COMPLETADA_FISICA' => Colors.green.shade700,
       'PROCESO'   => const Color(0xFFC8102E),
       'CANCELADA' => Colors.grey.shade600,
       _           => Colors.grey.shade600,
     };
+
+    // Determinar si la orden está cerrada/finalizada en Render
+    final bool isCerrado = {'COMPLETADA', 'FIRMADA', 'CERRADO',
+        'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA'}.contains(estado);
+
+    // Etiqueta de estado legible
+    final String estadoLabel = switch (estado) {
+      'COMPLETADA' || 'COMPLETADA_DIGITAL'
+      || 'COMPLETADA_FISICA' => 'Cerrado',
+      'FIRMADA'   => 'Firmado',
+      'CERRADO'   => 'Cerrado',
+      'PROCESO'   => 'Proceso',
+      'CANCELADA' => 'Cancelado',
+      _           => _cap(estado),
+    };
+
+    // Badge de sync: si la orden viene sincronizada de Render y está cerrada → verde
+    final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
+        syncSt == 'SINCRONIZADO_RENDER' ||
+        (isCerrado && syncSt != 'PENDIENTE_ACTUALIZAR');
+
 
     return Container(
       color: isEven ? _white : const Color(0xFFFAFAFA),
@@ -681,16 +726,16 @@ class _OsRow extends StatelessWidget {
         )),
         // ESTATUS badge
         Expanded(flex: 2, child: _Badge(
-          label: _cap(estado),
+          label: estadoLabel,
           fg: estadoFg,
-          bg: estadoFg.withOpacity(0.08),
+          bg: estadoFg.withValues(alpha: 0.08),
         )),
         // SYNC badge
-        Expanded(flex: 2, child: syncSt == 'PENDIENTE_ACTUALIZAR'
-          ? _Badge(label: 'Pendiente',
-              fg: Colors.orange.shade700, bg: Colors.orange.shade50)
-          : _Badge(label: 'Sincronizado',
-              fg: Colors.green.shade700, bg: Colors.green.shade50)),
+        Expanded(flex: 2, child: isSincronizado
+          ? _Badge(label: 'Sincronizado',
+              fg: Colors.green.shade700, bg: Colors.green.shade50)
+          : _Badge(label: 'Pendiente',
+              fg: Colors.orange.shade700, bg: Colors.orange.shade50)),
         // ACCIONES
         Expanded(flex: 2, child: Row(children: [
           if (isFisico)
@@ -707,18 +752,35 @@ class _OsRow extends StatelessWidget {
                 }
               },
             )
-          else if (estado != 'COMPLETADA' && estado != 'FIRMADA'
-              && estado != 'CANCELADA' && estado != 'CERRADO')
+          else if (isCerrado)
+            // OS Digital completada/cerrada — mostrar [Ver PDF] igual que Windows
+            Row(mainAxisSize: MainAxisSize.min, children: [
+              _ActionBtn(
+                label: 'Ver PDF', icon: Icons.picture_as_pdf_outlined,
+                fg: _white, bg: const Color(0xFF2563EB),
+                onTap: () {
+                  // Abrir PDF local si existe, sino ir a captura en modo lectura
+                  final pdfPath = os['pdf_path_local'] as String? ?? '';
+                  if (pdfPath.isNotEmpty) {
+                    OpenFilex.open(pdfPath);
+                  } else {
+                    // Fallback: abrir la captura en modo solo lectura
+                    onCaptura();
+                  }
+                },
+              ),
+              const SizedBox(width: 4),
+              _ActionBtn(
+                label: 'Editar', icon: Icons.edit_outlined,
+                fg: _white, bg: const Color(0xFF16A34A),
+                onTap: onCaptura,
+              ),
+            ])
+          else
             _ActionBtn(
               label: 'Capturar', icon: Icons.edit_note_outlined,
               fg: _white, bg: const Color(0xFF16A34A),
               onTap: onCaptura,
-            )
-          else
-            _Badge(
-              label: 'Finalizada',
-              fg: Colors.green.shade700,
-              bg: Colors.green.shade50,
             ),
         ])),
       ]),
