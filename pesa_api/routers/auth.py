@@ -257,67 +257,78 @@ async def emergency_diag(request: Request, db=Depends(get_db)):
 
 @router.post(
     "/emergency-reset",
-    summary="[TEMP] Resetear hashes de contraseña — eliminar tras uso",
+    summary="[TEMP] Insertar/resetear usuarios en BD vacía — eliminar tras uso",
     include_in_schema=False,
 )
 async def emergency_reset(request: Request, db=Depends(get_db)):
-    """Resetea las contraseñas. Detecta la tabla correcta automáticamente."""
+    """INSERT todos los usuarios en cat_tecnicos (que está vacía en Render)."""
     body = await request.json()
     if body.get("secret") != _RESET_SECRET:
         raise HTTPException(status_code=403, detail="Clave incorrecta")
 
-    users_to_reset = [
-        ("Daikki19",           "131019"),
-        ("alan.terrazas",      "131019"),
-        ("ivancolin1207",      "Daikki19"),
-        ("adriana.arias",      "131019"),
-        ("alessandro.segovia", "131019"),
-        ("jose.landaverde",    "131019"),
-        ("jhonny.jimenez",     "131019"),
-        ("fernando.arias",     "131019"),
-        ("nestor.arias",       "131019"),
-    ]
-
-    # Detectar tabla correcta
-    tables = await db.fetch(
-        "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY tablename"
-    )
-    table_names = [r["tablename"] for r in tables]
-    target_table = next(
-        (t for t in ["cat_tecnicos", "tecnicos", "usuarios", "users"] if t in table_names),
-        None
-    )
-    if not target_table:
-        return {"error": "No se encontró tabla de usuarios", "tables": table_names}
-
-    # Detectar columna de contraseña
+    # Verificar columnas reales de cat_tecnicos
     cols = await db.fetch(
-        "SELECT column_name FROM information_schema.columns WHERE table_name=$1",
-        target_table
+        "SELECT column_name FROM information_schema.columns WHERE table_name='cat_tecnicos' ORDER BY ordinal_position"
     )
     col_names = [r["column_name"] for r in cols]
-    pwd_col = next((c for c in ["password_hash", "password", "pwd", "contrasena", "hashed_password"] if c in col_names), None)
-    user_col = next((c for c in ["usuario", "username", "user", "login"] if c in col_names), None)
 
-    if not pwd_col or not user_col:
-        return {"error": f"Columnas no detectadas en {target_table}", "columns": col_names}
+    # Catálogo oficial de usuarios PESA
+    # (usuario, plain_pwd, rol, nombre_completo, email, activo)
+    users = [
+        ("Daikki19",           "131019",   "tecnico",        "Alan Guevara",       "alan.guevara@pesa.com",       True),
+        ("alan.terrazas",      "131019",   "tecnico",        "Alan Terrazas",      "alan.terrazas@pesa.com",      True),
+        ("ivancolin1207",      "Daikki19", "administrador",  "Iván Colín",         "ivancolin1207@pesa.com",       True),
+        ("adriana.arias",      "131019",   "recepcion",      "Adriana Arias",      "adriana.arias@pesa.com",      True),
+        ("alessandro.segovia", "131019",   "tecnico",        "Alessandro Segovia", "alessandro.segovia@pesa.com", True),
+        ("jose.landaverde",    "131019",   "tecnico",        "José Landaverde",    "jose.landaverde@pesa.com",    True),
+        ("jhonny.jimenez",     "131019",   "tecnico",        "Jhonny Jiménez",     "jhonny.jimenez@pesa.com",     True),
+        ("fernando.arias",     "131019",   "tecnico",        "Fernando Arias",     "fernando.arias@pesa.com",     True),
+        ("nestor.arias",       "131019",   "tecnico",        "Néstor Arias",       "nestor.arias@pesa.com",       True),
+    ]
 
     results = []
-    for usuario, plain_pwd in users_to_reset:
-        new_hash = hashlib.sha256(plain_pwd.encode("utf-8")).hexdigest()
-        sql = f"""UPDATE {target_table}
-                  SET {pwd_col} = $1
-                  WHERE LOWER(TRIM({user_col})) = LOWER(TRIM($2))
-                  RETURNING id, {user_col} as usuario"""
-        rows = await db.fetch(sql, new_hash, usuario)
-        if rows:
-            results.append({"usuario": rows[0]["usuario"], "hash_prefix": new_hash[:16]+"...", "status": "updated"})
-        else:
-            results.append({"usuario": usuario, "status": "not_found"})
+    for usuario, plain_pwd, rol, nombre, email, activo in users:
+        pwd_hash = hashlib.sha256(plain_pwd.encode("utf-8")).hexdigest()
 
+        # Construir INSERT dinámico según columnas disponibles
+        has_email  = "email"  in col_names
+        has_activo = "activo" in col_names
+        has_rol    = "rol"    in col_names
+
+        fields = ["usuario", "nombre_completo", "password_hash"]
+        values = [usuario, nombre, pwd_hash]
+        if has_rol:    fields.append("rol");    values.append(rol)
+        if has_email:  fields.append("email");  values.append(email)
+        if has_activo: fields.append("activo"); values.append(activo)
+
+        placeholders = ", ".join(f"${i+1}" for i in range(len(values)))
+        cols_str     = ", ".join(fields)
+        sql = f"""
+            INSERT INTO cat_tecnicos ({cols_str})
+            VALUES ({placeholders})
+            ON CONFLICT (usuario) DO UPDATE
+              SET password_hash   = EXCLUDED.password_hash,
+                  nombre_completo = EXCLUDED.nombre_completo
+                  {", rol = EXCLUDED.rol" if has_rol else ""}
+                  {", activo = EXCLUDED.activo" if has_activo else ""}
+            RETURNING id, usuario, nombre_completo
+        """
+        try:
+            row = await db.fetchrow(sql, *values)
+            results.append({
+                "id":      row["id"],
+                "usuario": row["usuario"],
+                "nombre":  row["nombre_completo"],
+                "hash":    pwd_hash[:16] + "...",
+                "status":  "upserted"
+            })
+        except Exception as e:
+            results.append({"usuario": usuario, "status": f"error: {e}"})
+
+    total_ok = len([r for r in results if r.get("status") == "upserted"])
     return {
-        "table": target_table,
-        "pwd_column": pwd_col,
-        "reset_count": len([r for r in results if r.get("status") == "updated"]),
-        "results": results,
+        "cat_tecnicos_columns": col_names,
+        "upserted": total_ok,
+        "failed":   len(results) - total_ok,
+        "results":  results,
     }
