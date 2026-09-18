@@ -925,9 +925,29 @@ class DashboardWidget(QWidget):
     solicitar_nuevo_formato = pyqtSignal(str)
     navegar_a               = pyqtSignal(str)
 
+    # ── Estilos de botones de acción — constantes de clase para no recrear por fila ──
+    _BTN_PDF_STYLE = (
+        "QPushButton{background:#F2F2F7;color:#1D1D1F;border:1px solid #D1D1D6;"
+        "border-radius:4px;font-size:9pt;font-weight:500;padding:0 8px;min-height:26px;}"
+        "QPushButton:hover{background:#E5E5EA;}QPushButton:pressed{background:#D1D1D6;}"
+    )
+    _BTN_CAPTURAR_STYLE = (
+        "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        "stop:0 #1A7F64,stop:1 #0E6E53);color:white;border:none;border-radius:4px;"
+        "font-size:8.5pt;font-weight:700;padding:0 10px;min-height:26px;}"
+        "QPushButton:hover{background:#145C48;}"
+    )
+    _BTN_PDF_FINAL_STYLE = (
+        "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        "stop:0 #0A5C9E,stop:1 #0869B8);color:white;border:none;border-radius:4px;"
+        "font-size:8.5pt;font-weight:700;padding:0 10px;min-height:26px;}"
+        "QPushButton:hover{background:#0747A6;}"
+    )
+
     # -- Indices de columna de la QTableWidget (0-based) ----------------------
     # Col 0: Folio
     # Col 1: Fecha
+
     # Col 2: Cliente
     # Col 3: Sucursal / Planta
     # Col 4: Tecnico Asignado
@@ -2777,48 +2797,10 @@ class DashboardWidget(QWidget):
         lay.setContentsMargins(6, 2, 6, 2)
         lay.setSpacing(8)
 
-        _btn_pdf_style = """
-            QPushButton {
-                background: #F2F2F7;
-                color: #1D1D1F;
-                border: 1px solid #D1D1D6;
-                border-radius: 4px;
-                font-size: 9pt;
-                font-weight: 500;
-                padding: 0 8px;
-                min-height: 26px;
-            }
-            QPushButton:hover { background: #E5E5EA; }
-            QPushButton:pressed { background: #D1D1D6; }
-        """
-        _btn_capturar_style = """
-            QPushButton {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #1A7F64, stop:1 #0E6E53);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 8.5pt;
-                font-weight: 700;
-                padding: 0 10px;
-                min-height: 26px;
-            }
-            QPushButton:hover { background: #145C48; }
-        """
-        _btn_pdf_final_style = """
-            QPushButton {
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 #0A5C9E, stop:1 #0869B8);
-                color: white;
-                border: none;
-                border-radius: 4px;
-                font-size: 8.5pt;
-                font-weight: 700;
-                padding: 0 10px;
-                min-height: 26px;
-            }
-            QPushButton:hover { background: #0747A6; }
-        """
+        # Usar constantes de clase (evita recrear strings CSS por fila)
+        _btn_pdf_style       = self._BTN_PDF_STYLE
+        _btn_capturar_style  = self._BTN_CAPTURAR_STYLE
+        _btn_pdf_final_style = self._BTN_PDF_FINAL_STYLE
 
         # ── Botón primario adaptativo ─────────────────────────────────────────
         if is_digital and not is_closed:
