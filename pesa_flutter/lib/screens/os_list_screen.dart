@@ -1,5 +1,6 @@
 // lib/screens/os_list_screen.dart — Dashboard corporativo estilo escritorio PESA
 // Paleta limpia: fondo #F8F9FA, blanco, rojo corporativo #C8102E
+import 'dart:io';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:flutter/scheduler.dart';
@@ -189,31 +190,47 @@ class _OsListScreenState extends State<OsListScreen> {
 
   Widget _buildGroupedList(BuildContext context) {
     final groups = _groupByLote(_filtered);
-    return ListView.builder(
-      itemCount: groups.length,
-      // itemExtent fijo activa el reciclaje O(1) de celdas — scroll 60 FPS
-      itemExtent: 72.0,
-      itemBuilder: (ctx, i) {
-        final group = groups[i];
-        if (group.isLote) {
-          return _LoteRow(
-            group: group,
-            onCaptura: (os) => ctx.push(
-              '/captura/${os['local_id']}',
-              extra: Map<String, dynamic>.from(os),
-            ),
-          );
-        }
-        final os = group.items.first;
-        return _OsRow(
-          os: os,
-          index: i,
-          onCaptura: () => ctx.push(
-            '/captura/${os['local_id']}',
-            extra: Map<String, dynamic>.from(os),
-          ),
-        );
-      },
+    // Detectar si el usuario es técnico para ocultar columna Técnico
+    final auth = context.read<AuthService>();
+    final r = (auth.role ?? '').toLowerCase();
+    const tecRoles = {'tecnico','servicio','tecnico_campo','calibrador',
+        'inspector','tecnico_calibrador','tecnico_inspector','operativo'};
+    final hideTecnico = tecRoles.contains(r);
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        // Ancho mínimo adaptativo: menos si se oculta columna técnico
+        width: hideTecnico ? 780 : 960,
+        child: ListView.builder(
+          itemCount: groups.length,
+          // itemExtent fijo activa el reciclaje O(1) de celdas — scroll 60 FPS
+          itemExtent: 72.0,
+          itemBuilder: (ctx, i) {
+            final group = groups[i];
+            if (group.isLote) {
+              return _LoteRow(
+                group: group,
+                hideTecnico: hideTecnico,
+                onCaptura: (os) => ctx.push(
+                  '/captura/${os['local_id']}',
+                  extra: Map<String, dynamic>.from(os),
+                ),
+              );
+            }
+            final os = group.items.first;
+            return _OsRow(
+              os: os,
+              index: i,
+              hideTecnico: hideTecnico,
+              onCaptura: () => ctx.push(
+                '/captura/${os['local_id']}',
+                extra: Map<String, dynamic>.from(os),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 } // fin _OsListScreenState
@@ -644,8 +661,9 @@ class _OsRow extends StatelessWidget {
   final int index;
   final VoidCallback onCaptura;
   final bool indent;
+  final bool hideTecnico; // ocultar columna técnico si el usuario logueado es técnico
   const _OsRow({required this.os, required this.index,
-      required this.onCaptura, this.indent = false});
+      required this.onCaptura, this.indent = false, this.hideTecnico = false});
 
   @override
   Widget build(BuildContext context) {
@@ -693,14 +711,14 @@ class _OsRow extends StatelessWidget {
       ),
       child: Row(children: [
         // FOLIO
-        Expanded(flex: 3, child: Text(os['folio_os'] ?? '—',
+        SizedBox(width: 110, child: Text(os['folio_os'] ?? '—',
             style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12,
                 color: Color(0xFFC8102E)))),
         // FECHA
-        Expanded(flex: 2, child: Text(os['fecha'] ?? '—',
+        SizedBox(width: 88, child: Text(os['fecha'] ?? '—',
             style: const TextStyle(fontSize: 11, color: _textPrim))),
         // CLIENTE / SUCURSAL
-        Expanded(flex: 5, child: Column(
+        Expanded(flex: 3, child: Column(
             crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text(os['cliente'] ?? '—',
               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
@@ -710,37 +728,36 @@ class _OsRow extends StatelessWidget {
             Text(os['sucursal']!, style: const TextStyle(fontSize: 10, color: _textSec),
                 overflow: TextOverflow.ellipsis),
         ])),
-        // TÉCNICO
-        Expanded(flex: 3, child: Text(os['tecnico'] ?? '—',
-            style: const TextStyle(fontSize: 11, color: _textPrim),
-            overflow: TextOverflow.ellipsis)),
+        // TÉCNICO — se oculta si el usuario logueado es técnico (para ganar espacio)
+        if (!hideTecnico)
+          Expanded(flex: 2, child: Text(os['tecnico'] ?? '—',
+              style: const TextStyle(fontSize: 11, color: _textPrim),
+              overflow: TextOverflow.ellipsis)),
         // TIPO SERVICIO
-        Expanded(flex: 3, child: Text(os['tipo_servicio'] ?? '—',
+        SizedBox(width: 120, child: Text(os['tipo_servicio'] ?? '—',
             style: const TextStyle(fontSize: 11, color: _textSec),
             overflow: TextOverflow.ellipsis)),
         // MODALIDAD badge
-        Expanded(flex: 2, child: _Badge(
+        SizedBox(width: 68, child: _Badge(
           label: isFisico ? 'Físico' : 'Digital',
           fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
           bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
         )),
         // ESTATUS badge
-        Expanded(flex: 2, child: _Badge(
+        SizedBox(width: 80, child: _Badge(
           label: estadoLabel,
           fg: estadoFg,
           bg: estadoFg.withValues(alpha: 0.08),
         )),
         // SYNC badge
-        Expanded(flex: 2, child: isSincronizado
+        SizedBox(width: 88, child: isSincronizado
           ? _Badge(label: 'Sincronizado',
               fg: Colors.green.shade700, bg: Colors.green.shade50)
           : _Badge(label: 'Pendiente',
               fg: Colors.orange.shade700, bg: Colors.orange.shade50)),
-        // ACCIONES
-        Expanded(flex: 2, child: Row(children: [
+        // ACCIONES — ancho fijo 150px para acomodar [Ver PDF] + [Editar]
+        SizedBox(width: 150, child: Row(children: [
           if (isFisico)
-            // OS Físicas: el PDF lo genera Windows en la oficina.
-            // En la tablet, la acción correcta es adjuntar el escaneo.
             _ActionBtn(
               label: 'Adjuntar', icon: Icons.document_scanner_outlined,
               fg: _white, bg: const Color(0xFF7C3AED),
@@ -753,19 +770,44 @@ class _OsRow extends StatelessWidget {
               },
             )
           else if (isCerrado)
-            // OS Digital completada/cerrada — mostrar [Ver PDF] igual que Windows
+            // OS Digital completada/cerrada — descargar PDF OFICIAL de Render
             Row(mainAxisSize: MainAxisSize.min, children: [
               _ActionBtn(
                 label: 'Ver PDF', icon: Icons.picture_as_pdf_outlined,
                 fg: _white, bg: const Color(0xFF2563EB),
-                onTap: () {
-                  // Abrir PDF local si existe, sino ir a captura en modo lectura
-                  final pdfPath = os['pdf_path_local'] as String? ?? '';
-                  if (pdfPath.isNotEmpty) {
-                    OpenFilex.open(pdfPath);
-                  } else {
-                    // Fallback: abrir la captura en modo solo lectura
-                    onCaptura();
+                onTap: () async {
+                  final folio = os['folio_os'] as String? ?? '';
+                  final ctx = context;
+                  // Primero intentar abrir PDF ya descargado localmente
+                  final localPath = os['pdf_path_local'] as String? ?? '';
+                  if (localPath.isNotEmpty && await File(localPath).exists()) {
+                    await OpenFilex.open(localPath);
+                    return;
+                  }
+                  // Descargar el PDF OFICIAL desde el backend de Render
+                  try {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(
+                          content: Text('Descargando PDF oficial...'),
+                          duration: Duration(seconds: 2),
+                          backgroundColor: Color(0xFF2563EB),
+                        ),
+                      );
+                    }
+                    final path = await ApiService.instance.downloadPdf(
+                      '/api/ordenes/$folio/pdf'
+                    );
+                    await OpenFilex.open(path);
+                  } catch (e) {
+                    if (ctx.mounted) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(
+                          content: Text('PDF no disponible: ${e.toString().replaceAll('HttpException: ', '')}'),
+                          backgroundColor: Colors.red.shade700,
+                        ),
+                      );
+                    }
                   }
                 },
               ),
@@ -874,7 +916,9 @@ class _OsGroup {
 class _LoteRow extends StatefulWidget {
   final _OsGroup group;
   final void Function(Map<String, dynamic> os) onCaptura;
-  const _LoteRow({required this.group, required this.onCaptura});
+  final bool hideTecnico;
+  const _LoteRow({required this.group, required this.onCaptura,
+      this.hideTecnico = false});
 
   @override
   State<_LoteRow> createState() => _LoteRowState();

@@ -208,13 +208,18 @@ class LocalDbService {
   /// Usado para RBAC estricto en la vista del técnico de campo.
   Future<List<Map<String, dynamic>>> getOsForTecnico(String nombreTecnico) async {
     final db = await _ensureInit();
-    // Búsqueda flexible: nombre completo o contenido parcial
-    return await db.query(
+    // rawQuery soporta LIKE case-insensitive en SQLite (collation NOCASE por defecto para ASCII)
+    // Para nombres con caracteres latinos se hace matching en Dart después
+    final rows = await db.query(
       'ordenes_servicio',
-      where: "LOWER(tecnico) LIKE LOWER(?)",
-      whereArgs: ['%$nombreTecnico%'],
       orderBy: 'fecha DESC',
     );
+    // Filtrar en Dart: nombre contiene alguna parte del nombre del técnico
+    final nombreLow = nombreTecnico.toLowerCase();
+    return rows.where((r) {
+      final tec = (r['tecnico'] as String? ?? '').toLowerCase();
+      return tec.contains(nombreLow) || nombreLow.contains(tec);
+    }).toList();
   }
 
   Future<Map<String, dynamic>?> getOs(int localId) async {
