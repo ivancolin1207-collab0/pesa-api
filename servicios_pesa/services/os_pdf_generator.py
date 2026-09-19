@@ -627,10 +627,11 @@ class OsPdfGenerator:
 
         _f2_gap = 2 * GAP
         _f2_net = cw - _f2_gap
+        # TIPO DE INSTRUMENTO: columna ampliada para textos largos (camionera/puente)
         field_row([
-            ("ID INDICADOR / EQUIPO", os_data.get("equipo_id") or os_data.get("id_equipo"), _f2_net * 0.30),
-            ("TIPO DE INSTRUMENTO",   _tipo_inst,      _f2_net * 0.38),
-            ("FUNCIONAMIENTO",        _funcionamiento, _f2_net * 0.32),
+            ("ID INDICADOR / EQUIPO", os_data.get("equipo_id") or os_data.get("id_equipo"), _f2_net * 0.28),
+            ("TIPO DE INSTRUMENTO",   _tipo_inst,      _f2_net * 0.45),
+            ("FUNCIONAMIENTO",        _funcionamiento, _f2_net * 0.27),
         ], y)
         y -= fila_h
 
@@ -643,32 +644,41 @@ class OsPdfGenerator:
         _dve_val  = os_data.get("dve") or os_data.get("equipo_dve") or ""
         _ubic    = os_data.get("equipo_ubicacion") or os_data.get("ubicacion") or ""
 
+        def _fmt_unidad(raw, unidad="kg"):
+            """Evita duplicar la unidad si el valor ya la contiene (ej: '75 000 kg' → '75 000 kg')."""
+            if not raw:
+                return None
+            s = str(raw).strip()
+            if s.lower().endswith(unidad.lower()):
+                return s   # ya trae la unidad
+            return f"{s} {unidad}"
+
         if tiene_inspeccion:
             _f3_gap = 3 * GAP
             _f3_net = cw - _f3_gap
             _unidad_pdf = str(os_data.get("unidad_medida") or "kg").strip() or "kg"
-            _cap_str  = f"{_cap_val} {_unidad_pdf}" if _cap_val else None
-            _div_str  = f"{_div_val} {_unidad_pdf}" if _div_val else None
+            _cap_str  = _fmt_unidad(_cap_val, _unidad_pdf)
+            _div_str  = _fmt_unidad(_div_val, _unidad_pdf)
             field_row([
-                ("CAPACIDAD M\u00c1XIMA", _cap_str,      _f3_net * 0.26),
-                ("DIVISI\u00d3N M\u00cdNIMA",  _div_str,       _f3_net * 0.22),
+                ("CAPACIDAD MÁXIMA", _cap_str,      _f3_net * 0.26),
+                ("DIVISIÓN MÍNIMA",  _div_str,       _f3_net * 0.22),
                 ("DVE",              _dve_val,        _f3_net * 0.22),
                 ("PUNTOS DE APOYO",  _puntos_apoyo,   _f3_net * 0.30),
             ], y)
             y -= fila_h
-            field_row([("UBICACI\u00d3N", _ubic, cw)], y)
+            field_row([("UBICACIÓN", _ubic, cw)], y)
             y -= fila_h
         else:
             _f3_gap = 3 * GAP
             _f3_net = cw - _f3_gap
             _unidad_pdf = str(os_data.get("unidad_medida") or "kg").strip() or "kg"
-            _cap_str2 = f"{_cap_val} {_unidad_pdf}" if _cap_val else None
-            _div_str2 = f"{_div_val} {_unidad_pdf}" if _div_val else None
+            _cap_str2 = _fmt_unidad(_cap_val, _unidad_pdf)
+            _div_str2 = _fmt_unidad(_div_val, _unidad_pdf)
             field_row([
-                ("CAPACIDAD M\u00c1XIMA", _cap_str2,     _f3_net * 0.25),
-                ("DIVISI\u00d3N M\u00cdNIMA",  _div_str2,      _f3_net * 0.22),
+                ("CAPACIDAD MÁXIMA", _cap_str2,     _f3_net * 0.25),
+                ("DIVISIÓN MÍNIMA",  _div_str2,      _f3_net * 0.22),
                 ("PUNTOS DE APOYO",  _puntos_apoyo,   _f3_net * 0.20),
-                ("UBICACI\u00d3N",        _ubic,           _f3_net * 0.33),
+                ("UBICACIÓN",        _ubic,           _f3_net * 0.33),
             ], y)
             y -= fila_h
 
@@ -978,9 +988,13 @@ class OsPdfGenerator:
             num_label(px, py, t, dx, dy)
 
         sep_line(p1_x + panel_w)
-        # Marcar 'Plataforma' si la geometría es cuadrada/rectangular o 'plataforma'
+        # Camionera detectada por geo O por tipo_instrumento
+        _tipo_raw = str((os_data or {}).get("tipo_instrumento") or "").lower()
+        _es_camionera = ("camionera" in geo_key or "camionera" in _tipo_raw
+                         or "puente" in _tipo_raw)
+        # Plataforma: cuadrada/rectangular, o geo vacía Y NO es camionera
         _is_plataforma = ("cuadrada" in geo_key or "plataforma" in geo_key or
-                          (not geo_key and True))  # default si vacío = plataforma
+                          (not geo_key and not _es_camionera))
         checkbox_row(p1_cx, body_top - body_h + 1,
                      "Plataforma", _is_plataforma)
 
@@ -1081,7 +1095,7 @@ class OsPdfGenerator:
                 c.drawCentredString(cx_col + cw_col / 2, tbl_y_top - cell_h / 2 - 1.5, "...")
 
         checkbox_row(p3_cx, body_top - body_h + 1,
-                     f"Camionera ({n_sec} Sec.)", "camionera" in geo_key)
+                     f"Camionera ({n_sec} Sec.)", _es_camionera)
 
 
     def _draw_repetibilidad_table(self, c, x, y, w, data, os_data: dict = None) -> float:

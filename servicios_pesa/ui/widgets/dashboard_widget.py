@@ -2755,12 +2755,13 @@ class DashboardWidget(QWidget):
 
 
     def _confirm_delete_batch(self, os_ids: list, folios: list) -> None:
-        """Confirma y elimina todos los registros de un lote."""
+        """Confirma y elimina todos los registros de un lote (con cascada)."""
         msg = QMessageBox(self)
-        msg.setWindowTitle("Eliminar Lote")
+        msg.setWindowTitle("⚠️  Eliminar Lote")
         msg.setText(
-            f"¿Eliminar el lote completo ({len(folios)} formatos)?\n"
-            f"Folios: {folios[0]} … {folios[-1]}"
+            f"¿Eliminar el lote completo ({len(folios)} formatos) de forma definitiva?\n\n"
+            f"Folios: {folios[0]} … {folios[-1]}\n\n"
+            "Esta acción es IRREVERSIBLE."
         )
         msg.setStandardButtons(
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel
@@ -2769,19 +2770,64 @@ class DashboardWidget(QWidget):
         msg.setIcon(QMessageBox.Icon.Warning)
         if msg.exec() != QMessageBox.StandardButton.Yes:
             return
+
+        # Filtrar None y convertir a int
+        valid_ids = [int(i) for i in os_ids if i is not None]
+        if not valid_ids:
+            QMessageBox.warning(self, "Sin IDs",
+                "No se encontraron IDs válidos. Intenta refrescar el dashboard.")
+            return
+
+        # Tablas hijas — SAVEPOINT por cada una para ignorar inexistentes
+        _CHILD_TABLES = [
+            ("adjuntos_os",       "id_os"),
+            ("det_excentricidad",  "id_os"),
+            ("det_repetibilidad",  "id_os"),
+            ("det_exactitud",      "id_os"),
+            ("historial_ordenes",  "id_os"),
+            ("historial_os",       "id_os"),
+        ]
+        conn = None
         try:
-            conn = _db_pool.get_connection()
+            conn = _db_pool.getconn()
+            conn.autocommit = False
             with conn.cursor() as cur:
+                for tabla, col in _CHILD_TABLES:
+                    sp = f"sp_{tabla[:20]}"
+                    try:
+                        cur.execute(f"SAVEPOINT {sp}")
+                        cur.execute(
+                            f"DELETE FROM {tabla} WHERE {col} = ANY(%s)",
+                            (valid_ids,)
+                        )
+                        cur.execute(f"RELEASE SAVEPOINT {sp}")
+                    except Exception:
+                        try: cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                        except Exception: pass
+
                 cur.execute(
-                    "DELETE FROM ordenes_servicio WHERE id = ANY(%s)", (os_ids,)
+                    "DELETE FROM ordenes_servicio WHERE id = ANY(%s)",
+                    (valid_ids,)
                 )
+                rows = cur.rowcount
             conn.commit()
-            _db_pool.release_connection(conn)
+            logger.info("[DELETE LOTE] %d registros eliminados: %s", rows, folios)
+            QMessageBox.information(self, "Lote eliminado",
+                f"Se eliminaron {rows} orden(es) correctamente.\n"
+                f"Folios: {folios[0]} … {folios[-1]}")
             self._load_table()
             self._load_kpis()
         except Exception as exc:
+            if conn:
+                try: conn.rollback()
+                except Exception: pass
             logger.error("Error eliminando lote: %s", exc)
-            QMessageBox.critical(self, "Error", f"No se pudo eliminar el lote:\n{exc}")
+            QMessageBox.critical(self, "Error al eliminar",
+                                 f"No se pudo eliminar el lote:\n\n{exc}")
+        finally:
+            if conn:
+                try: _db_pool.putconn(conn)
+                except Exception: pass
 
     def _build_action_cell(self, folio: str, estado: str, os_id,
                            tiene_adjunto: bool, sync_status: str,
