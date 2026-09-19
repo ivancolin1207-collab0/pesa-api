@@ -1164,7 +1164,7 @@ class OsPdfGenerator:
             c.setFont("Helvetica", 8)
             col_widths_rep = [w * 0.08, w * 0.22, w * 0.24, w * 0.24, w * 0.22]
             cx = x
-            _is_dig_rep = str(os_data.get("modalidad") or "").upper() != "FISICO"
+            _is_dig_rep = str((os_data or {}).get("modalidad") or "").upper() != "FISICO"
             for j, (val_str, cw_col) in enumerate(zip(cell_vals, col_widths_rep)):
                 cell_x = cx
                 cell_y = y - row_h
@@ -1579,7 +1579,7 @@ class OsPdfGenerator:
             cx += col_widths[0]
 
             # Col 1: L. INICIAL (diagonal SOLO en digital con datos; físico = blanco)
-            _is_digital_form = str(os_data.get("modalidad") or "").upper() != "FISICO"
+            _is_digital_form = str((os_data or {}).get("modalidad") or "").upper() != "FISICO"
             if ini_val is None or str(ini_val).strip() == "":
                 if _is_digital_form:
                     self._draw_cancel_slash(c, cx, y - row_h, col_widths[1], row_h)
@@ -1726,7 +1726,7 @@ class OsPdfGenerator:
             c.setFillColor(_BLACK)
             c.setFont("Helvetica", 7.5)
             cx = x
-            _is_dig_ex = str(os_data.get("modalidad") or "").upper() != "FISICO"
+            _is_dig_ex = str((os_data or {}).get("modalidad") or "").upper() != "FISICO"
             for v, cw_col in zip(vals, col_widths):
                 if v is None:
                     if _is_dig_ex:  # físico: celda en blanco; digital: diagonal

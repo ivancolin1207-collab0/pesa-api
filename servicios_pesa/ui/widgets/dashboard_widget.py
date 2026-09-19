@@ -3257,32 +3257,77 @@ class DashboardWidget(QWidget):
                 self._btn_eliminar_sel.setVisible(True)
 
     def _delete_single_os(self, os_id) -> None:
-
-        if not self._is_admin() or not os_id:
+        """Elimina una OS individual con cascada en tablas hijas y commit explícito."""
+        if not self._is_admin():
             return
+        if not os_id:
+            QMessageBox.warning(self, "Sin ID", "No se pudo obtener el ID de la orden.")
+            return
+        try:
+            os_id = int(os_id)
+        except (TypeError, ValueError):
+            QMessageBox.warning(self, "Error", f"ID de orden inválido: {os_id!r}")
+            return
+
         resp = QMessageBox.warning(
-            self, "Eliminar",
-            "Esta accion es irreversible.\n\n"
+            self, "⚠️  Eliminar Orden",
+            "Esta acción es IRREVERSIBLE.\n\n"
             "¿Desea eliminar permanentemente esta orden de servicio?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if resp != QMessageBox.StandardButton.Yes:
             return
+
+        # Tablas hijas — SAVEPOINT permite ignorar las que no existen
+        _CHILD_TABLES = [
+            ("adjuntos_os",      "id_os"),
+            ("det_excentricidad", "id_os"),
+            ("det_repetibilidad", "id_os"),
+            ("det_exactitud",     "id_os"),
+            ("historial_ordenes", "id_os"),
+            ("historial_os",      "id_os"),
+            ("folio_locks",       "folio_os"),   # referencia por texto
+        ]
+        conn = None
         try:
-            with _db_pool.transaction() as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SAVEPOINT sp_adj_single")
+            conn = _db_pool.getconn()
+            conn.autocommit = False
+            with conn.cursor() as cur:
+                cur.execute("SELECT folio_os FROM ordenes_servicio WHERE id = %s", (os_id,))
+                frow = cur.fetchone()
+                folio_os = frow[0] if frow else None
+                for tabla, col in _CHILD_TABLES:
+                    sp = f"sp_{tabla[:20]}"
                     try:
-                        cur.execute("DELETE FROM adjuntos_os WHERE id_os = %s", (os_id,))
-                        cur.execute("RELEASE SAVEPOINT sp_adj_single")
+                        cur.execute(f"SAVEPOINT {sp}")
+                        val = os_id if col == "id_os" else folio_os
+                        if val:
+                            cur.execute(f"DELETE FROM {tabla} WHERE {col} = %s", (val,))
+                        cur.execute(f"RELEASE SAVEPOINT {sp}")
                     except Exception:
-                        cur.execute("ROLLBACK TO SAVEPOINT sp_adj_single")
-                    cur.execute("DELETE FROM ordenes_servicio WHERE id = %s", (os_id,))
-                    logger.info("[DELETE] OS id=%s eliminada", os_id)
+                        try: cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                        except Exception: pass
+                cur.execute("DELETE FROM ordenes_servicio WHERE id = %s", (os_id,))
+                rows = cur.rowcount
+            conn.commit()
+            logger.info("[DELETE] OS id=%s folio=%s eliminada (%d)", os_id, folio_os, rows)
+            if rows == 0:
+                QMessageBox.warning(self, "Sin resultado",
+                    f"No se encontró id={os_id}. Es posible que ya estuviera eliminada.")
+            else:
+                QMessageBox.information(self, "Listo", "Orden eliminada correctamente.")
             QTimer.singleShot(100, self.refresh)
         except Exception as e:
-            logger.error("Error eliminando OS %s: %s", os_id, e)
-            QMessageBox.critical(self, "Error", f"No se pudo eliminar la orden:\n{e}")
+            if conn:
+                try: conn.rollback()
+                except Exception: pass
+            logger.error("Error eliminando OS id=%s: %s", os_id, e)
+            QMessageBox.critical(self, "Error al eliminar",
+                                 f"No se pudo eliminar la orden:\n\n{e}")
+        finally:
+            if conn:
+                try: _db_pool.putconn(conn)
+                except Exception: pass
 
     def _cambiar_modalidad_os(self, os_id: int, nueva_modalidad: str) -> None:
         """Cambia la modalidad (Físico / Digital) de una OS individual (solo admin)."""
