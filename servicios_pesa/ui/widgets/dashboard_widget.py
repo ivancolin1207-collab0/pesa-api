@@ -2913,7 +2913,22 @@ class DashboardWidget(QWidget):
 
         if self._is_admin():
             opts_menu.addSeparator()
-            act_del = QAction("Eliminar", btn_opts)
+            # ── Cambiar modalidad individual ───────────────────────────────────
+            cur_modal = (modalidad or "").upper()
+            if cur_modal != "FISICO":
+                act_to_fis = QAction("📄  Cambiar a Formato Físico", btn_opts)
+                act_to_fis.triggered.connect(
+                    lambda _, fid=os_id: self._cambiar_modalidad_os(fid, "FISICO")
+                )
+                opts_menu.addAction(act_to_fis)
+            if cur_modal != "DIGITAL":
+                act_to_dig = QAction("📱  Cambiar a Formato Digital", btn_opts)
+                act_to_dig.triggered.connect(
+                    lambda _, fid=os_id: self._cambiar_modalidad_os(fid, "Digital")
+                )
+                opts_menu.addAction(act_to_dig)
+            opts_menu.addSeparator()
+            act_del = QAction("🗑️  Eliminar Orden", btn_opts)
             act_del.triggered.connect(lambda _, fid=os_id: self._delete_single_os(fid))
             opts_menu.addAction(act_del)
 
@@ -3268,6 +3283,44 @@ class DashboardWidget(QWidget):
         except Exception as e:
             logger.error("Error eliminando OS %s: %s", os_id, e)
             QMessageBox.critical(self, "Error", f"No se pudo eliminar la orden:\n{e}")
+
+    def _cambiar_modalidad_os(self, os_id: int, nueva_modalidad: str) -> None:
+        """Cambia la modalidad (Físico / Digital) de una OS individual (solo admin)."""
+        if not self._is_admin() or not os_id:
+            return
+        etiqueta = "Físico (impresión manual)" if nueva_modalidad.upper() == "FISICO" \
+                   else "Digital (captura en tablet)"
+        resp = QMessageBox.question(
+            self, "Cambiar Modalidad",
+            f"¿Cambiar esta orden a modalidad {etiqueta}?\n\n"
+            "Si se cambia a Digital, la tablet podrá descargarla en la próxima sincronización.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if resp != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            with _db_pool.transaction() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE ordenes_servicio
+                           SET modalidad    = %s,
+                               sync_status  = 'PENDIENTE',
+                               updated_at   = NOW()
+                         WHERE id = %s
+                        """,
+                        (nueva_modalidad, os_id),
+                    )
+                    logger.info("[ADMIN] Modalidad OS id=%s → %s", os_id, nueva_modalidad)
+            QMessageBox.information(
+                self, "Listo",
+                f"Modalidad actualizada a {nueva_modalidad}.\n"
+                "La tablet la descargará en la próxima sincronización."
+            )
+            QTimer.singleShot(100, self.refresh)
+        except Exception as e:
+            logger.error("Error cambiando modalidad OS %s: %s", os_id, e)
+            QMessageBox.critical(self, "Error", f"No se pudo cambiar la modalidad:\n{e}")
 
     def _on_delete_selected(self) -> None:
         """Elimina en lote las OS marcadas con checkbox (solo admin)."""

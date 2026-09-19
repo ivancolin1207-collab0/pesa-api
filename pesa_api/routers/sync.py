@@ -263,8 +263,8 @@ async def sync_pull(
             ce.codigo                        AS clase_exactitud_codigo,
             COALESCE(ti.nombre,          '') AS tipo_instrumento,
             -- Offline-First v2: PDF + firma del técnico para uso offline
-            os.pdf_b64                       AS pdf_b64,
-            tc.firma_digital                 AS firma_tecnico_descargada,
+            NULL::text                       AS pdf_b64,
+            NULL::text                       AS firma_tecnico_descargada,
             'kg'                             AS unidad_medida,
             CASE
                 WHEN UPPER(os.modalidad) = 'FISICO'

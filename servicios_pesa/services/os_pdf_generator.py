@@ -1164,11 +1164,13 @@ class OsPdfGenerator:
             c.setFont("Helvetica", 8)
             col_widths_rep = [w * 0.08, w * 0.22, w * 0.24, w * 0.24, w * 0.22]
             cx = x
+            _is_dig_rep = str(os_data.get("modalidad") or "").upper() != "FISICO"
             for j, (val_str, cw_col) in enumerate(zip(cell_vals, col_widths_rep)):
                 cell_x = cx
                 cell_y = y - row_h
                 if val_str is None:
-                    self._draw_cancel_slash(c, cell_x, cell_y, cw_col, row_h)
+                    if _is_dig_rep:  # físico: celda en blanco; digital: diagonal
+                        self._draw_cancel_slash(c, cell_x, cell_y, cw_col, row_h)
                 else:
                     c.drawCentredString(cell_x + cw_col / 2, cell_y + 5, val_str)
                 cx += cw_col
@@ -1509,10 +1511,21 @@ class OsPdfGenerator:
 
         # ── Geometría para etiquetas Camionera ───────────────────────────────
         geo = (os_data.get("geometria_plataforma") or "").lower()
+        tipo_ins_low = (
+            (os_data.get("tipo_instrumento") or
+             os_data.get("tipo_receptor")    or
+             os_data.get("tipo_bascula")     or "")
+        ).lower()
+        # Detectar camionera por geometria O por tipo de instrumento
+        _es_camionera = ("camionera" in geo or "puente" in geo or
+                          "camionera" in tipo_ins_low or "puente" in tipo_ins_low)
         import re as _re
-        # Etiquetas estándar: Centro primero, luego Esquinas
-        if "camionera" in geo:
-            _POSICIONES_STD = [f"Secc. {i+1}" for i in range(10)]
+        # Etiquetas según tipo de instrumento
+        if _es_camionera:
+            _n_sec = os_data.get("secciones_camionera") or os_data.get("num_secciones") or n_rows
+            try: _n_sec = max(1, int(_n_sec))
+            except Exception: _n_sec = n_rows
+            _POSICIONES_STD = [f"Sección {i+1}" for i in range(max(_n_sec, 10))]
         elif "circular" in geo:
             _POSICIONES_STD = ["Centro", "Norte", "Sur", "Este", "Oeste",
                                "Posición 6", "Posición 7", "Posición 8"]
@@ -1565,18 +1578,23 @@ class OsPdfGenerator:
                                 y - row_h + max(2.5, row_h * 0.28), pos_label)
             cx += col_widths[0]
 
-            # Col 1: L. INICIAL (diagonal si None/vacío)
+            # Col 1: L. INICIAL (diagonal SOLO en digital con datos; físico = blanco)
+            _is_digital_form = str(os_data.get("modalidad") or "").upper() != "FISICO"
             if ini_val is None or str(ini_val).strip() == "":
-                self._draw_cancel_slash(c, cx, y - row_h, col_widths[1], row_h)
+                if _is_digital_form:
+                    self._draw_cancel_slash(c, cx, y - row_h, col_widths[1], row_h)
+                # else: celda en blanco para llenado manual
             else:
                 c.drawCentredString(cx + col_widths[1] / 2,
                                     y - row_h + max(2.5, row_h * 0.28),
                                     self._fmt(ini_val, d_dec))
             cx += col_widths[1]
 
-            # Col 2: L. FINAL (diagonal si None/vacío)
+            # Col 2: L. FINAL (diagonal SOLO en digital con datos; físico = blanco)
             if fin_val is None or str(fin_val).strip() == "":
-                self._draw_cancel_slash(c, cx, y - row_h, col_widths[2], row_h)
+                if _is_digital_form:
+                    self._draw_cancel_slash(c, cx, y - row_h, col_widths[2], row_h)
+                # else: celda en blanco para llenado manual
             else:
                 c.drawCentredString(cx + col_widths[2] / 2,
                                     y - row_h + max(2.5, row_h * 0.28),
@@ -1708,9 +1726,11 @@ class OsPdfGenerator:
             c.setFillColor(_BLACK)
             c.setFont("Helvetica", 7.5)
             cx = x
+            _is_dig_ex = str(os_data.get("modalidad") or "").upper() != "FISICO"
             for v, cw_col in zip(vals, col_widths):
                 if v is None:
-                    self._draw_cancel_slash(c, cx, y - row_h, cw_col, row_h)
+                    if _is_dig_ex:  # físico: celda en blanco; digital: diagonal
+                        self._draw_cancel_slash(c, cx, y - row_h, cw_col, row_h)
                 else:
                     c.drawCentredString(cx + cw_col / 2, y - row_h + 3.5, v)
                 cx += cw_col
