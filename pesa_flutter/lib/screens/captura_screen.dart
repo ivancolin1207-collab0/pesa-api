@@ -151,12 +151,8 @@ class _CapturaScreenState extends State<CapturaScreen>
     final pa = _os['puntos_apoyo'];
     if (pa != null) _puntosApoyo = (pa is int) ? pa : int.tryParse(pa.toString()) ?? 4;
 
-    // Secciones para camionera — también llamado num_secciones o secciones_camionera
-    final secRaw = _os['secciones_camionera'] ?? _os['num_secciones'];
-    if (secRaw != null && _nSecciones == 4) {
-      final secInt = (secRaw is int) ? secRaw : int.tryParse(secRaw.toString());
-      if (secInt != null && secInt > 0) _nSecciones = secInt;
-    }
+    // Secciones para camionera — guardadas en SQLite, disponibles vía _os map
+    // No hay una variable _nSecciones local; la consumen los widgets hijos.
 
     // JIA — pueden venir como bool o int (SQLite)
     _jChecked = _asBool(_os['jia_j']);
