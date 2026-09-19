@@ -3973,6 +3973,8 @@ class BatchGeneratorWidget(QWidget):
                 "filas_exactitud":       datos.get("filas_exactitud", 5),
                 "tipo_instrumento":      tipo_inst,
                 "puntos_apoyo":          puntos_apoyo,
+                # ── MODALIDAD: crítico para suprimir diagonales en físico ──────────
+                "modalidad":             datos.get("modalidad", "FISICO"),
                 # Campos de Calibracion (Inicial J/I/A + CCA) - TODAS las variantes de clave
                 "inicial_calibrador":       datos.get("inicial_calibrador", ""),
                 "tipo_calibracion_inicial": datos.get("tipo_calibracion_inicial", ""),

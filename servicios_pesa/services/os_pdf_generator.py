@@ -1203,12 +1203,19 @@ class OsPdfGenerator:
                     errors.append(abs(lf - li))
                 elif cargo is not None:
                     errors.append(abs(lf - cargo))
+        _is_fisico_rep = str((os_data or {}).get("modalidad") or "").upper() == "FISICO"
         if errors:
-            c.setFillColor(_RED)
-            c.drawRightString(x + w - 3, y - row_h + 6, self._fmt(max(errors), d_dec_rep))
+            if _is_fisico_rep:
+                pass  # físico: celda en blanco
+            else:
+                c.setFillColor(_RED)
+                c.drawRightString(x + w - 3, y - row_h + 6, self._fmt(max(errors), d_dec_rep))
         else:
-            c.setFillColor(_RED)
-            c.drawRightString(x + w - 3, y - row_h + 6, self._fmt(0, d_dec_rep))
+            if not _is_fisico_rep:
+                # Digital sin datos: mostrar 0 formateado
+                c.setFillColor(_RED)
+                c.drawRightString(x + w - 3, y - row_h + 6, self._fmt(0, d_dec_rep))
+            # Físico sin datos: celda en blanco para llenado manual
         y -= row_h
         return y
 
@@ -1631,15 +1638,19 @@ class OsPdfGenerator:
         c.setFont("Helvetica-Bold", max(5.5, data_font_size - 0.5))
         c.drawString(x + 3, y - footer_h + max(2, footer_h * 0.28),
                      "ERROR MAXIMO ENCONTRADO:")
-        d_dec_exc = self._get_decimals(os_data.get('div_minima'))
-        # Siempre mostrar un valor numérico formateado; NUNCA dejar en blanco
-        err_max_val = max(errors_all) if errors_all else 0.0
-        err_max_txt = self._fmt(err_max_val, d_dec_exc)
-        if not err_max_txt.strip():
-            err_max_txt = f"{0.0:.{d_dec_exc}f}"  # último recurso
-        c.setFillColor(_RED)
-        c.drawRightString(x + w - 3, y - footer_h + max(2, footer_h * 0.28),
-                          err_max_txt)
+        d_dec_exc = self._get_decimals((os_data or {}).get('div_minima'))
+        _is_fisico_exc = str((os_data or {}).get("modalidad") or "").upper() == "FISICO"
+        if errors_all and not _is_fisico_exc:
+            # Digital con datos: mostrar error máximo en rojo
+            err_max_txt = self._fmt(max(errors_all), d_dec_exc)
+            c.setFillColor(_RED)
+            c.drawRightString(x + w - 3, y - footer_h + max(2, footer_h * 0.28), err_max_txt)
+        elif not _is_fisico_exc:
+            # Digital sin datos: 0 formateado
+            c.setFillColor(_RED)
+            c.drawRightString(x + w - 3, y - footer_h + max(2, footer_h * 0.28),
+                              self._fmt(0.0, d_dec_exc))
+        # Físico: celda del error queda en blanco para llenado manual
         y -= footer_h
 
         return y

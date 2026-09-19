@@ -2929,7 +2929,9 @@ class DashboardWidget(QWidget):
                 opts_menu.addAction(act_to_dig)
             opts_menu.addSeparator()
             act_del = QAction("🗑️  Eliminar Orden", btn_opts)
-            act_del.triggered.connect(lambda _, fid=os_id: self._delete_single_os(fid))
+            act_del.triggered.connect(
+                lambda _, fid=os_id, fl=folio: self._delete_single_os(fid, folio_fallback=fl)
+            )
             opts_menu.addAction(act_del)
 
         btn_opts.setMenu(opts_menu)
@@ -3256,17 +3258,28 @@ class DashboardWidget(QWidget):
             if self._is_admin():
                 self._btn_eliminar_sel.setVisible(True)
 
-    def _delete_single_os(self, os_id) -> None:
-        """Elimina una OS individual con cascada en tablas hijas y commit explícito."""
+    def _delete_single_os(self, os_id, folio_fallback: str = None) -> None:
+        """Elimina una OS individual con cascada en tablas hijas y commit explícito.
+        Acepta os_id (int) o folio_fallback (str) como identificador.
+        """
         if not self._is_admin():
             return
-        if not os_id:
-            QMessageBox.warning(self, "Sin ID", "No se pudo obtener el ID de la orden.")
-            return
-        try:
-            os_id = int(os_id)
-        except (TypeError, ValueError):
-            QMessageBox.warning(self, "Error", f"ID de orden inválido: {os_id!r}")
+
+        # ── Resolver identificador ────────────────────────────────────────────
+        # os_id puede ser None cuando la fila viene de un lote físico sin id en el row.
+        # En ese caso usamos folio_fallback para buscar el id en la BD.
+        _resolved_id = None
+        _folio_known = folio_fallback or None
+
+        if os_id:
+            try:
+                _resolved_id = int(os_id)
+            except (TypeError, ValueError):
+                _resolved_id = None
+
+        if _resolved_id is None and not _folio_known:
+            QMessageBox.warning(self, "Sin ID",
+                "No se pudo identificar la orden (ni ID ni folio disponible).")
             return
 
         resp = QMessageBox.warning(
@@ -3293,35 +3306,57 @@ class DashboardWidget(QWidget):
             conn = _db_pool.getconn()
             conn.autocommit = False
             with conn.cursor() as cur:
-                cur.execute("SELECT folio_os FROM ordenes_servicio WHERE id = %s", (os_id,))
-                frow = cur.fetchone()
-                folio_os = frow[0] if frow else None
+                # Si no tenemos id, buscarlo por folio
+                if _resolved_id is None:
+                    cur.execute(
+                        "SELECT id, folio_os FROM ordenes_servicio WHERE folio_os = %s",
+                        (_folio_known,)
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        QMessageBox.warning(self, "No encontrada",
+                            f"No existe ninguna orden con folio '{_folio_known}'.")
+                        return
+                    _resolved_id = row[0]
+                    _folio_known = row[1]
+                else:
+                    cur.execute(
+                        "SELECT folio_os FROM ordenes_servicio WHERE id = %s",
+                        (_resolved_id,)
+                    )
+                    frow = cur.fetchone()
+                    _folio_known = frow[0] if frow else _folio_known
+
                 for tabla, col in _CHILD_TABLES:
                     sp = f"sp_{tabla[:20]}"
                     try:
                         cur.execute(f"SAVEPOINT {sp}")
-                        val = os_id if col == "id_os" else folio_os
+                        val = _resolved_id if col == "id_os" else _folio_known
                         if val:
                             cur.execute(f"DELETE FROM {tabla} WHERE {col} = %s", (val,))
                         cur.execute(f"RELEASE SAVEPOINT {sp}")
                     except Exception:
                         try: cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
                         except Exception: pass
-                cur.execute("DELETE FROM ordenes_servicio WHERE id = %s", (os_id,))
+
+                cur.execute("DELETE FROM ordenes_servicio WHERE id = %s", (_resolved_id,))
                 rows = cur.rowcount
             conn.commit()
-            logger.info("[DELETE] OS id=%s folio=%s eliminada (%d)", os_id, folio_os, rows)
+            logger.info("[DELETE] OS id=%s folio=%s eliminada (%d)",
+                        _resolved_id, _folio_known, rows)
             if rows == 0:
                 QMessageBox.warning(self, "Sin resultado",
-                    f"No se encontró id={os_id}. Es posible que ya estuviera eliminada.")
+                    f"No se encontró id={_resolved_id}. Es posible que ya estuviera eliminada.")
             else:
-                QMessageBox.information(self, "Listo", "Orden eliminada correctamente.")
+                QMessageBox.information(self, "Listo",
+                    f"Orden {_folio_known or _resolved_id} eliminada correctamente.")
             QTimer.singleShot(100, self.refresh)
         except Exception as e:
             if conn:
                 try: conn.rollback()
                 except Exception: pass
-            logger.error("Error eliminando OS id=%s: %s", os_id, e)
+            logger.error("Error eliminando OS id=%s folio=%s: %s",
+                         _resolved_id, _folio_known, e)
             QMessageBox.critical(self, "Error al eliminar",
                                  f"No se pudo eliminar la orden:\n\n{e}")
         finally:
