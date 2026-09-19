@@ -81,6 +81,7 @@ class OSCompleta(BaseModel):
     id_equipo:             Optional[str]   = None
     equipo_catalogo_id:    Optional[int]   = None
     tipo_instrumento:      Optional[str]   = None
+    id_tipo_instrumento:   Optional[int]   = None
     numero_cca:            Optional[str]   = None
     holograma_anterior:    Optional[str]   = None
     valor_repetibilidad:   Optional[float] = None
@@ -89,7 +90,17 @@ class OSCompleta(BaseModel):
     observaciones:         Optional[str]   = None
     aplica_excentricidad:  Optional[bool]  = True
     num_celdas_camionera:  Optional[int]   = 0
+    secciones_camionera:   Optional[int]   = 0
+    filas_excentricidad:   Optional[int]   = 4
+    num_secciones:         Optional[int]   = 0
+    instrumento_capacidad: Optional[str]   = None
+    instrumento_division:  Optional[str]   = None
+    datos_tecnicos_json:   Optional[str]   = '{}'
     pdf_url:               Optional[str]   = None
+    # Campos Offline-First v2
+    pdf_b64:               Optional[str]   = None   # PDF en Base64 subido por la tablet
+    firma_tecnico_descargada: Optional[str] = None  # Firma del técnico para uso offline
+    unidad_medida:         Optional[str]   = 'kg'   # kg / g / t / lb
     sync_version:          Optional[int]   = 1
     updated_at:            Optional[datetime] = None
 
@@ -120,10 +131,11 @@ class PushPayload(BaseModel):
     ns:                 Optional[str] = None
     ubicacion:          Optional[str] = None
     id_equipo:          Optional[str] = None
+    unidad_medida:      Optional[str] = None   # kg / g / t / lb
 
     # Vinculación a catálogo de sucursales (v13)
-    sucursal_id:        Optional[int] = None  # ID de la sucursal/planta del cliente
-    equipo_catalogo_id: Optional[int] = None  # ID equipo en cliente_equipos (si ya existía)
+    sucursal_id:        Optional[int] = None
+    equipo_catalogo_id: Optional[int] = None
 
     # Tablas de pruebas
     repetibilidad:  list[PushDetalle] = Field(default_factory=list)
@@ -132,6 +144,13 @@ class PushPayload(BaseModel):
 
     # Estado solicitado por la tablet
     nuevo_estado:   Optional[str] = None
+
+    # Offline-First v2: PDF + firmas digitales
+    pdf_b64:              Optional[str] = None  # PDF completo en Base64
+    firma_tecnico:        Optional[str] = None  # PNG firma técnico en Base64
+    firma_cliente:        Optional[str] = None  # PNG firma cliente en Base64
+    nombre_ing:           Optional[str] = None
+    puesto_ing:           Optional[str] = None
 
 
 class PushResponse(BaseModel):
@@ -215,16 +234,23 @@ async def sync_pull(
             COALESCE(os.ns,       '') AS ns,
             COALESCE(os.ns,       '') AS serie,
             COALESCE(os.ubicacion,'') AS ubicacion,
-            os.alcance_max, 
+            os.alcance_max,
             os.alcance_max AS capacidad_maxima,
-            os.div_minima, 
+            os.div_minima,
             os.div_minima AS division_minima,
             os.div_verificacion,
-            os.id_equipo::text,
+            COALESCE(os.id_equipo::text, '') AS id_equipo,
             os.numero_cca, os.holograma_anterior,
             os.valor_repetibilidad, os.valor_excentricidad,
-            COALESCE(os.aplica_excentricidad, true) AS aplica_excentricidad,
-            0                                       AS num_celdas_camionera,
+            COALESCE(os.aplica_excentricidad, true)  AS aplica_excentricidad,
+            COALESCE(os.secciones_camionera,   0)    AS num_celdas_camionera,
+            COALESCE(os.secciones_camionera,   0)    AS secciones_camionera,
+            COALESCE(os.filas_excentricidad,   4)    AS filas_excentricidad,
+            COALESCE(os.num_secciones,         0)    AS num_secciones,
+            COALESCE(os.instrumento_capacidad, '')   AS instrumento_capacidad,
+            COALESCE(os.instrumento_division,  '')   AS instrumento_division,
+            COALESCE(os.datos_tecnicos_json,   '{}') AS datos_tecnicos_json,
+            os.id_tipo_instrumento,
             COALESCE(os.sync_version, 1)            AS sync_version,
             COALESCE(os.updated_at, NOW())          AS updated_at,
             COALESCE(cl.razon_social,    '') AS cliente,
@@ -235,7 +261,11 @@ async def sync_pull(
             COALESCE(tc.nombre_completo, '') AS tecnico,
             COALESCE(tc.nombre_completo, '') AS tecnico_nombre,
             ce.codigo                        AS clase_exactitud_codigo,
-            ti.nombre                        AS tipo_instrumento,
+            COALESCE(ti.nombre,          '') AS tipo_instrumento,
+            -- Offline-First v2: PDF + firma del técnico para uso offline
+            os.pdf_b64                       AS pdf_b64,
+            tc.firma_digital                 AS firma_tecnico_descargada,
+            'kg'                             AS unidad_medida,
             CASE
                 WHEN UPPER(os.modalidad) = 'FISICO'
                 THEN '/api/v1/os/' || os.folio_os || '/pdf'
@@ -357,16 +387,20 @@ async def sync_push(
     nuevo_estado = row["estado"]
 
     if not estado_protegido and payload.nuevo_estado:
-        # Solo acepta transiciones válidas
+        # Acepta transiciones válidas + cierre digital desde tablet
         _TRANSICIONES_VALIDAS = {
-            "ASIGNADA":      ["EN_CAMPO"],
-            "EN_CAMPO":      ["SYNC_PENDIENTE", "FIRMADA"],
-            "SYNC_PENDIENTE":["EN_CAMPO", "FIRMADA"],
-            "FIRMADA":       [],            # Solo logistica puede avanzar a COMPLETADA
+            "ASIGNADA":          ["EN_CAMPO", "COMPLETADA_DIGITAL"],
+            "EN_CAMPO":          ["SYNC_PENDIENTE", "FIRMADA", "COMPLETADA_DIGITAL"],
+            "SYNC_PENDIENTE":    ["EN_CAMPO", "FIRMADA", "COMPLETADA_DIGITAL"],
+            "FIRMADA":           ["COMPLETADA_DIGITAL"],
+            "COMPLETADA_DIGITAL": [],  # estado final desde tablet
         }
         estados_siguientes = _TRANSICIONES_VALIDAS.get(row["estado"], [])
         if payload.nuevo_estado in estados_siguientes:
             nuevo_estado = payload.nuevo_estado
+        elif payload.nuevo_estado == "COMPLETADA_DIGITAL":
+            # Permitir cierre siempre que no esté ya cancelada/completada por admin
+            nuevo_estado = "COMPLETADA_DIGITAL"
 
     # Resolver clase de exactitud (si viene el código, buscar el ID)
     id_clase = row["id_clase_exactitud"]
@@ -379,8 +413,8 @@ async def sync_push(
             id_clase = clase_row["id"]
 
     # Actualizar OS en el servidor
-    # [FIX] Primer intento con sync_version, sync_at, device_id.
-    # Si la columna no existe todavía (BD antigua), reintenta sin ellas.
+    # [FIX] Primer intento con sync_version, sync_at, device_id, pdf_b64, unidad_medida.
+    # Si alguna columna no existe (BD sin migrar), reintenta sin ellas.
     try:
         await db.execute(
             """
@@ -395,11 +429,15 @@ async def sync_push(
                 ns                    = COALESCE($8, ns),
                 ubicacion             = COALESCE($9, ubicacion),
                 id_equipo             = COALESCE($10, id_equipo),
+                pdf_b64               = COALESCE($11, pdf_b64),
+                unidad_medida         = COALESCE($12, unidad_medida),
+                firma_tecnico_b64     = COALESCE($13, firma_tecnico_b64),
+                firma_cliente_b64     = COALESCE($14, firma_cliente_b64),
                 sync_version          = COALESCE(sync_version, 0) + 1,
                 sync_at               = NOW(),
-                device_id             = $11,
+                device_id             = $15,
                 updated_at            = NOW()
-            WHERE id = $12
+            WHERE id = $16
             """,
             nuevo_estado,
             payload.observaciones,
@@ -408,8 +446,12 @@ async def sync_push(
             id_clase,
             payload.marca, payload.modelo, payload.ns, payload.ubicacion,
             payload.id_equipo,
-            payload.device_id,
-            os_id,
+            payload.pdf_b64,        # $11
+            payload.unidad_medida,  # $12
+            payload.firma_tecnico,  # $13
+            payload.firma_cliente,  # $14
+            payload.device_id,      # $15
+            os_id,                  # $16
         )
     except Exception as e_full:
         logger.warning("UPDATE con sync_version falló (%s) — reintentando sin columnas opcionales", e_full)

@@ -22,7 +22,7 @@ class LocalDbService {
     final dbPath = p.join(await getDatabasesPath(), 'pesa_local.db');
     _db = await openDatabase(
       dbPath,
-      version: 4,   // v4: unidad_medida + firma_tecnico_descargada + pdf_b64 local
+      version: 5,   // v5: instrumento_capacidad, instrumento_division, secciones_camionera, id_equipo
       // ── onConfigure: único lugar donde SQLite acepta PRAGMAs globales ──────
       // journal_mode = WAL NO puede ejecutarse dentro de una transacción
       // (onCreate / onUpgrade están envueltos en una tx implícita por sqflite).
@@ -69,11 +69,16 @@ class LocalDbService {
             modelo                 TEXT,
             ns                     TEXT,
             ubicacion              TEXT,
+            id_equipo              TEXT,
             alcance_max            REAL,
             div_minima             REAL,
             div_verificacion       REAL,
             numero_cca             TEXT,
             holograma_anterior     TEXT,
+            instrumento_capacidad  TEXT,
+            instrumento_division   TEXT,
+            secciones_camionera    INTEGER DEFAULT 0,
+            num_secciones          INTEGER DEFAULT 0,
             sync_version           INTEGER DEFAULT 0,
             sync_status            TEXT DEFAULT 'SINCRONIZADO',
             updated_at             TEXT
@@ -122,6 +127,12 @@ class LocalDbService {
           'ALTER TABLE ordenes_servicio ADD COLUMN unidad_medida TEXT DEFAULT \'kg\'',
           'ALTER TABLE ordenes_servicio ADD COLUMN firma_tecnico_descargada TEXT',
           'ALTER TABLE ordenes_servicio ADD COLUMN pdf_b64_local TEXT',
+          // v5: campos de instrumento precargados por logística
+          'ALTER TABLE ordenes_servicio ADD COLUMN id_equipo TEXT',
+          'ALTER TABLE ordenes_servicio ADD COLUMN instrumento_capacidad TEXT',
+          'ALTER TABLE ordenes_servicio ADD COLUMN instrumento_division TEXT',
+          'ALTER TABLE ordenes_servicio ADD COLUMN secciones_camionera INTEGER DEFAULT 0',
+          'ALTER TABLE ordenes_servicio ADD COLUMN num_secciones INTEGER DEFAULT 0',
         ];
         for (final sql in colMigrations) {
           try { await db.execute(sql); } catch (_) {}
@@ -170,14 +181,20 @@ class LocalDbService {
       // ── Datos del instrumento (v3) ─────────────────────────────────────────
       'marca':             data['marca'],
       'modelo':            data['modelo'],
-      'ns':                data['ns'],
+      'ns':                data['ns'] ?? data['serie'],
       'ubicacion':         data['ubicacion'],
-      'alcance_max':       data['alcance_max'],
-      'div_minima':        data['div_minima'],
+      'id_equipo':         data['id_equipo'],
+      'alcance_max':       data['alcance_max'] ?? data['capacidad_maxima'],
+      'div_minima':        data['div_minima'] ?? data['division_minima'],
       'div_verificacion':  data['div_verificacion'],
       'numero_cca':        data['numero_cca'],
       'holograma_anterior': data['holograma_anterior'],
       'pdf_url':           data['pdf_url'],
+      // ── Campos precargados por logística (v5) ──────────────────────────────
+      'instrumento_capacidad': data['instrumento_capacidad'],
+      'instrumento_division':  data['instrumento_division'],
+      'secciones_camionera':   data['secciones_camionera'] ?? data['num_celdas_camionera'] ?? 0,
+      'num_secciones':         data['num_secciones'] ?? 0,
       // Offline-First v2
       'unidad_medida':     data['unidad_medida'] ?? 'kg',
       if (data['firma_tecnico_descargada'] != null)

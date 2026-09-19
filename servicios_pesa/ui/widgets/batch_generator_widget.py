@@ -3542,6 +3542,44 @@ class BatchGeneratorWidget(QWidget):
                         )
                         os_existente = cur.fetchone()
                         if not os_existente:
+                            # ── Extraer datos del primer equipo (instrumento principal) ──
+                            _equipos = datos.get("equipos") or []
+                            _eq1 = _equipos[0] if _equipos else {}
+                            _marca    = _eq1.get("marca", "").strip() or None
+                            _modelo   = _eq1.get("modelo", "").strip() or None
+                            _ns       = (_eq1.get("numero_serie") or _eq1.get("ns") or _eq1.get("serie", "")).strip() or None
+                            _id_eq    = (_eq1.get("id_indicador") or _eq1.get("id_equipo", "")).strip() or None
+                            _ubicacion = (_eq1.get("ubicacion_interna") or _eq1.get("ubicacion", "")).strip() or None
+                            _tipo_ins_nombre = _eq1.get("tipo_instrumento", "").strip() or None
+                            # capacidad y división: normalizar a numérico
+                            def _to_num(v):
+                                if v is None: return None
+                                try:
+                                    return float(str(v).replace(",", ".").replace(" ", "").split()[0])
+                                except Exception:
+                                    return None
+                            _cap_raw  = _eq1.get("capacidad_max") or _eq1.get("capacidad") or ""
+                            _div_raw  = _eq1.get("division_min")  or _eq1.get("division")  or ""
+                            _cap_num  = _to_num(_cap_raw)
+                            _div_num  = _to_num(_div_raw)
+                            _cap_str  = str(_cap_raw).strip() or None
+                            _div_str  = str(_div_raw).strip() or None
+                            # secciones: del eq o del campo general
+                            _secciones = datos.get("secciones_camionera") or None
+                            if not _secciones:
+                                _secciones_raw = _eq1.get("secciones") or _eq1.get("num_secciones")
+                                try: _secciones = int(_secciones_raw) if _secciones_raw else None
+                                except Exception: _secciones = None
+                            # aplica_excentricidad: inferir de tipo instrumento si no hay dato
+                            _aplica_exc = datos.get("aplica_excentricidad")
+                            if _aplica_exc is None:
+                                _tipo_low = (_tipo_ins_nombre or "").lower()
+                                _TIPOS_SIN_EXC = ["tolva", "tanque", "silo", "grúa", "grua", "colgante"]
+                                _aplica_exc = not any(k in _tipo_low for k in _TIPOS_SIN_EXC)
+                            # filas_excentricidad: del campo o por defecto 4 para camionera
+                            _filas_exc = datos.get("filas_excentricidad")
+                            if not _filas_exc and _secciones:
+                                _filas_exc = _secciones
                             cur.execute(
                                 """
                                 INSERT INTO ordenes_servicio (
@@ -3549,8 +3587,24 @@ class BatchGeneratorWidget(QWidget):
                                     id_tipo_servicio, tipo_servicio, id_cliente, id_tecnico,
                                     observaciones, estado, id_lote, rango_lote,
                                     id_tipo_instrumento, aplica_excentricidad, filas_excentricidad,
-                                    tipo_estructura, secciones_camionera, tipo_instalacion_camionera
-                                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    tipo_estructura, secciones_camionera, tipo_instalacion_camionera,
+                                    marca, modelo, ns, id_equipo, ubicacion,
+                                    alcance_max, div_minima,
+                                    instrumento_capacidad, instrumento_division,
+                                    num_secciones, sucursal_id,
+                                    sync_status, updated_at
+                                ) VALUES (
+                                    %s, %s, %s, %s, %s,
+                                    %s, %s, %s, %s,
+                                    %s, %s, %s, %s,
+                                    %s, %s, %s,
+                                    %s, %s, %s,
+                                    %s, %s, %s, %s, %s,
+                                    %s, %s,
+                                    %s, %s,
+                                    %s, %s,
+                                    %s, NOW()
+                                )
                                 """,
                                 (
                                     folio, consec, tipo,
@@ -3563,11 +3617,18 @@ class BatchGeneratorWidget(QWidget):
                                     datos.get("observaciones_tecnico"),
                                     estado, id_lote, _rango_lote,
                                     datos.get("id_tipo_instrumento"),
-                                    datos.get("aplica_excentricidad"),
-                                    datos.get("filas_excentricidad"),
+                                    _aplica_exc,
+                                    _filas_exc,
                                     datos.get("tipo_estructura"),
-                                    datos.get("secciones_camionera"),
+                                    _secciones,
                                     datos.get("tipo_instalacion_camionera"),
+                                    # ── datos del instrumento ──
+                                    _marca, _modelo, _ns, _id_eq, _ubicacion,
+                                    _cap_num, _div_num,
+                                    _cap_str, _div_str,
+                                    _secciones,
+                                    datos.get("sucursal_id"),
+                                    datos.get("sync_status", "PENDIENTE"),
                                 ),
                             )
                         # Se agrega siempre para que el PDF se genere correctamente
