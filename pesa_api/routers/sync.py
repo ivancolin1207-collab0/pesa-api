@@ -297,26 +297,46 @@ async def sync_pull(
                 current_user.get("username"), len(rows),
             )
         else:
-            # Técnico: solo sus órdenes digitales asignadas
-            if not id_tecnico:
-                raise HTTPException(
-                    status_code = status.HTTP_400_BAD_REQUEST,
-                    detail      = "El usuario no tiene técnico asignado",
+            # Técnico: todas las órdenes asignadas por ID o por nombre
+            # Trae todas las modalidades (FÍSICO, DIGITAL, HÍBRIDO) sin exclusión rígida
+            username_jwt = str(current_user.get("username") or "")
+            nombre_jwt   = str(current_user.get("nombre") or "") or username_jwt
+
+            # Si no hay nombre en JWT pero hay id_tecnico, obtenerlo de la BD
+            if not nombre_jwt.strip() and id_tecnico:
+                tec_row = await db.fetchrow(
+                    "SELECT nombre_completo, usuario FROM cat_tecnicos WHERE id = $1",
+                    id_tecnico,
                 )
-            rows = await db.fetch(
-                _SELECT + """
-                WHERE os.id_tecnico = $1
-                  AND UPPER(os.modalidad) = 'DIGITAL'
-                  AND os.estado NOT IN ('CANCELADA', 'COMPLETADA')
-                  AND os.updated_at > $2::timestamp
-                ORDER BY os.updated_at DESC
-                LIMIT $3
-                """,
-                id_tecnico, since, settings.SYNC_MAX_BATCH_SIZE,
-            )
+                if tec_row:
+                    nombre_jwt = str(tec_row["nombre_completo"] or tec_row["usuario"] or "")
+
+            nombre_param = f"%{nombre_jwt.strip().lower()}%" if nombre_jwt.strip() else "%"
+
+            where_clauses = [
+                """(
+                    os.id_tecnico = $1
+                    OR LOWER(COALESCE(tc.nombre_completo, '')) ILIKE $2
+                    OR LOWER(COALESCE(tc.usuario, ''))         ILIKE $2
+                )""",
+                "os.estado NOT IN ('CANCELADA')",
+            ]
+            params = [id_tecnico or -1, nombre_param]
+
+            if since and since.year > 2000:
+                params.append(since)
+                where_clauses.append(f"os.updated_at >= ${len(params)}::timestamp")
+
+            params.append(settings.SYNC_MAX_BATCH_SIZE)
+            query_sql = _SELECT + f"""
+                WHERE {" AND ".join(where_clauses)}
+                ORDER BY os.fecha DESC NULLS LAST, os.folio_os DESC
+                LIMIT ${len(params)}
+            """
+            rows = await db.fetch(query_sql, *params)
             logger.info(
-                "Sync PULL: tecnico_id=%d since=%s → %d OS",
-                id_tecnico, since.isoformat(), len(rows),
+                "Sync PULL [TECNICO id=%s user=%s]: %d OS encontradas",
+                id_tecnico, username_jwt, len(rows),
             )
 
         return [OSCompleta(**dict(r)) for r in rows]

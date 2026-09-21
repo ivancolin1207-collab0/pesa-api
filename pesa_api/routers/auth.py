@@ -1,4 +1,4 @@
-import hashlib
+﻿import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -138,7 +138,13 @@ async def login(
         )
 
     user_role = str(row["rol"] or "tecnico")
-    access = create_access_token({"sub": str(row["id"]), "role": user_role})
+    access = create_access_token({
+        "sub":        str(row["id"]),
+        "role":       user_role,
+        "id_tecnico": row["id"],
+        "username":   str(row["usuario"] or ""),
+        "nombre":     str(row["nombre_completo"] or ""),
+    })
     refresh = create_refresh_token(row["id"])
 
     return TokenResponse(
@@ -175,7 +181,13 @@ async def refresh_token_endpoint(
         )
 
     user_role = str(row["rol"] or "tecnico")
-    access = create_access_token({"sub": str(row["id"]), "role": user_role})
+    access = create_access_token({
+        "sub":        str(row["id"]),
+        "role":       user_role,
+        "id_tecnico": row["id"],
+        "username":   str(row["usuario"] or ""),
+        "nombre":     str(row["nombre_completo"] or ""),
+    })
     refresh = create_refresh_token(row["id"])
 
     return TokenResponse(

@@ -8,8 +8,12 @@ Permisos:
 """
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from pesa_api.core.database import get_db
@@ -161,3 +165,73 @@ async def update_estado(
         raise HTTPException(status_code=404, detail="OS no encontrada")
 
     return {"folio_os": folio_os, "nuevo_estado": body.nuevo_estado}
+
+
+@router.get(
+    "/{folio_os}/pdf",
+    summary = "Descargar PDF de una OS (si fue subido al servidor)",
+)
+async def download_pdf(
+    folio_os:     str,
+    db            = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Busca el PDF de la OS en el directorio UPLOAD_DIR configurado en el servidor.
+    Los PDFs físicos los genera la app Windows y deben subirse al servidor
+    mediante el endpoint POST /api/v1/ordenes/{id}/adjunto.
+
+    Respuestas:
+      200 application/pdf  → Archivo encontrado.
+      404                  → PDF no disponible en servidor (no subido aún).
+    """
+    # Buscar en BD el pdf_path o pdf_url registrado
+    row = await db.fetchrow(
+        "SELECT pdf_path, pdf_url FROM ordenes_servicio WHERE folio_os = $1",
+        folio_os,
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"OS '{folio_os}' no encontrada",
+        )
+
+    # Estrategia 1: pdf_path absoluto guardado en BD
+    bd_path = row.get("pdf_path")
+    if bd_path and Path(bd_path).exists():
+        return FileResponse(
+            path=bd_path,
+            media_type="application/pdf",
+            filename=f"{folio_os}.pdf",
+        )
+
+    # Estrategia 2: buscar en UPLOAD_DIR por nombre de folio
+    upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+    candidate  = Path(upload_dir) / f"{folio_os}.pdf"
+    if candidate.exists():
+        return FileResponse(
+            path=str(candidate),
+            media_type="application/pdf",
+            filename=f"{folio_os}.pdf",
+        )
+
+    # Estrategia 3: pdf_url es una ruta relativa local
+    pdf_url = row.get("pdf_url") or ""
+    if pdf_url.startswith("/uploads/"):
+        local_path = Path(upload_dir) / Path(pdf_url).name
+        if local_path.exists():
+            return FileResponse(
+                path=str(local_path),
+                media_type="application/pdf",
+                filename=f"{folio_os}.pdf",
+            )
+
+    # PDF no disponible en servidor
+    raise HTTPException(
+        status_code=404,
+        detail=(
+            f"PDF de '{folio_os}' no disponible en el servidor. "
+            "El PDF lo genera la app Windows. Para enviarlo a la tablet, "
+            "use el botón 'Adjuntar Escaneo' desde el dashboard."
+        ),
+    )

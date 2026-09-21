@@ -20,7 +20,10 @@ from fastapi.responses import JSONResponse
 
 from pesa_api.core.config  import settings
 from pesa_api.core.database import init_db_pool, close_db_pool
-from pesa_api.routers      import auth, os_router, sync, equipos, entrega_semanal, catalogos
+from pesa_api.routers      import (
+    auth, os_router, sync, equipos, entrega_semanal, catalogos,
+    usuarios_router, errores_router,
+)
 
 logger = logging.getLogger("pesa_api")
 
@@ -109,8 +112,11 @@ app.include_router(os_router.router,        prefix="/api/v1/os",        tags=["�
 app.include_router(sync.router,             prefix="/api/v1/sync",      tags=["Sincronización Offline"])
 app.include_router(equipos.router,          prefix="/api/v1/equipos",   tags=["Catálogo de Equipos"])
 app.include_router(entrega_semanal.router,  prefix="/api/v1/entregas",  tags=["Entregas Semanales"])
-# ── Catálogos y Ordenes desde Tablet ─────────────────────────────────────
-app.include_router(catalogos.router,        prefix="/api/v1",           tags=["Catálogos"])
+# ── Catálogos y Ordenes desde Tablet ────────────────────────────────────────────
+app.include_router(catalogos.router,        prefix="/api/v1",              tags=["Catálogos"])
+# ── Firma de perfil del técnico + errores de campo (v3.1) ────────────────
+app.include_router(usuarios_router.router,  prefix="/api/v1/usuarios",     tags=["Usuarios - Firma"])
+app.include_router(errores_router.router,   prefix="/api/v1/errores-tecnicos", tags=["Errores Técnicos"])
 
 # ─── Healthcheck ─────────────────────────────────────────────────────────────
 
