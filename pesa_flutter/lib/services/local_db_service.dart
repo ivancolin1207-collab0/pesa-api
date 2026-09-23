@@ -22,7 +22,7 @@ class LocalDbService {
     final dbPath = p.join(await getDatabasesPath(), 'pesa_local.db');
     _db = await openDatabase(
       dbPath,
-      version: 5,   // v5: instrumento_capacidad, instrumento_division, secciones_camionera, id_equipo
+      version: 6,   // v6: schema limpio — DROP+CREATE para forzar migracion en APK v4.0.0 -> v3.0.0
       // ── onConfigure: único lugar donde SQLite acepta PRAGMAs globales ──────
       // journal_mode = WAL NO puede ejecutarse dentro de una transacción
       // (onCreate / onUpgrade están envueltos en una tx implícita por sqflite).
@@ -101,8 +101,11 @@ class LocalDbService {
       },
       // [FIX] onUpgrade: agregar columnas faltantes a BDs existentes sin DROP
       onUpgrade: (db, oldVersion, newVersion) async {
-        // v2/v3 → columnas previas
+        // ── v6: Schema limpio — drop+recreate para solucionar migraciones corruptas
+        // Se ejecuta si el usuario viene de CUALQUIER version anterior a 6.
+        // Los datos locales se pierden pero se re-descargan del servidor al sincronizar.
         final colMigrations = [
+          // v2/v3 migraciones previas (toleradas con try/catch si ya existen)
           'ALTER TABLE ordenes_servicio ADD COLUMN nombre_ing TEXT',
           'ALTER TABLE ordenes_servicio ADD COLUMN puesto_ing TEXT',
           'ALTER TABLE ordenes_servicio ADD COLUMN pdf_path_local TEXT',
@@ -134,6 +137,59 @@ class LocalDbService {
           'ALTER TABLE ordenes_servicio ADD COLUMN secciones_camionera INTEGER DEFAULT 0',
           'ALTER TABLE ordenes_servicio ADD COLUMN num_secciones INTEGER DEFAULT 0',
         ];
+        // [v6] Si venimos de version < 6, hacer DROP+CREATE para limpiar schema corrupto
+        if (oldVersion < 6) {
+          await db.execute('DROP TABLE IF EXISTS ordenes_servicio');
+          await db.execute('''
+            CREATE TABLE ordenes_servicio (
+              local_id               INTEGER PRIMARY KEY AUTOINCREMENT,
+              folio_os               TEXT UNIQUE NOT NULL,
+              estado                 TEXT DEFAULT \'PROCESO\',
+              modalidad              TEXT DEFAULT \'DIGITAL\',
+              fecha                  TEXT,
+              cliente                TEXT,
+              sucursal               TEXT,
+              tecnico                TEXT,
+              tipo_servicio          TEXT,
+              tipo_instrumento       TEXT,
+              aplica_excentricidad   INTEGER DEFAULT 1,
+              num_celdas_camionera   INTEGER DEFAULT 0,
+              clase_exactitud        TEXT,
+              num_puntos_exactitud   INTEGER DEFAULT 10,
+              observaciones          TEXT,
+              rep_json               TEXT,
+              exc_json               TEXT,
+              exac_json              TEXT,
+              firma_tecnico          TEXT,
+              firma_cliente          TEXT,
+              nombre_ing             TEXT,
+              puesto_ing             TEXT,
+              pdf_path_local         TEXT,
+              pdf_url                TEXT,
+              marca                  TEXT,
+              modelo                 TEXT,
+              ns                     TEXT,
+              ubicacion              TEXT,
+              id_equipo              TEXT,
+              alcance_max            REAL,
+              div_minima             REAL,
+              div_verificacion       REAL,
+              numero_cca             TEXT,
+              holograma_anterior     TEXT,
+              instrumento_capacidad  TEXT,
+              instrumento_division   TEXT,
+              secciones_camionera    INTEGER DEFAULT 0,
+              num_secciones          INTEGER DEFAULT 0,
+              unidad_medida          TEXT DEFAULT \'kg\',
+              firma_tecnico_descargada TEXT,
+              pdf_b64_local          TEXT,
+              sync_version           INTEGER DEFAULT 0,
+              sync_status            TEXT DEFAULT \'SINCRONIZADO\',
+              updated_at             TEXT
+            )
+          ''');
+          return; // Schema ya es correcto, no aplicar ALTER TABLEs
+        }
         for (final sql in colMigrations) {
           try { await db.execute(sql); } catch (_) {}
         }
