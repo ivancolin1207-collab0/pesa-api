@@ -109,30 +109,60 @@ class AuthService extends ChangeNotifier {
   }
 
   /// Login offline: acepta SHA-256 O texto plano (igual que el backend Python).
-  /// Esto garantiza compatibilidad con hashes que puedan estar en distintos formatos.
+  /// [FIX v3.1.2] Fallback hardcoded: si SecureStorage falla (fresh install / Keystore reset),
+  /// compara contra la lista embebida _defaultOfflineUsers para no bloquear al tecnico.
   Future<String?> loginOffline(String username, String password) async {
     // Siempre refrescar el seed antes de intentar
     await _seedDefaultCredentials();
 
     final storedHash  = await _storage.read(key: 'offline_hash_$username');
     final storedPlain = await _storage.read(key: 'offline_plain_$username');
+    final inputHash   = sha256.convert(utf8.encode(password)).toString();
 
-    if (storedHash == null && storedPlain == null) {
+    // [FIX] Fallback hardcoded: si SecureStorage devuelve null (bug post-install en Android),
+    // verificar contra la lista _defaultOfflineUsers embebida en el APK.
+    final hardcoded = _defaultOfflineUsers.where(
+      (c) => c[0].toLowerCase() == username.toLowerCase(),
+    ).toList();
+    bool hardcodedOk = false;
+    String? hardcodedRole;
+    String? hardcodedNombre;
+    if (hardcoded.isNotEmpty) {
+      final cred = hardcoded.first;
+      hardcodedOk     = password == cred[1];  // plain match
+      hardcodedRole   = cred[2];
+      hardcodedNombre = cred[3];
+    }
+
+    if (storedHash == null && storedPlain == null && !hardcodedOk) {
       return 'Sin credenciales offline para "$username".\n'
-             'Conéctate al servidor al menos una vez para guardarlas.';
+             'Conecta la tablet a WiFi al menos una vez para guardarlas.';
     }
 
-    final inputHash = sha256.convert(utf8.encode(password)).toString();
-    final hashOk    = storedHash  != null && inputHash == storedHash;
-    final plainOk   = storedPlain != null && password  == storedPlain;
+    final hashOk  = storedHash  != null && inputHash == storedHash;
+    final plainOk = storedPlain != null && password  == storedPlain;
 
-    if (!hashOk && !plainOk) {
-      return 'Contraseña incorrecta (modo offline).';
+    if (!hashOk && !plainOk && !hardcodedOk) {
+      return 'Contrasena incorrecta (modo offline).';
     }
 
-    final role   = await _storage.read(key: 'offline_role_$username')   ?? 'tecnico';
+    final role   = await _storage.read(key: 'offline_role_$username')
+        ?? hardcodedRole ?? 'tecnico';
     final nombre = await _storage.read(key: 'offline_nombre_$username')
-        ?? await _storage.read(key: 'pesa_nombre_completo');
+        ?? await _storage.read(key: 'pesa_nombre_completo')
+        ?? hardcodedNombre;
+
+    // [FIX] Guardar en SecureStorage para que el proximo offline no necesite el hardcoded
+    if (hardcodedOk && (storedHash == null || storedPlain == null)) {
+      debugPrint('[AuthService] Sembrando credencial hardcoded via loginOffline para: $username');
+      try {
+        await _storage.write(key: 'offline_hash_$username',   value: inputHash);
+        await _storage.write(key: 'offline_plain_$username',  value: password);
+        await _storage.write(key: 'offline_role_$username',   value: role);
+        if (nombre != null) await _storage.write(key: 'offline_nombre_$username', value: nombre);
+      } catch (_) {}
+    }
+
     await setSession(username, role, nombreCompleto: nombre, offline: true);
     debugPrint('[AuthService] Login OFFLINE exitoso: $username | rol=$role');
     return null;
