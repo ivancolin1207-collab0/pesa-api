@@ -101,6 +101,8 @@ class OSCompleta(BaseModel):
     pdf_b64:               Optional[str]   = None   # PDF en Base64 subido por la tablet
     firma_tecnico_descargada: Optional[str] = None  # Firma del técnico para uso offline
     unidad_medida:         Optional[str]   = 'kg'   # kg / g / t / lb
+    id_lote:               Optional[str]   = None   # Identificador del lote
+    rango_lote:            Optional[str]   = None   # Rango legible del lote
     sync_version:          Optional[int]   = 1
     updated_at:            Optional[datetime] = None
 
@@ -211,9 +213,9 @@ async def sync_pull(
     id_tecnico = current_user.get("id_tecnico")
     role       = str(current_user.get("role", "")).lower().strip()
     # Admin y logística ven todo; técnicos en cualquier variante solo ven sus OS
-    _ADMIN_ROLES = {"admin", "administrador", "logistica"}
-    is_admin   = any(ar in role for ar in _ADMIN_ROLES) or (not id_tecnico and role not in {
-        "tecnico", "tecnico_campo", "tecnico_externo", "servicio", "operativo"
+    _ADMIN_ROLES = {"admin", "administrador", "logistica", "superadmin", "direccion", "gerencia"}
+    is_admin   = any(ar in role for ar in _ADMIN_ROLES) or (role not in {
+        "tecnico", "tecnico_campo", "tecnico_externo", "servicio", "operativo", "calibrador", "inspector"
     })
 
     # [FIX-TZ] asyncpg no puede comparar datetime aware con TIMESTAMP WITHOUT TIME ZONE
@@ -253,8 +255,10 @@ async def sync_pull(
             os.id_tipo_instrumento,
             COALESCE(os.sync_version, 1)            AS sync_version,
             COALESCE(os.updated_at, NOW())          AS updated_at,
-            COALESCE(cl.razon_social,    '') AS cliente,
-            COALESCE(cl.razon_social,    '') AS cliente_nombre,
+            COALESCE(os.id_lote, '')                AS id_lote,
+            COALESCE(os.rango_lote, '')             AS rango_lote,
+            COALESCE(cl.razon_social, os.cliente, '') AS cliente,
+            COALESCE(cl.razon_social, os.cliente, '') AS cliente_nombre,
             COALESCE(cl.direccion,       '') AS direccion_cliente,
             COALESCE(suc.nombre_sucursal, '') AS sucursal_nombre,
             -- [FIX] Preferir texto directo os.tipo_servicio si el JOIN no resuelve
@@ -283,19 +287,19 @@ async def sync_pull(
 
     try:
         if is_admin:
-            # Admin: TODAS las OS (Física + Digital) sin filtro de técnico ni fecha
+            # Admin: TODAS las OS activas (Física + Digital) sin filtro de técnico ni fecha
             # El admin siempre descarga el set completo para tener visión total
             rows = await db.fetch(
                 _SELECT + """
-                WHERE os.estado NOT IN ('CANCELADA')
-                ORDER BY os.updated_at DESC
+                WHERE (os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')
+                ORDER BY os.fecha DESC NULLS LAST, os.folio_os DESC
                 LIMIT $1
                 """,
                 settings.SYNC_MAX_BATCH_SIZE,
             )
             logger.info(
-                "Sync PULL [ADMIN %s]: %d OS totales (físicas + digitales)",
-                current_user.get("username"), len(rows),
+                "Sync PULL [ADMIN %s (rol=%s)]: %d OS totales (físicas + digitales)",
+                current_user.get("username"), role, len(rows),
             )
         else:
             # Técnico: todas las órdenes asignadas por ID o por nombre
@@ -341,7 +345,7 @@ async def sync_pull(
                     OR LOWER(COALESCE(tc.nombre_completo, '')) ILIKE $2
                     OR LOWER(COALESCE(tc.usuario, ''))         ILIKE $2
                 )""",
-                "os.estado NOT IN ('CANCELADA')",
+                "(os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')",
             ]
             params = [id_tecnico or -1, nombre_param]
 

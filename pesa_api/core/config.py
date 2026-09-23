@@ -116,7 +116,7 @@ class Settings:
     FILES_BASE_DIR: str = os.getenv("PESA_FILES_PATH", "/tmp/pesa_files")
 
     # ── Sincronización ────────────────────────────────────────────────────────
-    SYNC_MAX_BATCH_SIZE:  int = 200  # ampliado para admin (77+ órdenes)
+    SYNC_MAX_BATCH_SIZE:  int = 1000  # ampliado para asegurar todas las órdenes activas
     FIRMA_MAX_SIZE_BYTES: int = 500_000
 
     # ── Logging ───────────────────────────────────────────────────────────────
