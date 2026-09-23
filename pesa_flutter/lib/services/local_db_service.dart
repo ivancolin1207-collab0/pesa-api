@@ -2,6 +2,7 @@
 // Replica el esquema de PostgreSQL en el dispositivo Android.
 import 'dart:convert';
 import 'dart:math';
+import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 
