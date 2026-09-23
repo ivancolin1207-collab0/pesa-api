@@ -23,7 +23,7 @@ class LocalDbService {
     final dbPath = p.join(await getDatabasesPath(), 'pesa_local.db');
     _db = await openDatabase(
       dbPath,
-      version: 6,   // v6: schema limpio — DROP+CREATE para forzar migracion en APK v4.0.0 -> v3.0.0
+      version: 7,   // v7: forzar DROP+CREATE desde v6 (v3.0.0->v3.1.2 no ejecutaba onUpgrade)
       // ── onConfigure: único lugar donde SQLite acepta PRAGMAs globales ──────
       // journal_mode = WAL NO puede ejecutarse dentro de una transacción
       // (onCreate / onUpgrade están envueltos en una tx implícita por sqflite).
@@ -138,8 +138,8 @@ class LocalDbService {
           'ALTER TABLE ordenes_servicio ADD COLUMN secciones_camionera INTEGER DEFAULT 0',
           'ALTER TABLE ordenes_servicio ADD COLUMN num_secciones INTEGER DEFAULT 0',
         ];
-        // [v6] Si venimos de version < 6, hacer DROP+CREATE para limpiar schema corrupto
-        if (oldVersion < 6) {
+        // [v6 y v7] DROP+CREATE garantiza schema limpio desde cualquier version anterior
+        if (oldVersion < 7) {
           await db.execute('DROP TABLE IF EXISTS ordenes_servicio');
           await db.execute('''
             CREATE TABLE ordenes_servicio (
@@ -189,7 +189,13 @@ class LocalDbService {
               updated_at             TEXT
             )
           ''');
-          return; // Schema ya es correcto, no aplicar ALTER TABLEs
+          // Reiniciar lastSync para forzar pull completo
+          try {
+            await db.insert('meta',
+              {'key': 'last_sync_at', 'value': '2000-01-01T00:00:00.000Z'},
+              conflictAlgorithm: ConflictAlgorithm.replace);
+          } catch (_) {}
+          return; // Schema correcto — no aplicar ALTER TABLEs
         }
         for (final sql in colMigrations) {
           try { await db.execute(sql); } catch (_) {}
