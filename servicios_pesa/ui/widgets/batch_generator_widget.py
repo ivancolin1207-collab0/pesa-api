@@ -1,4 +1,4 @@
-"""
+﻿"""
 batch_generator_widget.py — Asistente de Generación de Formatos (4 pasos)
 Servicios PESA v2.1
 
@@ -1051,14 +1051,17 @@ class _CatalogLoader(QThread):
                 try:
                     from models.catalogo import tecnico_repo as _trepo
                     ops = _trepo.get_operativos()
-                    tecnicos = [(r["id"], r["nombre_completo"]) for r in ops]
+                    # [FIX] Garantizar que id sea siempre entero numerico
+                    tecnicos = [(int(r["id"]), str(r["nombre_completo"] or "")) for r in ops]
                 except Exception:
-                    with conn.cursor() as cur:
+                    from psycopg2.extras import RealDictCursor as _RDC
+                    with conn.cursor(cursor_factory=_RDC) as cur:
                         cur.execute(
                             "SELECT id, nombre_completo FROM cat_tecnicos "
                             "WHERE activo=TRUE ORDER BY nombre_completo"
                         )
-                        tecnicos = list(cur.fetchall())
+                        _rows = cur.fetchall()
+                    tecnicos = [(int(r["id"]), str(r["nombre_completo"] or "")) for r in _rows]
                 self.tecnicos_ready.emit(tecnicos)
 
                 # Tipos de Servicio
@@ -1102,7 +1105,7 @@ class BatchGeneratorWidget(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._modalidad:  str = ""   # "DIGITAL" | "FISICO"
+        self._modalidad:  str = ""   # "DIGITAL" | "FISICO" | "HIBRIDO"
         self._tipo_doc:   str = ""   # "OS" | "RMA" | "RE"
         self._clientes:   list[str] = []
         self._clientes_ids: list[int] = []
@@ -1228,20 +1231,30 @@ class BatchGeneratorWidget(QWidget):
             "Requiere escaneo posterior del original firmado.",
             accent=_RED,
         )
+        self._card_hibrido = SelectCard(
+            "🔀", "Híbrido — Digital + Físico",
+            "Genera PDF físico de respaldo Y habilita captura digital.\n"
+            "Ideal para pruebas o cuando la conectividad es inestable.",
+            accent=_AMBER,
+        )
 
-        # Grupo exclusivo
+        # Grupo exclusivo de 3 botones
         self._modal_group = QButtonGroup(self)
         self._modal_group.setExclusive(True)
-        self._modal_group.addButton(self._card_digital, 1)
-        self._modal_group.addButton(self._card_fisico,  2)
+        self._modal_group.addButton(self._card_digital,  1)
+        self._modal_group.addButton(self._card_fisico,   2)
+        self._modal_group.addButton(self._card_hibrido,  3)
 
         self._card_digital.toggled.connect(lambda chk: chk and self._on_modalidad("DIGITAL"))
         self._card_fisico.toggled.connect(lambda chk: chk and self._on_modalidad("FISICO"))
+        self._card_hibrido.toggled.connect(lambda chk: chk and self._on_modalidad("HIBRIDO"))
 
         cards_row.addWidget(self._card_digital)
         cards_row.addWidget(self._card_fisico)
+        cards_row.addWidget(self._card_hibrido)
         lay.addLayout(cards_row)
         return card
+
 
     # ── PASO 2 ────────────────────────────────────────────────────────────────
     def _build_step2_content(self) -> QWidget:
@@ -2473,15 +2486,17 @@ class BatchGeneratorWidget(QWidget):
         self._modalidad = modalidad
         self._tipo_doc  = ""
 
-        # Marcar visualmente la tarjeta de modalidad de forma forzada
-        self._card_digital.blockSignals(True)
-        self._card_fisico.blockSignals(True)
-        self._card_digital.setChecked(modalidad == "DIGITAL")
-        self._card_fisico.setChecked(modalidad == "FISICO")
-        self._card_digital._apply_style(modalidad == "DIGITAL")
-        self._card_fisico._apply_style(modalidad == "FISICO")
-        self._card_digital.blockSignals(False)
-        self._card_fisico.blockSignals(False)
+        # Marcar visualmente las 3 tarjetas de modalidad
+        for card, key in [
+            (self._card_digital,  "DIGITAL"),
+            (self._card_fisico,   "FISICO"),
+            (self._card_hibrido,  "HIBRIDO"),
+        ]:
+            card.blockSignals(True)
+            card.setChecked(modalidad == key)
+            if hasattr(card, '_apply_style'):
+                card._apply_style(modalidad == key)
+            card.blockSignals(False)
 
         # Restablecer selección de documento
         for btn in [self._card_os, self._card_rma, self._card_re, self._card_lp, self._card_lv]:
@@ -2500,6 +2515,20 @@ class BatchGeneratorWidget(QWidget):
                                             .replace("#E63946", _BLUE)
                                             .replace("#D90429", "#0062CC")
                                             .replace("#B70020", "#004A99"))
+        elif modalidad == "HIBRIDO":
+            self.btn_ejecutar.setText("🔀  Generar Híbrido (PDF + Tablet)")
+            self.btn_ejecutar.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {_AMBER};
+                    color: #FFFFFF; border: none;
+                    border-radius: 9px;
+                    font-size: 14px; font-weight: 700;
+                    padding: 0 24px;
+                }}
+                QPushButton:hover   {{ background-color: #E68900; }}
+                QPushButton:pressed {{ background-color: #CC7700; }}
+                QPushButton:disabled {{ background-color: #C7C7CC; color: #FFFFFF; }}
+            """)
         else:
             self.btn_ejecutar.setText("🖨️  Generar e Imprimir PDF")
             # Restaurar rojo
@@ -2746,6 +2775,17 @@ class BatchGeneratorWidget(QWidget):
         if hasattr(self, "_frame_calibracion") and not es_os:
             self._frame_calibracion.setVisible(False)
 
+        # CORRECCIÓN CRÍTICA: limpiar siempre el campo de folio al cambiar tipo de
+        # documento para que se recalcule con el prefijo correcto (RMA, RE, LP, LV, OS).
+        # Sin este clear, un folio 'OS-26-646' persiste aunque el usuario seleccione RMA.
+        if hasattr(self, 'input_folio_inicial'):
+            self.input_folio_inicial.blockSignals(True)
+            self.input_folio_inicial.clear()   # forzar recarga con prefijo correcto
+            # Actualizar placeholder dinamicamente con el prefijo del tipo seleccionado
+            anio2 = str(__import__('datetime').date.today().year)[2:]
+            self.input_folio_inicial.setPlaceholderText(f"Ej: {tipo}-{anio2}-001")
+            self.input_folio_inicial.blockSignals(False)
+
         self._mostrar_pasos_3_y_4()
 
     def _mostrar_pasos_3_y_4(self):
@@ -2753,11 +2793,16 @@ class BatchGeneratorWidget(QWidget):
         self._enable_card(self._card_step3)
         self._card_step4.setVisible(True)
         self._enable_card(self._card_step4)
-        
-        # Poblar el folio de forma obligatoria en el Paso 4
+
+        # CORRECCIÓN: siempre recalcular el folio (el campo fue limpiado en _on_tipo_doc).
+        # Si el campo ya tiene un valor escrito manualmente por el usuario se respeta.
         if hasattr(self, 'input_folio_inicial') and not self.input_folio_inicial.text().strip():
-            tipo_doc = getattr(self, '_tipo_doc', 'OS') or "OS"
-            nxt_folio = self._obtener_siguiente_folio(tipo_doc) if hasattr(self, '_obtener_siguiente_folio') else f"{tipo_doc}-26-549"
+            tipo_doc  = getattr(self, '_tipo_doc', 'OS') or "OS"
+            nxt_folio = (
+                self._obtener_siguiente_folio(tipo_doc)
+                if hasattr(self, '_obtener_siguiente_folio')
+                else f"{tipo_doc}-{str(__import__('datetime').date.today().year)[2:]}-1"
+            )
             self.input_folio_inicial.blockSignals(True)
             self.input_folio_inicial.setText(str(nxt_folio))
             self.input_folio_inicial.setEnabled(True)
@@ -4209,7 +4254,11 @@ class BatchGeneratorWidget(QWidget):
         Se activa el paso 1 si no está activo, y se selecciona la tarjeta del paso 2.
         """
         # Asegurar que el modal esté activado en Digital por defecto si no hay ninguno
-        if not self._card_digital.isChecked() and not self._card_fisico.isChecked():
+        if not any([
+            self._card_digital.isChecked(),
+            self._card_fisico.isChecked(),
+            self._card_hibrido.isChecked(),
+        ]):
             self._card_digital.setChecked(True)
             
         # Marcar y activar el formulario correspondiente (el toggled llama a _on_tipo_doc automáticamente)

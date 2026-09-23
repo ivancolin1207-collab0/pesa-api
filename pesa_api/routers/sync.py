@@ -461,19 +461,42 @@ async def sync_pull(
                     "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1",
                     id_tecnico or -1,
                 )
+                # [FIX-DIAGNÓSTICO] OS por id_tecnico sin el filtro de since
+                os_por_id_sin_since = await db.fetchval(
+                    "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'",
+                    id_tecnico or -1,
+                )
+                # [FIX-DIAGNÓSTICO] OS con id_tecnico NULL (huérfanas — creadas sin técnico)
+                os_null_tecnico = await db.fetchval(
+                    "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico IS NULL AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
+                )
+                # [FIX-DIAGNÓSTICO] since podría estar bloqueando — OS del técnico anteriores al since
+                os_bloqueadas_since = await db.fetchval(
+                    "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND updated_at < $2::timestamp",
+                    id_tecnico or -1, since,
+                ) if since and since.year > 2000 else 0
                 logger.warning(
                     "[SYNC PULL CERO RESULTADOS] DIAGNÓSTICO:\n"
                     "  Total OS no canceladas en BD: %s\n"
-                    "  OS con id_tecnico=%s: %s\n"
+                    "  OS con id_tecnico=%s (con filtro since): %s\n"
+                    "  OS con id_tecnico=%s (SIN filtro since): %s\n"
+                    "  OS BLOQUEADAS por filtro since (%s): %s\n"
+                    "  OS con id_tecnico NULL (huerfanas): %s\n"
                     "  OS con tecnico ILIKE '%s': %s\n"
                     "  Registro en cat_tecnicos: %s",
                     total_os, id_tecnico, os_por_id,
+                    id_tecnico, os_por_id_sin_since,
+                    since, os_bloqueadas_since,
+                    os_null_tecnico,
                     primera_palabra, os_por_nombre,
                     dict(tec_check) if tec_check else "NO ENCONTRADO",
                 )
                 print(
                     f"[SYNC PULL CERO] total_os={total_os} | "
-                    f"os_by_id={os_por_id} | os_by_nombre={os_por_nombre} | "
+                    f"os_by_id={os_por_id} | os_by_id_sin_since={os_por_id_sin_since} | "
+                    f"os_bloqueadas_since={os_bloqueadas_since} | "
+                    f"os_null_id_tecnico={os_null_tecnico} | "
+                    f"os_by_nombre={os_por_nombre} | "
                     f"cat_tecnico={dict(tec_check) if tec_check else 'NO_ENCONTRADO'}"
                 )
 

@@ -211,7 +211,7 @@ class _SidebarContent extends StatelessWidget {
               Text('Servicios PESA',
                   style: TextStyle(color: Color(0xFF111827),
                       fontWeight: FontWeight.w800, fontSize: 14)),
-              Text('v3.1.2',
+              Text('v3.1.3+15',
                   style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 10)),
             ]),
           ]),
