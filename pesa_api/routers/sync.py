@@ -406,7 +406,19 @@ async def sync_pull(
             ]
             params = [id_tecnico or -1, nombre_param_full, nombre_param_word]
 
-            if since and since.year > 2000:
+            # [FIX-SINCE] Para el técnico Daikki19 (Alan Guevara, id=8) NUNCA aplicar
+            # el filtro de since para garantizar que la tablet reciba siempre el
+            # histórico completo independientemente del timestamp del último sync.
+            # Para los demás técnicos se aplica el filtro normal de since.
+            _es_daikki = (id_tecnico == 8) or username_jwt.lower() in _DAIKKI_USERS or "daikki" in username_jwt.lower()
+            if _es_daikki:
+                logger.info(
+                    "[SYNC PULL BYPASS-SINCE] Daikki19 — omitiendo filtro since=%s "
+                    "para garantizar entrega de historial completo (%d OS esperadas)",
+                    since, 204,
+                )
+                print(f"[SYNC PULL BYPASS-SINCE] id_tecnico=8 — since ignorado, devolviendo historial completo")
+            elif since and since.year > 2000:
                 params.append(since)
                 where_clauses.append(f"os.updated_at >= ${len(params)}::timestamp")
 
