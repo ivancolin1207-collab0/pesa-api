@@ -373,11 +373,10 @@ async def sync_pull(
                 f"since={since}"
             )
 
-            # [FIX-AMPLIADO] WHERE incluye:
-            #   1. os.id_tecnico = $1 (FK directa)
-            #   2. EXISTS en cat_tecnicos por nombre_completo o usuario
-            #   3. LOWER(os.tecnico) ILIKE $2 (columna de texto libre en la OS)
-            #   4. LOWER(os.tecnico) ILIKE $3 (primera palabra del nombre — más flexible)
+            # [FIX-CORRECTO] WHERE filtra por:
+            #   1. os.id_tecnico = $1 (FK directa — ruta primaria)
+            #   2. EXISTS en cat_tecnicos por nombre_completo o usuario (nombre flexible)
+            # NOTA: os.tecnico NO existe como columna de texto; el nombre viene del JOIN con cat_tecnicos
             where_clauses = [
                 """(
                     os.id_tecnico = $1
@@ -385,10 +384,10 @@ async def sync_pull(
                         SELECT 1 FROM cat_tecnicos t2
                         WHERE t2.id = os.id_tecnico
                           AND (LOWER(t2.nombre_completo) ILIKE $2
-                               OR LOWER(t2.usuario) ILIKE $2)
+                               OR LOWER(t2.usuario) ILIKE $2
+                               OR LOWER(t2.nombre_completo) ILIKE $3
+                               OR LOWER(t2.usuario) ILIKE $3)
                     )
-                    OR LOWER(COALESCE(os.tecnico, '')) ILIKE $2
-                    OR LOWER(COALESCE(os.tecnico, '')) ILIKE $3
                 )""",
                 "(os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')",
             ]
@@ -435,9 +434,13 @@ async def sync_pull(
                     "SELECT id, nombre_completo, usuario, activo FROM cat_tecnicos WHERE id = $1 OR LOWER(usuario) = LOWER($2)",
                     id_tecnico or -1, username_jwt,
                 )
-                # Buscar OS por nombre directo
+                # Buscar OS con JOIN por nombre via cat_tecnicos (os.tecnico no existe como columna)
                 os_por_nombre = await db.fetchval(
-                    "SELECT COUNT(*) FROM ordenes_servicio WHERE LOWER(COALESCE(tecnico,'')) ILIKE $1",
+                    """
+                    SELECT COUNT(*) FROM ordenes_servicio os
+                    JOIN cat_tecnicos t ON t.id = os.id_tecnico
+                    WHERE LOWER(t.nombre_completo) ILIKE $1 OR LOWER(t.usuario) ILIKE $1
+                    """,
                     nombre_param_word,
                 )
                 # Buscar OS por id_tecnico directo
