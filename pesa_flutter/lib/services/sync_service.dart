@@ -257,14 +257,25 @@ class SyncService extends ChangeNotifier {
         debugPrint('[Sync PULL] AVISO: no se pudo limpiar tabla: $e');
       }
 
-      // Upsert individual — upsertOs ya tiene try/catch interno y devuelve bool
+      // Upsert individual — verifica que realmente se guarden
       int guardadas = 0;
+      String? lastErr;
       for (final osData in osList) {
         final folio = osData['folio_os'] ?? '?';
         debugPrint('[Sync PULL]   OS: $folio | '
             'estado: ${osData["estado"]} | tecnico: ${osData["tecnico"]}');
         final ok = await db.upsertOs(osData);
-        if (ok) guardadas++;
+        if (ok) {
+          guardadas++;
+        } else {
+          lastErr = db.lastUpsertError;
+        }
+      }
+
+      if (osList.isNotEmpty && guardadas == 0) {
+        throw Exception(
+          'El servidor entregó ${osList.length} órdenes, pero falló el almacenamiento local en SQLite: ${lastErr ?? "error desconocido"}'
+        );
       }
 
       await db.setLastSyncTime(DateTime.now().toUtc());

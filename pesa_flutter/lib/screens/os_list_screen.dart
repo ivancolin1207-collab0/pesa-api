@@ -259,12 +259,16 @@ class _OsListScreenState extends State<OsListScreen> {
 
     // ── Resultado: éxito ─────────────────────────────────────────────────
     final totalOS = _all.length;
+    final auth = context.read<AuthService>();
+    final isTecnico = auth.isTecnico;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           totalOS > 0
               ? '✅ Sincronizado — $totalOS órdenes en pantalla'
-              : '⚠ Sincronizado pero el servidor no reporta órdenes para este técnico.',
+              : isTecnico
+                  ? '⚠ Sincronizado pero el servidor no reporta órdenes para este técnico.'
+                  : '⚠ Sincronizado pero el servidor no reporta órdenes activas en el sistema.',
         ),
         backgroundColor:
             totalOS > 0 ? Colors.green.shade700 : Colors.orange.shade700,

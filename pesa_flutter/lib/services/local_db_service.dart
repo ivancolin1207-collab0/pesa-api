@@ -17,74 +17,77 @@ class LocalDbService {
 
   // ── Inicializacion ────────────────────────────────────────────────────────
 
+  String? lastUpsertError;
+
+  static const _createTableOrdenesSql = '''
+    CREATE TABLE IF NOT EXISTS ordenes_servicio (
+      local_id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      folio_os               TEXT UNIQUE NOT NULL,
+      estado                 TEXT DEFAULT 'PROCESO',
+      modalidad              TEXT DEFAULT 'DIGITAL',
+      fecha                  TEXT,
+      cliente                TEXT,
+      sucursal               TEXT,
+      tecnico                TEXT,
+      tipo_servicio          TEXT,
+      tipo_instrumento       TEXT,
+      aplica_excentricidad   INTEGER DEFAULT 1,
+      num_celdas_camionera   INTEGER DEFAULT 0,
+      clase_exactitud        TEXT,
+      num_puntos_exactitud   INTEGER DEFAULT 10,
+      observaciones          TEXT,
+      rep_json               TEXT,
+      exc_json               TEXT,
+      exac_json              TEXT,
+      firma_tecnico          TEXT,
+      firma_cliente          TEXT,
+      nombre_ing             TEXT,
+      puesto_ing             TEXT,
+      pdf_path_local         TEXT,
+      pdf_url                TEXT,
+      marca                  TEXT,
+      modelo                 TEXT,
+      ns                     TEXT,
+      ubicacion              TEXT,
+      id_equipo              TEXT,
+      alcance_max            REAL,
+      div_minima             REAL,
+      div_verificacion       REAL,
+      numero_cca             TEXT,
+      holograma_anterior     TEXT,
+      instrumento_capacidad  TEXT,
+      instrumento_division   TEXT,
+      secciones_camionera    INTEGER DEFAULT 0,
+      num_secciones          INTEGER DEFAULT 0,
+      unidad_medida          TEXT DEFAULT 'kg',
+      firma_tecnico_descargada TEXT,
+      pdf_b64_local          TEXT,
+      id_lote                TEXT,
+      rango_lote             TEXT,
+      sync_version           INTEGER DEFAULT 0,
+      sync_status            TEXT DEFAULT 'SINCRONIZADO',
+      updated_at             TEXT
+    )
+  ''';
+
+  // ── Inicializacion ────────────────────────────────────────────────────────
+
   Future<void> init() async {
-    // [FIX] getDatabasesPath() puede fallar en Android 11+ si los permisos
-    // aún no están resueltos. El try/catch en main.dart captura este error.
     final dbPath = p.join(await getDatabasesPath(), 'pesa_local.db');
     _db = await openDatabase(
       dbPath,
-      version: 7,   // v7: forzar DROP+CREATE desde v6 (v3.0.0->v3.1.2 no ejecutaba onUpgrade)
-      // ── onConfigure: único lugar donde SQLite acepta PRAGMAs globales ──────
-      // journal_mode = WAL NO puede ejecutarse dentro de una transacción
-      // (onCreate / onUpgrade están envueltos en una tx implícita por sqflite).
+      version: 8,   // v8: esquema unificado garantizado con id_lote, rango_lote y unidad_medida
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
-        // PRAGMA journal_mode = WAL eliminado: el driver nativo de Android
-        // no permite ejecutarlo via execute(); sqflite lo gestiona por defecto.
       },
       onCreate: (db, version) async {
-        // Solo DDL e INSERT de seed — NO PRAGMAs globales aquí
         await db.execute('''
           CREATE TABLE IF NOT EXISTS meta (
             key   TEXT PRIMARY KEY,
             value TEXT
           )
         ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS ordenes_servicio (
-            local_id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            folio_os               TEXT UNIQUE NOT NULL,
-            estado                 TEXT DEFAULT 'PROCESO',
-            modalidad              TEXT DEFAULT 'DIGITAL',
-            fecha                  TEXT,
-            cliente                TEXT,
-            sucursal               TEXT,
-            tecnico                TEXT,
-            tipo_servicio          TEXT,
-            tipo_instrumento       TEXT,
-            aplica_excentricidad   INTEGER DEFAULT 1,
-            num_celdas_camionera   INTEGER DEFAULT 0,
-            clase_exactitud        TEXT,
-            num_puntos_exactitud   INTEGER DEFAULT 10,
-            observaciones          TEXT,
-            rep_json               TEXT,
-            exc_json               TEXT,
-            exac_json              TEXT,
-            firma_tecnico          TEXT,
-            firma_cliente          TEXT,
-            nombre_ing             TEXT,
-            puesto_ing             TEXT,
-            pdf_path_local         TEXT,
-            pdf_url                TEXT,
-            marca                  TEXT,
-            modelo                 TEXT,
-            ns                     TEXT,
-            ubicacion              TEXT,
-            id_equipo              TEXT,
-            alcance_max            REAL,
-            div_minima             REAL,
-            div_verificacion       REAL,
-            numero_cca             TEXT,
-            holograma_anterior     TEXT,
-            instrumento_capacidad  TEXT,
-            instrumento_division   TEXT,
-            secciones_camionera    INTEGER DEFAULT 0,
-            num_secciones          INTEGER DEFAULT 0,
-            sync_version           INTEGER DEFAULT 0,
-            sync_status            TEXT DEFAULT 'SINCRONIZADO',
-            updated_at             TEXT
-          )
-        ''');
+        await db.execute(_createTableOrdenesSql);
         await db.execute('''
           CREATE TABLE IF NOT EXISTS firmas_pendientes (
             local_id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,109 +99,64 @@ class LocalDbService {
             sincronizado  INTEGER DEFAULT 0
           )
         ''');
-        // Generar device_id unico
         final devId = _generateUuid();
         await db.insert('meta', {'key': 'device_id', 'value': devId});
       },
-      // [FIX] onUpgrade: agregar columnas faltantes a BDs existentes sin DROP
       onUpgrade: (db, oldVersion, newVersion) async {
-        // ── v6: Schema limpio — drop+recreate para solucionar migraciones corruptas
-        // Se ejecuta si el usuario viene de CUALQUIER version anterior a 6.
-        // Los datos locales se pierden pero se re-descargan del servidor al sincronizar.
-        final colMigrations = [
-          // v2/v3 migraciones previas (toleradas con try/catch si ya existen)
-          'ALTER TABLE ordenes_servicio ADD COLUMN nombre_ing TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN puesto_ing TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN pdf_path_local TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN pdf_url TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN marca TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN modelo TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN ns TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN ubicacion TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN alcance_max REAL',
-          'ALTER TABLE ordenes_servicio ADD COLUMN div_minima REAL',
-          'ALTER TABLE ordenes_servicio ADD COLUMN div_verificacion REAL',
-          'ALTER TABLE ordenes_servicio ADD COLUMN numero_cca TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN holograma_anterior TEXT',
-          'ALTER TABLE firmas_pendientes ADD COLUMN nombre_ing TEXT',
-          'ALTER TABLE firmas_pendientes ADD COLUMN puesto_ing TEXT',
-          // v3
-          'ALTER TABLE ordenes_servicio ADD COLUMN modalidad TEXT DEFAULT \'DIGITAL\'',
-          'ALTER TABLE ordenes_servicio ADD COLUMN clase_exactitud TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN tipo_instrumento TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN updated_at TEXT',
-          // v4: Offline-First v2 — unidad, firma descargada, pdf local b64
-          'ALTER TABLE ordenes_servicio ADD COLUMN unidad_medida TEXT DEFAULT \'kg\'',
-          'ALTER TABLE ordenes_servicio ADD COLUMN firma_tecnico_descargada TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN pdf_b64_local TEXT',
-          // v5: campos de instrumento precargados por logística
-          'ALTER TABLE ordenes_servicio ADD COLUMN id_equipo TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN instrumento_capacidad TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN instrumento_division TEXT',
-          'ALTER TABLE ordenes_servicio ADD COLUMN secciones_camionera INTEGER DEFAULT 0',
-          'ALTER TABLE ordenes_servicio ADD COLUMN num_secciones INTEGER DEFAULT 0',
-        ];
-        // [v6 y v7] DROP+CREATE garantiza schema limpio desde cualquier version anterior
-        if (oldVersion < 7) {
+        // v8: DROP+CREATE garantiza esquema 100% limpio desde cualquier versión anterior
+        if (oldVersion < 8) {
           await db.execute('DROP TABLE IF EXISTS ordenes_servicio');
-          await db.execute('''
-            CREATE TABLE ordenes_servicio (
-              local_id               INTEGER PRIMARY KEY AUTOINCREMENT,
-              folio_os               TEXT UNIQUE NOT NULL,
-              estado                 TEXT DEFAULT \'PROCESO\',
-              modalidad              TEXT DEFAULT \'DIGITAL\',
-              fecha                  TEXT,
-              cliente                TEXT,
-              sucursal               TEXT,
-              tecnico                TEXT,
-              tipo_servicio          TEXT,
-              tipo_instrumento       TEXT,
-              aplica_excentricidad   INTEGER DEFAULT 1,
-              num_celdas_camionera   INTEGER DEFAULT 0,
-              clase_exactitud        TEXT,
-              num_puntos_exactitud   INTEGER DEFAULT 10,
-              observaciones          TEXT,
-              rep_json               TEXT,
-              exc_json               TEXT,
-              exac_json              TEXT,
-              firma_tecnico          TEXT,
-              firma_cliente          TEXT,
-              nombre_ing             TEXT,
-              puesto_ing             TEXT,
-              pdf_path_local         TEXT,
-              pdf_url                TEXT,
-              marca                  TEXT,
-              modelo                 TEXT,
-              ns                     TEXT,
-              ubicacion              TEXT,
-              id_equipo              TEXT,
-              alcance_max            REAL,
-              div_minima             REAL,
-              div_verificacion       REAL,
-              numero_cca             TEXT,
-              holograma_anterior     TEXT,
-              instrumento_capacidad  TEXT,
-              instrumento_division   TEXT,
-              secciones_camionera    INTEGER DEFAULT 0,
-              num_secciones          INTEGER DEFAULT 0,
-              unidad_medida          TEXT DEFAULT \'kg\',
-              firma_tecnico_descargada TEXT,
-              pdf_b64_local          TEXT,
-              sync_version           INTEGER DEFAULT 0,
-              sync_status            TEXT DEFAULT \'SINCRONIZADO\',
-              updated_at             TEXT
-            )
-          ''');
-          // Reiniciar lastSync para forzar pull completo
+          await db.execute(_createTableOrdenesSql);
           try {
             await db.insert('meta',
               {'key': 'last_sync_at', 'value': '2000-01-01T00:00:00.000Z'},
               conflictAlgorithm: ConflictAlgorithm.replace);
           } catch (_) {}
-          return; // Schema correcto — no aplicar ALTER TABLEs
+          return;
         }
-        for (final sql in colMigrations) {
-          try { await db.execute(sql); } catch (_) {}
+      },
+      onOpen: (db) async {
+        // [FIX-DEFENSIVO] Verificar columnas requeridas y agregarlas si faltan
+        try {
+          final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+          final existingCols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+          final requiredCols = {
+            'nombre_ing': 'TEXT',
+            'puesto_ing': 'TEXT',
+            'pdf_path_local': 'TEXT',
+            'pdf_url': 'TEXT',
+            'marca': 'TEXT',
+            'modelo': 'TEXT',
+            'ns': 'TEXT',
+            'ubicacion': 'TEXT',
+            'id_equipo': 'TEXT',
+            'alcance_max': 'REAL',
+            'div_minima': 'REAL',
+            'div_verificacion': 'REAL',
+            'numero_cca': 'TEXT',
+            'holograma_anterior': 'TEXT',
+            'instrumento_capacidad': 'TEXT',
+            'instrumento_division': 'TEXT',
+            'secciones_camionera': 'INTEGER DEFAULT 0',
+            'num_secciones': 'INTEGER DEFAULT 0',
+            'unidad_medida': "TEXT DEFAULT 'kg'",
+            'firma_tecnico_descargada': 'TEXT',
+            'pdf_b64_local': 'TEXT',
+            'id_lote': 'TEXT',
+            'rango_lote': 'TEXT',
+          };
+          for (final entry in requiredCols.entries) {
+            if (!existingCols.contains(entry.key.toLowerCase())) {
+              try {
+                await db.execute('ALTER TABLE ordenes_servicio ADD COLUMN ${entry.key} ${entry.value}');
+                debugPrint('[LocalDB] Columna agregada defensivamente: ${entry.key}');
+              } catch (e) {
+                debugPrint('[LocalDB] Error agregando columna ${entry.key}: $e');
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('[LocalDB] onOpen check error: $e');
         }
       },
     );
@@ -210,7 +168,6 @@ class LocalDbService {
   /// Seguro ante llamadas concurrentes (espera a que termine la primera).
   Future<Database> _ensureInit() async {
     if (_db != null) return _db!;
-    // Si ya hay un init en curso, esperar hasta que termine
     while (_initializing) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
@@ -227,17 +184,16 @@ class LocalDbService {
   // ── CRUD OS ───────────────────────────────────────────────────────────────
 
   Future<bool> upsertOs(Map<String, dynamic> data) async {
-    // [FIX v3.1.2] Tolerancia a variaciones de nombre de campo que devuelve el API
-    final folio     = (data['folio_os'] as String? ?? '').trim();
+    final folio = (data['folio_os'] as String? ?? '').trim();
     if (folio.isEmpty) {
       debugPrint('[LocalDB] upsertOs: folio_os vacío, saltando registro');
       return false;
     }
 
-    final sucursal  = data['sucursal_nombre'] ?? data['sucursal'] ?? '';
-    final cliente   = data['cliente'] ?? data['cliente_nombre'] ?? '';
-    final tecnico   = data['tecnico'] ?? data['tecnico_nombre'] ?? '';
-    final tipoSvc   = data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '';
+    final sucursal = data['sucursal_nombre'] ?? data['sucursal'] ?? '';
+    final cliente  = data['cliente'] ?? data['cliente_nombre'] ?? '';
+    final tecnico  = data['tecnico'] ?? data['tecnico_nombre'] ?? '';
+    final tipoSvc  = data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '';
 
     final row = {
       'folio_os':          folio,
@@ -253,7 +209,7 @@ class LocalDbService {
       'num_celdas_camionera': data['num_celdas_camionera'] ?? 0,
       'clase_exactitud':   data['clase_exactitud_codigo'],
       'observaciones':     data['observaciones'],
-      // ── Datos del instrumento (v3) ─────────────────────────────────────────
+      // ── Datos del instrumento ──────────────────────────────────────────────
       'marca':             data['marca'],
       'modelo':            data['modelo'],
       'ns':                data['ns'] ?? data['serie'],
@@ -265,13 +221,15 @@ class LocalDbService {
       'numero_cca':        data['numero_cca'],
       'holograma_anterior': data['holograma_anterior'],
       'pdf_url':           data['pdf_url'],
-      // ── Campos precargados por logística (v5) ──────────────────────────────
+      // ── Campos precargados por logística ───────────────────────────────────
       'instrumento_capacidad': data['instrumento_capacidad'],
       'instrumento_division':  data['instrumento_division'],
       'secciones_camionera':   data['secciones_camionera'] ?? data['num_celdas_camionera'] ?? 0,
       'num_secciones':         data['num_secciones'] ?? 0,
-      // Offline-First v2
+      // Offline-First v2 + Lotes
       'unidad_medida':     data['unidad_medida'] ?? 'kg',
+      'id_lote':           data['id_lote'] ?? data['lote'] ?? '',
+      'rango_lote':        data['rango_lote'] ?? '',
       if (data['firma_tecnico_descargada'] != null)
         'firma_tecnico_descargada': data['firma_tecnico_descargada'],
       // Sync
@@ -289,6 +247,7 @@ class LocalDbService {
       );
       return true;
     } catch (e) {
+      lastUpsertError = e.toString();
       debugPrint('[LocalDB] ERROR upsertOs folio=$folio: $e');
       return false;
     }
