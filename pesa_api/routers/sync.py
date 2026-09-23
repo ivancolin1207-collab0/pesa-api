@@ -257,7 +257,8 @@ async def sync_pull(
             COALESCE(cl.razon_social,    '') AS cliente_nombre,
             COALESCE(cl.direccion,       '') AS direccion_cliente,
             COALESCE(suc.nombre_sucursal, '') AS sucursal_nombre,
-            COALESCE(ts.nombre,          '') AS tipo_servicio,
+            -- [FIX] Preferir texto directo os.tipo_servicio si el JOIN no resuelve
+            COALESCE(ts.nombre, os.tipo_servicio, '') AS tipo_servicio,
             COALESCE(tc.nombre_completo, '') AS tecnico,
             COALESCE(tc.nombre_completo, '') AS tecnico_nombre,
             ce.codigo                        AS clase_exactitud_codigo,

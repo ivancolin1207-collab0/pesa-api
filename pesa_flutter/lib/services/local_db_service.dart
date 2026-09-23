@@ -164,15 +164,21 @@ class LocalDbService {
   // ── CRUD OS ───────────────────────────────────────────────────────────────
 
   Future<void> upsertOs(Map<String, dynamic> data) async {
+    // [FIX] Tolerancia a variaciones de nombre de campo que devuelve el API
+    final sucursal  = data['sucursal_nombre'] ?? data['sucursal'] ?? '';
+    final cliente   = data['cliente'] ?? data['cliente_nombre'] ?? '';
+    final tecnico   = data['tecnico'] ?? data['tecnico_nombre'] ?? '';
+    final tipoSvc   = data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '';
+
     final row = {
-      'folio_os':          data['folio_os'],
+      'folio_os':          data['folio_os'] ?? '',
       'estado':            data['estado'] ?? 'PROCESO',
       'modalidad':         data['modalidad'] ?? 'DIGITAL',
       'fecha':             data['fecha'],
-      'cliente':           data['cliente'],
-      'sucursal':          data['sucursal_nombre'],
-      'tecnico':           data['tecnico'],
-      'tipo_servicio':     data['tipo_servicio'],
+      'cliente':           cliente,
+      'sucursal':          sucursal,
+      'tecnico':           tecnico,
+      'tipo_servicio':     tipoSvc,
       'tipo_instrumento':  data['tipo_instrumento'],
       'aplica_excentricidad': data['aplica_excentricidad'] == true ? 1 : 0,
       'num_celdas_camionera': data['num_celdas_camionera'] ?? 0,
@@ -215,28 +221,40 @@ class LocalDbService {
 
   Future<List<Map<String, dynamic>>> getAllOs() async {
     final db = await _ensureInit();
-    return await db.query(
-      'ordenes_servicio',
-      orderBy: 'fecha DESC',
+    // Ordenar por último número del folio (ej. OS-26-645 > OS-26-551)
+    // usando CAST en SQLite para extraer el consecutivo
+    return await db.rawQuery(
+      "SELECT * FROM ordenes_servicio "
+      "ORDER BY CAST(SUBSTR(folio_os, INSTR(folio_os, '-', INSTR(folio_os, '-') + 1) + 1) AS INTEGER) DESC, "
+      "fecha DESC",
     );
   }
 
   /// Devuelve solo las órdenes asignadas al técnico por nombre completo.
-  /// Usado para RBAC estricto en la vista del técnico de campo.
+  /// Si el nombre está vacío, devuelve TODAS (caso admin).
+  /// [FIX] Ya no hace fallback a TODAS cuando matched=[] — antes ocultaba el bug.
   Future<List<Map<String, dynamic>>> getOsForTecnico(String nombreTecnico) async {
     final db = await _ensureInit();
-    // rawQuery soporta LIKE case-insensitive en SQLite (collation NOCASE por defecto para ASCII)
-    // Para nombres con caracteres latinos se hace matching en Dart después
-    final rows = await db.query(
-      'ordenes_servicio',
-      orderBy: 'fecha DESC',
+    final rows = await db.rawQuery(
+      "SELECT * FROM ordenes_servicio "
+      "ORDER BY CAST(SUBSTR(folio_os, INSTR(folio_os, '-', INSTR(folio_os, '-') + 1) + 1) AS INTEGER) DESC, "
+      "fecha DESC",
     );
-    // Filtrar en Dart: nombre contiene alguna parte del nombre del técnico
-    final nombreLow = nombreTecnico.toLowerCase();
-    return rows.where((r) {
-      final tec = (r['tecnico'] as String? ?? '').toLowerCase();
-      return tec.contains(nombreLow) || nombreLow.contains(tec);
+    final nombreLow = nombreTecnico.toLowerCase().trim();
+    if (nombreLow.isEmpty) return rows;  // Sin nombre = admin, devuelve todo
+    final words = nombreLow.split(RegExp(r'\s+')).where((w) => w.length >= 3).toList();
+    final matched = rows.where((r) {
+      final tec = (r['tecnico'] as String? ?? '').toLowerCase().trim();
+      if (tec.isEmpty) return false;
+      if (tec.contains(nombreLow) || nombreLow.contains(tec)) return true;
+      for (final w in words) {
+        if (tec.contains(w)) return true;
+      }
+      return false;
     }).toList();
+    // [FIX] Si matched está vacío, devolver lista vacía (no todas las órdenes).
+    // La vista del dashboard mostrará 0 y el usuario puede sincronizar de nuevo.
+    return matched;
   }
 
   Future<Map<String, dynamic>?> getOs(int localId) async {
