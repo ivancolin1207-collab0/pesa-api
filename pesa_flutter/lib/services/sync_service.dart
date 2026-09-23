@@ -62,47 +62,71 @@ class SyncService extends ChangeNotifier {
   Future<void> performSync() async {
     if (_state == SyncState.syncing) return;
 
-    // [FIX-TOKEN] Si no hay JWT, intentar renovar antes de abortar.
-    // Esto permite sincronizar después de un login offline.
+    // ── [FIX-CUELGUE] Estrategia simplificada de autenticación ────────────────
+    // ANTES: silentRefresh() con timeout 90s → cuelgue en "Obteniendo sesion..."
+    // AHORA:
+    //   1. Si ya hay token en memoria → ir directo al pull (no llamar servidor)
+    //   2. Si NO hay token en memoria → leer de SecureStorage (sin HTTP, instantáneo)
+    //   3. Si tampoco está en storage → login rápido con timeout ESTRICTO de 10s
+    //   4. Proceder al pull sea cual sea el resultado; el servidor dirá 401 si es inválido
+    // ─────────────────────────────────────────────────────────────────────────────
     if (!ApiService.instance.isAuthenticated) {
-      debugPrint('[SYNC] Sin token — intentando silentRefresh...');
       _setState(SyncState.syncing, 'Obteniendo sesion...');
-      final refreshed = await ApiService.instance.silentRefresh();
-      if (!refreshed) {
-        // [FIX-AUTOLOGIN] Antes de fallar, intentar auto-login offline con
-        // credenciales guardadas (pesa_cred_pass en SecureStorage).
-        // Esto evita el modal de "sesión expirada" cuando el técnico tiene WiFi
-        // pero el token expiró o fue renovado con nueva clave JWT en el servidor.
-        debugPrint('[SYNC] silentRefresh fallo — intentando auto-login offline...');
-        bool autoLoginOk = false;
+
+      // Paso 1: intentar cargar token de SecureStorage (sin llamada HTTP)
+      bool tokenLoaded = false;
+      try {
+        const st = FlutterSecureStorage(
+          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        );
+        final savedToken = await st.read(key: 'jwt_token')
+            .timeout(const Duration(seconds: 5), onTimeout: () => null);
+        if (savedToken != null && savedToken.isNotEmpty) {
+          // Inyectar el token directamente — sin validar contra servidor
+          ApiService.instance.injectToken(savedToken);
+          tokenLoaded = true;
+          debugPrint('[SYNC] Token recuperado de SecureStorage sin HTTP');
+        }
+      } catch (e) {
+        debugPrint('[SYNC] Error leyendo token de storage: $e');
+      }
+
+      // Paso 2: si no hay token guardado → login rápido con timeout 10s
+      if (!tokenLoaded) {
+        debugPrint('[SYNC] Sin token en storage — intentando login rapido (10s)...');
+        bool loginOk = false;
         try {
           const st = FlutterSecureStorage(
             aOptions: AndroidOptions(encryptedSharedPreferences: true),
           );
-          final savedUser = await st.read(key: 'pesa_username');
-          final savedPass = await st.read(key: 'pesa_cred_pass');
+          final savedUser = await st.read(key: 'pesa_username')
+              .timeout(const Duration(seconds: 3), onTimeout: () => null);
+          final savedPass = await st.read(key: 'pesa_cred_pass')
+              .timeout(const Duration(seconds: 3), onTimeout: () => null);
           if (savedUser != null && savedPass != null && savedUser.isNotEmpty) {
-            final loginErr = await ApiService.instance.login(savedUser, savedPass);
+            final loginErr = await ApiService.instance
+                .login(savedUser, savedPass)
+                .timeout(
+                  const Duration(seconds: 10),
+                  onTimeout: () => 'Timeout de login (10s) — servidor lento',
+                );
             if (loginErr == null) {
-              autoLoginOk = true;
-              debugPrint('[SYNC] Auto-login online OK para: $savedUser');
+              loginOk = true;
+              debugPrint('[SYNC] Login rapido OK para: $savedUser');
             } else {
-              debugPrint('[SYNC] Auto-login online fallo ($loginErr) — probando offline...');
+              debugPrint('[SYNC] Login rapido fallo: $loginErr');
             }
           }
         } catch (e) {
-          debugPrint('[SYNC] Error en auto-login: $e');
+          debugPrint('[SYNC] Error en login rapido: $e');
         }
-        if (!autoLoginOk) {
-          // Ninguna estrategia funcionó: mostrar error NO bloqueante (sin redirigir)
-          debugPrint('[SYNC ERROR] Sin autenticacion valida tras todos los intentos.');
+        if (!loginOk && !ApiService.instance.isAuthenticated) {
+          // Sin credenciales ni token — no se puede sincronizar
           _setState(SyncState.error,
               'Sin sesion activa. Abre la app y reingresa tu usuario y contrasena.');
-          // NO emitir sessionExpiredEvents para no bloquear con modal
           return;
         }
       }
-      debugPrint('[SYNC] Autenticacion OK — continuando sync...');
     }
 
     debugPrint('[Sync] Iniciando sync -> ${ApiService.instance.baseUrl}');
@@ -124,14 +148,11 @@ class SyncService extends ChangeNotifier {
 
       _lastSync = DateTime.now();
       await _refreshPending();
-      // [FIX] Siempre emitir success para que _onSyncChanged dispare _loadLocal().
-      // Si pull=0, el dashboard mostrara los registros locales existentes.
-      // Si no hay nada local tampoco, mostrara la pantalla de "sin ordenes".
       _setState(
         SyncState.success,
         pullCount > 0
             ? 'Sincronizado: $pushCount subida(s), $pullCount descargada(s)'
-            : pullCount == 0 && pushCount == 0
+            : pushCount == 0 && pullCount == 0
                 ? 'Sincronizado. Sin cambios nuevos.'
                 : 'Sincronizado: $pushCount subida(s)',
       );
@@ -145,62 +166,31 @@ class SyncService extends ChangeNotifier {
       final msg = e.message;
       debugPrint('[Sync] HttpException: $msg');
       if (msg.contains('401')) {
-        // [FIX-NO-LOGOUT] NO hacer logout inmediato por un 401 en background.
-        // El 401 en sync puede ser transitorio (cold-start de Render, clock skew).
-        // Intentar silentRefresh y reportar error SIN destruir la sesion.
-        debugPrint('[Sync] 401 en sync — intentando silentRefresh...');
-        final refreshed = await ApiService.instance.silentRefresh();
+        // 401 durante el pull → token expirado/inválido → silentRefresh CON timeout 10s
+        debugPrint('[Sync] 401 en pull — intentando silentRefresh (10s max)...');
+        bool refreshed = false;
+        try {
+          refreshed = await ApiService.instance.silentRefresh()
+              .timeout(const Duration(seconds: 10), onTimeout: () => false);
+        } catch (_) {}
         if (refreshed) {
-          debugPrint('[Sync] silentRefresh OK tras 401 — reintentando pull...');
+          debugPrint('[Sync] silentRefresh OK — reintentando pull...');
           _setState(SyncState.syncing, 'Reintentando sincronizacion...');
           try {
             final pullRetry = await _pullNuevos();
             _lastSync = DateTime.now();
             await _refreshPending();
-            if (pullRetry > 0) {
-              _setState(SyncState.success, 'Sincronizado (reintento): $pullRetry OS');
-            }
+            _setState(SyncState.success,
+                pullRetry > 0
+                    ? 'Sincronizado (reintento): $pullRetry OS'
+                    : 'Sincronizado. Sin cambios nuevos.');
           } catch (retryErr) {
             debugPrint('[Sync] Error en reintento: $retryErr');
             _setState(SyncState.error, 'Error de red. Reintenta manualmente.');
           }
         } else {
-          // silentRefresh fallido — intentar re-login con credenciales guardadas
-          debugPrint('[Sync] silentRefresh fallido tras 401 — intentando re-login...');
-          bool reloginOk = false;
-          try {
-            const st = FlutterSecureStorage(
-              aOptions: AndroidOptions(encryptedSharedPreferences: true),
-            );
-            final savedUser = await st.read(key: 'pesa_username');
-            final savedPass = await st.read(key: 'pesa_cred_pass');
-            if (savedUser != null && savedPass != null) {
-              final err = await ApiService.instance.login(savedUser, savedPass);
-              if (err == null) {
-                reloginOk = true;
-                debugPrint('[Sync] Re-login OK para $savedUser — reintentando pull...');
-                try {
-                  final pullRetry = await _pullNuevos();
-                  _lastSync = DateTime.now();
-                  await _refreshPending();
-                  _setState(SyncState.success,
-                      pullRetry > 0
-                          ? 'Sincronizado (relogin): $pullRetry OS'
-                          : 'Sincronizado. Sin cambios nuevos.');
-                  return;
-                } catch (retryErr) {
-                  debugPrint('[Sync] Error en pull tras relogin: $retryErr');
-                }
-              }
-            }
-          } catch (e) {
-            debugPrint('[Sync] Error en re-login: $e');
-          }
-          if (!reloginOk) {
-            // Sin credenciales guardadas o re-login fallido — error NO bloqueante
-            _setState(SyncState.error,
-                'Error de autenticacion. Reconecta al WiFi e intenta de nuevo.');
-          }
+          _setState(SyncState.error,
+              'Sesion expirada. Cierra y vuelve a abrir la app.');
         }
       } else {
         _setState(SyncState.error, 'Error HTTP: $msg');
@@ -212,6 +202,7 @@ class SyncService extends ChangeNotifier {
   }
 
   // ── Push: Subir OS con estado PENDIENTE_ACTUALIZAR ────────────────────────
+
 
   Future<int> _pushPendientes() async {
     final db      = LocalDbService.instance;

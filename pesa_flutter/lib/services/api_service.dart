@@ -290,6 +290,28 @@ class ApiService {
     // No borramos credenciales — se mantienen para el próximo login
   }
 
+  /// Inyecta un token JWT directamente en memoria (sin llamada HTTP).
+  /// Usado por SyncService para recuperar el token de SecureStorage
+  /// sin disparar silentRefresh (que tiene timeout de 90s).
+  void injectToken(String token) {
+    _token = token;
+    // Extraer claims del JWT para poblar userRole e idTecnico
+    try {
+      final parts = token.split('.');
+      if (parts.length == 3) {
+        final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+        final claims = jsonDecode(payload) as Map<String, dynamic>;
+        _userRole      = claims['role'] as String?;
+        _lastIdTecnico = claims['id_tecnico'] as int?;
+        if (_lastIdTecnico == null && claims['id_tecnico'] != null) {
+          _lastIdTecnico = int.tryParse(claims['id_tecnico'].toString());
+        }
+        _lastNombre = claims['nombre'] as String? ?? claims['sub'] as String?;
+      }
+    } catch (_) {}
+    debugPrint('[API] injectToken OK — role=$_userRole | idTec=$_lastIdTecnico');
+  }
+
   // ── Headers con JWT ───────────────────────────────────────────────────────
 
   Map<String, String> get _headers => {
@@ -309,8 +331,12 @@ class ApiService {
         .timeout(timeout ?? _connTimeout);
 
     if (resp.statusCode == 401) {
-      debugPrint('[API] 401 detectado → intentando silentRefresh...');
-      final ok = await silentRefresh();
+      debugPrint('[API] 401 detectado → intentando silentRefresh (15s max)...');
+      bool ok = false;
+      try {
+        ok = await silentRefresh()
+            .timeout(const Duration(seconds: 15), onTimeout: () => false);
+      } catch (_) {}
       if (ok) {
         // Reintentar con el nuevo token
         resp = await http.get(uri, headers: _headers)
@@ -328,8 +354,12 @@ class ApiService {
         .timeout(timeout ?? _connTimeout);
 
     if (resp.statusCode == 401) {
-      debugPrint('[API] 401 en POST → intentando silentRefresh...');
-      final ok = await silentRefresh();
+      debugPrint('[API] 401 en POST → intentando silentRefresh (15s max)...');
+      bool ok = false;
+      try {
+        ok = await silentRefresh()
+            .timeout(const Duration(seconds: 15), onTimeout: () => false);
+      } catch (_) {}
       if (ok) {
         resp = await http.post(uri, headers: _headers, body: body)
             .timeout(timeout ?? _connTimeout);
@@ -350,11 +380,9 @@ class ApiService {
     debugPrint('[SyncPull] → Timeout: ${_syncTimeout.inSeconds}s');
 
     try {
-      // Asegurar token válido antes de la petición
-      if (_token == null || _isTokenExpired(_token!)) {
-        debugPrint('[SyncPull] Token ausente/expirado — renovando antes de pull...');
-        await silentRefresh();
-      }
+      // [FIX] NO llamar silentRefresh() aquí — causa cuelgue de 90s.
+      // Si el token es inválido, el servidor responderá 401 y _getWithRetry
+      // ejecutará silentRefresh con timeout adecuado en ese momento.
 
       final resp = await _getWithRetry(uri, timeout: _syncTimeout);
 
