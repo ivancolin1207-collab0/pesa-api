@@ -286,6 +286,21 @@ async def sync_pull(
         LEFT JOIN cliente_sucursales   suc ON os.sucursal_id        = suc.id
     """
 
+    # ── DIAGNÓSTICO COMPLETO EN RENDER LOGS ─────────────────────────────────
+    logger.info(
+        "[SYNC PULL] ===== DIAGNÓSTICO INICIO =====\n"
+        "  current_user completo: %s\n"
+        "  id_tecnico=%s | role=%s | is_admin=%s\n"
+        "  since=%s",
+        dict(current_user), id_tecnico, role, is_admin, since,
+    )
+    print(
+        f"[SYNC PULL DIAG] id={current_user.get('id')} "
+        f"username={current_user.get('username')} "
+        f"nombre_completo={current_user.get('nombre_completo')} "
+        f"role={role} id_tecnico={id_tecnico} is_admin={is_admin}"
+    )
+
     try:
         if is_admin:
             # Admin: TODAS las OS activas — DISTINCT ON ya en _SELECT elimina duplicados
@@ -337,11 +352,32 @@ async def sync_pull(
                 if tec_row:
                     nombre_jwt = str(tec_row["nombre_completo"] or tec_row["usuario"] or "")
 
-            nombre_param = f"%{nombre_jwt.strip().lower()}%" if nombre_jwt.strip() else "%alan%"
+            # Extraer la primera palabra del nombre para búsqueda flexible
+            nombre_stripped = nombre_jwt.strip().lower()
+            nombre_param_full = f"%{nombre_stripped}%" if nombre_stripped else "%alan%"
+            # Palabra clave: primera palabra del nombre (ej. "alan" de "alan guevara")
+            primera_palabra = nombre_stripped.split()[0] if nombre_stripped.split() else "alan"
+            nombre_param_word = f"%{primera_palabra}%"
 
-            # [FIX-DUPLICADOS] Usar EXISTS en lugar de JOIN de nombre para evitar
-            # que la condición OR en el nombre del técnico multiplique filas.
-            # La cláusula DISTINCT ON en _SELECT también actúa como red de seguridad.
+            # ── DIAGNÓSTICO DETALLADO ──────────────────────────────────────
+            logger.info(
+                "[SYNC PULL TECNICO] username=%s | nombre_jwt='%s' | id_tecnico=%s\n"
+                "  nombre_param_full='%s' | nombre_param_word='%s' | since=%s",
+                username_jwt, nombre_jwt, id_tecnico,
+                nombre_param_full, nombre_param_word, since,
+            )
+            print(
+                f"[SYNC PULL SQL PARAMS] id_tecnico={id_tecnico} "
+                f"nombre_full='{nombre_param_full}' "
+                f"nombre_word='{nombre_param_word}' "
+                f"since={since}"
+            )
+
+            # [FIX-AMPLIADO] WHERE incluye:
+            #   1. os.id_tecnico = $1 (FK directa)
+            #   2. EXISTS en cat_tecnicos por nombre_completo o usuario
+            #   3. LOWER(os.tecnico) ILIKE $2 (columna de texto libre en la OS)
+            #   4. LOWER(os.tecnico) ILIKE $3 (primera palabra del nombre — más flexible)
             where_clauses = [
                 """(
                     os.id_tecnico = $1
@@ -351,10 +387,12 @@ async def sync_pull(
                           AND (LOWER(t2.nombre_completo) ILIKE $2
                                OR LOWER(t2.usuario) ILIKE $2)
                     )
+                    OR LOWER(COALESCE(os.tecnico, '')) ILIKE $2
+                    OR LOWER(COALESCE(os.tecnico, '')) ILIKE $3
                 )""",
                 "(os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')",
             ]
-            params = [id_tecnico or -1, nombre_param]
+            params = [id_tecnico or -1, nombre_param_full, nombre_param_word]
 
             if since and since.year > 2000:
                 params.append(since)
@@ -367,11 +405,61 @@ async def sync_pull(
                 ORDER BY os.folio_os DESC, os.updated_at DESC
                 LIMIT ${len(params)}
             """
+
+            # Loguear la query completa para depuración en Render
+            logger.info(
+                "[SYNC PULL SQL QUERY]:\n%s\nPARAMS: %s",
+                query_sql, params,
+            )
+            print(f"[SYNC PULL SQL PARAMS FINAL] {params}")
+
             rows = await db.fetch(query_sql, *params)
+
             logger.info(
                 "Sync PULL [TECNICO id=%s user=%s nombre=%s]: %d OS encontradas",
                 id_tecnico, username_jwt, nombre_jwt, len(rows),
             )
+            print(
+                f"[SYNC PULL RESULT] id_tecnico={id_tecnico} username={username_jwt} "
+                f"nombre='{nombre_jwt}' -> {len(rows)} OS encontradas"
+            )
+
+            # Diagnóstico extra si no se encontró nada
+            if len(rows) == 0:
+                # Contar cuántas OS hay sin filtro de técnico
+                total_os = await db.fetchval(
+                    "SELECT COUNT(*) FROM ordenes_servicio WHERE UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
+                )
+                # Buscar si existe el técnico en cat_tecnicos
+                tec_check = await db.fetchrow(
+                    "SELECT id, nombre_completo, usuario, activo FROM cat_tecnicos WHERE id = $1 OR LOWER(usuario) = LOWER($2)",
+                    id_tecnico or -1, username_jwt,
+                )
+                # Buscar OS por nombre directo
+                os_por_nombre = await db.fetchval(
+                    "SELECT COUNT(*) FROM ordenes_servicio WHERE LOWER(COALESCE(tecnico,'')) ILIKE $1",
+                    nombre_param_word,
+                )
+                # Buscar OS por id_tecnico directo
+                os_por_id = await db.fetchval(
+                    "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1",
+                    id_tecnico or -1,
+                )
+                logger.warning(
+                    "[SYNC PULL CERO RESULTADOS] DIAGNÓSTICO:\n"
+                    "  Total OS no canceladas en BD: %s\n"
+                    "  OS con id_tecnico=%s: %s\n"
+                    "  OS con tecnico ILIKE '%s': %s\n"
+                    "  Registro en cat_tecnicos: %s",
+                    total_os, id_tecnico, os_por_id,
+                    primera_palabra, os_por_nombre,
+                    dict(tec_check) if tec_check else "NO ENCONTRADO",
+                )
+                print(
+                    f"[SYNC PULL CERO] total_os={total_os} | "
+                    f"os_by_id={os_por_id} | os_by_nombre={os_por_nombre} | "
+                    f"cat_tecnico={dict(tec_check) if tec_check else 'NO_ENCONTRADO'}"
+                )
 
         return [OSCompleta(**dict(r)) for r in rows]
 
@@ -384,6 +472,7 @@ async def sync_pull(
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail      = f"Error interno al generar el payload de sync: {exc}",
         )
+
 
 
 
