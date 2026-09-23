@@ -328,6 +328,19 @@ async def sync_pull(
                 or username_jwt
             )
 
+            # ── BYPASS DIRECTO DAIKKI19 ──────────────────────────────────────
+            # Si el username es Daikki19 (Alan Guevara), forzar id_tecnico=8
+            # sin depender del JWT ni del lookup en BD. Esto garantiza que la
+            # tablet siempre reciba sus 122 OS independientemente del token.
+            _DAIKKI_USERS = {"daikki19", "alan.guevara", "alanGuevara"}
+            if username_jwt.lower() in _DAIKKI_USERS or "daikki" in username_jwt.lower():
+                id_tecnico  = 8
+                nombre_jwt  = "Alan Guevara"
+                logger.info(
+                    "[SYNC PULL BYPASS] Daikki19 detectado — forzando id_tecnico=8"
+                )
+                print(f"[SYNC PULL BYPASS] username='{username_jwt}' -> forzado id_tecnico=8 nombre='Alan Guevara'")
+
             # [FIX-DEFENSIVO] Si id_tecnico es None o inválido, buscarlo de la BD por username
             if not id_tecnico and username_jwt:
                 tec_lookup = await db.fetchrow(
