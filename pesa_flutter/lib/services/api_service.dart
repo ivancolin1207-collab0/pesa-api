@@ -213,10 +213,10 @@ class ApiService {
     // 1. Validación local de exp
     if (_isTokenExpired(_token!)) {
       debugPrint('[API] Token guardado EXPIRADO localmente — renovando...');
-      _token = null;
+      // [FIX-401-LOOP] No limpiar el token si silentRefresh falla (sin red):
+      // se mantiene para trabajo offline.
       final ok = await silentRefresh();
-      debugPrint('[API] Renovacion proactiva: ${ok ? "OK" : "Fallo"}')
-;
+      debugPrint('[API] Renovacion proactiva: ${ok ? "OK" : "Fallo — usando sesion local"}');
       return;
     }
 
@@ -229,13 +229,15 @@ class ApiService {
       ).timeout(const Duration(seconds: 15));
 
       if (resp.statusCode == 401) {
-        // Token rechazado por el servidor (firma incorrecta o revocado)
-        debugPrint('[API] Token rechazado por servidor (401) — limpiando y renovando...');
-        _token = null;
-        await _storage.delete(key: 'jwt_token');
+        // Token rechazado por el servidor (firma incorrecta o revocado).
+        // [FIX-401-LOOP] Intentar renovar UNA VEZ sin destruir la sesión local.
+        // Si silentRefresh falla (servidor frío, sin red), mantener el token
+        // para permitir trabajo offline. NO redirigir al login automáticamente.
+        debugPrint('[API] Token rechazado por servidor (401) — intentando silentRefresh...');
         final ok = await silentRefresh();
-        debugPrint('[API] Renovacion post-401: ${ok ? "OK" : "Fallo — se requerira login manual"}')
-;
+        debugPrint('[API] silentRefresh post-401: ${ok ? "OK" : "Fallo — se mantiene sesion local para offline"}');
+        // NO emitir sessionExpiredEvents aquí: este método se ejecuta en background
+        // (arranque de app). Solo emitir desde login/refresh explícito del usuario.
       } else if (resp.statusCode == 200) {
         // Token valido — extraer role e id_tecnico del response
         debugPrint('[API] Token validado contra servidor OK');

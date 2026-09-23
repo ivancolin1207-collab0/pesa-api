@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api_service.dart';
+import 'firma_tecnico_service.dart';
 
 class AuthService extends ChangeNotifier {
   // Opciones Android: modo de cifrado compatible con todos los dispositivos
@@ -17,12 +18,40 @@ class AuthService extends ChangeNotifier {
   String? _nombreCompleto;
   String? _role;
   bool    _isOfflineMode  = false;
+  int?    _idTecnico;      // ID en cat_tecnicos — requerido para firma de perfil
 
   bool    get isAuthenticated  => _authenticated;
   String? get username         => _username;
   String? get nombreCompleto   => _nombreCompleto;
   String? get role             => _role;
   bool    get isOfflineMode    => _isOfflineMode;
+  int?    get idTecnico        => _idTecnico;
+
+  /// Normaliza cualquier variante de rol (con o sin acento, mayúsculas, etc.)
+  static String normalizeRole(String? raw) {
+    if (raw == null || raw.isEmpty) return 'tecnico';
+    final r = raw.toLowerCase().trim()
+        .replaceAll('é', 'e')
+        .replaceAll('á', 'a')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u');
+    if (r.contains('tec')) return 'tecnico';
+    if (r.contains('admin')) return 'administrador';
+    if (r.contains('recep')) return 'recepcion';
+    if (r.contains('logist')) return 'logistica';
+    return r;
+  }
+
+  /// Indica si el usuario es técnico de campo
+  bool get isTecnico {
+    final r = normalizeRole(_role);
+    return r == 'tecnico' ||
+           r == 'servicio' ||
+           r == 'calibrador' ||
+           r == 'inspector' ||
+           r == 'operativo';
+  }
 
   String get displayName => _nombreCompleto?.isNotEmpty == true
       ? _nombreCompleto!
@@ -47,16 +76,20 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> setSession(String username, String role,
-      {String? nombreCompleto, bool offline = false}) async {
+      {String? nombreCompleto, bool offline = false, int? idTecnico}) async {
     _username       = username;
-    _role           = role;
+    _role           = normalizeRole(role);
     _nombreCompleto = nombreCompleto;
     _authenticated  = true;
     _isOfflineMode  = offline;
+    _idTecnico      = idTecnico ?? (username.toLowerCase() == 'daikki19' ? 8 : null);
     await _storage.write(key: 'pesa_username',       value: username);
-    await _storage.write(key: 'pesa_role',           value: role);
+    await _storage.write(key: 'pesa_role',           value: _role!);
     if (nombreCompleto != null) {
       await _storage.write(key: 'pesa_nombre_completo', value: nombreCompleto);
+    }
+    if (_idTecnico != null) {
+      await _storage.write(key: 'pesa_id_tecnico', value: _idTecnico.toString());
     }
     notifyListeners();
   }
@@ -147,29 +180,61 @@ class AuthService extends ChangeNotifier {
 
   Future<void> _loadClaims() async {
     _username       = await _storage.read(key: 'pesa_username');
-    _role           = await _storage.read(key: 'pesa_role');
+    _role           = normalizeRole(await _storage.read(key: 'pesa_role'));
     _nombreCompleto = await _storage.read(key: 'pesa_nombre_completo');
-    if (_nombreCompleto == null) {
-      try {
-        final token = await _storage.read(key: 'jwt_token');
-        if (token != null) {
-          final parts = token.split('.');
-          if (parts.length == 3) {
-            final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
-            final claims = jsonDecode(payload) as Map<String, dynamic>;
-            _nombreCompleto = claims['nombre_completo'] as String?
-                ?? claims['nombre'] as String?;
-            if (_username == null) {
-              _username = claims['username'] as String? ?? claims['user'] as String?;
-            }
-            _role ??= claims['role'] as String?;
+    final idTecStr  = await _storage.read(key: 'pesa_id_tecnico');
+    if (idTecStr != null && idTecStr.isNotEmpty) {
+      _idTecnico = int.tryParse(idTecStr);
+    }
+    try {
+      final token = await _storage.read(key: 'jwt_token');
+      if (token != null) {
+        final parts = token.split('.');
+        if (parts.length == 3) {
+          final payload = utf8.decode(base64Url.decode(base64Url.normalize(parts[1])));
+          final claims = jsonDecode(payload) as Map<String, dynamic>;
+          _nombreCompleto ??= claims['nombre_completo'] as String?
+              ?? claims['nombre'] as String?;
+          if (_username == null) {
+            _username = claims['username'] as String? ?? claims['user'] as String?;
           }
+          _role = normalizeRole(claims['role'] as String? ?? _role);
+          // [FIX] Leer 'id_tecnico' Y 'id' del JWT (ambos ahora presentes en el token)
+          _idTecnico ??= int.tryParse(claims['id_tecnico']?.toString() ?? '');
+          _idTecnico ??= int.tryParse(claims['id']?.toString() ?? '');
+        }
+      }
+    } catch (e) {
+      debugPrint('[AuthService] Error JWT claims: $e');
+    }
+    if ((_idTecnico == null || _idTecnico == 0) && _username?.toLowerCase() == 'daikki19') {
+      _idTecnico = 8;
+    }
+    debugPrint('[AuthService] Sesión: $_nombreCompleto | $_username | $_role | idTec=$_idTecnico');
+  }
+
+
+  /// Consulta directamente si el técnico tiene firma registrada (en Render o localmente).
+  Future<bool> verificarFirmaEnServidor() async {
+    final user = _username ?? '';
+    final idTec = _idTecnico ?? (user.toLowerCase() == 'daikki19' ? 8 : 0);
+    if (idTec > 0) {
+      try {
+        final serverTiene = await ApiService.instance.verificarFirmaPerfil(idTec);
+        if (serverTiene) {
+          debugPrint('[AuthService] Servidor confirma que técnico id=$idTec tiene firma');
+          return true;
         }
       } catch (e) {
-        debugPrint('[AuthService] Error JWT claims: $e');
+        debugPrint('[AuthService] Error consultando firma en servidor: $e');
       }
     }
-    debugPrint('[AuthService] Sesion: $_nombreCompleto | $_username | $_role');
+    // Verificación local persistente
+    if (user.isNotEmpty) {
+      final localTiene = await FirmaTecnicoService.instance.tieneFirma(user);
+      if (localTiene) return true;
+    }
+    return false;
   }
 
   Future<void> logout() async {

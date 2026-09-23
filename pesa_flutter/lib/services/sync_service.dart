@@ -6,8 +6,8 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'api_service.dart';
-import 'auth_service.dart';
 import 'local_db_service.dart';
+
 
 
 /// Evento global que dispara cuando el servidor responde 401 (sesión expirada).
@@ -222,15 +222,14 @@ class SyncService extends ChangeNotifier {
     // ConflictAlgorithm.replace en upsertOs garantiza idempotencia (no duplicados).
     const since = null; // null → ApiService.syncPull usa DateTime(2000) por defecto
 
-    // [FIX-SYNC-DIAG] Obtener id_tecnico del JWT para diagnóstico
-    final auth      = AuthService();
-    await auth.loadSession();
-    final idTecnico = auth.idTecnico;
-    final username  = auth.username ?? 'desconocido';
+    // [FIX-SYNC-DIAG] Datos de diagnóstico directo desde ApiService singleton.
+    // Ya NO se crea una nueva instancia de AuthService (que nunca tiene datos).
+    final idTecnico = ApiService.instance.lastIdTecnico;
+    final username  = ApiService.instance.userRole ?? 'desconocido';
 
     debugPrint('[Sync PULL] Full refresh desde 2000-01-01');
     debugPrint('[Sync PULL] URL: ${ApiService.instance.baseUrl}/api/v1/sync/pull');
-    debugPrint('[Sync PULL] JWT id_tecnico=$idTecnico | username=$username');
+    debugPrint('[Sync PULL] JWT id_tecnico=$idTecnico | role=$username');
     debugPrint('[Sync PULL] Token: ${ApiService.instance.isAuthenticated ? "OK" : "NO AUTENTICADO"}');
 
     try {
@@ -238,8 +237,8 @@ class SyncService extends ChangeNotifier {
       debugPrint('[Sync PULL] RECIBIDAS: ${osList.length} ordenes del servidor');
 
       if (osList.isEmpty) {
-        // [FIX-DIAG] Diagnostico explicito cuando el servidor devuelve lista vacia
-        debugPrint('[Sync PULL] AVISO: servidor retorno 0 ordenes para id_tecnico=$idTecnico ($username).'
+        // [FIX-DIAG] Diagnóstico explícito cuando el servidor devuelve lista vacía
+        debugPrint('[Sync PULL] AVISO: servidor retorno 0 ordenes para id_tecnico=$idTecnico.'
             ' Verifica en Render que ordenes_servicio.id_tecnico=$idTecnico exista.');
         _setState(SyncState.error,
             'Sincronizado pero el servidor no reporta ordenes para este tecnico.');
@@ -268,6 +267,7 @@ class SyncService extends ChangeNotifier {
       rethrow;
     }
   }
+
 
   // ── Push firmas pendientes ────────────────────────────────────────────────
 
