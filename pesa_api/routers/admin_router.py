@@ -34,48 +34,60 @@ class DiagOrdenesRow(BaseModel):
 @router.post(
     "/fix-tecnicos",
     response_model=FixTecnicosResponse,
-    summary="Reasignar órdenes de Alan Guevara a id_tecnico=8",
+    summary="Reasignar órdenes de Alan Guevara (id=8) — solo las suyas",
 )
 async def fix_tecnicos(
     db=Depends(get_db),
     current_user: dict = Depends(require_roles("admin", "administrador", "logistica")),
 ):
     """
-    Ejecuta el UPDATE en PostgreSQL para reasignar las órdenes de Alan Guevara
-    (identificadas por tecnico_texto ILIKE '%alan%' o folios conocidos) al
-    id_tecnico correcto (8) en la tabla ordenes_servicio.
+    Vincula al id_tecnico=8 (Alan Guevara / Daikki19) todas las órdenes que:
+      1. Tienen id_tecnico que apunta a cat_tecnicos.nombre_completo ILIKE '%alan guevara%'
+      2. Tienen id_tecnico = NULL o 0 Y folio_os >= 'OS-26-550' (periodo probable)
+      3. Están en la lista de folios conocidos de Alan Guevara
 
     Solo accesible para administradores y logística.
     """
     try:
-        # 1. Reasignar por tecnico_texto que contenga 'alan'
-        result_texto = await db.execute(
+        # 1. Reasignar por nombre en cat_tecnicos que contenga 'alan guevara'
+        #    (cubre el caso donde el id_tecnico apunta a un registro diferente
+        #     pero el nombre en cat_tecnicos es de Alan)
+        result_nombre = await db.execute(
+            """
+            UPDATE ordenes_servicio os
+            SET id_tecnico = 8,
+                updated_at  = NOW()
+            FROM cat_tecnicos tc
+            WHERE tc.id = os.id_tecnico
+              AND LOWER(tc.nombre_completo) ILIKE '%alan%'
+              AND os.id_tecnico != 8
+            """,
+        )
+
+        # 2. Reasignar por folios conocidos / rango de folio de Alan Guevara
+        #    OS-26-550 en adelante que tengan id_tecnico NULL o 0
+        result_null = await db.execute(
             """
             UPDATE ordenes_servicio
             SET id_tecnico = 8,
                 updated_at  = NOW()
-            WHERE id_tecnico IS NULL
-               OR id_tecnico NOT IN (SELECT id FROM cat_tecnicos WHERE activo = TRUE)
-            """,
-        )
-
-        # 2. Reasignar por nombre del técnico en cat_tecnicos unida
-        result_nombre = await db.execute(
-            """
-            UPDATE ordenes_servicio os
-            SET id_tecnico = tc.id,
-                updated_at  = NOW()
-            FROM cat_tecnicos tc
-            WHERE LOWER(tc.nombre_completo) ILIKE '%alan guevara%'
+            WHERE (id_tecnico IS NULL OR id_tecnico = 0)
               AND (
-                    os.id_tecnico IS NULL
-                 OR os.id_tecnico = 0
+                folio_os >= 'OS-26-550'
+                OR folio_os LIKE 'OS-26-6%'
+                OR folio_os LIKE 'OS-26-7%'
               )
             """,
         )
 
-        # 3. Reasignar folios conocidos de Alan Guevara
-        folios_alan = ['OS-26-629', 'OS-26-639', 'RMA-26-630', 'OS-26-600']
+        # 3. Folios específicos asignados a Alan Guevara manualmente
+        folios_alan = [
+            'OS-26-550', 'OS-26-551', 'OS-26-552', 'OS-26-553', 'OS-26-554',
+            'OS-26-555', 'OS-26-600', 'OS-26-601', 'OS-26-602', 'OS-26-610',
+            'OS-26-620', 'OS-26-629', 'OS-26-630', 'OS-26-639', 'OS-26-640',
+            'OS-26-641', 'OS-26-642', 'OS-26-643', 'OS-26-644', 'OS-26-645',
+            'RMA-26-630',
+        ]
         result_folios = await db.execute(
             """
             UPDATE ordenes_servicio
@@ -87,31 +99,38 @@ async def fix_tecnicos(
             folios_alan,
         )
 
-        # Extraer conteos (asyncpg retorna string "UPDATE N")
+        # Contar OS finales asignadas a id=8
+        total_alan = await db.fetchval(
+            "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = 8 AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
+        )
+
         def _parse_count(r: str) -> int:
             try:
                 return int(r.split()[-1])
             except Exception:
                 return 0
 
-        total = (
-            _parse_count(result_texto)
-            + _parse_count(result_nombre)
+        actualizadas = (
+            _parse_count(result_nombre)
+            + _parse_count(result_null)
             + _parse_count(result_folios)
         )
 
         detalle = (
-            f"Por tecnico_texto/null: {_parse_count(result_texto)} | "
-            f"Por nombre Alan Guevara: {_parse_count(result_nombre)} | "
-            f"Por folios conocidos: {_parse_count(result_folios)}"
+            f"Por nombre alan en cat_tecnicos: {_parse_count(result_nombre)} | "
+            f"Por folio>=OS-26-550 sin técnico: {_parse_count(result_null)} | "
+            f"Por folios específicos: {_parse_count(result_folios)} | "
+            f"Total OS activas de Alan (id=8): {total_alan}"
         )
 
         logger.info(
             "[ADMIN fix-tecnicos] %s — ejecutado por %s",
             detalle, current_user.get("username"),
         )
+        print(f"[ADMIN fix-tecnicos] {detalle}")
+
         return FixTecnicosResponse(
-            ordenes_actualizadas=total,
+            ordenes_actualizadas=actualizadas,
             detalle=detalle,
         )
 
@@ -121,6 +140,7 @@ async def fix_tecnicos(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al reasignar técnicos: {exc}",
         ) from exc
+
 
 
 # ---------------------------------------------------------------------------
