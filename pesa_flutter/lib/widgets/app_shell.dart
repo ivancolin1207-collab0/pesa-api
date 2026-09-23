@@ -1,9 +1,11 @@
 // lib/widgets/app_shell.dart — Layout shell con sidebar corporativo BLANCO (light theme)
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
+import '../services/api_service.dart';
 import '../services/sync_service.dart';
 
 // ── Tokens corporativos light ───────────────────────────────────────────────
@@ -87,8 +89,47 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    // Escuchar evento de sesión expirada (401) y redirigir a /login
-    _sessionSub = sessionExpiredEvents.stream.listen((_) {
+    // Escuchar evento de sesión expirada (401)
+    // [FIX] Antes de redirigir al login, intentar silentRefresh y auto-login
+    // con credenciales guardadas. Solo va al login si todo falla.
+    _sessionSub = sessionExpiredEvents.stream.listen((_) async {
+      if (!mounted) return;
+
+      // Intento 1: silentRefresh
+      final refreshed = await ApiService.instance.silentRefresh();
+      if (refreshed) {
+        debugPrint('[AppShell] silentRefresh OK — sesión recuperada, no redirigir');
+        return; // sesion recuperada, no interrumpir al usuario
+      }
+
+      // Intento 2: re-login con credenciales guardadas
+      try {
+        const st = FlutterSecureStorage(
+          aOptions: AndroidOptions(encryptedSharedPreferences: true),
+        );
+        final savedUser = await st.read(key: 'pesa_username');
+        final savedPass = await st.read(key: 'pesa_cred_pass');
+        if (savedUser != null && savedPass != null && savedUser.isNotEmpty) {
+          final err = await ApiService.instance.login(savedUser, savedPass);
+          if (err == null) {
+            debugPrint('[AppShell] Auto-relogin OK para $savedUser — sesión recuperada');
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Sesión renovada automáticamente.'),
+                  backgroundColor: Color(0xFF16A34A),
+                  duration: Duration(seconds: 3),
+                ),
+              );
+            }
+            return; // NO redirigir al login
+          }
+        }
+      } catch (e) {
+        debugPrint('[AppShell] Error en auto-relogin: $e');
+      }
+
+      // Solo si todos los intentos fallaron → redirigir al login
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(

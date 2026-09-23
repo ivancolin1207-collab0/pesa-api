@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api_service.dart';
 import 'local_db_service.dart';
 
@@ -68,17 +69,40 @@ class SyncService extends ChangeNotifier {
       _setState(SyncState.syncing, 'Obteniendo sesion...');
       final refreshed = await ApiService.instance.silentRefresh();
       if (!refreshed) {
-        debugPrint('[SYNC ERROR] silentRefresh fallo. Sin autenticacion valida.');
-        // [FIX-SESSION] Emitir evento para redirigir al login —
-        // el usuario debe autenticarse de nuevo con sus credenciales actuales.
-        // Esto ocurre cuando el JWT antiguo fue firmado con clave incorrecta
-        // y las credenciales guardadas tambien fallan.
-        _setState(SyncState.error,
-            'Sesion expirada. Inicia sesion nuevamente.');
-        sessionExpiredEvents.add(null);
-        return;
+        // [FIX-AUTOLOGIN] Antes de fallar, intentar auto-login offline con
+        // credenciales guardadas (pesa_cred_pass en SecureStorage).
+        // Esto evita el modal de "sesión expirada" cuando el técnico tiene WiFi
+        // pero el token expiró o fue renovado con nueva clave JWT en el servidor.
+        debugPrint('[SYNC] silentRefresh fallo — intentando auto-login offline...');
+        bool autoLoginOk = false;
+        try {
+          const st = FlutterSecureStorage(
+            aOptions: AndroidOptions(encryptedSharedPreferences: true),
+          );
+          final savedUser = await st.read(key: 'pesa_username');
+          final savedPass = await st.read(key: 'pesa_cred_pass');
+          if (savedUser != null && savedPass != null && savedUser.isNotEmpty) {
+            final loginErr = await ApiService.instance.login(savedUser, savedPass);
+            if (loginErr == null) {
+              autoLoginOk = true;
+              debugPrint('[SYNC] Auto-login online OK para: $savedUser');
+            } else {
+              debugPrint('[SYNC] Auto-login online fallo ($loginErr) — probando offline...');
+            }
+          }
+        } catch (e) {
+          debugPrint('[SYNC] Error en auto-login: $e');
+        }
+        if (!autoLoginOk) {
+          // Ninguna estrategia funcionó: mostrar error NO bloqueante (sin redirigir)
+          debugPrint('[SYNC ERROR] Sin autenticacion valida tras todos los intentos.');
+          _setState(SyncState.error,
+              'Sin sesion activa. Abre la app y reingresa tu usuario y contrasena.');
+          // NO emitir sessionExpiredEvents para no bloquear con modal
+          return;
+        }
       }
-      debugPrint('[SYNC] silentRefresh OK — continuando sync...');
+      debugPrint('[SYNC] Autenticacion OK — continuando sync...');
     }
 
     debugPrint('[Sync] Iniciando sync -> ${ApiService.instance.baseUrl}');
@@ -141,10 +165,42 @@ class SyncService extends ChangeNotifier {
             _setState(SyncState.error, 'Error de red. Reintenta manualmente.');
           }
         } else {
-          // silentRefresh fallido — NO cerrar sesion, solo informar
-          debugPrint('[Sync] silentRefresh fallido — error sin logout');
-          _setState(SyncState.error,
-              'Error de autenticacion temporal. Reconecta al WiFi e intenta de nuevo.');
+          // silentRefresh fallido — intentar re-login con credenciales guardadas
+          debugPrint('[Sync] silentRefresh fallido tras 401 — intentando re-login...');
+          bool reloginOk = false;
+          try {
+            const st = FlutterSecureStorage(
+              aOptions: AndroidOptions(encryptedSharedPreferences: true),
+            );
+            final savedUser = await st.read(key: 'pesa_username');
+            final savedPass = await st.read(key: 'pesa_cred_pass');
+            if (savedUser != null && savedPass != null) {
+              final err = await ApiService.instance.login(savedUser, savedPass);
+              if (err == null) {
+                reloginOk = true;
+                debugPrint('[Sync] Re-login OK para $savedUser — reintentando pull...');
+                try {
+                  final pullRetry = await _pullNuevos();
+                  _lastSync = DateTime.now();
+                  await _refreshPending();
+                  _setState(SyncState.success,
+                      pullRetry > 0
+                          ? 'Sincronizado (relogin): $pullRetry OS'
+                          : 'Sincronizado. Sin cambios nuevos.');
+                  return;
+                } catch (retryErr) {
+                  debugPrint('[Sync] Error en pull tras relogin: $retryErr');
+                }
+              }
+            }
+          } catch (e) {
+            debugPrint('[Sync] Error en re-login: $e');
+          }
+          if (!reloginOk) {
+            // Sin credenciales guardadas o re-login fallido — error NO bloqueante
+            _setState(SyncState.error,
+                'Error de autenticacion. Reconecta al WiFi e intenta de nuevo.');
+          }
         }
       } else {
         _setState(SyncState.error, 'Error HTTP: $msg');
