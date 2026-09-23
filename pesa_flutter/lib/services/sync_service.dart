@@ -242,11 +242,19 @@ class SyncService extends ChangeNotifier {
 
       if (osList.isEmpty) {
         // [FIX] Servidor devolvio 0 ordenes: loguear pero NO poner estado error.
-        // El dashboard mostrara los registros locales y el usuario puede sincronizar de nuevo.
-        // Antes esto bloqueaba _onSyncChanged (que solo escucha SyncState.success).
         debugPrint('[Sync PULL] AVISO: servidor retorno 0 ordenes para id_tecnico=$idTecnico.'
             ' La BD local puede tener datos previos.');
-        return 0;  // performSync pondra SyncState.success y _loadLocal() se ejecutara
+        return 0;
+      }
+
+      // [FIX-NUCLEAR] Borrar TODAS las órdenes locales antes de re-insertar.
+      // Esto garantiza limpieza independientemente de la versión del schema SQLite.
+      // Si el schema tenía columnas incompatibles, al borrar+reinsertar queda limpio.
+      try {
+        final borradas = await db.deleteAllOs();
+        debugPrint('[Sync PULL] Tabla limpia: $borradas filas eliminadas antes del pull');
+      } catch (e) {
+        debugPrint('[Sync PULL] AVISO: no se pudo limpiar tabla: $e');
       }
 
       // Upsert individual — upsertOs ya tiene try/catch interno y devuelve bool

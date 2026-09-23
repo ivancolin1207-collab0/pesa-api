@@ -19,6 +19,7 @@ import 'screens/placeholder_screen.dart';
 import 'screens/attach_scan_screen.dart';
 import 'screens/catalogos_screen.dart';
 import 'screens/nuevo_doc_screen.dart';
+import 'screens/mi_firma_screen.dart';
 import 'widgets/captura_firma_tecnico_dialog.dart';
 
 void main() async {
@@ -159,6 +160,10 @@ final _router = GoRouter(
     GoRoute(
       path: '/catalogos',
       builder: (ctx, state) => const CatalogosScreen(),
+    ),
+    GoRoute(
+      path: '/mi-firma',
+      builder: (ctx, state) => const MiFirmaScreen(),
     ),
     GoRoute(
       path: '/nuevo-doc',

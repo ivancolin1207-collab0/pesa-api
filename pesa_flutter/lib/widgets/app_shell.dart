@@ -22,12 +22,16 @@ const _navItemsAll = [
   _NavItem(icon: Icons.description_outlined,      label: 'Generar Formatos',   route: '/formatos'),
   _NavItem(icon: Icons.history_outlined,          label: 'Buscar / Historial', route: '/historial'),
   _NavItem(icon: Icons.document_scanner_outlined, label: 'Adjuntar Escaneo',   route: '/escaneo'),
+  _NavItem(icon: Icons.draw_outlined,             label: 'Mi Firma',           route: '/mi-firma'),
   _NavItem(icon: Icons.category_outlined,         label: 'Catálogos',          route: '/catalogos'),
   _NavItem(icon: Icons.settings_outlined,         label: 'Configuración',      route: '/settings'),
 ];
 
 /// Items visibles solo para admin/logistica/recepcion (ocultos para técnicos)
 const _adminOnlyRoutes = {'/catalogos', '/settings', '/formatos'};
+
+/// Items visibles SOLO para técnicos (ocultos para admin)
+const _tecnicoOnlyRoutes = {'/mi-firma'};
 
 /// Determina si un rol corresponde a un técnico operativo de campo
 bool _isTecnicoRole(String? role) {
@@ -49,9 +53,15 @@ bool _isTecnicoRole(String? role) {
 List<_NavItem> _navItemsForRole(String? role) {
   final isTecnico = _isTecnicoRole(role);
   if (isTecnico) {
-    return _navItemsAll.where((i) => !_adminOnlyRoutes.contains(i.route)).toList();
+    // Para técnicos: sin admin-only, pero CON tecnico-only
+    return _navItemsAll
+        .where((i) => !_adminOnlyRoutes.contains(i.route))
+        .toList();
   }
-  return List.from(_navItemsAll);
+  // Para admin/logistica: sin tecnico-only
+  return _navItemsAll
+      .where((i) => !_tecnicoOnlyRoutes.contains(i.route))
+      .toList();
 }
 
 class _NavItem {

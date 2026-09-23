@@ -294,6 +294,13 @@ class LocalDbService {
     }
   }
 
+  /// Borra TODAS las órdenes locales (usado antes de un pull completo).
+  /// Retorna el número de filas eliminadas.
+  Future<int> deleteAllOs() async {
+    final db = await _ensureInit();
+    return await db.delete('ordenes_servicio');
+  }
+
   Future<List<Map<String, dynamic>>> getAllOs() async {
     final db = await _ensureInit();
     // Ordenar por último número del folio (ej. OS-26-645 > OS-26-551)
