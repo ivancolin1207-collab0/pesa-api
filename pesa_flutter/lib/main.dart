@@ -2,6 +2,7 @@
 // Flutter 3.22+  —  Servicios PESA v2.0
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
@@ -193,55 +194,93 @@ class _SplashScreenState extends State<_SplashScreen> {
     await Future.delayed(const Duration(milliseconds: 800));
     if (!mounted) return;
 
+    final auth = context.read<AuthService>();
+
+    // ── Paso 1: si ya hay token válido en memoria → cargar sesión ──────────
     if (ApiService.instance.isAuthenticated) {
-      // Cargar datos del usuario desde storage
-      final auth = context.read<AuthService>();
-      // [FIX] Envolver loadSession con try/catch — evita crash si SecureStorage falla
       try {
         await auth.loadSession();
       } catch (e, st) {
         debugPrint('[SPLASH] ERROR al cargar sesion: $e\n$st');
-        if (mounted) {
-          setState(() => _splashError = 'Error al cargar sesion.\nIntenta de nuevo.');
-          await Future.delayed(const Duration(seconds: 3));
-          if (mounted) context.go('/login');
-        }
-        return;
       }
-      if (!mounted) return;
-
-      // ── VERIFICACIÓN DE FIRMA DESDE EL SPLASH ────────────────────────
-      final esTecnico = auth.isTecnico;
-      final username  = auth.username ?? '';
-      // [FIX] Garantizar idTecnico=8 para Daikki19 (Alan Guevara) aunque el
-      // JWT antiguo no incluya el claim id_tecnico en el payload.
-      final idTecnico = auth.idTecnico
-          ?? (username.toLowerCase() == 'daikki19' ? 8 : 0);
-
-      debugPrint('[SPLASH] Sesion: $username | esTecnico=$esTecnico | idTecnico=$idTecnico');
-
-      if (esTecnico && username.isNotEmpty && mounted) {
+    } else {
+      // ── Paso 2: sin token en memoria → intentar silentRefresh ───────────
+      // Ocurre cuando: app recién instalada en nuevo dispositivo, token expirado,
+      // o el token fue rechazado por el servidor en loadSavedToken.
+      debugPrint('[SPLASH] Sin token activo — intentando silentRefresh...');
+      final refreshed = await ApiService.instance.silentRefresh();
+      if (refreshed) {
+        debugPrint('[SPLASH] silentRefresh OK — cargando sesión...');
         try {
-          final tieneFirma = await auth.verificarFirmaEnServidor();
-          debugPrint('[SPLASH] Tecnico: $username | idTecnico=$idTecnico | tieneFirma: $tieneFirma');
-          if (!tieneFirma && mounted) {
-            // Mostrar modal BLOQUEANTE antes de abrir el Dashboard
-            await CapturFirmaTecnicoDialog.mostrarConSync(
-              context,
-              username:       username,
-              nombreCompleto: auth.nombreCompleto ?? username,
-              idTecnico:      idTecnico,
-            );
+          await auth.loadSession();
+        } catch (e) {
+          debugPrint('[SPLASH] Error tras silentRefresh: $e');
+        }
+      } else {
+        // ── Paso 3: silentRefresh falló → intentar login offline automático ─
+        // Usar las credenciales guardadas en SecureStorage (pesa_username + offline_plain)
+        debugPrint('[SPLASH] silentRefresh falló — intentando auto-login offline...');
+        try {
+          const storage = FlutterSecureStorage(
+            aOptions: AndroidOptions(encryptedSharedPreferences: true),
+          );
+          final savedUser = await storage.read(key: 'pesa_username');
+          final savedPass = await storage.read(key: 'pesa_cred_pass');
+          if (savedUser != null && savedPass != null && savedUser.isNotEmpty) {
+            final offlineErr = await auth.loginOffline(savedUser, savedPass);
+            if (offlineErr == null) {
+              debugPrint('[SPLASH] Auto-login offline OK para: $savedUser');
+            } else {
+              debugPrint('[SPLASH] Auto-login offline falló: $offlineErr');
+            }
           }
         } catch (e) {
-          debugPrint('[SPLASH] Error verificando firma (no bloqueante): $e');
+          debugPrint('[SPLASH] Error en auto-login offline: $e');
         }
       }
-
-      if (mounted) context.go('/os');
-    } else {
-      if (mounted) context.go('/login');
     }
+
+    if (!mounted) return;
+
+    // ── Verificar si logramos autenticar por alguna vía ────────────────────
+    if (!auth.isAuthenticated) {
+      // Ninguna estrategia funcionó → ir al login
+      debugPrint('[SPLASH] Sin sesión disponible → Login');
+      if (mounted) context.go('/login');
+      return;
+    }
+
+    if (!mounted) return;
+
+    // ── VERIFICACIÓN DE FIRMA DESDE EL SPLASH ────────────────────────
+    final esTecnico = auth.isTecnico;
+    final username  = auth.username ?? '';
+    // [FIX] Garantizar idTecnico=8 para Daikki19 (Alan Guevara) aunque el
+    // JWT antiguo no incluya el claim id_tecnico en el payload.
+    final idTecnico = auth.idTecnico
+        ?? (username.toLowerCase() == 'daikki19' ? 8 : 0);
+
+    debugPrint('[SPLASH] Sesion: $username | esTecnico=$esTecnico | idTecnico=$idTecnico');
+
+    if (esTecnico && username.isNotEmpty && mounted) {
+      try {
+        final tieneFirma = await auth.verificarFirmaEnServidor();
+        debugPrint('[SPLASH] Tecnico: $username | idTecnico=$idTecnico | tieneFirma: $tieneFirma');
+        if (!tieneFirma && mounted) {
+          // Mostrar modal BLOQUEANTE antes de abrir el Dashboard
+          await CapturFirmaTecnicoDialog.mostrarConSync(
+            context,
+            username:       username,
+            nombreCompleto: auth.nombreCompleto ?? username,
+            idTecnico:      idTecnico,
+          );
+        }
+      } catch (e) {
+        debugPrint('[SPLASH] Error verificando firma (no bloqueante): $e');
+      }
+    }
+
+    if (mounted) context.go('/os');
   }
 
   @override
