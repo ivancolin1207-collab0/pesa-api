@@ -1,6 +1,7 @@
 """
 pesa_api/core/security.py — JWT, hashing de contraseñas y RBAC.
 """
+import os
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -25,11 +26,23 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 SQL_CURRENT_USER = "SELECT id, usuario AS username, nombre_completo, activo, id AS id_tecnico, rol AS role FROM cat_tecnicos WHERE id = $1"
 
-# Obtener valores con fallback
-_SECRET = getattr(settings, "SECRET_KEY", getattr(settings, "JWT_SECRET", "pesa-secret-key-prod-2026"))
-_ALGO = getattr(settings, "ALGORITHM", getattr(settings, "JWT_ALGORITHM", "HS256"))
-_ACCESS_MINUTES = getattr(settings, "ACCESS_TOKEN_EXPIRE_MINUTES", getattr(settings, "ACCESS_TOKEN_EXPIRE", 480))
-_REFRESH_DAYS = getattr(settings, "REFRESH_TOKEN_EXPIRE_DAYS", getattr(settings, "REFRESH_TOKEN_EXPIRE", 30))
+# ── Resolución de la clave JWT — prioridad: settings.JWT_SECRET > env directo > fallback ──
+# IMPORTANTE: settings.JWT_SECRET lee PESA_JWT_SECRET del .env.
+# No usar getattr con nombre incorrecto (SECRET_KEY no existe en Settings).
+_SECRET = getattr(settings, "JWT_SECRET",
+            os.environ.get("PESA_JWT_SECRET",
+              os.environ.get("JWT_SECRET", "pesa-secret-2026-cambiar-en-produccion")))
+_ALGO   = getattr(settings, "JWT_ALGORITHM", "HS256")
+# Access token: 30 días (43,200 min) para técnicos de campo sin conexión frecuente
+_ACCESS_MINUTES = int(os.environ.get(
+    "PESA_JWT_EXPIRE_MINUTES",
+    getattr(settings, "JWT_EXPIRE_MINUTES", 43_200)  # 30 días por defecto
+))
+# Refresh token: 90 días
+_REFRESH_DAYS = int(os.environ.get(
+    "PESA_REFRESH_EXPIRE_DAYS",
+    getattr(settings, "REFRESH_EXPIRE_DAYS", 90)
+))
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
