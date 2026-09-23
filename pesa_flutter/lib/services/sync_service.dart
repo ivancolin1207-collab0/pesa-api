@@ -100,13 +100,17 @@ class SyncService extends ChangeNotifier {
 
       _lastSync = DateTime.now();
       await _refreshPending();
-      // Si pull=0, _pullNuevos() ya puso el estado en error con mensaje descriptivo
-      if (pullCount > 0 || pushCount > 0) {
-        _setState(
-          SyncState.success,
-          'Sincronizado: $pushCount subida(s), $pullCount descargada(s)',
-        );
-      }
+      // [FIX] Siempre emitir success para que _onSyncChanged dispare _loadLocal().
+      // Si pull=0, el dashboard mostrara los registros locales existentes.
+      // Si no hay nada local tampoco, mostrara la pantalla de "sin ordenes".
+      _setState(
+        SyncState.success,
+        pullCount > 0
+            ? 'Sincronizado: $pushCount subida(s), $pullCount descargada(s)'
+            : pullCount == 0 && pushCount == 0
+                ? 'Sincronizado. Sin cambios nuevos.'
+                : 'Sincronizado: $pushCount subida(s)',
+      );
     } on SocketException catch (e) {
       debugPrint('[Sync] SocketException: $e');
       _setState(SyncState.offline, 'Sin conexion al servidor — verifica WiFi');
@@ -237,12 +241,12 @@ class SyncService extends ChangeNotifier {
       debugPrint('[Sync PULL] RECIBIDAS: ${osList.length} ordenes del servidor');
 
       if (osList.isEmpty) {
-        // [FIX-DIAG] Diagnóstico explícito cuando el servidor devuelve lista vacía
+        // [FIX] Servidor devolvio 0 ordenes: loguear pero NO poner estado error.
+        // El dashboard mostrara los registros locales y el usuario puede sincronizar de nuevo.
+        // Antes esto bloqueaba _onSyncChanged (que solo escucha SyncState.success).
         debugPrint('[Sync PULL] AVISO: servidor retorno 0 ordenes para id_tecnico=$idTecnico.'
-            ' Verifica en Render que ordenes_servicio.id_tecnico=$idTecnico exista.');
-        _setState(SyncState.error,
-            'Sincronizado pero el servidor no reporta ordenes para este tecnico.');
-        return 0;
+            ' La BD local puede tener datos previos.');
+        return 0;  // performSync pondra SyncState.success y _loadLocal() se ejecutara
       }
 
       // Upsert individual con error por fila para no perder el resto si una falla

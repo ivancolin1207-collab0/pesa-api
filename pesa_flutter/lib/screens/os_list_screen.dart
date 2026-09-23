@@ -1,17 +1,19 @@
 // lib/screens/os_list_screen.dart — Dashboard corporativo estilo escritorio PESA
 // Paleta limpia: fondo #F8F9FA, blanco, rojo corporativo #C8102E
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
-import 'package:flutter/scheduler.dart';
 import 'package:go_router/go_router.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
+import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/app_shell.dart';
+import '../widgets/captura_firma_tecnico_dialog.dart';
 
 // ── Tokens de diseño corporativo ──────────────────────────────────────────
 const _bg         = Color(0xFFF8F9FA);
@@ -33,9 +35,10 @@ class _OsListScreenState extends State<OsListScreen> {
   List<Map<String, dynamic>> _all      = [];
   List<Map<String, dynamic>> _filtered = [];
   bool _loading = true;
+  bool _syncDialogOpen = false; // flag para cierre garantizado del spinner
 
   // ── Filtros ───────────────────────────────────────────────────────────────
-  String  _periodo = 'Mes';
+  String  _periodo = 'Todo'; // Por defecto 'Todo' para no perder órdenes antiguas
   String? _tecnico;
   String? _estado;
   String  _query   = '';
@@ -47,16 +50,227 @@ class _OsListScreenState extends State<OsListScreen> {
     context.read<SyncService>().startNetworkMonitor();
     context.read<SyncService>().addListener(_onSyncChanged);
     _loadLocal();
-    // Para técnicos: fijar filtro en su propio nombre desde el inicio
-    SchedulerBinding.instance.addPostFrameCallback((_) {
-      final auth = context.read<AuthService>();
-      final r = (auth.role ?? '').toLowerCase();
-      const tecRoles = {'tecnico','servicio','tecnico_campo','calibrador',
-          'inspector','tecnico_calibrador','tecnico_inspector','operativo'};
-      if (tecRoles.contains(r) && auth.nombreCompleto != null) {
-        setState(() => _tecnico = auth.nombreCompleto);
-      }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _comprobarFirmaYDescargar();
     });
+  }
+
+  Future<void> _comprobarFirmaYDescargar() async {
+    if (!mounted) return;
+    final auth = context.read<AuthService>();
+    final isTecnico = auth.isTecnico;
+
+    // ── 1. Fijar filtro de técnico propio ───────────────────────────────
+    if (isTecnico && auth.nombreCompleto != null) {
+      setState(() => _tecnico = auth.nombreCompleto);
+    }
+
+    // ── 2. Verificación INMEDIATA de firma (sin depender de red) ───────
+    // Primero revisa localmente; si la sesión está offline o el servidor
+    // falla, igual fuerza la captura de firma si no existe localmente.
+    if (isTecnico && mounted) {
+      final username  = auth.username ?? '';
+      final nombre    = auth.nombreCompleto ?? username;
+      final idTec     = auth.idTecnico ?? 0;
+
+      bool tieneFirmaLocal = false;
+      try {
+        // Verificar SOLO en almacenamiento local (instantáneo, sin red)
+        tieneFirmaLocal = await FirmaTecnicoService.instance.tieneFirma(username);
+      } catch (e) {
+        debugPrint('[Dashboard] Error verificando firma local: $e');
+      }
+
+      if (!tieneFirmaLocal && mounted) {
+        debugPrint('[Dashboard] Técnico sin firma local → mostrando diálogo bloqueante');
+        await showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (ctx) => PopScope(
+            canPop: false, // Flutter 3.x+ replacement for WillPopScope
+            child: CapturFirmaTecnicoDialog(
+              username:       username,
+              nombreCompleto: nombre,
+              idTecnico:      idTec,
+            ),
+          ),
+        );
+      }
+    }
+
+    // ── 3. Disparar sincronización con visibilidad de error real ───────
+    if (mounted) await _sincronizarOrdenesServidor();
+  }
+
+  /// Cierra el dialog de progreso de forma segura, usando el contexto
+  /// del propio widget (no el del builder del dialog) para evitar el
+  /// problema de dialogCtx no inicializado cuando se cierra antes del
+  /// primer frame renderizado.
+  void _closeSyncDialog() {
+    if (!_syncDialogOpen) return;
+    _syncDialogOpen = false;
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.of(context, rootNavigator: false).pop();
+    }
+  }
+
+  Future<void> _sincronizarOrdenesServidor() async {
+    if (!mounted) return;
+    if (_syncDialogOpen) return; // Evitar doble apertura
+
+    // ── Abrir spinner con flag de control ────────────────────────────────
+    _syncDialogOpen = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      useRootNavigator: false,
+      builder: (_) => const AlertDialog(
+        title: Text('Sincronizando...'),
+        content: SizedBox(
+          height: 88,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              CircularProgressIndicator(color: Color(0xFFC8102E)),
+              SizedBox(height: 16),
+              Text('Descargando órdenes del servidor Render...',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12, color: Colors.grey)),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    String? errorMsg;
+    String? errorDetail;
+
+    try {
+      debugPrint('[Sync] Iniciando sincronización con timeout de 30s...');
+
+      // ── SIEMPRE forzar pull completo desde 2000-01-01 ─────────────────────
+      // El servidor filtra por sync_at >= since. Las órdenes con sync_at=NULL
+      // quedan EXCLUIDAS si since > 1970. Resetear garantiza que se descarguen
+      // TODAS las órdenes del técnico en cada sync manual.
+      await LocalDbService.instance.setLastSyncTime(DateTime(2000));
+      debugPrint('[Sync] lastSync reseteado a 2000-01-01 → pull completo garantizado');
+
+      // TIMEOUT ESTRICTO: si performSync no responde en 30s → TimeoutException
+      await context
+          .read<SyncService>()
+          .performSync()
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () {
+              throw TimeoutException(
+                'El servidor Render no respondió en 30 segundos.\n'
+                'Puede estar en "cold start" (espera ~1 min) o sin internet.',
+              );
+            },
+          );
+
+      await _loadLocal();
+
+      // Determinar resultado
+      if (mounted) {
+        final sync = context.read<SyncService>();
+        if (sync.state == SyncState.error) {
+          errorMsg = 'Error de Sincronización';
+          errorDetail = sync.message.isNotEmpty
+              ? sync.message
+              : 'Error desconocido al conectar con el servidor.';
+        }
+      }
+    } on TimeoutException catch (e) {
+      debugPrint('[Sync] ⏱ TIMEOUT: $e');
+      errorMsg = 'Tiempo de Espera Agotado';
+      errorDetail = e.message ?? e.toString();
+    } catch (e, st) {
+      debugPrint('[Sync] ❌ ERROR: $e\n$st');
+      errorMsg = 'Error de Conexión';
+      errorDetail = e.toString();
+    } finally {
+      // ── CIERRE GARANTIZADO DEL DIALOG ──────────────────────────────────
+      // Se ejecuta SIEMPRE: éxito, error o timeout.
+      _closeSyncDialog();
+    }
+
+    if (!mounted) return;
+
+    // ── Resultado: error ────────────────────────────────────────────────
+    if (errorMsg != null) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Row(children: [
+            const Icon(Icons.wifi_off, color: Color(0xFFC8102E), size: 20),
+            const SizedBox(width: 8),
+            Expanded(child: Text(errorMsg!, style: const TextStyle(fontSize: 15))),
+          ]),
+          content: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: SelectableText(
+                    errorDetail ?? 'Sin detalles',
+                    style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                const Text(
+                  '• Verifica que la tablet tenga Wi-Fi activo\n'
+                  '• Render puede tardar ~30s en despertar (cold start)\n'
+                  '• Si persiste, cierra sesión y vuelve a entrar',
+                  style: TextStyle(fontSize: 11, color: Colors.grey),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cerrar'),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFC8102E),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _sincronizarOrdenesServidor();
+              },
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Reintentar'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    // ── Resultado: éxito ─────────────────────────────────────────────────
+    final totalOS = _all.length;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          totalOS > 0
+              ? '✅ Sincronizado — $totalOS órdenes en pantalla'
+              : '⚠ Sincronizado pero el servidor no reporta órdenes para este técnico.',
+        ),
+        backgroundColor:
+            totalOS > 0 ? Colors.green.shade700 : Colors.orange.shade700,
+        duration: const Duration(seconds: 5),
+      ),
+    );
   }
 
   @override
@@ -67,18 +281,22 @@ class _OsListScreenState extends State<OsListScreen> {
   }
 
   void _onSyncChanged() {
-    if (context.read<SyncService>().state == SyncState.success) _loadLocal();
+    final state = context.read<SyncService>().state;
+    // [FIX] Recargar en success Y en error: el servidor puede reportar 0 nuevas
+    // órdenes (pull vació) pero puede haber datos previos en SQLite local que
+    // deben mostrarse. Antes solo se recargaba en success, ocultando datos locales.
+    if (state == SyncState.success || state == SyncState.error) {
+      _loadLocal();
+    }
   }
+
 
   Future<void> _loadLocal() async {
     setState(() => _loading = true);
     try {
       // RBAC: si el usuario es técnico, cargar solo sus órdenes de SQLite local
       final auth = context.read<AuthService>();
-      final r = (auth.role ?? '').toLowerCase();
-      const tecRoles = {'tecnico','servicio','tecnico_campo','calibrador',
-          'inspector','tecnico_calibrador','tecnico_inspector','operativo'};
-      final isTecnico = tecRoles.contains(r);
+      final isTecnico = auth.isTecnico;
       final nombre = auth.nombreCompleto ?? '';
 
       final list = isTecnico && nombre.isNotEmpty
@@ -90,7 +308,8 @@ class _OsListScreenState extends State<OsListScreen> {
         // Usar compute() para filtrado en isolate si hay >20 elementos
         await _applyFilters();
       }
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[Dashboard] Error en _loadLocal: $e');
       if (mounted) setState(() { _all = []; _loading = false; });
     }
   }
@@ -192,10 +411,7 @@ class _OsListScreenState extends State<OsListScreen> {
     final groups = _groupByLote(_filtered);
     // Detectar si el usuario es técnico para ocultar columna Técnico
     final auth = context.read<AuthService>();
-    final r = (auth.role ?? '').toLowerCase();
-    const tecRoles = {'tecnico','servicio','tecnico_campo','calibrador',
-        'inspector','tecnico_calibrador','tecnico_inspector','operativo'};
-    final hideTecnico = tecRoles.contains(r);
+    final hideTecnico = auth.isTecnico;
 
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -251,21 +467,35 @@ class _FilterParams {
   });
 }
 
+DateTime? _parseFecha(String s) {
+  if (s.isEmpty) return null;
+  final d = DateTime.tryParse(s);
+  if (d != null) return d;
+  if (s.contains('/')) {
+    final parts = s.split('/');
+    if (parts.length == 3) {
+      if (parts[0].length == 4) {
+        return DateTime.tryParse('${parts[0]}-${parts[1].padLeft(2, '0')}-${parts[2].padLeft(2, '0')}');
+      } else {
+        return DateTime.tryParse('${parts[2]}-${parts[1].padLeft(2, '0')}-${parts[0].padLeft(2, '0')}');
+      }
+    }
+  }
+  return null;
+}
+
 /// Función top-level requerida por compute() — corre en isolate separado
 List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
   final now = DateTime(p.nowYear, p.nowMonth, p.nowDay);
   final filtered = p.all.where((os) {
     final fechaStr = os['fecha'] as String? ?? '';
     if (p.periodo != 'Todo' && fechaStr.isNotEmpty) {
-      try {
-        final parts = fechaStr.split('/');
-        if (parts.length == 3) {
-          final f = DateTime(int.parse(parts[2]), int.parse(parts[1]), int.parse(parts[0]));
-          if (p.periodo == 'Hoy'    && !(f.year==now.year&&f.month==now.month&&f.day==now.day)) return false;
-          if (p.periodo == 'Semana' && now.difference(f).inDays > 7) return false;
-          if (p.periodo == 'Mes'    && (f.month!=now.month||f.year!=now.year)) return false;
-        }
-      } catch (_) {}
+      final f = _parseFecha(fechaStr);
+      if (f != null) {
+        if (p.periodo == 'Hoy'    && !(f.year == now.year && f.month == now.month && f.day == now.day)) return false;
+        if (p.periodo == 'Semana' && now.difference(f).inDays.abs() > 7) return false;
+        if (p.periodo == 'Mes'    && (f.month != now.month || f.year != now.year)) return false;
+      }
     }
     if (p.tecnico != null && p.tecnico!.isNotEmpty &&
         !(os['tecnico'] as String? ?? '').toLowerCase().contains(p.tecnico!.toLowerCase())) return false;
@@ -368,20 +598,26 @@ class _Header extends StatelessWidget {
             onPressed: onRefresh,
             child: const Icon(Icons.refresh, size: 16),
           ),
-          const SizedBox(width: 4),
-          // Botón + Nuevo Documento (rojo corporativo)
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _red,
-              foregroundColor: _white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            ),
-            onPressed: () => _showNuevoDocDialog(context),
-            icon: const Icon(Icons.add, size: 14),
-            label: const Text('+ Nuevo Documento',
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
-          ),
+          // Botón + Nuevo Documento — oculto para técnicos de campo
+          Builder(builder: (ctx) {
+            final isTecnico = ctx.watch<AuthService>().isTecnico;
+            if (isTecnico) return const SizedBox.shrink();
+            return Row(mainAxisSize: MainAxisSize.min, children: [
+              const SizedBox(width: 4),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _red,
+                  foregroundColor: _white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                ),
+                onPressed: () => _showNuevoDocDialog(context),
+                icon: const Icon(Icons.add, size: 14),
+                label: const Text('+ Nuevo Documento',
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
+              ),
+            ]);
+          }),
         ]),
       );
     });

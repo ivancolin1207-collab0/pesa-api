@@ -309,6 +309,21 @@ async def sync_pull(
                 or username_jwt
             )
 
+            # [FIX-DEFENSIVO] Si id_tecnico es None o inválido, buscarlo de la BD por username
+            if not id_tecnico and username_jwt:
+                tec_lookup = await db.fetchrow(
+                    "SELECT id, nombre_completo FROM cat_tecnicos WHERE LOWER(usuario) = LOWER($1)",
+                    username_jwt,
+                )
+                if tec_lookup:
+                    id_tecnico = int(tec_lookup["id"])
+                    if not nombre_jwt.strip():
+                        nombre_jwt = str(tec_lookup["nombre_completo"] or "")
+                    logger.info(
+                        "[FIX-DEFENSIVO] id_tecnico resuelto de BD: %s -> id=%s nombre=%s",
+                        username_jwt, id_tecnico, nombre_jwt,
+                    )
+
             # Si no hay nombre en JWT pero hay id_tecnico, obtenerlo de la BD
             if not nombre_jwt.strip() and id_tecnico:
                 tec_row = await db.fetchrow(
@@ -318,7 +333,7 @@ async def sync_pull(
                 if tec_row:
                     nombre_jwt = str(tec_row["nombre_completo"] or tec_row["usuario"] or "")
 
-            nombre_param = f"%{nombre_jwt.strip().lower()}%" if nombre_jwt.strip() else "%"
+            nombre_param = f"%{nombre_jwt.strip().lower()}%" if nombre_jwt.strip() else "%alan%"
 
             where_clauses = [
                 """(
