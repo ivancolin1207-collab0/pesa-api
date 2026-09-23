@@ -224,8 +224,11 @@ async def sync_pull(
 
     # ── SELECT blindado con COALESCE en todos los campos de texto ─────────────
     # Garantiza que ningún NULL en órdenes físicas rompa la validación Pydantic.
+    # [FIX-DUPLICADOS] SELECT DISTINCT ON garantiza una sola fila por folio_os.
+    # El JOIN con cliente_sucursales puede multiplicar filas si hay varias sucursales
+    # por cliente, o si el técnico coincide tanto por id como por nombre en el WHERE.
     _SELECT = """
-        SELECT
+        SELECT DISTINCT ON (os.folio_os)
             os.folio_os,
             COALESCE(os.estado,    'PROCESO') AS estado,
             COALESCE(os.modalidad, 'DIGITAL') AS modalidad,
@@ -261,13 +264,11 @@ async def sync_pull(
             COALESCE(cl.razon_social, os.cliente, '') AS cliente_nombre,
             COALESCE(cl.direccion,       '') AS direccion_cliente,
             COALESCE(suc.nombre_sucursal, '') AS sucursal_nombre,
-            -- [FIX] Preferir texto directo os.tipo_servicio si el JOIN no resuelve
             COALESCE(ts.nombre, os.tipo_servicio, '') AS tipo_servicio,
             COALESCE(tc.nombre_completo, '') AS tecnico,
             COALESCE(tc.nombre_completo, '') AS tecnico_nombre,
             ce.codigo                        AS clase_exactitud_codigo,
             COALESCE(ti.nombre,          '') AS tipo_instrumento,
-            -- Offline-First v2: PDF + firma del técnico para uso offline
             NULL::text                       AS pdf_b64,
             NULL::text                       AS firma_tecnico_descargada,
             'kg'                             AS unidad_medida,
@@ -287,18 +288,17 @@ async def sync_pull(
 
     try:
         if is_admin:
-            # Admin: TODAS las OS activas (Física + Digital) sin filtro de técnico ni fecha
-            # El admin siempre descarga el set completo para tener visión total
+            # Admin: TODAS las OS activas — DISTINCT ON ya en _SELECT elimina duplicados
             rows = await db.fetch(
                 _SELECT + """
                 WHERE (os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')
-                ORDER BY os.fecha DESC NULLS LAST, os.folio_os DESC
+                ORDER BY os.folio_os DESC, os.updated_at DESC
                 LIMIT $1
                 """,
                 settings.SYNC_MAX_BATCH_SIZE,
             )
             logger.info(
-                "Sync PULL [ADMIN %s (rol=%s)]: %d OS totales (físicas + digitales)",
+                "Sync PULL [ADMIN %s (rol=%s)]: %d OS DISTINTAS (sin duplicados)",
                 current_user.get("username"), role, len(rows),
             )
         else:
@@ -339,11 +339,18 @@ async def sync_pull(
 
             nombre_param = f"%{nombre_jwt.strip().lower()}%" if nombre_jwt.strip() else "%alan%"
 
+            # [FIX-DUPLICADOS] Usar EXISTS en lugar de JOIN de nombre para evitar
+            # que la condición OR en el nombre del técnico multiplique filas.
+            # La cláusula DISTINCT ON en _SELECT también actúa como red de seguridad.
             where_clauses = [
                 """(
                     os.id_tecnico = $1
-                    OR LOWER(COALESCE(tc.nombre_completo, '')) ILIKE $2
-                    OR LOWER(COALESCE(tc.usuario, ''))         ILIKE $2
+                    OR EXISTS (
+                        SELECT 1 FROM cat_tecnicos t2
+                        WHERE t2.id = os.id_tecnico
+                          AND (LOWER(t2.nombre_completo) ILIKE $2
+                               OR LOWER(t2.usuario) ILIKE $2)
+                    )
                 )""",
                 "(os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')",
             ]
@@ -354,9 +361,10 @@ async def sync_pull(
                 where_clauses.append(f"os.updated_at >= ${len(params)}::timestamp")
 
             params.append(settings.SYNC_MAX_BATCH_SIZE)
+            # DISTINCT ON en _SELECT + ORDER BY folio_os primero garantiza un solo resultado por folio
             query_sql = _SELECT + f"""
                 WHERE {" AND ".join(where_clauses)}
-                ORDER BY os.fecha DESC NULLS LAST, os.folio_os DESC
+                ORDER BY os.folio_os DESC, os.updated_at DESC
                 LIMIT ${len(params)}
             """
             rows = await db.fetch(query_sql, *params)
