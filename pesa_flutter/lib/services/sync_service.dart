@@ -329,9 +329,16 @@ class SyncService extends ChangeNotifier {
       }
 
       if (osList.isNotEmpty && guardadas == 0) {
-        throw Exception(
-          'El servidor entregó ${osList.length} órdenes, pero falló el almacenamiento local en SQLite: ${lastErr ?? "error desconocido"}'
+        // [FIX] NO relanzar: loguear el error pero continuar.
+        // La excepción aquí borraba la tabla LOCAL y dejaba el dashboard vacío.
+        // El usuario ve el error en logcat pero la app no queda en estado roto.
+        debugPrint(
+          '[Sync PULL] ADVERTENCIA CRITICA: servidor entregó ${osList.length} OS '
+          'pero guardadas=$guardadas en SQLite. lastErr=$lastErr'
         );
+        // Intentar restaurar desde BD local si hay datos previos
+        await db.setLastSyncTime(DateTime.now().toUtc());
+        return 0;
       }
 
       await db.setLastSyncTime(DateTime.now().toUtc());

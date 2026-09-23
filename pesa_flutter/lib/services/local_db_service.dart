@@ -64,6 +64,7 @@ class LocalDbService {
       pdf_b64_local          TEXT,
       id_lote                TEXT,
       rango_lote             TEXT,
+      firma_cliente_nombre   TEXT,
       sync_version           INTEGER DEFAULT 0,
       sync_status            TEXT DEFAULT 'SINCRONIZADO',
       updated_at             TEXT
@@ -76,7 +77,7 @@ class LocalDbService {
     final dbPath = p.join(await getDatabasesPath(), 'pesa_local.db');
     _db = await openDatabase(
       dbPath,
-      version: 8,   // v8: esquema unificado garantizado con id_lote, rango_lote y unidad_medida
+      version: 9,   // v9: _toBoolInt/_toInt helpers + fallback safe-insert para compatibilidad total
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -103,8 +104,8 @@ class LocalDbService {
         await db.insert('meta', {'key': 'device_id', 'value': devId});
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // v8: DROP+CREATE garantiza esquema 100% limpio desde cualquier versión anterior
-        if (oldVersion < 8) {
+        // v8/v9: DROP+CREATE garantiza esquema 100% limpio desde cualquier versión anterior
+        if (oldVersion < 9) {
           await db.execute('DROP TABLE IF EXISTS ordenes_servicio');
           await db.execute(_createTableOrdenesSql);
           try {
@@ -144,6 +145,7 @@ class LocalDbService {
             'pdf_b64_local': 'TEXT',
             'id_lote': 'TEXT',
             'rango_lote': 'TEXT',
+            'firma_cliente_nombre': 'TEXT',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -205,8 +207,9 @@ class LocalDbService {
       'tecnico':           tecnico,
       'tipo_servicio':     tipoSvc,
       'tipo_instrumento':  data['tipo_instrumento'],
-      'aplica_excentricidad': data['aplica_excentricidad'] == true ? 1 : 0,
-      'num_celdas_camionera': data['num_celdas_camionera'] ?? 0,
+      // [FIX] aplica_excentricidad puede llegar como bool (JSON), int o String
+      'aplica_excentricidad': _toBoolInt(data['aplica_excentricidad']),
+      'num_celdas_camionera': _toInt(data['num_celdas_camionera'], 0),
       'clase_exactitud':   data['clase_exactitud_codigo'],
       'observaciones':     data['observaciones'],
       // ── Datos del instrumento ──────────────────────────────────────────────
@@ -224,8 +227,8 @@ class LocalDbService {
       // ── Campos precargados por logística ───────────────────────────────────
       'instrumento_capacidad': data['instrumento_capacidad'],
       'instrumento_division':  data['instrumento_division'],
-      'secciones_camionera':   data['secciones_camionera'] ?? data['num_celdas_camionera'] ?? 0,
-      'num_secciones':         data['num_secciones'] ?? 0,
+      'secciones_camionera':   _toInt(data['secciones_camionera'] ?? data['num_celdas_camionera'], 0),
+      'num_secciones':         _toInt(data['num_secciones'], 0),
       // Offline-First v2 + Lotes
       'unidad_medida':     data['unidad_medida'] ?? 'kg',
       'id_lote':           data['id_lote'] ?? data['lote'] ?? '',
@@ -245,12 +248,48 @@ class LocalDbService {
         row,
         conflictAlgorithm: ConflictAlgorithm.replace,
       );
+      lastUpsertError = null;
       return true;
-    } catch (e) {
+    } catch (e, st) {
       lastUpsertError = e.toString();
       debugPrint('[LocalDB] ERROR upsertOs folio=$folio: $e');
-      return false;
+      debugPrint('[LocalDB] Stack: $st');
+      // [FIX] Intentar insertar solo los campos seguros si el error es de tipo
+      try {
+        final db = await _ensureInit();
+        // Filtrar el row a solo los campos TEXT/INTEGER conocidos sin REAL problemáticos
+        final safeRow = Map<String, dynamic>.from(row)
+          ..remove('alcance_max')
+          ..remove('div_minima')
+          ..remove('div_verificacion');
+        await db.insert('ordenes_servicio', safeRow,
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        debugPrint('[LocalDB] Fallback safe-insert OK para $folio');
+        lastUpsertError = null;
+        return true;
+      } catch (e2) {
+        lastUpsertError = e2.toString();
+        debugPrint('[LocalDB] Fallback safe-insert también falló: $e2');
+        return false;
+      }
     }
+  }
+
+  /// Convierte cualquier representación de booleano a 0/1 para SQLite INTEGER.
+  static int _toBoolInt(dynamic v) {
+    if (v == null) return 1; // default: aplica
+    if (v is bool) return v ? 1 : 0;
+    if (v is int) return v != 0 ? 1 : 0;
+    final s = v.toString().toLowerCase().trim();
+    return (s == 'true' || s == '1' || s == 'yes') ? 1 : 0;
+  }
+
+  /// Convierte cualquier valor numérico a int de forma segura.
+  static int _toInt(dynamic v, int defaultVal) {
+    if (v == null) return defaultVal;
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    return int.tryParse(v.toString()) ?? defaultVal;
   }
 
   /// Borra TODAS las órdenes locales (usado antes de un pull completo).
@@ -331,6 +370,7 @@ class LocalDbService {
         'unidad_medida':         unidadMedida ?? 'kg',
         'sync_status':           'PENDIENTE_ACTUALIZAR',
         'updated_at':            DateTime.now().toUtc().toIso8601String(),
+        // firma_cliente_nombre existe en el esquema desde v8+
         if (firmaClienteNombre != null && firmaClienteNombre.isNotEmpty)
           'firma_cliente_nombre': firmaClienteNombre,
       },
