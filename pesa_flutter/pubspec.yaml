@@ -1,0 +1,57 @@
+name: pesa_tablet
+description: "Servicios PESA â€” App de campo para tecnico en tablet Android. Offline-first con sincronizacion automatica."
+publish_to: 'none'
+version: 3.0.0+6
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- HTTP y Auth ---
+  http: ^1.2.2
+  flutter_secure_storage: ^9.2.2     # JWT token almacenado seguro
+  jwt_decoder: ^2.0.1
+  crypto: ^3.0.3                     # SHA-256 para login offline
+
+  # --- SQLite local (offline-first) ---
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+
+  # --- Conectividad ---
+  connectivity_plus: ^6.0.5          # Deteccion de red (WiFi / datos / ninguna)
+
+  # --- PDF on-device ---
+  pdf: ^3.10.8                       # Generacion de PDF en la tablet
+  printing: ^5.13.1                  # Imprimir o compartir el PDF
+
+  # --- Firma digital ---
+  signature: ^5.4.0                  # Canvas de firma digital tactil
+
+  # --- UI ---
+  cupertino_icons: ^1.0.8
+  intl: ^0.19.0                      # Formateo de fechas
+  provider: ^6.1.2                   # State management
+  go_router: ^14.2.7                 # Navegacion declarativa
+  flutter_animate: ^4.5.0            # Micro-animaciones
+
+  # --- Background sync ---
+  workmanager: ^0.5.2                # Worker en segundo plano (Android)
+  path_provider: ^2.1.3              # Obtener rutas de Documents/Downloads
+  open_filex: ^4.3.4                 # Abrir PDF con visor nativo del dispositivo
+
+  # --- CÃ¡mara / Escaneo ---
+  image_picker: ^1.1.2               # Captura con cÃ¡mara o galerÃ­a para escaneos
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - Img/
