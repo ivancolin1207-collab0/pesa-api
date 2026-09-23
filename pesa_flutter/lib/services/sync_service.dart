@@ -249,17 +249,14 @@ class SyncService extends ChangeNotifier {
         return 0;  // performSync pondra SyncState.success y _loadLocal() se ejecutara
       }
 
-      // Upsert individual con error por fila para no perder el resto si una falla
+      // Upsert individual — upsertOs ya tiene try/catch interno y devuelve bool
       int guardadas = 0;
       for (final osData in osList) {
-        try {
-          debugPrint('[Sync PULL]   OS: ${osData["folio_os"]} | '
-              'estado: ${osData["estado"]} | tecnico: ${osData["tecnico"]}');
-          await db.upsertOs(osData);
-          guardadas++;
-        } catch (e) {
-          debugPrint('[Sync PULL]   AVISO upsertOs fallo para ${osData["folio_os"]}: $e');
-        }
+        final folio = osData['folio_os'] ?? '?';
+        debugPrint('[Sync PULL]   OS: $folio | '
+            'estado: ${osData["estado"]} | tecnico: ${osData["tecnico"]}');
+        final ok = await db.upsertOs(osData);
+        if (ok) guardadas++;
       }
 
       await db.setLastSyncTime(DateTime.now().toUtc());

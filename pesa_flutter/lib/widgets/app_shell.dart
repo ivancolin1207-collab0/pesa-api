@@ -6,7 +6,7 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/sync_service.dart';
 
-// ── Tokens corporativos light ─────────────────────────────────────────────
+// ── Tokens corporativos light ───────────────────────────────────────────────
 const _red         = Color(0xFFC8102E);
 const _redLight    = Color(0xFFFEE2E2); // fondo ítem activo
 const _sidebarBg   = Colors.white;
@@ -26,17 +26,28 @@ const _navItemsAll = [
   _NavItem(icon: Icons.settings_outlined,         label: 'Configuración',      route: '/settings'),
 ];
 
-/// Roles que son técnicos de campo (sin acceso a catálogos/config)
-const _tecnicoRoles = {'tecnico', 'servicio', 'tecnico_campo', 'calibrador', 'inspector',
-    'tecnico_calibrador', 'tecnico_inspector', 'operativo'};
+/// Items visibles solo para admin/logistica/recepcion (ocultos para técnicos)
+const _adminOnlyRoutes = {'/catalogos', '/settings', '/formatos'};
 
-/// Items visibles solo para admin/logistica/recepcion
-const _adminOnlyRoutes = {'/catalogos', '/settings'};
+/// Determina si un rol corresponde a un técnico operativo de campo
+bool _isTecnicoRole(String? role) {
+  if (role == null || role.isEmpty) return false;
+  final r = role.toLowerCase().trim()
+      .replaceAll('é', 'e')
+      .replaceAll('á', 'a')
+      .replaceAll('í', 'i')
+      .replaceAll('ó', 'o')
+      .replaceAll('ú', 'u');
+  return r.contains('tec') ||
+         r == 'servicio' ||
+         r == 'calibrador' ||
+         r == 'inspector' ||
+         r == 'operativo';
+}
 
 /// Devuelve los items del menú filtrados según el rol del usuario
 List<_NavItem> _navItemsForRole(String? role) {
-  final r = (role ?? '').toLowerCase().trim();
-  final isTecnico = _tecnicoRoles.contains(r);
+  final isTecnico = _isTecnicoRole(role);
   if (isTecnico) {
     return _navItemsAll.where((i) => !_adminOnlyRoutes.contains(i.route)).toList();
   }
@@ -125,7 +136,7 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-// ── Contenido del sidebar ─────────────────────────────────────────────────
+// ── Contenido del sidebar ───────────────────────────────────────────────────
 class _SidebarContent extends StatelessWidget {
   final String currentRoute;
   const _SidebarContent({required this.currentRoute});
@@ -134,7 +145,7 @@ class _SidebarContent extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Column(children: [
-        // ── Brand ────────────────────────────────────────────────────────
+        // ── Brand ─────────────────────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 20, 16, 16),
           child: Row(children: [
@@ -149,14 +160,14 @@ class _SidebarContent extends StatelessWidget {
               Text('Servicios PESA',
                   style: TextStyle(color: Color(0xFF111827),
                       fontWeight: FontWeight.w800, fontSize: 14)),
-              Text('v1.0.0',
+              Text('v3.1.2',
                   style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 10)),
             ]),
           ]),
         ),
         const Divider(color: _divider, height: 1),
 
-        // ── Label MENÚ ────────────────────────────────────────────────────
+        // ── Label MENÚ ───────────────────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
           child: Align(
@@ -167,7 +178,7 @@ class _SidebarContent extends StatelessWidget {
           ),
         ),
 
-        // ── Ítems ────────────────────────────────────────────────────
+        // ── Ítems ────────────────────────────────────────────────────────
         Builder(builder: (ctx) {
           final auth = ctx.watch<AuthService>();
           final items = _navItemsForRole(auth.role);
@@ -181,14 +192,14 @@ class _SidebarContent extends StatelessWidget {
         const Spacer(),
         const Divider(color: _divider, height: 1),
 
-        // ── Perfil usuario ────────────────────────────────────────────────
+        // ── Perfil usuario ───────────────────────────────────────────────
         _UserProfile(),
       ]),
     );
   }
 }
 
-// ── Nav tile ─────────────────────────────────────────────────────────────
+// ── Nav tile ────────────────────────────────────────────────────────────────
 class _NavTile extends StatelessWidget {
   final _NavItem item;
   final bool     isActive;
@@ -227,7 +238,7 @@ class _NavTile extends StatelessWidget {
   }
 }
 
-// ── Perfil usuario ────────────────────────────────────────────────────────
+// ── Perfil usuario ──────────────────────────────────────────────────────────
 class _UserProfile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {

@@ -219,15 +219,21 @@ class LocalDbService {
 
   // ── CRUD OS ───────────────────────────────────────────────────────────────
 
-  Future<void> upsertOs(Map<String, dynamic> data) async {
-    // [FIX] Tolerancia a variaciones de nombre de campo que devuelve el API
+  Future<bool> upsertOs(Map<String, dynamic> data) async {
+    // [FIX v3.1.2] Tolerancia a variaciones de nombre de campo que devuelve el API
+    final folio     = (data['folio_os'] as String? ?? '').trim();
+    if (folio.isEmpty) {
+      debugPrint('[LocalDB] upsertOs: folio_os vacío, saltando registro');
+      return false;
+    }
+
     final sucursal  = data['sucursal_nombre'] ?? data['sucursal'] ?? '';
     final cliente   = data['cliente'] ?? data['cliente_nombre'] ?? '';
     final tecnico   = data['tecnico'] ?? data['tecnico_nombre'] ?? '';
     final tipoSvc   = data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '';
 
     final row = {
-      'folio_os':          data['folio_os'] ?? '',
+      'folio_os':          folio,
       'estado':            data['estado'] ?? 'PROCESO',
       'modalidad':         data['modalidad'] ?? 'DIGITAL',
       'fecha':             data['fecha'],
@@ -267,12 +273,18 @@ class LocalDbService {
       'updated_at':        data['updated_at']?.toString(),
     };
 
-    final db = await _ensureInit();
-    await db.insert(
-      'ordenes_servicio',
-      row,
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    try {
+      final db = await _ensureInit();
+      await db.insert(
+        'ordenes_servicio',
+        row,
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      return true;
+    } catch (e) {
+      debugPrint('[LocalDB] ERROR upsertOs folio=$folio: $e');
+      return false;
+    }
   }
 
   Future<List<Map<String, dynamic>>> getAllOs() async {

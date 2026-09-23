@@ -45,14 +45,16 @@ class ApiService {
   /// Devuelve un String descriptivo si hubo error (para mostrarlo en la UI).
   Future<String?> login(String username, String password) async {
     try {
-      // FastAPI usa OAuth2PasswordRequestForm → requiere form-urlencoded
+      // [FIX v3.1.2] Usar JSON en lugar de form-urlencoded.
+      // El backend auth.py procesa JSON primero (Content-Type: application/json).
+      // Esto elimina problemas de codificación con caracteres especiales y es más fiable.
       final resp = await http.post(
         Uri.parse('$_baseUrl/auth/login'),
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
-        body: {
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
           'username': username.trim(),
           'password': password.trim(),
-        },
+        }),
       ).timeout(_connTimeout);  // 90s — tolera cold-start de Render
 
       debugPrint('[API Login] Status: ${resp.statusCode} Body: ${resp.body}');
