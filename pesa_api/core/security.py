@@ -26,13 +26,14 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 SQL_CURRENT_USER = "SELECT id, usuario AS username, nombre_completo, activo, id AS id_tecnico, rol AS role FROM cat_tecnicos WHERE id = $1"
 
-# ── Resolución de la clave JWT — prioridad: settings.JWT_SECRET > env directo > fallback ──
-# IMPORTANTE: settings.JWT_SECRET lee PESA_JWT_SECRET del .env.
-# No usar getattr con nombre incorrecto (SECRET_KEY no existe en Settings).
-_SECRET = getattr(settings, "JWT_SECRET",
-            os.environ.get("PESA_JWT_SECRET",
-              os.environ.get("JWT_SECRET", "pesa-secret-2026-cambiar-en-produccion")))
-_ALGO   = getattr(settings, "JWT_ALGORITHM", "HS256")
+# ── Resolución de la clave JWT ────────────────────────────────────────────────
+# Fuente única de verdad: settings.JWT_SECRET (que lee PESA_JWT_SECRET del entorno).
+# El fallback hardcoded es IDÉNTICO al de config.py para evitar discrepancias
+# cuando Render no tiene PESA_JWT_SECRET configurado en Environment Variables.
+# [FIX-401] Esta era la causa raíz del bucle 401: dos fallbacks distintos entre
+#            config.py y security.py firmaban/validaban con claves diferentes.
+_SECRET = settings.JWT_SECRET  # settings.JWT_SECRET = os.getenv("PESA_JWT_SECRET", "CAMBIAR-EN-PRODUCCION-secret-pesa-2026")
+_ALGO   = settings.JWT_ALGORITHM
 # Access token: 30 días (43,200 min) para técnicos de campo sin conexión frecuente
 _ACCESS_MINUTES = int(os.environ.get(
     "PESA_JWT_EXPIRE_MINUTES",
@@ -118,6 +119,9 @@ async def get_current_user(
         "id": row["id"],
         "username": row["username"],
         "nombre_completo": row["nombre_completo"],
+        # [FIX-SYNC] Alias 'nombre' para compatibilidad con sync_pull y otros routers
+        # que acceden a current_user.get('nombre'). Ambas claves apuntan al mismo valor.
+        "nombre": row["nombre_completo"],
         "role": effective_role,
         "id_tecnico": row["id_tecnico"],
     }

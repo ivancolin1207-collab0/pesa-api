@@ -22,7 +22,7 @@ from pesa_api.core.config  import settings
 from pesa_api.core.database import init_db_pool, close_db_pool
 from pesa_api.routers      import (
     auth, os_router, sync, equipos, entrega_semanal, catalogos,
-    usuarios_router, errores_router,
+    usuarios_router, errores_router, admin_router,
 )
 
 logger = logging.getLogger("pesa_api")
@@ -117,6 +117,8 @@ app.include_router(catalogos.router,        prefix="/api/v1",              tags=
 # ── Firma de perfil del técnico + errores de campo (v3.1) ────────────────
 app.include_router(usuarios_router.router,  prefix="/api/v1/usuarios",     tags=["Usuarios - Firma"])
 app.include_router(errores_router.router,   prefix="/api/v1/errores-tecnicos", tags=["Errores Técnicos"])
+# ── Administración y mantenimiento de datos (solo admin) ──────────────
+app.include_router(admin_router.router,     prefix="/api/v1/admin",          tags=["Administración"])
 
 # ─── Healthcheck ─────────────────────────────────────────────────────────────
 

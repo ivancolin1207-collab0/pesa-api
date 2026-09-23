@@ -300,7 +300,13 @@ async def sync_pull(
             # Técnico: todas las órdenes asignadas por ID o por nombre
             # Trae todas las modalidades (FÍSICO, DIGITAL, HÍBRIDO) sin exclusión rígida
             username_jwt = str(current_user.get("username") or "")
-            nombre_jwt   = str(current_user.get("nombre") or "") or username_jwt
+            # [FIX-SYNC-PULL] Leer 'nombre_completo' (clave correcta del dict get_current_user)
+            # y tambien el alias 'nombre' que ahora incluimos en el JWT y en current_user.
+            nombre_jwt = (
+                str(current_user.get("nombre_completo") or "")
+                or str(current_user.get("nombre") or "")
+                or username_jwt
+            )
 
             # Si no hay nombre en JWT pero hay id_tecnico, obtenerlo de la BD
             if not nombre_jwt.strip() and id_tecnico:
@@ -335,8 +341,8 @@ async def sync_pull(
             """
             rows = await db.fetch(query_sql, *params)
             logger.info(
-                "Sync PULL [TECNICO id=%s user=%s]: %d OS encontradas",
-                id_tecnico, username_jwt, len(rows),
+                "Sync PULL [TECNICO id=%s user=%s nombre=%s]: %d OS encontradas",
+                id_tecnico, username_jwt, nombre_jwt, len(rows),
             )
 
         return [OSCompleta(**dict(r)) for r in rows]

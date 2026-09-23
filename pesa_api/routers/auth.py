@@ -1,4 +1,4 @@
-﻿import hashlib
+import hashlib
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -140,10 +140,11 @@ async def login(
     user_role = str(row["rol"] or "tecnico")
     access = create_access_token({
         "sub":        str(row["id"]),
+        "id":         row["id"],          # [FIX] ID numérico explícito para Flutter
         "role":       user_role,
-        "id_tecnico": row["id"],
+        "id_tecnico": row["id"],          # Compatibilidad backward
         "username":   str(row["usuario"] or ""),
-        "nombre":     str(row["nombre_completo"] or ""),
+        "nombre":     str(row["nombre_completo"] or ""),  # [FIX] nombre explícito para sync_pull y Flutter
     })
     refresh = create_refresh_token(row["id"])
 
@@ -183,10 +184,11 @@ async def refresh_token_endpoint(
     user_role = str(row["rol"] or "tecnico")
     access = create_access_token({
         "sub":        str(row["id"]),
+        "id":         row["id"],          # [FIX] ID numérico explícito
         "role":       user_role,
-        "id_tecnico": row["id"],
+        "id_tecnico": row["id"],          # Compatibilidad backward
         "username":   str(row["usuario"] or ""),
-        "nombre":     str(row["nombre_completo"] or ""),
+        "nombre":     str(row["nombre_completo"] or ""),  # [FIX] nombre explícito
     })
     refresh = create_refresh_token(row["id"])
 
