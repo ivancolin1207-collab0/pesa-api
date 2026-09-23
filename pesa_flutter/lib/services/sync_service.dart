@@ -9,8 +9,6 @@ import 'api_service.dart';
 import 'auth_service.dart';
 import 'local_db_service.dart';
 
-// [FIX-SYNC-DIAG] Timeout referencia — no se usa directamente pero documenta el spec
-const Duration _kPullTimeout = Duration(seconds: 10);
 
 /// Evento global que dispara cuando el servidor responde 401 (sesión expirada).
 /// El AppShell o el Router escuchan este stream para redirigir al Login.
@@ -70,9 +68,14 @@ class SyncService extends ChangeNotifier {
       _setState(SyncState.syncing, 'Obteniendo sesion...');
       final refreshed = await ApiService.instance.silentRefresh();
       if (!refreshed) {
-        debugPrint('[SYNC ERROR] silentRefresh fallo. Sin autenticacion.');
+        debugPrint('[SYNC ERROR] silentRefresh fallo. Sin autenticacion valida.');
+        // [FIX-SESSION] Emitir evento para redirigir al login —
+        // el usuario debe autenticarse de nuevo con sus credenciales actuales.
+        // Esto ocurre cuando el JWT antiguo fue firmado con clave incorrecta
+        // y las credenciales guardadas tambien fallan.
         _setState(SyncState.error,
-            'Sin sesion activa — inicia sesion en linea al menos una vez');
+            'Sesion expirada. Inicia sesion nuevamente.');
+        sessionExpiredEvents.add(null);
         return;
       }
       debugPrint('[SYNC] silentRefresh OK — continuando sync...');

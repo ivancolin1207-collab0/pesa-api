@@ -31,12 +31,12 @@ class ApiService {
 
   String? _userRole;
   String? _lastNombre; // Nombre completo del último login exitoso
+  int?    _lastIdTecnico; // ID en cat_tecnicos del último login
 
-  /// Rol del usuario autenticado (extraído del JWT claims).
-  String? get userRole => _userRole;
-
-  /// Nombre completo del usuario (del response del servidor).
-  String? get lastNombre => _lastNombre;
+  bool    get isAuthenticated => _token != null;
+  String? get userRole       => _userRole;
+  String? get lastNombre     => _lastNombre;
+  int?    get lastIdTecnico  => _lastIdTecnico;
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
@@ -78,18 +78,23 @@ class ApiService {
                 key: 'pesa_nombre_completo', value: _lastNombre);
           }
 
-          // Extraer role del JWT payload
+          // Extraer role e id_tecnico del JWT payload
           try {
             final parts = _token!.split('.');
             if (parts.length == 3) {
               final payload = utf8.decode(base64Url.decode(
                   base64Url.normalize(parts[1])));
               final claims = jsonDecode(payload) as Map<String, dynamic>;
-              _userRole = claims['role'] as String?;
+              _userRole      = claims['role'] as String?;
+              _lastIdTecnico = claims['id_tecnico'] as int?;
+              // Fallback: id_tecnico puede venir como String numérico
+              if (_lastIdTecnico == null && claims['id_tecnico'] != null) {
+                _lastIdTecnico = int.tryParse(claims['id_tecnico'].toString());
+              }
             }
           } catch (_) {}
 
-          debugPrint('[API Login] ✅ Token guardado — rol: $_userRole | nombre: $_lastNombre');
+          debugPrint('[API Login] \u2705 Token guardado — rol: $_userRole | nombre: $_lastNombre | idTec: $_lastIdTecnico');
           return null; // éxito
         }
         return 'El servidor no devolvió un token válido (respuesta incompleta).';
@@ -193,15 +198,64 @@ class ApiService {
     }
   }
 
-  /// Carga el token guardado y, si está expirado, lo renueva silenciosamente.
-  /// Así la primera petición tras abrir la app nunca falla con 401.
+  /// Carga el token guardado y, si está expirado o inválido contra el servidor,
+  /// lo renueva silenciosamente.
+  /// [FIX] Valida el token localmente (exp) Y contra el servidor (/auth/me).
+  /// Si el servidor rechaza el token (p.ej. clave JWT cambiada), lo descarta
+  /// y ejecuta silentRefresh para obtener uno nuevo.
   Future<void> loadSavedToken() async {
     _token = await _storage.read(key: 'jwt_token');
-    if (_token != null && _isTokenExpired(_token!)) {
-      debugPrint('[API] Token cargado está EXPIRADO — renovando proactivamente...');
-      _token = null; // invalidar para forzar refresh
+    if (_token == null) {
+      debugPrint('[API] No hay token guardado.');
+      return;
+    }
+
+    // 1. Validación local de exp
+    if (_isTokenExpired(_token!)) {
+      debugPrint('[API] Token guardado EXPIRADO localmente — renovando...');
+      _token = null;
       final ok = await silentRefresh();
-      debugPrint('[API] Renovación proactiva: ${ok ? "✅ OK" : "❌ Falló"}');
+      debugPrint('[API] Renovacion proactiva: ${ok ? "OK" : "Fallo"}')
+;
+      return;
+    }
+
+    // 2. [FIX] Validación contra el servidor — detecta tokens con firma incorrecta
+    // Usa /auth/me que es liviano y retorna rapidamente
+    try {
+      final resp = await http.get(
+        Uri.parse('$_baseUrl/auth/me'),
+        headers: {'Authorization': 'Bearer $_token'},
+      ).timeout(const Duration(seconds: 15));
+
+      if (resp.statusCode == 401) {
+        // Token rechazado por el servidor (firma incorrecta o revocado)
+        debugPrint('[API] Token rechazado por servidor (401) — limpiando y renovando...');
+        _token = null;
+        await _storage.delete(key: 'jwt_token');
+        final ok = await silentRefresh();
+        debugPrint('[API] Renovacion post-401: ${ok ? "OK" : "Fallo — se requerira login manual"}')
+;
+      } else if (resp.statusCode == 200) {
+        // Token valido — extraer role e id_tecnico del response
+        debugPrint('[API] Token validado contra servidor OK');
+        try {
+          final data = jsonDecode(resp.body) as Map<String, dynamic>;
+          _userRole      = data['role'] as String?;
+          _lastIdTecnico = data['id_tecnico'] as int?;
+          _lastNombre    = data['nombre_completo'] as String?;
+        } catch (_) {}
+      } else {
+        // Error de servidor (5xx, cold-start) — no descartar el token
+        debugPrint('[API] Servidor retorno ${resp.statusCode} en validacion — manteniendo token local');
+      }
+    } on SocketException {
+      // Sin red — token local considerado valido por ahora
+      debugPrint('[API] Sin red al validar token — usando token local');
+    } on TimeoutException {
+      debugPrint('[API] Timeout al validar token (servidor frio) — usando token local');
+    } catch (e) {
+      debugPrint('[API] Error inesperado al validar token: $e — usando token local');
     }
   }
 
@@ -231,8 +285,6 @@ class ApiService {
     await _storage.delete(key: 'jwt_refresh_token');
     // No borramos credenciales — se mantienen para el próximo login
   }
-
-  bool get isAuthenticated => _token != null;
 
   // ── Headers con JWT ───────────────────────────────────────────────────────
 
@@ -475,4 +527,96 @@ class ApiService {
   }
 
   String get baseUrl => _baseUrl;
+
+  // ── Firma de perfil del técnico (v3.1) ───────────────────────────────────
+
+  /// Guarda la firma de perfil permanente del técnico en el servidor.
+  /// [idTecnico] es el ID del técnico en cat_tecnicos.
+  /// [firmaBase64] es el trazo PNG en Base64.
+  /// Retorna true si se guardó correctamente.
+  Future<bool> guardarFirmaPerfil(int idTecnico, String firmaBase64) async {
+    debugPrint('[API] guardarFirmaPerfil → /api/v1/usuarios/$idTecnico/firma');
+    final uri = Uri.parse('$_baseUrl/api/v1/usuarios/$idTecnico/firma');
+    final body = jsonEncode({'firma_digital': firmaBase64});
+
+    Future<http.Response> doRequest() =>
+        http.put(uri, headers: _authHeaders, body: body)
+            .timeout(_connTimeout);
+
+    var resp = await doRequest();
+    if (resp.statusCode == 401) {
+      final ok = await silentRefresh();
+      if (ok) resp = await doRequest();
+    }
+
+    if (resp.statusCode == 200) {
+      debugPrint('[API] ✅ Firma de perfil guardada para técnico $idTecnico');
+      return true;
+    }
+    debugPrint('[API] ❌ guardarFirmaPerfil: HTTP ${resp.statusCode} — ${resp.body}');
+    return false;
+  }
+
+  /// Consulta al servidor si el técnico con [idTecnico] tiene firma registrada en cat_tecnicos.
+  Future<bool> verificarFirmaPerfil(int idTecnico) async {
+    debugPrint('[API] verificarFirmaPerfil → /api/v1/usuarios/$idTecnico/firma');
+    try {
+      final uri = Uri.parse('$_baseUrl/api/v1/usuarios/$idTecnico/firma');
+      final resp = await _getWithRetry(uri, timeout: _connTimeout);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final tiene = data['tiene_firma'] == true;
+        debugPrint('[API] verificarFirmaPerfil id=$idTecnico → tiene_firma: $tiene');
+        return tiene;
+      }
+      debugPrint('[API] verificarFirmaPerfil: HTTP ${resp.statusCode}');
+    } catch (e) {
+      debugPrint('[API] verificarFirmaPerfil error: $e');
+    }
+    return false;
+  }
+
+  // ── Registro de errores técnicos en campo (v3.1) ─────────────────────────
+
+  /// Reporta un incidente de captura digital fallida al servidor.
+  /// Se usa cuando la modalidad es Híbrido y falla el guardado digital.
+  /// Devuelve true si el reporte fue recibido.
+  Future<bool> registrarErrorTecnico({
+    required String errorMensaje,
+    String? folio,
+    String? tecnico,
+    String? stackTrace,
+    String dispositivo = 'Tablet Android',
+  }) async {
+    debugPrint('[API] registrarErrorTecnico → folio=$folio tecnico=$tecnico');
+    try {
+      final uri = Uri.parse('$_baseUrl/api/v1/errores-tecnicos');
+      final body = jsonEncode({
+        'folio':         folio,
+        'tecnico':       tecnico,
+        'error_mensaje': errorMensaje,
+        'stack_trace':   stackTrace,
+        'dispositivo':   dispositivo,
+      });
+
+      Future<http.Response> doRequest() =>
+          _postWithRetry(uri, body, timeout: _connTimeout);
+
+      var resp = await doRequest();
+      if (resp.statusCode == 401) {
+        final ok = await silentRefresh();
+        if (ok) resp = await doRequest();
+      }
+
+      if (resp.statusCode == 201 || resp.statusCode == 200) {
+        debugPrint('[API] ✅ Error técnico registrado en servidor');
+        return true;
+      }
+      debugPrint('[API] registrarErrorTecnico: HTTP ${resp.statusCode}');
+      return false;
+    } catch (e) {
+      debugPrint('[API] registrarErrorTecnico exception: $e');
+      return false; // No lanzar — este método nunca debe romper el flujo
+    }
+  }
 }
