@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/config_service.dart';
-import '../services/firma_tecnico_service.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -259,25 +258,33 @@ class _LoginScreenState extends State<LoginScreen> {
         final auth   = context.read<AuthService>();
         final role   = ApiService.instance.userRole ?? 'tecnico';
         final nombre = ApiService.instance.lastNombre;
+        // Extraer id_tecnico del JWT para firma de perfil y sync
+        final idTecnico = ApiService.instance.lastIdTecnico;
 
-        await auth.setSession(username, role, nombreCompleto: nombre);
+        await auth.setSession(username, role,
+            nombreCompleto: nombre, idTecnico: idTecnico);
         // Guardar hash para futuros logins offline
         await auth.saveOfflineCredentials(username, password, role,
             nombreCompleto: nombre);
 
-        debugPrint('[LOGIN] ✅ Sesión online — user: $username | rol: $role');
+        debugPrint('[LOGIN] \u2705 Sesión online — user: $username | rol: $role | idTec: $idTecnico');
 
-        try {
-          final tieneFirma = await FirmaTecnicoService.instance.tieneFirma(username);
+        // ── BLOQUEO POR FIRMA ────────────────────────────────────────
+        // Para roles técnicos: verificar si tienen firma local.
+        final esTecnico = auth.isTecnico;
+
+        if (esTecnico && mounted) {
+          final tieneFirma = await auth.verificarFirmaEnServidor();
           if (!tieneFirma && mounted) {
-            await CapturFirmaTecnicoDialog.mostrar(
+            // MODAL BLOQUEANTE: no navega hasta que el técnico firme
+            final firmada = await CapturFirmaTecnicoDialog.mostrarConSync(
               context,
-              username: username,
+              username:       username,
               nombreCompleto: nombre ?? username,
+              idTecnico:      idTecnico ?? (username.toLowerCase() == 'daikki19' ? 8 : 0),
             );
+            debugPrint('[LOGIN] Firma capturada en modal: $firmada');
           }
-        } catch (firmaErr) {
-          debugPrint('[LOGIN] ⚠️ Error firma (no bloqueante): $firmaErr');
         }
 
         if (mounted) context.go('/os');

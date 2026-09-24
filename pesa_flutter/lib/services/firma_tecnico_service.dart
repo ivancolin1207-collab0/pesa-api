@@ -8,6 +8,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
+import 'api_service.dart';   // Para saveAndSyncFirma → guardarFirmaPerfil
 
 class FirmaTecnicoService {
   FirmaTecnicoService._();
@@ -77,6 +78,33 @@ class FirmaTecnicoService {
     }
   }
 
+  // ── Guardar firma local + sincronizar al servidor (v3.1) ─────────────────
+  /// Guarda la firma localmente Y la sube al servidor para que Windows pueda
+  /// verificarla en el login del técnico.
+  /// [idTecnico] es el ID en cat_tecnicos (requerido para el endpoint de API).
+  /// Retorna true si la sincronización al servidor fue exitosa.
+  Future<bool> saveAndSyncFirma(
+    String username,
+    String firmaBase64,
+    int idTecnico,
+  ) async {
+    // 1. Guardar localmente primero (funciona offline)
+    await saveFirma(username, firmaBase64);
+    // 2. Intentar sincronizar al servidor
+    try {
+      final ok = await ApiService.instance.guardarFirmaPerfil(idTecnico, firmaBase64);
+      if (ok) {
+        debugPrint('[FirmaTecnico] ✅ Firma sincronizada al servidor para id=$idTecnico');
+      } else {
+        debugPrint('[FirmaTecnico] ⚠️  Firma guardada localmente pero NO sincronizada al servidor');
+      }
+      return ok;
+    } catch (e) {
+      debugPrint('[FirmaTecnico] Error al sincronizar firma al servidor: $e');
+      return false;
+    }
+  }
+
   // ── Eliminar firma ────────────────────────────────────────────────────────
   /// Elimina la firma del técnico (para permitir re-captura voluntaria).
   Future<void> deleteFirma(String username) async {
@@ -95,4 +123,5 @@ class FirmaTecnicoService {
     return f != null && f.isNotEmpty;
   }
 }
+
 

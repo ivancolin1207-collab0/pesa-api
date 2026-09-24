@@ -312,6 +312,21 @@ class OsPdfGenerator:
         y = self._draw_nota(c, y_after_firmas)
         self._draw_footer_bar(c)
 
+    # --- Helper único de detección de modalidad (normaliza acentos) ----------
+
+    @staticmethod
+    def _es_digital(os_data) -> bool:
+        """
+        Retorna True SOLO si la modalidad es explícitamente DIGITAL.
+        Cualquier otro valor (FISICO, Físico, FÍSICO, None, "") → False.
+        Usa unicodedata para eliminar diferencias de acentuación.
+        """
+        import unicodedata as _ud
+        raw = str((os_data or {}).get("modalidad") or "").strip()
+        # Normalizar: quitar diacríticos, pasar a ASCII mayúsculas
+        normalized = _ud.normalize("NFKD", raw).encode("ascii", "ignore").decode().upper()
+        return normalized == "DIGITAL"
+
     # --- Helper: diagonal de cancelación para celdas vacías ------------------
 
     def _draw_cancel_slash(self, c, cx: float, cy: float, cell_w: float, cell_h: float) -> None:
@@ -847,7 +862,7 @@ class OsPdfGenerator:
             left_x = self.ML
             right_x = self.ML + left_w + GAP
 
-            y_left = self._draw_repetibilidad_table(c, left_x, y, left_w, rep)
+            y_left = self._draw_repetibilidad_table(c, left_x, y, left_w, rep, os_data)
             y_left -= 6
 
             # Recuadro NO APTO para excentricidad con dibujo vectorial del tipo de instrumento
@@ -1178,7 +1193,10 @@ class OsPdfGenerator:
             c.setFont("Helvetica", 8)
             col_widths_rep = [w * 0.08, w * 0.22, w * 0.24, w * 0.24, w * 0.22]
             cx = x
-            _is_dig_rep = str((os_data or {}).get("modalidad") or "").upper() != "FISICO"
+            # REGLA: solo dibujar diagonal en modalidad DIGITAL explícita.
+            # Si os_data es None o modalidad no está definida → tratar como FÍSICO (seguro).
+            _modalidad_up = str((os_data or {}).get("modalidad") or "").upper().strip()
+            _is_dig_rep = self._es_digital(os_data)  # norm. acentos: FISICO/FÍSICO/Fisico = False
             for j, (val_str, cw_col) in enumerate(zip(cell_vals, col_widths_rep)):
                 cell_x = cx
                 cell_y = y - row_h
@@ -1217,7 +1235,8 @@ class OsPdfGenerator:
                     errors.append(abs(lf - li))
                 elif cargo is not None:
                     errors.append(abs(lf - cargo))
-        _is_fisico_rep = str((os_data or {}).get("modalidad") or "").upper() == "FISICO"
+        # REGLA FÍSICA: cuando modalidad no es DIGITAL, pie en blanco (incluye acentos).
+        _is_fisico_rep = not self._es_digital(os_data)   # blanco a menos que sea DIGITAL explícito
         if errors:
             if _is_fisico_rep:
                 pass  # físico: celda en blanco
@@ -1600,7 +1619,8 @@ class OsPdfGenerator:
             cx += col_widths[0]
 
             # Col 1: L. INICIAL (diagonal SOLO en digital con datos; físico = blanco)
-            _is_digital_form = str((os_data or {}).get("modalidad") or "").upper() != "FISICO"
+            # REGLA: solo diagonal en DIGITAL explícito; norm. acentos vía _es_digital.
+            _is_digital_form = self._es_digital(os_data)
             if ini_val is None or str(ini_val).strip() == "":
                 if _is_digital_form:
                     self._draw_cancel_slash(c, cx, y - row_h, col_widths[1], row_h)
@@ -1632,7 +1652,11 @@ class OsPdfGenerator:
                 c.setFillColor(_BLACK)
                 c.setFont("Helvetica", data_font_size)
             else:
-                self._draw_cancel_slash(c, cx, y - row_h, col_widths[3], row_h)
+                # REGLA FÍSICA: en modalidad Físico la celda ERROR vacía se deja
+                # en blanco para que el técnico anote el valor a mano.
+                # En digital, se dibuja la diagonal de cancelación.
+                if _is_digital_form:
+                    self._draw_cancel_slash(c, cx, y - row_h, col_widths[3], row_h)
 
             # Bordes de fila
             c.setStrokeColor(_TBL_BORDER)
@@ -1653,7 +1677,7 @@ class OsPdfGenerator:
         c.drawString(x + 3, y - footer_h + max(2, footer_h * 0.28),
                      "ERROR MAXIMO ENCONTRADO:")
         d_dec_exc = self._get_decimals((os_data or {}).get('div_minima'))
-        _is_fisico_exc = str((os_data or {}).get("modalidad") or "").upper() == "FISICO"
+        _is_fisico_exc = not self._es_digital(os_data)  # True cuando FISICO/FÍSICO/Fisico/None
         if errors_all and not _is_fisico_exc:
             # Digital con datos: mostrar error máximo en rojo
             err_max_txt = self._fmt(max(errors_all), d_dec_exc)
@@ -1741,17 +1765,26 @@ class OsPdfGenerator:
                     error_ex = fin_val - nom_val
                 except Exception:
                     pass
+            _is_fisico_ex = not self._es_digital(os_data)  # True para FISICO/FÍSICO/Fisico/None
+            _is_dig_ex = not _is_fisico_ex
+            # ERROR: mostrar valor calculado; si no hay datos: '0' en digital, VACIO en físico
+            _error_cell = (
+                self._fmt(error_ex, d_dec) if error_ex is not None
+                else (self._fmt(0, d_dec) if _is_dig_ex else None)   # físico = None, no '0'
+            )
             vals = [
                 str(i + 1),
-                self._fmt_int(nom_val),      # Valor nominal como entero: "1", "2", "5"
+                self._fmt_int(nom_val),
                 self._fmt(ini_val, d_dec) if ini_val is not None else None,
-                self._fmt(fin_val, d_dec),
-                self._fmt(error_ex, d_dec) if error_ex is not None else self._fmt(0, d_dec),
+                # L.FINAL: None en físico sin datos (no '' que imprime nada pero ocupa el slot)
+                self._fmt(fin_val, d_dec) if fin_val is not None else None,
+                _error_cell,
             ]
             c.setFillColor(_BLACK)
             c.setFont("Helvetica", 7.5)
             cx = x
-            _is_dig_ex = str((os_data or {}).get("modalidad") or "").upper() != "FISICO"
+            # REGLA: solo diagonal en DIGITAL; norm. acentos.
+            _is_dig_ex = self._es_digital(os_data)
             for v, cw_col in zip(vals, col_widths):
                 if v is None:
                     if _is_dig_ex:  # físico: celda en blanco; digital: diagonal
@@ -1785,8 +1818,15 @@ class OsPdfGenerator:
             if lf is not None and vn is not None:
                 errors_ex.append(abs(lf - vn))
         d_dec_ex = self._get_decimals(_od.get('div_minima') if _od else None)
-        c.drawRightString(x + w - 3, y - row_h + 4,
-                          self._fmt(max(errors_ex), d_dec_ex) if errors_ex else self._fmt(0, d_dec_ex))
+        # REGLA FÍSICO: en modalidad Físico el pie ERROR MÁXIMO se deja en blanco
+        # (el técnico lo anota a mano). En digital se imprime el valor o '0'.
+        _is_fisico_emax = not self._es_digital(_od)   # True para FISICO/FÍSICO/Fisico/None
+        if not _is_fisico_emax:          # NUNCA imprimir en físico
+            if errors_ex:
+                c.drawRightString(x + w - 3, y - row_h + 4, self._fmt(max(errors_ex), d_dec_ex))
+            else:
+                c.drawRightString(x + w - 3, y - row_h + 4, self._fmt(0, d_dec_ex))
+        # Físico: celda del error queda en blanco para llenado manual
         y -= row_h
         return y
 
@@ -2140,8 +2180,12 @@ class OsPdfGenerator:
                 c.drawString(self.ML + 2, line_y + 2, text_lines[idx])
 
         # 4. Diagonal de cancelación en las líneas vacías
+        # REGLA FÍSICA: en formato físico NUNCA se dibuja la diagonal — el técnico
+        # escribe a mano sobre las líneas pautadas. Solo se dibuja en digital/cerrado.
+        # REGLA FÍSICA: solo diagonal en observaciones cuando es DIGITAL explícito.
+        _is_dig_obs = self._es_digital(os_data)
         empty_lines = all_lines_y[first_empty_idx:]
-        if len(empty_lines) >= 2:
+        if _is_dig_obs and len(empty_lines) >= 2:
             top_y    = empty_lines[0]
             bot_y    = empty_lines[-1]
             c.setStrokeColor(_GRAY_MED)

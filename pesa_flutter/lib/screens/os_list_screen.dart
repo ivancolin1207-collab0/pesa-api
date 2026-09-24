@@ -440,6 +440,8 @@ class _OsListScreenState extends State<OsListScreen> {
   @override
   Widget build(BuildContext context) {
     final sync   = context.watch<SyncService>();
+    final auth   = context.watch<AuthService>();
+    final hideTecnico = auth.isTecnico;
     final bottom = MediaQuery.of(context).viewPadding.bottom;
 
     final content = Scaffold(
@@ -455,18 +457,19 @@ class _OsListScreenState extends State<OsListScreen> {
             periodo:  _periodo, tecnico: _tecnico, estado: _estado,
             tecnicos: _tecnicos, estados: _estados,
             searchCtrl: _searchCtrl, query: _query,
+            hideTecnico: hideTecnico,
             onPeriodo: (v) { setState(() => _periodo = v); _applyFilters(); },
             onTecnico: (v) { setState(() => _tecnico = v); _applyFilters(); },
             onEstado:  (v) { setState(() => _estado  = v); _applyFilters(); },
             onSearch:  (v) { setState(() => _query   = v); _applyFilters(); },
             onClear:   ()  { _searchCtrl.clear(); setState(() => _query = ''); _applyFilters(); },
           ),
-          _TableHeader(),
+          _TableHeader(hideTecnico: hideTecnico),
           Expanded(child: _loading
             ? const Center(child: CircularProgressIndicator(color: _red))
             : _filtered.isEmpty
                 ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
-                : _buildGroupedList(context),
+                : _buildGroupedList(context, hideTecnico),
           ),
           SizedBox(height: bottom > 0 ? bottom : 8),
         ]),
@@ -475,46 +478,34 @@ class _OsListScreenState extends State<OsListScreen> {
     return AppShell(currentRoute: '/os', child: content);
   }
 
-  Widget _buildGroupedList(BuildContext context) {
+  Widget _buildGroupedList(BuildContext context, bool hideTecnico) {
     final groups = _groupByLote(_filtered);
-    // Detectar si el usuario es técnico para ocultar columna Técnico
-    final auth = context.read<AuthService>();
-    final hideTecnico = auth.isTecnico;
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: SizedBox(
-        // Ancho mínimo adaptativo: menos si se oculta columna técnico
-        width: hideTecnico ? 780 : 960,
-        child: ListView.builder(
-          itemCount: groups.length,
-          // itemExtent fijo activa el reciclaje O(1) de celdas — scroll 60 FPS
-          itemExtent: 72.0,
-          itemBuilder: (ctx, i) {
-            final group = groups[i];
-            if (group.isLote) {
-              return _LoteRow(
-                group: group,
-                hideTecnico: hideTecnico,
-                onCaptura: (os) => ctx.push(
-                  '/captura/${os['local_id']}',
-                  extra: Map<String, dynamic>.from(os),
-                ),
-              );
-            }
-            final os = group.items.first;
-            return _OsRow(
-              os: os,
-              index: i,
-              hideTecnico: hideTecnico,
-              onCaptura: () => ctx.push(
-                '/captura/${os['local_id']}',
-                extra: Map<String, dynamic>.from(os),
-              ),
-            );
-          },
-        ),
-      ),
+    return ListView.builder(
+      itemCount: groups.length,
+      itemBuilder: (ctx, i) {
+        final group = groups[i];
+        if (group.isLote) {
+          return _LoteRow(
+            group: group,
+            hideTecnico: hideTecnico,
+            onCaptura: (os) => ctx.push(
+              '/captura/${os['local_id']}',
+              extra: Map<String, dynamic>.from(os),
+            ),
+          );
+        }
+        final os = group.items.first;
+        return _OsRow(
+          os: os,
+          index: i,
+          hideTecnico: hideTecnico,
+          onCaptura: () => ctx.push(
+            '/captura/${os['local_id']}',
+            extra: Map<String, dynamic>.from(os),
+          ),
+        );
+      },
     );
   }
 } // fin _OsListScreenState
@@ -809,10 +800,13 @@ class _FilterBar extends StatelessWidget {
   final ValueChanged<String> onSearch;
   final VoidCallback onClear;
 
+  final bool hideTecnico;
+
   const _FilterBar({
     required this.periodo, required this.tecnico, required this.estado,
     required this.tecnicos, required this.estados,
     required this.searchCtrl, required this.query,
+    this.hideTecnico = false,
     required this.onPeriodo, required this.onTecnico, required this.onEstado,
     required this.onSearch, required this.onClear,
   });
@@ -845,24 +839,22 @@ class _FilterBar extends StatelessWidget {
                 onSelected: (_) => onPeriodo(p),
               ),
             ),
-          const SizedBox(width: 8),
-          const Text('L', style: TextStyle(color: _textSec, fontSize: 12)),
           const Spacer(),
-          _DropdownFilter(
-            hint: 'Todos los Técnicos',
-            value: tecnico,
-            items: tecnicos,
-            onChanged: onTecnico,
-          ),
-          const SizedBox(width: 8),
+          if (!hideTecnico) ...[
+            _DropdownFilter(
+              hint: 'Todos los Técnicos',
+              value: tecnico,
+              items: tecnicos,
+              onChanged: onTecnico,
+            ),
+            const SizedBox(width: 8),
+          ],
           _DropdownFilter(
             hint: 'Todos los Estados',
             value: estado,
             items: estados,
             onChanged: onEstado,
           ),
-          const SizedBox(width: 8),
-          const Text('L', style: TextStyle(color: _textSec, fontSize: 12)),
         ]),
         const SizedBox(height: 8),
         // Fila 2: Búsqueda
@@ -937,24 +929,28 @@ class _DropdownFilter extends StatelessWidget {
 // Table Header
 // ═══════════════════════════════════════════════════════════════════════════
 class _TableHeader extends StatelessWidget {
+  final bool hideTecnico;
+  const _TableHeader({this.hideTecnico = false});
+
   @override
   Widget build(BuildContext context) {
     return Container(
       color: _tableHead,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: _border)),
       ),
-      child: const Row(children: [
-        _TH('FOLIO OS',       flex: 3),
-        _TH('FECHA',          flex: 2),
-        _TH('CLIENTE / SUCURSAL', flex: 5),
-        _TH('TÉCNICO',        flex: 3),
-        _TH('TIPO SERVICIO',  flex: 3),
-        _TH('MODALIDAD',      flex: 2),
-        _TH('ESTATUS',        flex: 2),
-        _TH('SYNC',           flex: 2),
-        _TH('ACCIONES',       flex: 2),
+      child: Row(children: [
+        const _TH('FOLIO OS',           flex: 2),
+        const _TH('FECHA',              flex: 2),
+        const _TH('CLIENTE / SUCURSAL', flex: 4),
+        if (!hideTecnico)
+          const _TH('TÉCNICO',          flex: 3),
+        const _TH('TIPO SERVICIO',      flex: 3),
+        const _TH('MODALIDAD',          flex: 2),
+        const _TH('ESTATUS',            flex: 2),
+        const _TH('SYNC',               flex: 2),
+        const _TH('ACCIONES',           flex: 3),
       ]),
     );
   }
@@ -965,9 +961,18 @@ class _TH extends StatelessWidget {
   final int    flex;
   const _TH(this.label, {required this.flex});
   @override
-  Widget build(BuildContext context) => Expanded(flex: flex, child: Text(label,
-      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700,
-          color: _tableText, letterSpacing: 0.6)));
+  Widget build(BuildContext context) => Expanded(
+    flex: flex,
+    child: Text(
+      label,
+      style: const TextStyle(
+        fontSize: 9.5,
+        fontWeight: FontWeight.w700,
+        color: _tableText,
+        letterSpacing: 0.5,
+      ),
+    ),
+  );
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -978,9 +983,15 @@ class _OsRow extends StatelessWidget {
   final int index;
   final VoidCallback onCaptura;
   final bool indent;
-  final bool hideTecnico; // ocultar columna técnico si el usuario logueado es técnico
-  const _OsRow({required this.os, required this.index,
-      required this.onCaptura, this.indent = false, this.hideTecnico = false});
+  final bool hideTecnico;
+
+  const _OsRow({
+    required this.os,
+    required this.index,
+    required this.onCaptura,
+    this.indent = false,
+    this.hideTecnico = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -998,11 +1009,9 @@ class _OsRow extends StatelessWidget {
       _           => Colors.grey.shade600,
     };
 
-    // Determinar si la orden está cerrada/finalizada en Render
     final bool isCerrado = {'COMPLETADA', 'FIRMADA', 'CERRADO',
         'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA'}.contains(estado);
 
-    // Etiqueta de estado legible
     final String estadoLabel = switch (estado) {
       'COMPLETADA' || 'COMPLETADA_DIGITAL'
       || 'COMPLETADA_FISICA' => 'Cerrado',
@@ -1013,140 +1022,231 @@ class _OsRow extends StatelessWidget {
       _           => _cap(estado),
     };
 
-    // Badge de sync: si la orden viene sincronizada de Render y está cerrada → verde
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
         (isCerrado && syncSt != 'PENDIENTE_ACTUALIZAR');
 
+    final fechaStr = _formatFecha(os['fecha'] as String?);
 
     return Container(
       color: isEven ? _white : const Color(0xFFFAFAFA),
-      padding: EdgeInsets.only(
-          left: indent ? 32 : 16, right: 16, top: 11, bottom: 11),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: _border)),
       ),
       child: Row(children: [
-        // FOLIO
-        SizedBox(width: 110, child: Text(os['folio_os'] ?? '—',
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12,
-                color: Color(0xFFC8102E)))),
-        // FECHA
-        SizedBox(width: 88, child: Text(os['fecha'] ?? '—',
-            style: const TextStyle(fontSize: 11, color: _textPrim))),
-        // CLIENTE / SUCURSAL
-        Expanded(flex: 3, child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(os['cliente'] ?? '—',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                  color: _textPrim),
-              overflow: TextOverflow.ellipsis),
-          if ((os['sucursal'] ?? '').toString().isNotEmpty)
-            Text(os['sucursal']!, style: const TextStyle(fontSize: 10, color: _textSec),
-                overflow: TextOverflow.ellipsis),
-        ])),
-        // TÉCNICO — se oculta si el usuario logueado es técnico (para ganar espacio)
-        if (!hideTecnico)
-          Expanded(flex: 2, child: Text(os['tecnico'] ?? '—',
-              style: const TextStyle(fontSize: 11, color: _textPrim),
-              overflow: TextOverflow.ellipsis)),
-        // TIPO SERVICIO
-        SizedBox(width: 120, child: Text(os['tipo_servicio'] ?? '—',
-            style: const TextStyle(fontSize: 11, color: _textSec),
-            overflow: TextOverflow.ellipsis)),
-        // MODALIDAD badge
-        SizedBox(width: 68, child: _Badge(
-          label: isFisico ? 'Físico' : 'Digital',
-          fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-          bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
-        )),
-        // ESTATUS badge
-        SizedBox(width: 80, child: _Badge(
-          label: estadoLabel,
-          fg: estadoFg,
-          bg: estadoFg.withValues(alpha: 0.08),
-        )),
-        // SYNC badge
-        SizedBox(width: 88, child: isSincronizado
-          ? _Badge(label: 'Sincronizado',
-              fg: Colors.green.shade700, bg: Colors.green.shade50)
-          : _Badge(label: 'Pendiente',
-              fg: Colors.orange.shade700, bg: Colors.orange.shade50)),
-        // ACCIONES — ancho fijo 150px para acomodar [Ver PDF] + [Editar]
-        SizedBox(width: 150, child: Row(children: [
-          if (isFisico)
-            _ActionBtn(
-              label: 'Adjuntar', icon: Icons.document_scanner_outlined,
-              fg: _white, bg: const Color(0xFF7C3AED),
-              onTap: () {
-                final ctx = context;
-                if (ctx.mounted) {
-                  ctx.push('/escaneo',
-                      extra: {'folio_os': os['folio_os'] ?? ''});
-                }
-              },
-            )
-          else if (isCerrado)
-            // OS Digital completada/cerrada — descargar PDF OFICIAL de Render
-            Row(mainAxisSize: MainAxisSize.min, children: [
-              _ActionBtn(
-                label: 'Ver PDF', icon: Icons.picture_as_pdf_outlined,
-                fg: _white, bg: const Color(0xFF2563EB),
-                onTap: () async {
-                  final folio = os['folio_os'] as String? ?? '';
-                  final ctx = context;
-                  // Primero intentar abrir PDF ya descargado localmente
-                  final localPath = os['pdf_path_local'] as String? ?? '';
-                  if (localPath.isNotEmpty && await File(localPath).exists()) {
-                    await OpenFilex.open(localPath);
-                    return;
-                  }
-                  // Descargar el PDF OFICIAL desde el backend de Render
-                  try {
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text('Descargando PDF oficial...'),
-                          duration: Duration(seconds: 2),
-                          backgroundColor: Color(0xFF2563EB),
-                        ),
-                      );
-                    }
-                    final path = await ApiService.instance.downloadPdf(
-                      '/api/ordenes/$folio/pdf'
-                    );
-                    await OpenFilex.open(path);
-                  } catch (e) {
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        SnackBar(
-                          content: Text('PDF no disponible: ${e.toString().replaceAll('HttpException: ', '')}'),
-                          backgroundColor: Colors.red.shade700,
-                        ),
-                      );
-                    }
-                  }
-                },
-              ),
-              const SizedBox(width: 4),
-              _ActionBtn(
-                label: 'Editar', icon: Icons.edit_outlined,
-                fg: _white, bg: const Color(0xFF16A34A),
-                onTap: onCaptura,
-              ),
-            ])
-          else
-            _ActionBtn(
-              label: 'Capturar', icon: Icons.edit_note_outlined,
-              fg: _white, bg: const Color(0xFF16A34A),
-              onTap: onCaptura,
+        // FOLIO OS (flex 2) - alineado a la izquierda
+        Expanded(
+          flex: 2,
+          child: Padding(
+            padding: EdgeInsets.only(left: indent ? 14.0 : 0.0),
+            child: Row(
+              children: [
+                if (indent)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 3),
+                    child: Icon(Icons.subdirectory_arrow_right, size: 13, color: _textSec),
+                  ),
+                Expanded(
+                  child: Text(
+                    os['folio_os'] ?? '—',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                      color: Color(0xFFC8102E),
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
-        ])),
+          ),
+        ),
+
+        // FECHA (flex 2) - YYYY-MM-DD
+        Expanded(
+          flex: 2,
+          child: Text(
+            fechaStr,
+            style: const TextStyle(fontSize: 11, color: _textPrim),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+
+        // CLIENTE / SUCURSAL (flex 4)
+        Expanded(
+          flex: 4,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                os['cliente'] ?? '—',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _textPrim),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
+              if ((os['sucursal'] ?? '').toString().isNotEmpty)
+                Text(
+                  os['sucursal']!.toString(),
+                  style: const TextStyle(fontSize: 10, color: _textSec),
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 1,
+                ),
+            ],
+          ),
+        ),
+
+        // TÉCNICO (flex 3) - oculto para rol técnico
+        if (!hideTecnico)
+          Expanded(
+            flex: 3,
+            child: Text(
+              os['tecnico'] ?? '—',
+              style: const TextStyle(fontSize: 11, color: _textPrim),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+
+        // TIPO SERVICIO (flex 3)
+        Expanded(
+          flex: 3,
+          child: Text(
+            os['tipo_servicio'] ?? '—',
+            style: const TextStyle(fontSize: 11, color: _textSec),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+
+        // MODALIDAD (flex 2)
+        Expanded(
+          flex: 2,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _Badge(
+              label: isFisico ? 'Físico' : 'Digital',
+              fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+              bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
+            ),
+          ),
+        ),
+
+        // ESTATUS (flex 2)
+        Expanded(
+          flex: 2,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: _Badge(
+              label: estadoLabel,
+              fg: estadoFg,
+              bg: estadoFg.withValues(alpha: 0.08),
+            ),
+          ),
+        ),
+
+        // SYNC (flex 2)
+        Expanded(
+          flex: 2,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: isSincronizado
+                ? _Badge(label: 'Sincronizado', fg: Colors.green.shade700, bg: Colors.green.shade50)
+                : _Badge(label: 'Pendiente', fg: Colors.orange.shade700, bg: Colors.orange.shade50),
+          ),
+        ),
+
+        // ACCIONES (flex 3)
+        Expanded(
+          flex: 3,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isFisico)
+                _ActionBtn(
+                  label: 'Adjuntar',
+                  icon: Icons.document_scanner_outlined,
+                  fg: _white,
+                  bg: const Color(0xFF7C3AED),
+                  onTap: () {
+                    final ctx = context;
+                    if (ctx.mounted) {
+                      ctx.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''});
+                    }
+                  },
+                )
+              else if (isCerrado)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _ActionBtn(
+                      label: 'Ver PDF',
+                      icon: Icons.picture_as_pdf_outlined,
+                      fg: _white,
+                      bg: const Color(0xFF2563EB),
+                      onTap: () async {
+                        final folio = os['folio_os'] as String? ?? '';
+                        final ctx = context;
+                        final localPath = os['pdf_path_local'] as String? ?? '';
+                        if (localPath.isNotEmpty && await File(localPath).exists()) {
+                          await OpenFilex.open(localPath);
+                          return;
+                        }
+                        try {
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(
+                                content: Text('Descargando PDF oficial...'),
+                                duration: Duration(seconds: 2),
+                                backgroundColor: Color(0xFF2563EB),
+                              ),
+                            );
+                          }
+                          final path = await ApiService.instance.downloadPdf('/api/ordenes/$folio/pdf');
+                          await OpenFilex.open(path);
+                        } catch (e) {
+                          if (ctx.mounted) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              SnackBar(
+                                content: Text('PDF no disponible: ${e.toString().replaceAll('HttpException: ', '')}'),
+                                backgroundColor: Colors.red.shade700,
+                              ),
+                            );
+                          }
+                        }
+                      },
+                    ),
+                    const SizedBox(width: 4),
+                    _ActionBtn(
+                      label: 'Editar',
+                      icon: Icons.edit_outlined,
+                      fg: _white,
+                      bg: const Color(0xFF16A34A),
+                      onTap: onCaptura,
+                    ),
+                  ],
+                )
+              else
+                _ActionBtn(
+                  label: 'Llenar OS',
+                  icon: Icons.edit_note_outlined,
+                  fg: _white,
+                  bg: const Color(0xFF16A34A),
+                  onTap: onCaptura,
+                ),
+            ],
+          ),
+        ),
       ]),
     );
   }
 
-  String _cap(String s) => s.isEmpty ? s : s[0]+s.substring(1).toLowerCase();
+  String _formatFecha(String? f) {
+    if (f == null || f.isEmpty) return '—';
+    final clean = f.split('T').first.split(' ').first;
+    return clean.isNotEmpty ? clean : '—';
+  }
+
+  String _cap(String s) => s.isEmpty ? s : s[0] + s.substring(1).toLowerCase();
 } // fin _OsRow
 
 // ── Badge ─────────────────────────────────────────────────────────────────
@@ -1234,8 +1334,11 @@ class _LoteRow extends StatefulWidget {
   final _OsGroup group;
   final void Function(Map<String, dynamic> os) onCaptura;
   final bool hideTecnico;
-  const _LoteRow({required this.group, required this.onCaptura,
-      this.hideTecnico = false});
+  const _LoteRow({
+    required this.group,
+    required this.onCaptura,
+    this.hideTecnico = false,
+  });
 
   @override
   State<_LoteRow> createState() => _LoteRowState();
@@ -1245,7 +1348,6 @@ class _LoteRowState extends State<_LoteRow> {
   bool _expanded = false;
 
   String get _rangoLabel {
-    // Ordenar numéricamente por último número del folio (ej. OS-26-607 < OS-26-610)
     final items = [...widget.group.items];
     items.sort((a, b) {
       int _num(Map<String, dynamic> o) {
@@ -1261,8 +1363,8 @@ class _LoteRowState extends State<_LoteRow> {
         .toList();
     if (folios.isEmpty) return widget.group.loteKey;
     final count = folios.length;
-    if (count == 1) return '${folios.first} (1 OS asignada)';
-    return '${folios.first} al ${folios.last} ($count OS asignadas)';
+    if (count == 1) return '${folios.first} (1 OS)';
+    return '${folios.first} al ${folios.last} ($count OS)';
   }
 
   List<Map<String, dynamic>> get _sortedItems {
@@ -1276,6 +1378,12 @@ class _LoteRowState extends State<_LoteRow> {
       return _num(a).compareTo(_num(b));
     });
     return items;
+  }
+
+  String _formatFecha(String? f) {
+    if (f == null || f.isEmpty) return '—';
+    final clean = f.split('T').first.split(' ').first;
+    return clean.isNotEmpty ? clean : '—';
   }
 
   @override
@@ -1293,12 +1401,13 @@ class _LoteRowState extends State<_LoteRow> {
       _ => Colors.grey.shade600,
     };
 
+    final fechaStr = _formatFecha(first['fecha'] as String?);
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      // ── Fila principal del lote ──────────────────────────────────────────
       InkWell(
         onTap: () => setState(() => _expanded = !_expanded),
         child: Container(
-          color: const Color(0xFFFFF7ED), // fondo naranja suave para lotes
+          color: const Color(0xFFFFF7ED),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
             border: Border(
@@ -1307,91 +1416,151 @@ class _LoteRowState extends State<_LoteRow> {
             ),
           ),
           child: Row(children: [
-            // Flecha acordeón
-            AnimatedRotation(
-              turns: _expanded ? 0.25 : 0,
-              duration: const Duration(milliseconds: 200),
-              child: const Icon(Icons.chevron_right, size: 18,
-                  color: Color(0xFFC8102E)),
-            ),
-            const SizedBox(width: 4),
-            // LOTE badge + rango
-            Expanded(flex: 3, child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(
-                    color: const Color(0xFFC8102E),
-                    borderRadius: BorderRadius.circular(4)),
-                child: Text('LOTE · $count OS',
-                    style: const TextStyle(
-                        color: Colors.white, fontSize: 9,
-                        fontWeight: FontWeight.w800)),
-              ),
-              const SizedBox(height: 2),
-              Text(_rangoLabel,
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w700, fontSize: 11,
-                      color: Color(0xFFC8102E)),
-                  overflow: TextOverflow.ellipsis),
-            ])),
-            // FECHA
-            Expanded(flex: 2, child: Text(first['fecha'] ?? '—',
-                style: const TextStyle(fontSize: 11, color: _textPrim))),
-            // CLIENTE
-            Expanded(flex: 5, child: Text(first['cliente'] ?? '—',
-                style: const TextStyle(
-                    fontSize: 12, fontWeight: FontWeight.w600,
-                    color: _textPrim),
-                overflow: TextOverflow.ellipsis)),
-            // TÉCNICO
-            Expanded(flex: 3, child: Text(first['tecnico'] ?? '—',
-                style: const TextStyle(fontSize: 11, color: _textPrim),
-                overflow: TextOverflow.ellipsis)),
-            // TIPO SERVICIO
-            Expanded(flex: 3, child: Text(first['tipo_servicio'] ?? '—',
-                style: const TextStyle(fontSize: 11, color: _textSec),
-                overflow: TextOverflow.ellipsis)),
-            // MODALIDAD
-            Expanded(flex: 2, child: _Badge(
-              label: isFis ? 'Físico · $count OS' : 'Digital · $count OS',
-              fg: isFis ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-              bg: isFis ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
-            )),
-            // ESTATUS
-            Expanded(flex: 2, child: _Badge(
-              label: estado[0] + estado.substring(1).toLowerCase(),
-              fg: estFg,
-              bg: estFg.withOpacity(0.08),
-            )),
-            // SYNC
-            const Expanded(flex: 2, child: _Badge(
-              label: 'Sincronizado',
-              fg: Colors.green, bg: Color(0xFFDCFCE7),
-            )),
-            // ACCIONES
-            Expanded(flex: 2, child: pdfUrl != null && pdfUrl.isNotEmpty
-              ? ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF4B5563),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6)),
-                    elevation: 0,
+            // FOLIO / LOTE (flex 2)
+            Expanded(
+              flex: 2,
+              child: Row(
+                children: [
+                  AnimatedRotation(
+                    turns: _expanded ? 0.25 : 0,
+                    duration: const Duration(milliseconds: 200),
+                    child: const Icon(Icons.chevron_right, size: 18, color: Color(0xFFC8102E)),
                   ),
-                  onPressed: () => _openPdfLote(context, pdfUrl),
-                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 12),
-                  label: const Text('Ver Lote (PDF)',
-                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
-                )
-              : const SizedBox()),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFC8102E),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'LOTE · $count OS',
+                            style: const TextStyle(color: Colors.white, fontSize: 8.5, fontWeight: FontWeight.w800),
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          _rangoLabel,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 10.5, color: Color(0xFFC8102E)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // FECHA (flex 2)
+            Expanded(
+              flex: 2,
+              child: Text(
+                fechaStr,
+                style: const TextStyle(fontSize: 11, color: _textPrim),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+
+            // CLIENTE / SUCURSAL (flex 4)
+            Expanded(
+              flex: 4,
+              child: Text(
+                first['cliente'] ?? '—',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _textPrim),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+
+            // TÉCNICO (flex 3) - solo si !hideTecnico
+            if (!widget.hideTecnico)
+              Expanded(
+                flex: 3,
+                child: Text(
+                  first['tecnico'] ?? '—',
+                  style: const TextStyle(fontSize: 11, color: _textPrim),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+
+            // TIPO SERVICIO (flex 3)
+            Expanded(
+              flex: 3,
+              child: Text(
+                first['tipo_servicio'] ?? '—',
+                style: const TextStyle(fontSize: 11, color: _textSec),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+
+            // MODALIDAD (flex 2)
+            Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _Badge(
+                  label: isFis ? 'Físico · $count OS' : 'Digital · $count OS',
+                  fg: isFis ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+                  bg: isFis ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
+                ),
+              ),
+            ),
+
+            // ESTATUS (flex 2)
+            Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _Badge(
+                  label: estado[0] + estado.substring(1).toLowerCase(),
+                  fg: estFg,
+                  bg: estFg.withOpacity(0.08),
+                ),
+              ),
+            ),
+
+            // SYNC (flex 2)
+            const Expanded(
+              flex: 2,
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: _Badge(
+                  label: 'Sincronizado',
+                  fg: Colors.green,
+                  bg: Color(0xFFDCFCE7),
+                ),
+              ),
+            ),
+
+            // ACCIONES (flex 3)
+            Expanded(
+              flex: 3,
+              child: pdfUrl != null && pdfUrl.isNotEmpty
+                  ? ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF4B5563),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        elevation: 0,
+                      ),
+                      onPressed: () => _openPdfLote(context, pdfUrl),
+                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 12),
+                      label: const Text('Ver Lote (PDF)', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+                    )
+                  : const SizedBox(),
+            ),
           ]),
         ),
       ),
-      // ── OS hijas (cuando está expandido) ────────────────────────────────────
+
+      // OS hijas del lote
       if (_expanded)
         for (int i = 0; i < _sortedItems.length; i++)
           Container(
@@ -1401,6 +1570,7 @@ class _LoteRowState extends State<_LoteRow> {
               index: i,
               onCaptura: () => widget.onCaptura(_sortedItems[i]),
               indent: true,
+              hideTecnico: widget.hideTecnico,
             ),
           ),
     ]);

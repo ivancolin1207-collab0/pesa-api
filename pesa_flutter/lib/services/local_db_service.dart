@@ -382,6 +382,21 @@ class LocalDbService {
     );
   }
 
+  Future<void> savePdfPath(int localId, String path) async {
+    final db = await _ensureInit();
+    await db.update(
+      'ordenes_servicio',
+      {
+        'pdf_path_local': path,
+        'estado': 'COMPLETADA_DIGITAL',
+        'sync_status': 'PENDIENTE_ACTUALIZAR',
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'local_id = ?',
+      whereArgs: [localId],
+    );
+  }
+
   /// Consolida el cierre de una OS con PDF local y firmas en un solo UPDATE.
   /// Llamar justo después de generar el PDF.
   Future<void> saveOsCerrada({
@@ -548,21 +563,7 @@ class LocalDbService {
   }
 
 
-  // ── Guardar ruta del PDF generado on-device ───────────────────────────────
 
-  Future<void> savePdfPath(int localId, String pdfPath) async {
-    final db = await _ensureInit();
-    await db.update(
-      'ordenes_servicio',
-      {
-        'pdf_path_local': pdfPath,
-        'sync_status': 'PENDIENTE_ACTUALIZAR',
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      },
-      where: 'local_id = ?',
-      whereArgs: [localId],
-    );
-  }
   // ── UUID v4 simple ────────────────────────────────────────────────────────
 
   static String _generateUuid() {

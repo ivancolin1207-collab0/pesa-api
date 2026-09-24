@@ -625,7 +625,14 @@ class _DashboardLoader(QThread):
                 SELECT id FROM adjuntos_os WHERE id_os = os.id LIMIT 1
             ) adj ON TRUE
             WHERE 1=1 {{where_clause}}
-            ORDER BY os.id, os.id_lote NULLS LAST, os.fecha DESC, os.created_at DESC
+            ORDER BY
+                -- Orden descendente seguro: extrae el último número del folio
+                -- (funciona con OS-26-645, RMA-26-630, RE-26-605, LV-26-1, etc.)
+                CASE WHEN os.folio_os ~ '-[0-9]+$'
+                     THEN CAST(REGEXP_REPLACE(os.folio_os, '^.*-([0-9]+)$', '\\1') AS INTEGER)
+                     ELSE 0
+                END DESC,
+                os.fecha DESC
             LIMIT 500
         """.format(where_clause=where_clause)
         try:
@@ -633,7 +640,9 @@ class _DashboardLoader(QThread):
                 cur.execute(sql, params or None)
                 rows = list(cur.fetchall())
         except Exception as e:
+            import traceback as _tb
             logger.warning("Query principal fallo, aplicando fallback: %s", e)
+            _tb.print_exc()
             conn.rollback()
             # Fallback sin sucursales / lotes
             sql_fb = f"""
@@ -662,7 +671,12 @@ class _DashboardLoader(QThread):
                 LEFT JOIN cat_tipo_servicio     ts  ON os.id_tipo_servicio = ts.id
                 LEFT JOIN cat_tipo_instrumento  ti  ON os.id_tipo_instrumento = ti.id
                 WHERE 1=1 {where_clause}
-                ORDER BY os.fecha DESC, os.created_at DESC
+                ORDER BY
+                    CASE WHEN os.folio_os ~ '-[0-9]+$'
+                         THEN CAST(REGEXP_REPLACE(os.folio_os, '^.*-([0-9]+)$', '\\1') AS INTEGER)
+                         ELSE 0
+                    END DESC,
+                    os.fecha DESC
                 LIMIT 500
             """
             with conn.cursor() as cur:
@@ -1782,7 +1796,7 @@ class DashboardWidget(QWidget):
         self._btn_sync.setEnabled(True)
         self._btn_sync.setText("Sincronizar")
         self._refresh_pending_count()
-        QTimer.singleShot(300, self.refresh)
+        QTimer.singleShot(300, lambda: self._async_refresh(load_filters=False, force=True))
         QMessageBox.information(
             self, "Sincronizacion Completada",
             f"{n} registro(s) sincronizado(s) con el servidor central."
@@ -2076,15 +2090,22 @@ class DashboardWidget(QWidget):
                         LEFT JOIN cat_tipo_servicio  ts    ON os.id_tipo_servicio = ts.id
                         LEFT JOIN cliente_sucursales suc   ON os.sucursal_id      = suc.id
                         WHERE 1=1 {where_clause}
-                        ORDER BY os.id_lote NULLS LAST, os.fecha DESC, os.created_at DESC
+                        ORDER BY
+                            CASE WHEN os.folio_os ~ '-[0-9]+$'
+                                 THEN CAST(REGEXP_REPLACE(os.folio_os, '^.*-([0-9]+)$', '\\1') AS INTEGER)
+                                 ELSE 0
+                            END DESC,
+                            os.fecha DESC
                         LIMIT 200
                         """,
                         params or None,
                     )
                     rows = cur.fetchall()
                 except Exception as e:
+                    import traceback as _tb
                     conn.rollback()
                     logger.warning("Query principal fallo, aplicando fallback: %s", e)
+                    _tb.print_exc()
                     cur.execute(
                         f"""
                         SELECT
@@ -2105,7 +2126,12 @@ class DashboardWidget(QWidget):
                         LEFT JOIN cat_tecnicos      tc ON os.id_tecnico       = tc.id
                         LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
                         WHERE 1=1 {where_clause}
-                        ORDER BY os.fecha DESC, os.created_at DESC
+                        ORDER BY
+                            CASE WHEN os.folio_os ~ '-[0-9]+$'
+                                 THEN CAST(REGEXP_REPLACE(os.folio_os, '^.*-([0-9]+)$', '\\1') AS INTEGER)
+                                 ELSE 0
+                            END DESC,
+                            os.fecha DESC
                         LIMIT 200
                         """,
                         params or None,
@@ -2231,6 +2257,15 @@ class DashboardWidget(QWidget):
                 "TECNICO", "TIPO SERVICIO", "MODALIDAD", "ESTATUS", "SYNC", "ACCIONES"
             ])
 
+        # ── DEDUPLICACIÓN: un solo registro por folio_os (evita duplicados
+            # causados por JOINs multiplicativos en lotes/partidas) ──────────
+            _seen_folios: dict = {}
+            for _r in rows:
+                _folio_key = str(_r[0] or "").strip()
+                if _folio_key:
+                    _seen_folios[_folio_key] = _r
+            rows = list(_seen_folios.values()) if _seen_folios else rows
+
             # ── Agrupar filas: primero por id_lote (BD), luego retroactivo en Python ─
             # Para registros históricos sin id_lote, detectar folios consecutivos que
             # comparten (fecha, cliente, tecnico, servicio) → tratarlos como lote virtual.
@@ -2238,6 +2273,7 @@ class DashboardWidget(QWidget):
 
             lote_groups: OrderedDict[str, list] = OrderedDict()
             rows_sin_lote: list = []
+
 
             for row in rows:
                 id_lote = row[9] if len(row) > 9 else None
@@ -2755,12 +2791,48 @@ class DashboardWidget(QWidget):
 
 
     def _confirm_delete_batch(self, os_ids: list, folios: list) -> None:
-        """Confirma y elimina todos los registros de un lote (con cascada)."""
+        """Confirma y elimina todos los registros de un lote (con cascada).
+
+        Estrategia resiliente:
+        1. Intenta borrar por IDs numéricos (os_ids sin None).
+        2. Si no hay IDs válidos (lotes físicos), borra por folio_os.
+        3. Si folios también está vacío, intenta desglosar el rango del texto.
+        """
+        # ── 1. Resolver lista de folios ───────────────────────────────────────
+        folios_limpios = [f for f in (folios or []) if f]
+
+        # Fallback: desglosar rango "OS-26-631 al OS-26-638" si folios viene vacío
+        if not folios_limpios and os_ids:
+            # os_ids puede traer strings de folio en algunos contextos
+            folios_limpios = [str(x) for x in os_ids if x and not str(x).isdigit()]
+
+        # ── 2. Resolver IDs numéricos ─────────────────────────────────────────
+        valid_ids = []
+        for i in os_ids:
+            try:
+                valid_ids.append(int(i))
+            except (TypeError, ValueError):
+                pass  # None o strings de folio → ignorar para esta lista
+
+        # ── 3. Verificar que tengamos algo con qué borrar ─────────────────────
+        if not valid_ids and not folios_limpios:
+            QMessageBox.warning(
+                self, "Sin datos para eliminar",
+                "No se encontraron IDs ni folios válidos para este lote.\n"
+                "Intenta refrescar el dashboard (F5) y vuelve a intentarlo."
+            )
+            return
+
+        n_items = len(folios_limpios) or len(valid_ids)
+        modo    = "folios" if folios_limpios else f"{len(valid_ids)} ID(s)"
+        label_f = f"{folios_limpios[0]} … {folios_limpios[-1]}" if folios_limpios else str(valid_ids[:3])
+
+        # ── 4. Diálogo de confirmación ────────────────────────────────────────
         msg = QMessageBox(self)
         msg.setWindowTitle("⚠️  Eliminar Lote")
         msg.setText(
-            f"¿Eliminar el lote completo ({len(folios)} formatos) de forma definitiva?\n\n"
-            f"Folios: {folios[0]} … {folios[-1]}\n\n"
+            f"¿Eliminar el lote completo ({n_items} formato(s)) de forma definitiva?\n\n"
+            f"Folios: {label_f}\n\n"
             "Esta acción es IRREVERSIBLE."
         )
         msg.setStandardButtons(
@@ -2771,62 +2843,97 @@ class DashboardWidget(QWidget):
         if msg.exec() != QMessageBox.StandardButton.Yes:
             return
 
-        # Filtrar None y convertir a int
-        valid_ids = [int(i) for i in os_ids if i is not None]
-        if not valid_ids:
-            QMessageBox.warning(self, "Sin IDs",
-                "No se encontraron IDs válidos. Intenta refrescar el dashboard.")
-            return
-
-        # Tablas hijas — SAVEPOINT por cada una para ignorar inexistentes
+        # ── 5. Tablas hijas con SAVEPOINT ────────────────────────────────────
         _CHILD_TABLES = [
-            ("adjuntos_os",       "id_os"),
+            ("adjuntos_os",        "id_os"),
             ("det_excentricidad",  "id_os"),
             ("det_repetibilidad",  "id_os"),
             ("det_exactitud",      "id_os"),
+            ("det_celdas_carga",   "id_os"),
+            ("det_levantamiento_metrologico", "id_os"),
+            ("det_levantamiento_proyecto",    "id_os"),
             ("historial_ordenes",  "id_os"),
             ("historial_os",       "id_os"),
         ]
         conn = None
         try:
-            conn = _db_pool.getconn()
-            conn.autocommit = False
+            conn = _db_pool.get_connection()
             with conn.cursor() as cur:
-                for tabla, col in _CHILD_TABLES:
-                    sp = f"sp_{tabla[:20]}"
-                    try:
-                        cur.execute(f"SAVEPOINT {sp}")
-                        cur.execute(
-                            f"DELETE FROM {tabla} WHERE {col} = ANY(%s)",
-                            (valid_ids,)
-                        )
-                        cur.execute(f"RELEASE SAVEPOINT {sp}")
-                    except Exception:
-                        try: cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
-                        except Exception: pass
 
-                cur.execute(
-                    "DELETE FROM ordenes_servicio WHERE id = ANY(%s)",
-                    (valid_ids,)
-                )
-                rows = cur.rowcount
+                if valid_ids:
+                    # ── Borrado por IDs numéricos (cascada) ──────────────────
+                    for tabla, col in _CHILD_TABLES:
+                        sp = f"sp_{tabla[:20]}"
+                        try:
+                            cur.execute(f"SAVEPOINT {sp}")
+                            cur.execute(
+                                f"DELETE FROM {tabla} WHERE {col} = ANY(%s)",
+                                (valid_ids,)
+                            )
+                            cur.execute(f"RELEASE SAVEPOINT {sp}")
+                        except Exception:
+                            try: cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                            except Exception: pass
+
+                    cur.execute(
+                        "DELETE FROM ordenes_servicio WHERE id = ANY(%s)",
+                        (valid_ids,)
+                    )
+                    rows = cur.rowcount
+
+                else:
+                    # ── Borrado por folio_os cuando no hay IDs ────────────────
+                    # Primero obtener los IDs internos desde los folios
+                    cur.execute(
+                        "SELECT id FROM ordenes_servicio WHERE folio_os = ANY(%s)",
+                        (folios_limpios,)
+                    )
+                    db_ids = [r[0] for r in cur.fetchall() if r[0] is not None]
+
+                    if db_ids:
+                        # Borrar hijos por IDs recuperados
+                        for tabla, col in _CHILD_TABLES:
+                            sp = f"sp_{tabla[:20]}"
+                            try:
+                                cur.execute(f"SAVEPOINT {sp}")
+                                cur.execute(
+                                    f"DELETE FROM {tabla} WHERE {col} = ANY(%s)",
+                                    (db_ids,)
+                                )
+                                cur.execute(f"RELEASE SAVEPOINT {sp}")
+                            except Exception:
+                                try: cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
+                                except Exception: pass
+
+                    # Borrar la OS por folio_os directamente (tolerante a id=None)
+                    cur.execute(
+                        "DELETE FROM ordenes_servicio WHERE folio_os = ANY(%s)",
+                        (folios_limpios,)
+                    )
+                    rows = cur.rowcount
+
             conn.commit()
-            logger.info("[DELETE LOTE] %d registros eliminados: %s", rows, folios)
-            QMessageBox.information(self, "Lote eliminado",
+            logger.info("[DELETE LOTE] %d registros eliminados: %s", rows, label_f)
+            QMessageBox.information(
+                self, "Lote eliminado",
                 f"Se eliminaron {rows} orden(es) correctamente.\n"
-                f"Folios: {folios[0]} … {folios[-1]}")
+                f"Folios: {label_f}"
+            )
             self._load_table()
             self._load_kpis()
+
         except Exception as exc:
             if conn:
                 try: conn.rollback()
                 except Exception: pass
             logger.error("Error eliminando lote: %s", exc)
-            QMessageBox.critical(self, "Error al eliminar",
-                                 f"No se pudo eliminar el lote:\n\n{exc}")
+            QMessageBox.critical(
+                self, "Error al eliminar",
+                f"No se pudo eliminar el lote:\n\n{exc}"
+            )
         finally:
             if conn:
-                try: _db_pool.putconn(conn)
+                try: _db_pool.release_connection(conn)
                 except Exception: pass
 
     def _build_action_cell(self, folio: str, estado: str, os_id,
@@ -2881,14 +2988,25 @@ class DashboardWidget(QWidget):
             btn_editar.setToolTip("Reabrir la captura para corregir datos y regenerar PDF")
             btn_editar.clicked.connect(lambda _, fid=os_id, fl=folio, rd=row_data: self._abrir_captura_digital(fid, fl, rd))
             lay.addWidget(btn_editar)
+
+            if _session_has_role("recepcion", "admin"):
+                btn_dl = QPushButton("📥 Descargar PDF")
+                btn_dl.setFixedHeight(26)
+                btn_dl.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_dl.setStyleSheet(_btn_pdf_style)
+                btn_dl.setToolTip("Descargar PDF y confirmar recepción en auditoría")
+                btn_dl.clicked.connect(lambda _, fid=os_id, fl=folio: self._descargar_pdf_os(fid, fl))
+                lay.addWidget(btn_dl)
         else:
-            # FISICO → Ver PDF
+            # FÊSICO → Ver PDF — pasar folio directo (no os_id) para evitar el
+            # error 'No se pudo determinar el folio de la orden' cuando os_id
+            # viene como None o no mapea a la tabla correcta.
             btn_primary = QPushButton("Ver PDF")
             btn_primary.setFixedHeight(26)
             btn_primary.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_primary.setStyleSheet(_btn_pdf_style)
             btn_primary.setToolTip("Abrir el PDF en blanco para imprimir")
-            btn_primary.clicked.connect(lambda _, fid=os_id: self._open_pdf(fid))
+            btn_primary.clicked.connect(lambda _, fl=str(folio): self._open_pdf(fl))
             lay.addWidget(btn_primary)
 
         # ── Botón Opciones con QMenu ──────────────────────────────────────────
@@ -2950,12 +3068,18 @@ class DashboardWidget(QWidget):
 
         # ── Opción Descargar PDF (admin / recepción) ──────────────────────────
         if _session_has_role("admin", "recepcion", "logistica"):
-            act_download = QAction("\U0001f4e5  Descargar PDF", btn_opts)
+            act_download = QAction("📥  Descargar PDF", btn_opts)
             act_download.triggered.connect(
                 lambda _, fid=os_id, fl=folio: self._descargar_pdf_os(fid, fl)
             )
             opts_menu.addSeparator()
             opts_menu.addAction(act_download)
+
+            act_confirmar = QAction("✅  Confirmar PDF descargado (Recibido)", btn_opts)
+            act_confirmar.triggered.connect(
+                lambda _, fid=os_id, fl=folio: self._confirmar_pdf_recibido(fid, fl)
+            )
+            opts_menu.addAction(act_confirmar)
 
         if self._is_admin():
             opts_menu.addSeparator()
@@ -2994,6 +3118,7 @@ class DashboardWidget(QWidget):
         """
         import os as _os
         import shutil
+        import base64
 
         # 1. Buscar el PDF en la carpeta de PDFs de la aplicación
         pdf_src = None
@@ -3003,7 +3128,7 @@ class DashboardWidget(QWidget):
         except Exception:
             pass
         if not pdf_src or not _os.path.exists(pdf_src):
-            # Buscar por nombre de archivo en carpeta local
+            # Buscar por nombre de archivo en carpetas locales estándar
             from pathlib import Path
             for search_dir in [
                 _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', '..', 'PDFs'),
@@ -3014,11 +3139,36 @@ class DashboardWidget(QWidget):
                     pdf_src = str(candidate)
                     break
 
+        # Si no existe localmente, intentar descargar desde PostgreSQL (pdf_b64 subido por tablet)
+        if (not pdf_src or not _os.path.exists(pdf_src)) and _DEPS_OK and _db_pool:
+            try:
+                conn = _db_pool.get_connection()
+                pdf_b64 = None
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT pdf_b64 FROM ordenes_servicio WHERE id = %s OR folio_os = %s LIMIT 1",
+                        (os_id, folio)
+                    )
+                    row = cur.fetchone()
+                    if row and row[0]:
+                        pdf_b64 = row[0]
+                _db_pool.release_connection(conn)
+
+                if pdf_b64:
+                    import tempfile
+                    temp_dir = tempfile.gettempdir()
+                    temp_pdf = _os.path.join(temp_dir, f"{folio}.pdf")
+                    with open(temp_pdf, "wb") as f_out:
+                        f_out.write(base64.b64decode(pdf_b64))
+                    pdf_src = temp_pdf
+            except Exception as exc:
+                logger.warning("No se pudo obtener pdf_b64 de la BD para %s: %s", folio, exc)
+
         if not pdf_src or not _os.path.exists(pdf_src):
             QMessageBox.warning(
                 self, "PDF no encontrado",
                 f"No se encontró el PDF para el folio {folio}.\n"
-                "Genera primero el PDF desde la pantalla de captura."
+                "Genera primero el PDF desde la pantalla de captura o espera a que el técnico sincronice."
             )
             return
 
@@ -3042,14 +3192,16 @@ class DashboardWidget(QWidget):
             )
             return
 
-        # 4. Registrar en BD: pdf_descargado = TRUE
+        # 4. Registrar en BD: pdf_descargado = TRUE, auditoria_digital = 'Recibido'
         if _DEPS_OK and _db_pool:
             try:
                 conn = _db_pool.get_connection()
                 with conn.cursor() as cur:
                     cur.execute(
-                        "UPDATE ordenes_servicio SET pdf_descargado = TRUE WHERE id = %s",
-                        (os_id,)
+                        """UPDATE ordenes_servicio 
+                           SET pdf_descargado = TRUE, auditoria_digital = 'Recibido' 
+                           WHERE id = %s OR folio_os = %s""",
+                        (os_id, folio)
                     )
                 conn.commit()
                 _db_pool.release_connection(conn)
@@ -3058,11 +3210,67 @@ class DashboardWidget(QWidget):
 
         QMessageBox.information(
             self, "PDF descargado",
-            f"PDF guardado exitosamente en:\n{dest_path}"
+            f"PDF guardado exitosamente en:\n{dest_path}\n"
+            "Estatus de auditoría actualizado a 'Recibido'."
         )
 
+    def _confirmar_pdf_recibido(self, os_id: int, folio: str) -> None:
+        """Marca manualmente la orden como PDF recibido / auditado por recepción."""
+        if not _DEPS_OK or not _db_pool:
+            return
+        try:
+            conn = _db_pool.get_connection()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """UPDATE ordenes_servicio 
+                       SET pdf_descargado = TRUE, auditoria_digital = 'Recibido' 
+                       WHERE id = %s OR folio_os = %s""",
+                    (os_id, folio)
+                )
+            conn.commit()
+            _db_pool.release_connection(conn)
+            QMessageBox.information(
+                self, "Auditoría Confirmada",
+                f"La orden {folio} ha sido confirmada como 'PDF Recibido' en auditoría."
+            )
+        except Exception as exc:
+            logger.error("Error al confirmar PDF recibido: %s", exc)
+            QMessageBox.critical(self, "Error", f"No se pudo confirmar recepción:\n{exc}")
+
     def _abrir_captura_digital(self, os_id, folio: str, row_data: tuple = None) -> None:
-        """Abre el diálogo de captura digital interactiva para la OS indicada."""
+        """Abre el diálogo de captura digital interactiva para la OS indicada.
+        Antes de abrir, verifica que la OS exista en la BD para evitar abrir
+        un diálogo de una orden huérfana (eliminada remotamente).
+        """
+        # ── Verificación de existencia: evitar abrir captura de orden huérfana ───
+        if folio:
+            try:
+                _conn_chk = _db_pool.get_connection()
+                try:
+                    with _conn_chk.cursor() as _cur_chk:
+                        _cur_chk.execute(
+                            "SELECT id FROM ordenes_servicio WHERE folio_os = %s",
+                            (folio.strip(),)
+                        )
+                        _exists = _cur_chk.fetchone()
+                    _conn_chk.commit()
+                finally:
+                    _db_pool.release_connection(_conn_chk)
+
+                if not _exists:
+                    # Orden eliminada remotamente — purgar de la vista sin error bloqueante
+                    logger.warning("_abrir_captura_digital: OS huérfana '%s' (eliminada en servidor). Purgar del tree.", folio)
+                    self._remove_folio_from_tree(folio)
+                    QMessageBox.information(
+                        self, "Orden no encontrada",
+                        f"La orden {folio} ya no existe en el servidor.\n"
+                        "La tabla se actualizó automáticamente."
+                    )
+                    self._async_refresh(load_filters=False, force=True)
+                    return
+            except Exception as _exc_chk:
+                logger.warning("_abrir_captura_digital: no se pudo verificar existencia: %s", _exc_chk)
+
         try:
             from ui.widgets.captura_digital_dialog import CapturaDigitalDialog
         except ImportError as exc:
@@ -3089,6 +3297,42 @@ class DashboardWidget(QWidget):
         dlg = CapturaDigitalDialog(os_id=os_id, folio=folio, orden_data=orden_dict, parent=self)
         dlg.captura_guardada.connect(self.refresh)
         dlg.exec()
+
+    def _remove_folio_from_tree(self, folio: str) -> None:
+        """Elimina del QTreeWidget la fila (o grupo) que coincide con el folio dado.
+        Soporta tanto filas individuales como nodos hijo dentro de lotes."""
+        if not hasattr(self, "_table") or not folio:
+            return
+        folio = folio.strip()
+        root = self._table.invisibleRootItem()
+        to_remove = []   # (parent_item_or_None, child_item)
+        for i in range(root.childCount()):
+            top = root.child(i)
+            # ¿Es un nodo individual con ese folio?
+            if top.text(0).strip() == folio:
+                to_remove.append((None, top))
+                continue
+            # ¿Es un grupo con ese folio como hijo?
+            for j in range(top.childCount()):
+                child = top.child(j)
+                if child.text(0).strip() == folio:
+                    to_remove.append((top, child))
+        for parent, item in to_remove:
+            if parent is None:
+                idx = root.indexOfChild(item)
+                if idx >= 0:
+                    root.takeChild(idx)
+            else:
+                idx = parent.indexOfChild(item)
+                if idx >= 0:
+                    parent.takeChild(idx)
+                # Si el grupo quedó vacío, también lo eliminamos
+                if parent.childCount() == 0:
+                    pidx = root.indexOfChild(parent)
+                    if pidx >= 0:
+                        root.takeChild(pidx)
+        logger.info("_remove_folio_from_tree: purgadas %d entrada(s) de folio '%s'",
+                    len(to_remove), folio)
 
 
     # =========================================================================
@@ -3125,32 +3369,63 @@ class DashboardWidget(QWidget):
 
         words = search_term.split()
 
-        def _matches(text: str) -> bool:
+        # ── Detección de modo de búsqueda ────────────────────────────────────
+        # Numérico puro (ej. "624") → solo buscar en FOLIO (columna 0).
+        # Evita que códigos postales, teléfonos o números en direcciones
+        # hagan falso-positivo.
+        _is_numeric_search = search_term.isdigit()
+
+        # Prefijo de folio (ej. "OS-26", "RMA-26") → solo folio.
+        _FOLIO_PREFIXES = ("os-", "rma-", "re-", "lp-", "lv-")
+        _is_folio_prefix = any(search_term.startswith(p) for p in _FOLIO_PREFIXES)
+
+        _folio_only = _is_numeric_search or _is_folio_prefix
+
+        def _matches_folio_only(folio_text: str) -> bool:
+            """Coincidencia de subcadena SOLO sobre el texto del folio.
+            No evalúa sucursal ni dirección → evita falsos positivos con CPs.
+            '624' → True para 'OS-26-624', False para sucursal con '76246'
+            porque la sucursal NUNCA se evalúa en este modo.
+            """
+            return search_term in folio_text.lower().strip()
+
+        def _matches_all_fields(text: str) -> bool:
+            """Búsqueda general: todas las palabras deben aparecer en algún campo."""
             t = text.lower()
             return all(w in t for w in words)
 
         for i in range(n_top):
             parent_item = root.child(i)
 
-            # Texto buscable del padre: columnas 0..6 (folio, fecha, cliente,
-            # sucursal, técnico, tipo_servicio, modalidad)
-            parent_texts = " ".join(
-                (parent_item.text(col) or "") for col in range(7)
-            )
-            parent_match = _matches(parent_texts)
+            # ── COLUMNA 1 = FOLIO OS (columna 0 es el checkbox, siempre vacío) ──
+            parent_folio = parent_item.text(1) or ""
 
-            child_count    = parent_item.childCount()
+            if _folio_only:
+                parent_match = _matches_folio_only(parent_folio)
+            else:
+                # Texto buscable del padre: cols 1..6 (omitir col 0 = checkbox)
+                parent_texts = " ".join(
+                    (parent_item.text(col) or "") for col in range(1, 7)
+                )
+                parent_match = _matches_all_fields(parent_texts)
+
+            child_count     = parent_item.childCount()
             any_child_match = False
 
             for j in range(child_count):
                 child = parent_item.child(j)
-                child_texts = " ".join(
-                    (child.text(col) or "") for col in range(7)
-                )
-                child_match = _matches(child_texts)
+                # Columna 1 = FOLIO del hijo
+                child_folio = child.text(1) or ""
+
+                if _folio_only:
+                    child_match = _matches_folio_only(child_folio)
+                else:
+                    child_texts = " ".join(
+                        (child.text(col) or "") for col in range(1, 7)
+                    )
+                    child_match = _matches_all_fields(child_texts)
 
                 if parent_match:
-                    # Padre coincide → todos los hijos visibles
                     child.setHidden(False)
                 else:
                     child.setHidden(not child_match)
@@ -3166,6 +3441,8 @@ class DashboardWidget(QWidget):
                 parent_item.setExpanded(True)
             elif parent_match:
                 parent_item.setExpanded(True)
+
+
 
 
     # =========================================================================
@@ -3349,8 +3626,7 @@ class DashboardWidget(QWidget):
         ]
         conn = None
         try:
-            conn = _db_pool.getconn()
-            conn.autocommit = False
+            conn = _db_pool.get_connection()   # API correcta del DatabasePool
             with conn.cursor() as cur:
                 # Si no tenemos id, buscarlo por folio
                 if _resolved_id is None:
@@ -3373,6 +3649,15 @@ class DashboardWidget(QWidget):
                     frow = cur.fetchone()
                     _folio_known = frow[0] if frow else _folio_known
 
+                # ── BORRADO EN CASCADA ─────────────────────────────────────
+                # Si _resolved_id sigue None (no encontrado por folio en BD)
+                # abortar con mensaje cláro — evita 'id=None' confuso.
+                if _resolved_id is None and not _folio_known:
+                    QMessageBox.warning(self, "No encontrada",
+                        "No se pudo determinar el identificador de la orden.\n"
+                        "Intenta refrescar el dashboard e intentarlo de nuevo.")
+                    return
+
                 for tabla, col in _CHILD_TABLES:
                     sp = f"sp_{tabla[:20]}"
                     try:
@@ -3385,14 +3670,22 @@ class DashboardWidget(QWidget):
                         try: cur.execute(f"ROLLBACK TO SAVEPOINT {sp}")
                         except Exception: pass
 
-                cur.execute("DELETE FROM ordenes_servicio WHERE id = %s", (_resolved_id,))
+                # DELETE principal: preferir por id, pero usar folio como fallback
+                if _resolved_id is not None:
+                    cur.execute("DELETE FROM ordenes_servicio WHERE id = %s",
+                                (_resolved_id,))
+                else:
+                    # Fallback: borrar por folio_os (es único en la tabla)
+                    cur.execute("DELETE FROM ordenes_servicio WHERE folio_os = %s",
+                                (_folio_known,))
                 rows = cur.rowcount
             conn.commit()
             logger.info("[DELETE] OS id=%s folio=%s eliminada (%d)",
                         _resolved_id, _folio_known, rows)
             if rows == 0:
                 QMessageBox.warning(self, "Sin resultado",
-                    f"No se encontró id={_resolved_id}. Es posible que ya estuviera eliminada.")
+                    f"No se encontró la orden '{_folio_known}'. "
+                    "Es posible que ya estuviera eliminada.")
             else:
                 QMessageBox.information(self, "Listo",
                     f"Orden {_folio_known or _resolved_id} eliminada correctamente.")
@@ -3407,7 +3700,7 @@ class DashboardWidget(QWidget):
                                  f"No se pudo eliminar la orden:\n\n{e}")
         finally:
             if conn:
-                try: _db_pool.putconn(conn)
+                try: _db_pool.release_connection(conn)   # API correcta
                 except Exception: pass
 
     def _cambiar_modalidad_os(self, os_id: int, nueva_modalidad: str) -> None:
@@ -3686,6 +3979,38 @@ class DashboardWidget(QWidget):
             pathlib.Path.home() / "PesaServidorLocal" / "PDF_OS",
         ]
 
+        # ── REGENERACIÓN DE CACHÉ: si el PDF ya existe en disco y es formato FÍSICO,
+        # regenerarlo con el generador actualizado (sin diagonales ni ceros).
+        try:
+            from services.pdf_router import regenerar_pdf as _regen_pdf
+            for _pdf_dir in _pdf_dirs:
+                _candidate = _pdf_dir / f"{folio_limpio}.pdf"
+                if _candidate.exists():
+                    try:
+                        _conn_r = _db_pool.get_connection()
+                        try:
+                            with _conn_r.cursor() as _cur:
+                                _cur.execute(
+                                    "SELECT id, modalidad FROM ordenes_servicio WHERE folio_os = %s",
+                                    (folio_limpio,)
+                                )
+                                _row_r = _cur.fetchone()
+                            _conn_r.commit()
+                        finally:
+                            _db_pool.release_connection(_conn_r)
+                        if _row_r:
+                            _oid_r, _mod_r = _row_r
+                            if str(_mod_r or "").upper().strip() in ("FISICO", "FÍSICO", "PHYSICAL"):
+                                logger.info("_open_pdf: regenerando PDF físico en caché: %s", _candidate)
+                                _regen_pdf(_oid_r, folio_limpio, force=True)
+                    except Exception as _exc_r:
+                        logger.warning("_open_pdf: no se pudo regenerar PDF: %s", _exc_r)
+                    break
+        except Exception as _exc_regen:
+            logger.warning("_open_pdf: regeneración de caché omitida: %s", _exc_regen)
+
+
+
         # ── 1. PDF individual exacto: <folio>.pdf ─────────────────────────────
         for pdf_dir in _pdf_dirs:
             candidate = pdf_dir / f"{folio_limpio}.pdf"
@@ -3693,6 +4018,7 @@ class DashboardWidget(QWidget):
                 logger.info("_open_pdf: encontrado PDF individual: %s", candidate)
                 _open_file(str(candidate))
                 return
+
 
         # ── 2. PDF de lote combinado ──────────────────────────────────────────
         for pdf_dir in _pdf_dirs:
