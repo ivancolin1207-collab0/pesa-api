@@ -77,7 +77,7 @@ class LocalDbService {
     final dbPath = p.join(await getDatabasesPath(), 'pesa_local.db');
     _db = await openDatabase(
       dbPath,
-      version: 9,   // v9: _toBoolInt/_toInt helpers + fallback safe-insert para compatibilidad total
+      version: 10,   // v10: corrección crítica SQL INSTR y sanitización de tipos SQLite
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -104,8 +104,8 @@ class LocalDbService {
         await db.insert('meta', {'key': 'device_id', 'value': devId});
       },
       onUpgrade: (db, oldVersion, newVersion) async {
-        // v8/v9: DROP+CREATE garantiza esquema 100% limpio desde cualquier versión anterior
-        if (oldVersion < 9) {
+        // v10: DROP+CREATE garantiza esquema 100% limpio desde cualquier versión anterior
+        if (oldVersion < 10) {
           await db.execute('DROP TABLE IF EXISTS ordenes_servicio');
           await db.execute(_createTableOrdenesSql);
           try {
@@ -192,51 +192,51 @@ class LocalDbService {
       return false;
     }
 
-    final sucursal = data['sucursal_nombre'] ?? data['sucursal'] ?? '';
-    final cliente  = data['cliente'] ?? data['cliente_nombre'] ?? '';
-    final tecnico  = data['tecnico'] ?? data['tecnico_nombre'] ?? '';
-    final tipoSvc  = data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '';
+    final sucursal = (data['sucursal_nombre'] ?? data['sucursal'] ?? '').toString();
+    final cliente  = (data['cliente'] ?? data['cliente_nombre'] ?? '').toString();
+    final tecnico  = (data['tecnico'] ?? data['tecnico_nombre'] ?? '').toString();
+    final tipoSvc  = (data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '').toString();
 
-    final row = {
+    final row = <String, dynamic>{
       'folio_os':          folio,
-      'estado':            data['estado'] ?? 'PROCESO',
-      'modalidad':         data['modalidad'] ?? 'DIGITAL',
-      'fecha':             data['fecha'],
+      'estado':            data['estado']?.toString() ?? 'PROCESO',
+      'modalidad':         data['modalidad']?.toString() ?? 'DIGITAL',
+      'fecha':             data['fecha']?.toString(),
       'cliente':           cliente,
       'sucursal':          sucursal,
       'tecnico':           tecnico,
       'tipo_servicio':     tipoSvc,
-      'tipo_instrumento':  data['tipo_instrumento'],
+      'tipo_instrumento':  data['tipo_instrumento']?.toString(),
       // [FIX] aplica_excentricidad puede llegar como bool (JSON), int o String
       'aplica_excentricidad': _toBoolInt(data['aplica_excentricidad']),
       'num_celdas_camionera': _toInt(data['num_celdas_camionera'], 0),
-      'clase_exactitud':   data['clase_exactitud_codigo'],
-      'observaciones':     data['observaciones'],
+      'clase_exactitud':   data['clase_exactitud_codigo']?.toString(),
+      'observaciones':     data['observaciones']?.toString(),
       // ── Datos del instrumento ──────────────────────────────────────────────
-      'marca':             data['marca'],
-      'modelo':            data['modelo'],
-      'ns':                data['ns'] ?? data['serie'],
-      'ubicacion':         data['ubicacion'],
-      'id_equipo':         data['id_equipo'],
-      'alcance_max':       data['alcance_max'] ?? data['capacidad_maxima'],
-      'div_minima':        data['div_minima'] ?? data['division_minima'],
-      'div_verificacion':  data['div_verificacion'],
-      'numero_cca':        data['numero_cca'],
-      'holograma_anterior': data['holograma_anterior'],
-      'pdf_url':           data['pdf_url'],
+      'marca':             data['marca']?.toString(),
+      'modelo':            data['modelo']?.toString(),
+      'ns':                (data['ns'] ?? data['serie'])?.toString(),
+      'ubicacion':         data['ubicacion']?.toString(),
+      'id_equipo':         data['id_equipo']?.toString(),
+      'alcance_max':       _toDouble(data['alcance_max'] ?? data['capacidad_maxima']),
+      'div_minima':        _toDouble(data['div_minima'] ?? data['division_minima']),
+      'div_verificacion':  _toDouble(data['div_verificacion']),
+      'numero_cca':        data['numero_cca']?.toString(),
+      'holograma_anterior': data['holograma_anterior']?.toString(),
+      'pdf_url':           data['pdf_url']?.toString(),
       // ── Campos precargados por logística ───────────────────────────────────
-      'instrumento_capacidad': data['instrumento_capacidad'],
-      'instrumento_division':  data['instrumento_division'],
+      'instrumento_capacidad': data['instrumento_capacidad']?.toString(),
+      'instrumento_division':  data['instrumento_division']?.toString(),
       'secciones_camionera':   _toInt(data['secciones_camionera'] ?? data['num_celdas_camionera'], 0),
       'num_secciones':         _toInt(data['num_secciones'], 0),
       // Offline-First v2 + Lotes
-      'unidad_medida':     data['unidad_medida'] ?? 'kg',
-      'id_lote':           data['id_lote'] ?? data['lote'] ?? '',
-      'rango_lote':        data['rango_lote'] ?? '',
+      'unidad_medida':     data['unidad_medida']?.toString() ?? 'kg',
+      'id_lote':           (data['id_lote'] ?? data['lote'])?.toString() ?? '',
+      'rango_lote':        data['rango_lote']?.toString() ?? '',
       if (data['firma_tecnico_descargada'] != null)
-        'firma_tecnico_descargada': data['firma_tecnico_descargada'],
+        'firma_tecnico_descargada': data['firma_tecnico_descargada']?.toString(),
       // Sync
-      'sync_version':      data['sync_version'] ?? 0,
+      'sync_version':      _toInt(data['sync_version'], 0),
       'sync_status':       'SINCRONIZADO',
       'updated_at':        data['updated_at']?.toString(),
     };
@@ -257,7 +257,6 @@ class LocalDbService {
       // [FIX] Intentar insertar solo los campos seguros si el error es de tipo
       try {
         final db = await _ensureInit();
-        // Filtrar el row a solo los campos TEXT/INTEGER conocidos sin REAL problemáticos
         final safeRow = Map<String, dynamic>.from(row)
           ..remove('alcance_max')
           ..remove('div_minima')
@@ -292,6 +291,15 @@ class LocalDbService {
     return int.tryParse(v.toString()) ?? defaultVal;
   }
 
+  /// Convierte cualquier valor numérico a double de forma segura.
+  static double? _toDouble(dynamic v) {
+    if (v == null) return null;
+    if (v is double) return v;
+    if (v is int) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
+  }
+
   /// Borra TODAS las órdenes locales (usado antes de un pull completo).
   /// Retorna el número de filas eliminadas.
   Future<int> deleteAllOs() async {
@@ -301,12 +309,9 @@ class LocalDbService {
 
   Future<List<Map<String, dynamic>>> getAllOs() async {
     final db = await _ensureInit();
-    // Ordenar por último número del folio (ej. OS-26-645 > OS-26-551)
-    // usando CAST en SQLite para extraer el consecutivo
+    // Ordenar por local_id descendente (más recientes arriba) y fecha
     return await db.rawQuery(
-      "SELECT * FROM ordenes_servicio "
-      "ORDER BY CAST(SUBSTR(folio_os, INSTR(folio_os, '-', INSTR(folio_os, '-') + 1) + 1) AS INTEGER) DESC, "
-      "fecha DESC",
+      "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
     );
   }
 
@@ -316,9 +321,7 @@ class LocalDbService {
   Future<List<Map<String, dynamic>>> getOsForTecnico(String nombreTecnico) async {
     final db = await _ensureInit();
     final rows = await db.rawQuery(
-      "SELECT * FROM ordenes_servicio "
-      "ORDER BY CAST(SUBSTR(folio_os, INSTR(folio_os, '-', INSTR(folio_os, '-') + 1) + 1) AS INTEGER) DESC, "
-      "fecha DESC",
+      "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
     );
     final nombreLow = nombreTecnico.toLowerCase().trim();
     if (nombreLow.isEmpty) return rows;  // Sin nombre = admin, devuelve todo

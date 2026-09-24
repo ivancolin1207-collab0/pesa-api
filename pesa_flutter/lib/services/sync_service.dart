@@ -25,6 +25,64 @@ class SyncService extends ChangeNotifier {
   DateTime? _lastSync;
   StreamSubscription? _connSub;
 
+  List<Map<String, dynamic>> _orders = [];
+  List<Map<String, dynamic>> get orders => _orders;
+
+  // ── Contadores reactivos del Dashboard ───────────────────────────────────
+  int _kpiTotal   = 0;
+  int _kpiProceso = 0;
+  int _kpiCerrado = 0;
+  int _kpiFisico  = 0;
+
+  int get kpiTotal   => _kpiTotal;
+  int get kpiProceso => _kpiProceso;
+  int get kpiCerrado => _kpiCerrado;
+  int get kpiFisico  => _kpiFisico;
+
+  /// Asigna directamente la lista de órdenes recibidas en memoria
+  /// y actualiza de inmediato las variables reactivas de los contadores.
+  void setOrdersFromPull(List<Map<String, dynamic>> osList) {
+    _orders = List<Map<String, dynamic>>.from(osList);
+    _updateCounters(_orders);
+    notifyListeners();
+  }
+
+  void _updateCounters(List<Map<String, dynamic>> list) {
+    _kpiTotal = list.length;
+    int proceso = 0;
+    int cerrado = 0;
+    int fisico  = 0;
+
+    for (final o in list) {
+      final estado = (o['estado'] as String? ?? '').trim().toUpperCase();
+      final modalidad = (o['modalidad'] as String? ?? '').trim().toUpperCase();
+
+      final isCerrada = estado == 'CERRADA' ||
+          estado == 'CERRADO' ||
+          estado == 'COMPLETADA' ||
+          estado == 'COMPLETADA_DIGITAL' ||
+          estado == 'FIRMADA';
+
+      final isCancelada = estado == 'CANCELADA' || estado == 'CANCELADO';
+
+      if (isCerrada) {
+        cerrado++;
+      } else if (!isCancelada) {
+        // En Proceso: órdenes con estatus distinto a 'Cerrada' o 'Cancelada'
+        proceso++;
+      }
+
+      // Formatos Físicos: órdenes cuya modalidad contenga 'Físico'
+      if (modalidad.contains('FISIC') || modalidad.contains('FÍSIC')) {
+        fisico++;
+      }
+    }
+
+    _kpiProceso = proceso;
+    _kpiCerrado = cerrado;
+    _kpiFisico  = fisico;
+  }
+
   SyncState get state         => _state;
   String    get message       => _message;
   String    get statusMessage => _message;
@@ -288,29 +346,22 @@ class SyncService extends ChangeNotifier {
       debugPrint('[Sync PULL] RECIBIDAS: ${osList.length} ordenes del servidor');
 
       if (osList.isEmpty) {
-        // [FIX] Servidor devolvio 0 ordenes: loguear pero NO poner estado error.
-        debugPrint('[Sync PULL] AVISO: servidor retorno 0 ordenes para id_tecnico=$idTecnico.'
-            ' La BD local puede tener datos previos.');
+        debugPrint('[Sync PULL] AVISO: servidor retorno 0 ordenes para id_tecnico=$idTecnico.');
         return 0;
       }
 
-      // [FIX-NUCLEAR] Borrar TODAS las órdenes locales antes de re-insertar.
-      // Esto garantiza limpieza independientemente de la versión del schema SQLite.
-      // Si el schema tenía columnas incompatibles, al borrar+reinsertar queda limpio.
-      try {
-        final borradas = await db.deleteAllOs();
-        debugPrint('[Sync PULL] Tabla limpia: $borradas filas eliminadas antes del pull');
-      } catch (e) {
-        debugPrint('[Sync PULL] AVISO: no se pudo limpiar tabla: $e');
-      }
+      // ── [ASIGNACIÓN DIRECTA INMEDIATA AL ESTADO DEL DASHBOARD] ──────────
+      // En cuanto se recibe la lista de órdenes en la respuesta HTTP 200:
+      // Asigna directamente esa lista de órdenes al estado/proveedor que maneja el Dashboard.
+      // Actualiza de inmediato las variables reactivas de los contadores e invoca notifyListeners().
+      setOrdersFromPull(osList);
+      debugPrint('[Sync PULL] Dashboard en memoria actualizado: ${osList.length} OS '
+          '| Total: $_kpiTotal, Proceso: $_kpiProceso, Cerrados: $_kpiCerrado, Físicos: $_kpiFisico');
 
-      // Upsert individual — verifica que realmente se guarden
+      // Persistir también en SQLite de forma segura (sin borrar si falla)
       int guardadas = 0;
       String? lastErr;
       for (final osData in osList) {
-        final folio = osData['folio_os'] ?? '?';
-        debugPrint('[Sync PULL]   OS: $folio | '
-            'estado: ${osData["estado"]} | tecnico: ${osData["tecnico"]}');
         final ok = await db.upsertOs(osData);
         if (ok) {
           guardadas++;
@@ -319,22 +370,9 @@ class SyncService extends ChangeNotifier {
         }
       }
 
-      if (osList.isNotEmpty && guardadas == 0) {
-        // [FIX] NO relanzar: loguear el error pero continuar.
-        // La excepción aquí borraba la tabla LOCAL y dejaba el dashboard vacío.
-        // El usuario ve el error en logcat pero la app no queda en estado roto.
-        debugPrint(
-          '[Sync PULL] ADVERTENCIA CRITICA: servidor entregó ${osList.length} OS '
-          'pero guardadas=$guardadas en SQLite. lastErr=$lastErr'
-        );
-        // Intentar restaurar desde BD local si hay datos previos
-        await db.setLastSyncTime(DateTime.now().toUtc());
-        return 0;
-      }
-
       await db.setLastSyncTime(DateTime.now().toUtc());
-      debugPrint('[Sync PULL] OK $guardadas/${osList.length} OS guardadas en SQLite');
-      return guardadas;
+      debugPrint('[Sync PULL] Persistencia SQLite: $guardadas/${osList.length} guardadas (lastErr: $lastErr)');
+      return osList.length;
     } catch (e, st) {
       debugPrint('[Sync PULL] ERROR GRAVE: $e');
       debugPrint(st.toString());

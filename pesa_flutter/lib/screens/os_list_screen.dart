@@ -47,9 +47,19 @@ class _OsListScreenState extends State<OsListScreen> {
   @override
   void initState() {
     super.initState();
-    context.read<SyncService>().startNetworkMonitor();
-    context.read<SyncService>().addListener(_onSyncChanged);
-    _loadLocal();
+    final sync = context.read<SyncService>();
+    sync.startNetworkMonitor();
+    sync.addListener(_onSyncChanged);
+
+    // Si SyncService ya tiene órdenes en memoria tras el pull, usarlas de inmediato
+    if (sync.orders.isNotEmpty) {
+      _all = List<Map<String, dynamic>>.from(sync.orders);
+      _loading = false;
+      _applyFilters();
+    } else {
+      _loadLocal();
+    }
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _comprobarFirmaYDescargar();
     });
@@ -60,10 +70,12 @@ class _OsListScreenState extends State<OsListScreen> {
     final auth = context.read<AuthService>();
     final isTecnico = auth.isTecnico;
 
-    // ── 1. Fijar filtro de técnico propio ───────────────────────────────
-    if (isTecnico && auth.nombreCompleto != null) {
-      setState(() => _tecnico = auth.nombreCompleto);
-    }
+    // ── 1. NO fijar _tecnico en el estado para técnicos ───────────────────
+    // getOsForTecnico() en SQLite ya entrega SOLO las órdenes del técnico.
+    // Si se fijara _tecnico aquí, _filterIsolate haría un segundo filtro por
+    // cadena que puede descartar registros por diferencias de capitalización
+    // o acentos entre el nombre en el JWT y la columna 'tecnico' en SQLite.
+    // El dropdown de técnico queda disponible solo para roles admin/logística.
 
     // ── 2. Verificación INMEDIATA de firma (sin depender de red) ───────
     // Primero revisa localmente; si la sesión está offline o el servidor
@@ -169,11 +181,20 @@ class _OsListScreenState extends State<OsListScreen> {
             },
           );
 
-      await _loadLocal();
+      // Si SyncService ya tiene órdenes en memoria del pull HTTP 200, asignarlas directamente:
+      final sync = context.read<SyncService>();
+      if (sync.orders.isNotEmpty && mounted) {
+        setState(() {
+          _all = List<Map<String, dynamic>>.from(sync.orders);
+          _loading = false;
+        });
+        await _applyFilters();
+      } else {
+        await _loadLocal();
+      }
 
       // Determinar resultado
       if (mounted) {
-        final sync = context.read<SyncService>();
         if (sync.state == SyncState.error) {
           errorMsg = 'Error de Sincronización';
           errorDetail = sync.message.isNotEmpty
@@ -185,10 +206,14 @@ class _OsListScreenState extends State<OsListScreen> {
       debugPrint('[Sync] ⏱ TIMEOUT: $e');
       errorMsg = 'Tiempo de Espera Agotado';
       errorDetail = e.message ?? e.toString();
+      // Cargar datos locales aunque haya timeout — pueden existir órdenes previas
+      if (mounted) await _loadLocal();
     } catch (e, st) {
       debugPrint('[Sync] ❌ ERROR: $e\n$st');
       errorMsg = 'Error de Conexión';
       errorDetail = e.toString();
+      // Cargar datos locales aunque haya error — pueden existir órdenes previas
+      if (mounted) await _loadLocal();
     } finally {
       // ── CIERRE GARANTIZADO DEL DIALOG ──────────────────────────────────
       // Se ejecuta SIEMPRE: éxito, error o timeout.
@@ -259,20 +284,19 @@ class _OsListScreenState extends State<OsListScreen> {
 
     // ── Resultado: éxito ─────────────────────────────────────────────────
     final totalOS = _all.length;
-    final auth = context.read<AuthService>();
-    final isTecnico = auth.isTecnico;
+    final syncMsg = context.read<SyncService>().statusMessage;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           totalOS > 0
-              ? '✅ Sincronizado — $totalOS órdenes en pantalla'
-              : isTecnico
-                  ? '⚠ Sincronizado pero el servidor no reporta órdenes para este técnico.'
-                  : '⚠ Sincronizado pero el servidor no reporta órdenes activas en el sistema.',
+              ? 'Sincronizado — $totalOS órdenes cargadas'
+              : syncMsg.isNotEmpty
+                  ? syncMsg
+                  : 'Sincronizado. Sin órdenes activas.',
         ),
         backgroundColor:
             totalOS > 0 ? Colors.green.shade700 : Colors.orange.shade700,
-        duration: const Duration(seconds: 5),
+        duration: const Duration(seconds: 4),
       ),
     );
   }
@@ -285,36 +309,59 @@ class _OsListScreenState extends State<OsListScreen> {
   }
 
   void _onSyncChanged() {
-    final state = context.read<SyncService>().state;
-    // [FIX] Recargar en success Y en error: el servidor puede reportar 0 nuevas
-    // órdenes (pull vació) pero puede haber datos previos en SQLite local que
-    // deben mostrarse. Antes solo se recargaba en success, ocultando datos locales.
-    if (state == SyncState.success || state == SyncState.error) {
+    final sync = context.read<SyncService>();
+    debugPrint('[Dashboard] _onSyncChanged: state=${sync.state}, orders=${sync.orders.length}');
+    // Si SyncService recibió las órdenes tras el pull HTTP 200, asignarlas directamente:
+    if (sync.orders.isNotEmpty && mounted) {
+      setState(() {
+        _all = List<Map<String, dynamic>>.from(sync.orders);
+        _loading = false;
+      });
+      _applyFilters();
+    } else if (sync.state == SyncState.success || sync.state == SyncState.error) {
       _loadLocal();
     }
   }
 
 
   Future<void> _loadLocal() async {
-    setState(() => _loading = true);
-    try {
-      // RBAC: si el usuario es técnico, cargar solo sus órdenes de SQLite local
-      final auth = context.read<AuthService>();
-      final isTecnico = auth.isTecnico;
-      final nombre = auth.nombreCompleto ?? '';
-
-      final list = isTecnico && nombre.isNotEmpty
-          ? await LocalDbService.instance.getOsForTecnico(nombre)
-          : await LocalDbService.instance.getAllOs();
-
+    final sync = context.read<SyncService>();
+    // Prioridad 1: si SyncService ya tiene órdenes en memoria del pull, mantenerlas visibles
+    if (sync.orders.isNotEmpty && _all.isEmpty) {
       if (mounted) {
-        setState(() { _all = list; _loading = false; });
-        // Usar compute() para filtrado en isolate si hay >20 elementos
+        setState(() {
+          _all = List<Map<String, dynamic>>.from(sync.orders);
+          _loading = false;
+        });
         await _applyFilters();
+      }
+    } else if (_all.isEmpty) {
+      if (mounted) setState(() => _loading = true);
+    }
+
+    try {
+      final list = await LocalDbService.instance.getAllOs();
+      if (mounted) {
+        if (list.isNotEmpty) {
+          setState(() { _all = list; _loading = false; });
+          await _applyFilters();
+        } else if (sync.orders.isNotEmpty) {
+          setState(() { _all = List<Map<String, dynamic>>.from(sync.orders); _loading = false; });
+          await _applyFilters();
+        } else {
+          setState(() { _all = []; _loading = false; });
+        }
       }
     } catch (e) {
       debugPrint('[Dashboard] Error en _loadLocal: $e');
-      if (mounted) setState(() { _all = []; _loading = false; });
+      if (mounted) {
+        if (sync.orders.isNotEmpty) {
+          setState(() { _all = List<Map<String, dynamic>>.from(sync.orders); _loading = false; });
+          await _applyFilters();
+        } else {
+          setState(() { _all = []; _loading = false; });
+        }
+      }
     }
   }
 
@@ -341,14 +388,31 @@ class _OsListScreenState extends State<OsListScreen> {
 
   // ── KPIs ─────────────────────────────────────────────────────────────────
   int get _kpiTotal   => _filtered.length;
-  int get _kpiProceso => _filtered.where((o) =>
-      (o['estado'] as String? ?? '').toUpperCase() == 'PROCESO').length;
-  int get _kpiCerrado => _filtered.where((o) {
-    final e = (o['estado'] as String? ?? '').toUpperCase();
-    return e == 'COMPLETADA' || e == 'FIRMADA' || e == 'CERRADO';
+
+  int get _kpiProceso => _filtered.where((o) {
+    final e = (o['estado'] as String? ?? '').trim().toUpperCase();
+    final isCerrada = e == 'CERRADA' ||
+        e == 'CERRADO' ||
+        e == 'COMPLETADA' ||
+        e == 'COMPLETADA_DIGITAL' ||
+        e == 'FIRMADA';
+    final isCancelada = e == 'CANCELADA' || e == 'CANCELADO';
+    return !isCerrada && !isCancelada;
   }).length;
-  int get _kpiFisico  => _filtered.where((o) =>
-      (o['modalidad'] as String? ?? '').toUpperCase().contains('FISIC')).length;
+
+  int get _kpiCerrado => _filtered.where((o) {
+    final e = (o['estado'] as String? ?? '').trim().toUpperCase();
+    return e == 'CERRADA' ||
+        e == 'CERRADO' ||
+        e == 'COMPLETADA' ||
+        e == 'COMPLETADA_DIGITAL' ||
+        e == 'FIRMADA';
+  }).length;
+
+  int get _kpiFisico  => _filtered.where((o) {
+    final m = (o['modalidad'] as String? ?? '').trim().toUpperCase();
+    return m.contains('FISIC') || m.contains('FÍSIC');
+  }).length;
 
   List<String> get _tecnicos => _all
       .map((o) => o['tecnico'] as String? ?? '').where((t) => t.isNotEmpty)
@@ -492,8 +556,19 @@ DateTime? _parseFecha(String s) {
 List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
   final now = DateTime(p.nowYear, p.nowMonth, p.nowDay);
   final filtered = p.all.where((os) {
+    // Cuando está seleccionada la pestaña 'Todo', NO descartar órdenes por filtros secundarios
+    if (p.periodo == 'Todo') {
+      if (p.query.isNotEmpty) {
+        final q = p.query.toLowerCase().trim();
+        final ok = ['folio_os', 'cliente', 'sucursal', 'tecnico']
+            .any((k) => (os[k]?.toString().toLowerCase() ?? '').contains(q));
+        if (!ok) return false;
+      }
+      return true;
+    }
+
     final fechaStr = os['fecha'] as String? ?? '';
-    if (p.periodo != 'Todo' && fechaStr.isNotEmpty) {
+    if (fechaStr.isNotEmpty) {
       final f = _parseFecha(fechaStr);
       if (f != null) {
         if (p.periodo == 'Hoy'    && !(f.year == now.year && f.month == now.month && f.day == now.day)) return false;
@@ -506,18 +581,20 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
     if (p.estado != null && p.estado!.isNotEmpty &&
         (os['estado'] as String? ?? '') != p.estado) return false;
     if (p.query.isNotEmpty) {
-      final q = p.query.toLowerCase();
-      final ok = ['folio_os','cliente','sucursal','tecnico']
-          .any((k) => (os[k] as String? ?? '').toLowerCase().contains(q));
+      final q = p.query.toLowerCase().trim();
+      final ok = ['folio_os', 'cliente', 'sucursal', 'tecnico']
+          .any((k) => (os[k]?.toString().toLowerCase() ?? '').contains(q));
       if (!ok) return false;
     }
     return true;
   }).toList();
 
-  // Deduplicar
   final uniqueMap = <String, Map<String, dynamic>>{};
   for (final os in filtered) {
-    final key = (os['id'] ?? os['local_id'] ?? os['folio_os'] ?? '').toString();
+    final folio = (os['folio_os'] as String? ?? '').trim();
+    final key = folio.isNotEmpty
+        ? folio
+        : (os['local_id'] ?? os['id'] ?? '').toString();
     if (key.isNotEmpty) uniqueMap[key] = os;
   }
   return uniqueMap.values.toList();
