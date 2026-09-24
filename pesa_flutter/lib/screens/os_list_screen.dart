@@ -39,6 +39,7 @@ class _OsListScreenState extends State<OsListScreen> {
 
   // ── Filtros ───────────────────────────────────────────────────────────────
   String  _periodo = 'Todo'; // Por defecto 'Todo' para no perder órdenes antiguas
+  String  _modalidad = 'Todas las Modalidades';
   String? _tecnico;
   String? _estado;
   String  _query   = '';
@@ -370,6 +371,7 @@ class _OsListScreenState extends State<OsListScreen> {
     final params = _FilterParams(
       all: _all,
       periodo: _periodo,
+      modalidad: _modalidad,
       tecnico: _tecnico,
       estado: _estado,
       query: _query,
@@ -454,15 +456,21 @@ class _OsListScreenState extends State<OsListScreen> {
           _KpiBar(total: _kpiTotal, proceso: _kpiProceso,
               cerrado: _kpiCerrado, fisico: _kpiFisico),
           _FilterBar(
-            periodo:  _periodo, tecnico: _tecnico, estado: _estado,
-            tecnicos: _tecnicos, estados: _estados,
-            searchCtrl: _searchCtrl, query: _query,
+            periodo:  _periodo,
+            modalidad: _modalidad,
+            tecnico: _tecnico,
+            estado: _estado,
+            tecnicos: _tecnicos,
+            estados: _estados,
+            searchCtrl: _searchCtrl,
+            query: _query,
             hideTecnico: hideTecnico,
-            onPeriodo: (v) { setState(() => _periodo = v); _applyFilters(); },
-            onTecnico: (v) { setState(() => _tecnico = v); _applyFilters(); },
-            onEstado:  (v) { setState(() => _estado  = v); _applyFilters(); },
-            onSearch:  (v) { setState(() => _query   = v); _applyFilters(); },
-            onClear:   ()  { _searchCtrl.clear(); setState(() => _query = ''); _applyFilters(); },
+            onPeriodo:   (v) { setState(() => _periodo = v); _applyFilters(); },
+            onModalidad: (v) { setState(() => _modalidad = v); _applyFilters(); },
+            onTecnico:   (v) { setState(() => _tecnico = v); _applyFilters(); },
+            onEstado:    (v) { setState(() => _estado  = v); _applyFilters(); },
+            onSearch:    (v) { setState(() => _query   = v); _applyFilters(); },
+            onClear:     ()  { _searchCtrl.clear(); setState(() => _query = ''); _applyFilters(); },
           ),
           _TableHeader(hideTecnico: hideTecnico),
           Expanded(child: _loading
@@ -514,15 +522,21 @@ class _OsListScreenState extends State<OsListScreen> {
 class _FilterParams {
   final List<Map<String, dynamic>> all;
   final String periodo;
+  final String modalidad;
   final String? tecnico;
   final String? estado;
   final String query;
   final int nowYear, nowMonth, nowDay;
   const _FilterParams({
-    required this.all, required this.periodo,
-    required this.tecnico, required this.estado,
+    required this.all,
+    required this.periodo,
+    required this.modalidad,
+    required this.tecnico,
+    required this.estado,
     required this.query,
-    required this.nowYear, required this.nowMonth, required this.nowDay,
+    required this.nowYear,
+    required this.nowMonth,
+    required this.nowDay,
   });
 }
 
@@ -547,36 +561,43 @@ DateTime? _parseFecha(String s) {
 List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
   final now = DateTime(p.nowYear, p.nowMonth, p.nowDay);
   final filtered = p.all.where((os) {
-    // Cuando está seleccionada la pestaña 'Todo', NO descartar órdenes por filtros secundarios
-    if (p.periodo == 'Todo') {
-      if (p.query.isNotEmpty) {
-        final q = p.query.toLowerCase().trim();
-        final ok = ['folio_os', 'cliente', 'sucursal', 'tecnico']
-            .any((k) => (os[k]?.toString().toLowerCase() ?? '').contains(q));
-        if (!ok) return false;
+    // 1. Filtro por Período (Fecha)
+    if (p.periodo != 'Todo') {
+      final fechaStr = os['fecha'] as String? ?? '';
+      if (fechaStr.isNotEmpty) {
+        final f = _parseFecha(fechaStr);
+        if (f != null) {
+          if (p.periodo == 'Hoy'    && !(f.year == now.year && f.month == now.month && f.day == now.day)) return false;
+          if (p.periodo == 'Semana' && now.difference(f).inDays.abs() > 7) return false;
+          if (p.periodo == 'Mes'    && (f.month != now.month || f.year != now.year)) return false;
+        }
       }
-      return true;
     }
 
-    final fechaStr = os['fecha'] as String? ?? '';
-    if (fechaStr.isNotEmpty) {
-      final f = _parseFecha(fechaStr);
-      if (f != null) {
-        if (p.periodo == 'Hoy'    && !(f.year == now.year && f.month == now.month && f.day == now.day)) return false;
-        if (p.periodo == 'Semana' && now.difference(f).inDays.abs() > 7) return false;
-        if (p.periodo == 'Mes'    && (f.month != now.month || f.year != now.year)) return false;
-      }
+    // 2. Filtro por Modalidad (Todas las Modalidades / Solo Físicos / Solo Digitales)
+    if (p.modalidad.isNotEmpty && p.modalidad != 'Todas las Modalidades') {
+      final m = (os['modalidad'] as String? ?? '').trim().toUpperCase();
+      final isFisico = m.contains('FISIC') || m.contains('FÍSIC');
+      if (p.modalidad == 'Solo Físicos' && !isFisico) return false;
+      if (p.modalidad == 'Solo Digitales' && isFisico) return false;
     }
+
+    // 3. Filtro por Técnico (para admin/logística)
     if (p.tecnico != null && p.tecnico!.isNotEmpty &&
         !(os['tecnico'] as String? ?? '').toLowerCase().contains(p.tecnico!.toLowerCase())) return false;
+
+    // 4. Filtro por Estado
     if (p.estado != null && p.estado!.isNotEmpty &&
         (os['estado'] as String? ?? '') != p.estado) return false;
+
+    // 5. Búsqueda por texto (query)
     if (p.query.isNotEmpty) {
       final q = p.query.toLowerCase().trim();
-      final ok = ['folio_os', 'cliente', 'sucursal', 'tecnico']
+      final ok = ['folio_os', 'cliente', 'sucursal', 'tecnico', 'tipo_servicio', 'id_lote', 'lote']
           .any((k) => (os[k]?.toString().toLowerCase() ?? '').contains(q));
       if (!ok) return false;
     }
+
     return true;
   }).toList();
 
@@ -791,11 +812,13 @@ class _KpiCard extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════
 class _FilterBar extends StatelessWidget {
   final String periodo;
+  final String modalidad;
   final String? tecnico, estado;
   final List<String> tecnicos, estados;
   final TextEditingController searchCtrl;
   final String query;
   final ValueChanged<String> onPeriodo;
+  final ValueChanged<String> onModalidad;
   final ValueChanged<String?> onTecnico, onEstado;
   final ValueChanged<String> onSearch;
   final VoidCallback onClear;
@@ -803,12 +826,21 @@ class _FilterBar extends StatelessWidget {
   final bool hideTecnico;
 
   const _FilterBar({
-    required this.periodo, required this.tecnico, required this.estado,
-    required this.tecnicos, required this.estados,
-    required this.searchCtrl, required this.query,
+    required this.periodo,
+    required this.modalidad,
+    required this.tecnico,
+    required this.estado,
+    required this.tecnicos,
+    required this.estados,
+    required this.searchCtrl,
+    required this.query,
     this.hideTecnico = false,
-    required this.onPeriodo, required this.onTecnico, required this.onEstado,
-    required this.onSearch, required this.onClear,
+    required this.onPeriodo,
+    required this.onModalidad,
+    required this.onTecnico,
+    required this.onEstado,
+    required this.onSearch,
+    required this.onClear,
   });
 
   @override
@@ -849,6 +881,11 @@ class _FilterBar extends StatelessWidget {
             ),
             const SizedBox(width: 8),
           ],
+          _ModalidadDropdownFilter(
+            value: modalidad,
+            onChanged: onModalidad,
+          ),
+          const SizedBox(width: 8),
           _DropdownFilter(
             hint: 'Todos los Estados',
             value: estado,
@@ -888,6 +925,71 @@ class _FilterBar extends StatelessWidget {
           ),
         ),
       ]),
+    );
+  }
+}
+
+class _ModalidadDropdownFilter extends StatelessWidget {
+  final String value;
+  final ValueChanged<String> onChanged;
+  const _ModalidadDropdownFilter({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        border: Border.all(color: _border),
+        borderRadius: BorderRadius.circular(6),
+        color: _white,
+      ),
+      child: DropdownButton<String>(
+        value: value,
+        isDense: true,
+        underline: const SizedBox(),
+        style: const TextStyle(fontSize: 12, color: _textPrim),
+        items: const [
+          DropdownMenuItem(
+            value: 'Todas las Modalidades',
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.layers_outlined, size: 14, color: _textSec),
+                SizedBox(width: 6),
+                Text('Todas las Modalidades',
+                    style: TextStyle(fontSize: 12, color: _textPrim, fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'Solo Físicos',
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.description_outlined, size: 14, color: Color(0xFF7C3AED)),
+                SizedBox(width: 6),
+                Text('Solo Físicos',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF7C3AED), fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          DropdownMenuItem(
+            value: 'Solo Digitales',
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.devices_outlined, size: 14, color: Color(0xFF2563EB)),
+                SizedBox(width: 6),
+                Text('Solo Digitales',
+                    style: TextStyle(fontSize: 12, color: Color(0xFF2563EB), fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+        ],
+        onChanged: (v) {
+          if (v != null) onChanged(v);
+        },
+      ),
     );
   }
 }
