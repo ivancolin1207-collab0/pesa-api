@@ -627,6 +627,7 @@ async def sync_push(
                 unidad_medida         = COALESCE($12, unidad_medida),
                 firma_tecnico_b64     = COALESCE($13, firma_tecnico_b64),
                 firma_cliente_b64     = COALESCE($14, firma_cliente_b64),
+                sync_status           = 'SINCRONIZADO',
                 sync_version          = COALESCE(sync_version, 0) + 1,
                 sync_at               = NOW(),
                 device_id             = $15,
@@ -663,6 +664,7 @@ async def sync_push(
                 ns                  = COALESCE($8, ns),
                 ubicacion           = COALESCE($9, ubicacion),
                 id_equipo           = COALESCE($10, id_equipo),
+                sync_status         = 'SINCRONIZADO',
                 updated_at          = NOW()
             WHERE id = $11
             """,

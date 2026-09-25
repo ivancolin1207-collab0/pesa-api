@@ -9,11 +9,13 @@ Permisos:
 from __future__ import annotations
 
 import os
+import json
+import base64
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, File, Form, UploadFile, status
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from pesa_api.core.database import get_db
@@ -169,26 +171,19 @@ async def update_estado(
 
 @router.get(
     "/{folio_os}/pdf",
-    summary = "Descargar PDF de una OS (si fue subido al servidor)",
+    summary = "Descargar PDF de una OS (si fue subido al servidor o guardado en BD)",
 )
 async def download_pdf(
     folio_os:     str,
     db            = Depends(get_db),
-    current_user: dict = Depends(get_current_user),
 ):
     """
-    Busca el PDF de la OS en el directorio UPLOAD_DIR configurado en el servidor.
-    Los PDFs físicos los genera la app Windows y deben subirse al servidor
-    mediante el endpoint POST /api/v1/ordenes/{id}/adjunto.
-
-    Respuestas:
-      200 application/pdf  → Archivo encontrado.
-      404                  → PDF no disponible en servidor (no subido aún).
+    Busca el PDF de la OS en el directorio UPLOAD_DIR o lo reconstruye desde pdf_b64 en PostgreSQL.
+    Permite descarga directa tanto para la app de Windows como para navegadores.
     """
-    # Buscar en BD el pdf_path o pdf_url registrado
     row = await db.fetchrow(
-        "SELECT pdf_path, pdf_url FROM ordenes_servicio WHERE folio_os = $1",
-        folio_os,
+        "SELECT pdf_path, pdf_url, pdf_b64 FROM ordenes_servicio WHERE folio_os = $1",
+        folio_os.strip(),
     )
     if row is None:
         raise HTTPException(
@@ -226,12 +221,165 @@ async def download_pdf(
                 filename=f"{folio_os}.pdf",
             )
 
+    # Estrategia 4: Reconstruir desde pdf_b64 almacenado en PostgreSQL
+    pdf_b64 = row.get("pdf_b64")
+    if pdf_b64:
+        try:
+            pdf_bytes = base64.b64decode(pdf_b64)
+            # Guardar en UPLOAD_DIR para acelerar siguientes peticiones
+            try:
+                os.makedirs(upload_dir, exist_ok=True)
+                with open(str(candidate), "wb") as f_out:
+                    f_out.write(pdf_bytes)
+            except Exception:
+                pass
+            return Response(
+                content=pdf_bytes,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'inline; filename="{folio_os}.pdf"'
+                },
+            )
+        except Exception as e:
+            pass
+
     # PDF no disponible en servidor
     raise HTTPException(
         status_code=404,
-        detail=(
-            f"PDF de '{folio_os}' no disponible en el servidor. "
-            "El PDF lo genera la app Windows. Para enviarlo a la tablet, "
-            "use el botón 'Adjuntar Escaneo' desde el dashboard."
-        ),
+        detail=f"PDF de '{folio_os}' no disponible en el servidor. El técnico aún no ha finalizado o sincronizado el documento.",
     )
+
+
+@router.post(
+    "/{folio_os}/upload-pdf",
+    summary="Subir PDF generado por la tablet a Render",
+)
+async def upload_pdf_tablet_os(
+    folio_os: str,
+    file: Optional[UploadFile] = File(None),
+    archivo: Optional[UploadFile] = File(None),
+    folio: Optional[str] = Form(None),
+    data: Optional[str] = Form(None),
+    db=Depends(get_db),
+):
+    target_file = file or archivo
+    if not target_file:
+        raise HTTPException(status_code=400, detail="No se proporcionó ningún archivo PDF")
+
+    clean_folio = (folio or folio_os).strip()
+    row = await db.fetchrow(
+        "SELECT id, folio_os, estado FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        clean_folio,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"OS '{clean_folio}' no encontrada")
+
+    actual_folio = row["folio_os"]
+    actual_id = row["id"]
+
+    upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    filename = f"{actual_folio}.pdf"
+    filepath = os.path.join(upload_dir, filename)
+
+    content = await target_file.read()
+    with open(filepath, "wb") as f:
+        f.write(content)
+
+    pdf_b64 = base64.b64encode(content).decode("ascii")
+
+    await db.execute(
+        """
+        UPDATE ordenes_servicio
+        SET estado         = 'COMPLETADA',
+            pdf_b64        = $1,
+            pdf_url        = $2,
+            pdf_path       = $3,
+            pdf_descargado = FALSE,
+            sync_status    = 'SINCRONIZADO',
+            sync_version   = COALESCE(sync_version, 0) + 1,
+            sync_at        = NOW(),
+            updated_at     = NOW()
+        WHERE id = $4
+        """,
+        pdf_b64,
+        f"/uploads/{filename}",
+        filepath,
+        actual_id,
+    )
+
+    if data:
+        try:
+            p = json.loads(data)
+            await db.execute(
+                """
+                UPDATE ordenes_servicio SET
+                    observaciones     = COALESCE($1, observaciones),
+                    dictamen          = COALESCE($2, dictamen),
+                    firma_tecnico_b64 = COALESCE($3, firma_tecnico_b64),
+                    firma_cliente_b64 = COALESCE($4, firma_cliente_b64),
+                    nombre_ing        = COALESCE($5, nombre_ing),
+                    puesto_ing        = COALESCE($6, puesto_ing),
+                    unidad_medida     = COALESCE($7, unidad_medida)
+                WHERE id = $8
+                """,
+                p.get("observaciones"), p.get("dictamen"),
+                p.get("firma_tecnico"), p.get("firma_cliente"),
+                p.get("nombre_ing"), p.get("puesto_ing"),
+                p.get("unidad_medida"), actual_id,
+            )
+            for idx, r in enumerate(p.get("rep_rows", [])):
+                pid = r.get("posicion_id") or (idx + 1)
+                await db.execute(
+                    """
+                    INSERT INTO det_repetibilidad (id_os, posicion_id, lectura_inicial, lectura_final)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (id_os, posicion_id) DO UPDATE SET
+                        lectura_inicial = EXCLUDED.lectura_inicial,
+                        lectura_final   = EXCLUDED.lectura_final
+                    """,
+                    actual_id, int(pid),
+                    float(r["lectura_inicial"]) if r.get("lectura_inicial") is not None else None,
+                    float(r["lectura_final"]) if r.get("lectura_final") is not None else None,
+                )
+            for idx, r in enumerate(p.get("exc_rows", [])):
+                pid = r.get("posicion_id") or (idx + 1)
+                await db.execute(
+                    """
+                    INSERT INTO det_excentricidad (id_os, posicion_id, lectura_inicial, lectura_final)
+                    VALUES ($1, $2, $3, $4)
+                    ON CONFLICT (id_os, posicion_id) DO UPDATE SET
+                        lectura_inicial = EXCLUDED.lectura_inicial,
+                        lectura_final   = EXCLUDED.lectura_final
+                    """,
+                    actual_id, int(pid),
+                    float(r["lectura_inicial"]) if r.get("lectura_inicial") is not None else None,
+                    float(r["lectura_final"]) if r.get("lectura_final") is not None else None,
+                )
+            for idx, r in enumerate(p.get("exac_rows", [])):
+                pid = r.get("punto_id") or r.get("posicion_id") or (idx + 1)
+                await db.execute(
+                    """
+                    INSERT INTO det_exactitud (id_os, punto_id, valor_nominal, lectura_inicial, lectura_final)
+                    VALUES ($1, $2, $3, $4, $5)
+                    ON CONFLICT (id_os, punto_id) DO UPDATE SET
+                        valor_nominal   = EXCLUDED.valor_nominal,
+                        lectura_inicial = EXCLUDED.lectura_inicial,
+                        lectura_final   = EXCLUDED.lectura_final
+                    """,
+                    actual_id, int(pid),
+                    float(r["valor_nominal"]) if r.get("valor_nominal") is not None else None,
+                    float(r["lectura_inicial"]) if r.get("lectura_inicial") is not None else None,
+                    float(r["lectura_final"]) if r.get("lectura_final") is not None else None,
+                )
+        except Exception as e_json:
+            pass
+
+    return {
+        "ok": True,
+        "folio_os": actual_folio,
+        "id": actual_id,
+        "size_bytes": len(content),
+        "sync_status": "SINCRONIZADO",
+    }
+
