@@ -311,6 +311,26 @@ async def adjuntar_escaneo(
     }
 
 
+# ── Descarga de PDF de la OS ──────────────────────────────────────────────────
+
+@router.get(
+    "/ordenes/{folio}/pdf",
+    summary="Descargar PDF de una OS",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+@router.get(
+    "/ordenes/{folio}/download-pdf",
+    summary="Descargar PDF de una OS (alias download-pdf)",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+async def download_pdf_orden(
+    folio: str,
+    db=Depends(get_db),
+):
+    from pesa_api.routers.os_router import download_pdf
+    return await download_pdf(folio_os=folio, db=db)
+
+
 # ── Subida directa de PDF generado desde la tablet ───────────────────────────
 
 @router.post(

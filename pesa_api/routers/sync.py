@@ -681,6 +681,26 @@ async def sync_push(
     # Upsert de pruebas metrológicas
     await _upsert_pruebas(db, os_id, payload)
 
+    # Si viene el PDF en Base64, guardarlo en el almacenamiento de Render
+    if payload.pdf_b64:
+        try:
+            import os
+            import base64
+            upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+            os.makedirs(upload_dir, exist_ok=True)
+            p_filename = f"{payload.folio_os}.pdf"
+            p_filepath = os.path.join(upload_dir, p_filename)
+            p_bytes = base64.b64decode(payload.pdf_b64)
+            with open(p_filepath, "wb") as pf:
+                pf.write(p_bytes)
+            await db.execute(
+                "UPDATE ordenes_servicio SET pdf_url = $1, pdf_path = $2 WHERE id = $3",
+                f"/uploads/{p_filename}", p_filepath, os_id,
+            )
+            logger.info("[SYNC PUSH] PDF guardado en disco para %s (%d bytes)", payload.folio_os, len(p_bytes))
+        except Exception as e_pdf_disk:
+            logger.warning("[SYNC PUSH] Error guardando PDF en disco: %s", e_pdf_disk)
+
     # ── Auto-registro de báscula (Modalidad DIGITAL) ──────────────────────────────
     # Si la tablet envía sucursal_id + número de serie, registramos el equipo
     # en cliente_equipos si es nuevo (UPSERT = nunca duplica).

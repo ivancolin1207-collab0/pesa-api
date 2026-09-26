@@ -173,6 +173,10 @@ async def update_estado(
     "/{folio_os}/pdf",
     summary = "Descargar PDF de una OS (si fue subido al servidor o guardado en BD)",
 )
+@router.get(
+    "/{folio_os}/download-pdf",
+    summary = "Descargar PDF de una OS (alias download-pdf)",
+)
 async def download_pdf(
     folio_os:     str,
     db            = Depends(get_db),

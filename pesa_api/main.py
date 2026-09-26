@@ -114,11 +114,19 @@ app.include_router(equipos.router,          prefix="/api/v1/equipos",   tags=["C
 app.include_router(entrega_semanal.router,  prefix="/api/v1/entregas",  tags=["Entregas Semanales"])
 # ── Catálogos y Ordenes desde Tablet ────────────────────────────────────────────
 app.include_router(catalogos.router,        prefix="/api/v1",              tags=["Catálogos"])
+app.include_router(catalogos.router,        prefix="/api",                 tags=["Catálogos Legacy"])
 # ── Firma de perfil del técnico + errores de campo (v3.1) ────────────────
 app.include_router(usuarios_router.router,  prefix="/api/v1/usuarios",     tags=["Usuarios - Firma"])
 app.include_router(errores_router.router,   prefix="/api/v1/errores-tecnicos", tags=["Errores Técnicos"])
 # ── Administración y mantenimiento de datos (solo admin) ──────────────
 app.include_router(admin_router.router,     prefix="/api/v1/admin",          tags=["Administración"])
+
+# ── Archivos Estáticos (PDFs y adjuntos) ──────────────────────────────────────
+import os
+from fastapi.staticfiles import StaticFiles
+_upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+os.makedirs(_upload_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_upload_dir), name="uploads")
 
 # ─── Healthcheck ─────────────────────────────────────────────────────────────
 
