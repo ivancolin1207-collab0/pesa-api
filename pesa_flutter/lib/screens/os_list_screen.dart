@@ -1,11 +1,12 @@
 // lib/screens/os_list_screen.dart — Dashboard corporativo estilo escritorio PESA
 // Paleta limpia: fondo #F8F9FA, blanco, rojo corporativo #C8102E
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show compute;
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
@@ -1286,25 +1287,91 @@ class _OsRow extends StatelessWidget {
                       fg: _white,
                       bg: const Color(0xFF2563EB),
                       onTap: () async {
-                        final folio = os['folio_os'] as String? ?? '';
+                        final folio = (os['folio_os'] as String? ?? '').trim();
                         final ctx = context;
+                        if (folio.isEmpty) return;
+
+                        // 1. Verificar si existe en la ruta local registrada
+                        String? pathToOpen;
                         final localPath = os['pdf_path_local'] as String? ?? '';
-                        if (localPath.isNotEmpty && await File(localPath).exists()) {
-                          await OpenFilex.open(localPath);
+                        if (localPath.isNotEmpty && await File(localPath).exists() && await File(localPath).length() > 500) {
+                          pathToOpen = localPath;
+                        }
+
+                        // 2. Verificar en directorio PESA_Tablet/PDF_OS de Documentos o Temporal
+                        if (pathToOpen == null) {
+                          try {
+                            final docDir = await getApplicationDocumentsDirectory();
+                            final fDoc = File('${docDir.path}/PESA_Tablet/PDF_OS/$folio.pdf');
+                            if (await fDoc.exists() && await fDoc.length() > 500) {
+                              pathToOpen = fDoc.path;
+                            }
+                          } catch (_) {}
+                        }
+                        if (pathToOpen == null) {
+                          try {
+                            final tmpDir = await getTemporaryDirectory();
+                            final fTmp = File('${tmpDir.path}/PESA_Tablet/PDF_OS/$folio.pdf');
+                            if (await fTmp.exists() && await fTmp.length() > 500) {
+                              pathToOpen = fTmp.path;
+                            }
+                          } catch (_) {}
+                        }
+
+                        // 3. Consultar SQLite directamente por si la orden en memoria viene de Pull
+                        if (pathToOpen == null) {
+                          try {
+                            final localOs = await LocalDbService.instance.getOsByFolio(folio);
+                            if (localOs != null) {
+                              final p = localOs['pdf_path_local'] as String?;
+                              if (p != null && await File(p).exists() && await File(p).length() > 500) {
+                                pathToOpen = p;
+                              } else {
+                                final b64 = localOs['pdf_b64_local'] as String?;
+                                if (b64 != null && b64.trim().isNotEmpty) {
+                                  final docDir = await getApplicationDocumentsDirectory();
+                                  final dir = Directory('${docDir.path}/PESA_Tablet/PDF_OS');
+                                  await dir.create(recursive: true);
+                                  final restored = File('${dir.path}/$folio.pdf');
+                                  await restored.writeAsBytes(base64Decode(b64.trim()));
+                                  if (await restored.length() > 500) {
+                                    pathToOpen = restored.path;
+                                  }
+                                }
+                              }
+                            }
+                          } catch (_) {}
+                        }
+
+                        // Si encontramos el PDF localmente en la tablet, abrirlo de inmediato
+                        if (pathToOpen != null && await File(pathToOpen).exists()) {
+                          if (ctx.mounted) {
+                            ctx.push('/pdf-viewer', extra: {
+                              'pdfPath': pathToOpen,
+                              'folio': folio,
+                            });
+                          }
                           return;
                         }
+
+                        // 4. Si no está local, descargarlo desde Render vía HTTP
                         try {
                           if (ctx.mounted) {
                             ScaffoldMessenger.of(ctx).showSnackBar(
                               const SnackBar(
-                                content: Text('Descargando PDF oficial...'),
+                                content: Text('Descargando PDF oficial desde el servidor...'),
                                 duration: Duration(seconds: 2),
                                 backgroundColor: Color(0xFF2563EB),
                               ),
                             );
                           }
-                          final path = await ApiService.instance.downloadPdf('/api/ordenes/$folio/pdf');
-                          await OpenFilex.open(path);
+                          final path = await ApiService.instance.downloadPdf('/api/v1/ordenes/$folio/pdf');
+                          if (ctx.mounted) {
+                            ctx.push('/pdf-viewer', extra: {
+                              'pdfPath': path,
+                              'folio': folio,
+                            });
+                          }
                         } catch (e) {
                           if (ctx.mounted) {
                             ScaffoldMessenger.of(ctx).showSnackBar(
@@ -1693,7 +1760,12 @@ class _LoteRowState extends State<_LoteRow> {
     try {
       final localPath = await ApiService.instance.downloadPdf(pdfUrl);
       if (context.mounted) Navigator.of(context).pop();
-      await OpenFilex.open(localPath);
+      if (context.mounted) {
+        context.push('/pdf-viewer', extra: {
+          'pdfPath': localPath,
+          'folio': widget.group.loteKey,
+        });
+      }
     } catch (e) {
       if (context.mounted) Navigator.of(context).pop();
       if (context.mounted) {

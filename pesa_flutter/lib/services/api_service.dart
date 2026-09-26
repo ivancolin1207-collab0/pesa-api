@@ -460,22 +460,46 @@ class ApiService {
   /// Descarga un PDF desde la URL dada con el token Bearer y lo guarda
   /// en el directorio temporal de la app. Retorna la ruta local del archivo.
   Future<String> downloadPdf(String url) async {
+    final urlsToTry = <String>[];
     final fullUrl = url.startsWith('http') ? url : '$_baseUrl$url';
-    debugPrint('[API] downloadPdf → $fullUrl');
+    urlsToTry.add(fullUrl);
 
-    final resp = await _getWithRetry(Uri.parse(fullUrl), timeout: _syncTimeout);
+    // Si la URL es de tipo ordenes u os, agregar endpoints alternativos y /uploads
+    try {
+      final uri = Uri.parse(fullUrl);
+      final segments = uri.pathSegments;
+      if (segments.contains('ordenes') || segments.contains('os')) {
+        final folio = segments.lastWhere((s) => s != 'pdf' && s != 'download-pdf', orElse: () => '');
+        if (folio.isNotEmpty) {
+          urlsToTry.add('$_baseUrl/api/v1/ordenes/$folio/pdf');
+          urlsToTry.add('$_baseUrl/api/v1/ordenes/$folio/download-pdf');
+          urlsToTry.add('$_baseUrl/api/v1/os/$folio/pdf');
+          urlsToTry.add('$_baseUrl/api/v1/os/$folio/download-pdf');
+          urlsToTry.add('$_baseUrl/uploads/$folio.pdf');
+        }
+      }
+    } catch (_) {}
 
-    if (resp.statusCode != 200) {
-      throw HttpException(
-          'PDF download failed: HTTP ${resp.statusCode}');
+    http.Response? lastResp;
+    for (final tryUrl in urlsToTry.toSet()) {
+      try {
+        debugPrint('[API] downloadPdf intentando → $tryUrl');
+        final resp = await _getWithRetry(Uri.parse(tryUrl), timeout: _syncTimeout);
+        if (resp.statusCode == 200 && resp.bodyBytes.length > 500) {
+          final tmpDir = await getTemporaryDirectory();
+          final ts = DateTime.now().millisecondsSinceEpoch;
+          final localPath = '${tmpDir.path}/pesa_pdf_$ts.pdf';
+          await File(localPath).writeAsBytes(resp.bodyBytes);
+          debugPrint('[API] PDF descargado con éxito desde $tryUrl → $localPath');
+          return localPath;
+        }
+        lastResp = resp;
+      } catch (e) {
+        debugPrint('[API] Error intentando $tryUrl: $e');
+      }
     }
 
-    final tmpDir = await getTemporaryDirectory();
-    final ts = DateTime.now().millisecondsSinceEpoch;
-    final localPath = '${tmpDir.path}/pesa_pdf_$ts.pdf';
-    await File(localPath).writeAsBytes(resp.bodyBytes);
-    debugPrint('[API] PDF guardado en: $localPath');
-    return localPath;
+    throw HttpException('PDF download failed: HTTP ${lastResp?.statusCode ?? 404}');
   }
 
   // ── Upload Escaneo (multipart) ────────────────────────────────────────────
@@ -510,6 +534,72 @@ class ApiService {
           'uploadEscaneo failed: HTTP ${streamed.statusCode} — $body');
     }
     debugPrint('[API] ✅ Escaneo subido para OS $osId');
+  }
+
+  // ── Upload PDF Generado (multipart) ───────────────────────────────────────
+
+  /// Sube el PDF binario generado al endpoint de Render para disponibilidad inmediata.
+  Future<bool> uploadPdf(String folio, File file, {int? osId, Map<String, dynamic>? data}) async {
+    final uri = Uri.parse('$_baseUrl/api/v1/ordenes/$folio/upload-pdf');
+    debugPrint('[API] uploadPdf → $uri (folio: $folio, size: ${file.lengthSync()} bytes)');
+
+    Future<http.StreamedResponse> sendRequest() async {
+      final request = http.MultipartRequest('POST', uri);
+      request.headers.addAll(_authHeaders);
+      request.fields['folio_os'] = folio;
+      request.fields['folio'] = folio;
+      if (osId != null && osId > 0) {
+        request.fields['os_id'] = osId.toString();
+      }
+      if (data != null) {
+        request.fields['data'] = jsonEncode(data);
+      }
+      request.files.add(await http.MultipartFile.fromPath(
+        'file', file.path,
+        filename: '$folio.pdf',
+      ));
+      return request.send().timeout(const Duration(seconds: 45));
+    }
+
+    try {
+      var streamed = await sendRequest();
+      if (streamed.statusCode == 401) {
+        debugPrint('[API] 401 en uploadPdf → silentRefresh...');
+        final ok = await silentRefresh();
+        if (ok) streamed = await sendRequest();
+      }
+      if (streamed.statusCode == 200 || streamed.statusCode == 201) {
+        debugPrint('[API] ✅ PDF subido exitosamente a Render para $folio');
+        return true;
+      } else {
+        // Fallback a /api/v1/os/$folio/upload-pdf si el primero no responde 200
+        final fallbackUri = Uri.parse('$_baseUrl/api/v1/os/$folio/upload-pdf');
+        final req2 = http.MultipartRequest('POST', fallbackUri);
+        req2.headers.addAll(_authHeaders);
+        req2.fields['folio_os'] = folio;
+        req2.fields['folio'] = folio;
+        if (osId != null && osId > 0) {
+          req2.fields['os_id'] = osId.toString();
+        }
+        if (data != null) {
+          req2.fields['data'] = jsonEncode(data);
+        }
+        req2.files.add(await http.MultipartFile.fromPath(
+          'file', file.path,
+          filename: '$folio.pdf',
+        ));
+        final streamed2 = await req2.send().timeout(const Duration(seconds: 30));
+        if (streamed2.statusCode == 200 || streamed2.statusCode == 201) {
+          debugPrint('[API] ✅ PDF subido exitosamente a Render (fallback) para $folio');
+          return true;
+        }
+        final body = await streamed.stream.bytesToString();
+        debugPrint('[API] ⚠️ uploadPdf falló: HTTP ${streamed.statusCode} — $body');
+      }
+    } catch (e) {
+      debugPrint('[API] Error en uploadPdf: $e');
+    }
+    return false;
   }
 
   // ── Catálogos ────────────────────────────────────────────────────────────

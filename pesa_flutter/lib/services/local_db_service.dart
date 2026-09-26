@@ -55,6 +55,12 @@ class LocalDbService {
       div_verificacion       REAL,
       numero_cca             TEXT,
       holograma_anterior     TEXT,
+      holograma_actualizado  TEXT,
+      funcionamiento         TEXT,
+      puntos_apoyo           INTEGER DEFAULT 4,
+      usa_sustitucion        INTEGER DEFAULT 0,
+      masa_patron_disponible REAL,
+      factor_sustitucion     REAL,
       instrumento_capacidad  TEXT,
       instrumento_division   TEXT,
       secciones_camionera    INTEGER DEFAULT 0,
@@ -65,6 +71,7 @@ class LocalDbService {
       id_lote                TEXT,
       rango_lote             TEXT,
       firma_cliente_nombre   TEXT,
+      pdf_subido             INTEGER DEFAULT 0,
       sync_version           INTEGER DEFAULT 0,
       sync_status            TEXT DEFAULT 'SINCRONIZADO',
       updated_at             TEXT
@@ -136,6 +143,12 @@ class LocalDbService {
             'div_verificacion': 'REAL',
             'numero_cca': 'TEXT',
             'holograma_anterior': 'TEXT',
+            'holograma_actualizado': 'TEXT',
+            'funcionamiento': 'TEXT',
+            'puntos_apoyo': 'INTEGER DEFAULT 4',
+            'usa_sustitucion': 'INTEGER DEFAULT 0',
+            'masa_patron_disponible': 'REAL',
+            'factor_sustitucion': 'REAL',
             'instrumento_capacidad': 'TEXT',
             'instrumento_division': 'TEXT',
             'secciones_camionera': 'INTEGER DEFAULT 0',
@@ -146,6 +159,10 @@ class LocalDbService {
             'id_lote': 'TEXT',
             'rango_lote': 'TEXT',
             'firma_cliente_nombre': 'TEXT',
+            'direccion': 'TEXT',
+            'calibrado_por': 'TEXT',
+            'cca_aplica': 'INTEGER DEFAULT 0',
+            'pdf_subido': 'INTEGER DEFAULT 0',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -196,6 +213,7 @@ class LocalDbService {
     final cliente  = (data['cliente'] ?? data['cliente_nombre'] ?? '').toString();
     final tecnico  = (data['tecnico'] ?? data['tecnico_nombre'] ?? '').toString();
     final tipoSvc  = (data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '').toString();
+    final direccion = (data['direccion'] ?? data['direccion_cliente'] ?? data['sucursal_direccion'] ?? data['planta'] ?? '').toString();
 
     final row = <String, dynamic>{
       'folio_os':          folio,
@@ -204,6 +222,7 @@ class LocalDbService {
       'fecha':             data['fecha']?.toString(),
       'cliente':           cliente,
       'sucursal':          sucursal,
+      'direccion':         direccion,
       'tecnico':           tecnico,
       'tipo_servicio':     tipoSvc,
       'tipo_instrumento':  data['tipo_instrumento']?.toString(),
@@ -243,6 +262,27 @@ class LocalDbService {
 
     try {
       final db = await _ensureInit();
+      // [FIX-OFFLINE-PDF] Preservar rutas de PDF locales y estado de subida
+      final existingRows = await db.query(
+        'ordenes_servicio',
+        columns: ['pdf_path_local', 'pdf_b64_local', 'pdf_subido'],
+        where: 'folio_os = ?',
+        whereArgs: [folio],
+        limit: 1,
+      );
+      if (existingRows.isNotEmpty) {
+        final ex = existingRows.first;
+        if (row['pdf_path_local'] == null && ex['pdf_path_local'] != null) {
+          row['pdf_path_local'] = ex['pdf_path_local'];
+        }
+        if (row['pdf_b64_local'] == null && ex['pdf_b64_local'] != null) {
+          row['pdf_b64_local'] = ex['pdf_b64_local'];
+        }
+        if (ex['pdf_subido'] != null) {
+          row['pdf_subido'] = ex['pdf_subido'];
+        }
+      }
+
       await db.insert(
         'ordenes_servicio',
         row,
@@ -351,6 +391,99 @@ class LocalDbService {
     return rows.isEmpty ? null : rows.first;
   }
 
+  Future<Map<String, dynamic>?> getOsByFolio(String folio) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return null;
+    final db = await _ensureInit();
+    final rows = await db.query(
+      'ordenes_servicio',
+      where: 'folio_os = ?',
+      whereArgs: [folioKey],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : rows.first;
+  }
+
+  // ── Almacenamiento local indexado de Borradores (Offline-First) ───────────
+
+  Future<void> saveDraft(String folio, Map<String, dynamic> draftData) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return;
+    try {
+      final db = await _ensureInit();
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS borradores_captura (
+          folio_os TEXT PRIMARY KEY,
+          draft_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+      await db.insert(
+        'borradores_captura',
+        {
+          'folio_os': folioKey,
+          'draft_json': jsonEncode(draftData),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      debugPrint('[LocalDB] Borrador guardado exitosamente para $folioKey');
+    } catch (e) {
+      debugPrint('[LocalDB] Error al guardar borrador para $folioKey: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>?> getDraft(String folio) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return null;
+    try {
+      final db = await _ensureInit();
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS borradores_captura (
+          folio_os TEXT PRIMARY KEY,
+          draft_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+      final rows = await db.query(
+        'borradores_captura',
+        where: 'folio_os = ?',
+        whereArgs: [folioKey],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      final raw = rows.first['draft_json'] as String?;
+      if (raw == null || raw.isEmpty) return null;
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('[LocalDB] Error recuperando borrador para $folioKey: $e');
+      return null;
+    }
+  }
+
+  Future<void> deleteDraft(String folio) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return;
+    try {
+      final db = await _ensureInit();
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS borradores_captura (
+          folio_os TEXT PRIMARY KEY,
+          draft_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+      await db.delete(
+        'borradores_captura',
+        where: 'folio_os = ?',
+        whereArgs: [folioKey],
+      );
+      debugPrint('[LocalDB] Borrador eliminado para $folioKey');
+    } catch (e) {
+      debugPrint('[LocalDB] Error eliminando borrador para $folioKey: $e');
+    }
+  }
+
   Future<void> saveLecturas({
     required int localId,
     required List repRows,
@@ -360,40 +493,95 @@ class LocalDbService {
     String? dictamen,
     String? unidadMedida,
     String? firmaClienteNombre,   // nombre del receptor — obligatorio metrológico
+    bool isDraft = false,
+    Map<String, dynamic>? instrumentData,
   }) async {
     final db = await _ensureInit();
-    await db.update(
-      'ordenes_servicio',
-      {
-        'rep_json':              jsonEncode(repRows),
-        'exc_json':              jsonEncode(excRows),
-        'exac_json':             jsonEncode(exacRows),
-        'observaciones':         observaciones,
-        'estado':                'COMPLETADA_DIGITAL',
-        'unidad_medida':         unidadMedida ?? 'kg',
-        'sync_status':           'PENDIENTE_ACTUALIZAR',
-        'updated_at':            DateTime.now().toUtc().toIso8601String(),
-        // firma_cliente_nombre existe en el esquema desde v8+
-        if (firmaClienteNombre != null && firmaClienteNombre.isNotEmpty)
-          'firma_cliente_nombre': firmaClienteNombre,
-      },
-      where: 'local_id = ?',
-      whereArgs: [localId],
-    );
+    final Map<String, dynamic> updateMap = {
+      'rep_json':              jsonEncode(repRows),
+      'exc_json':              jsonEncode(excRows),
+      'exac_json':             jsonEncode(exacRows),
+      'observaciones':         observaciones,
+      if (dictamen != null)    'dictamen': dictamen,
+      if (!isDraft)            'estado': 'COMPLETADA_DIGITAL',
+      'unidad_medida':         unidadMedida ?? 'kg',
+      'sync_status':           'PENDIENTE_ACTUALIZAR',
+      'updated_at':            DateTime.now().toUtc().toIso8601String(),
+      if (firmaClienteNombre != null && firmaClienteNombre.isNotEmpty)
+        'firma_cliente_nombre': firmaClienteNombre,
+    };
+
+    if (instrumentData != null) {
+      for (final field in [
+        'marca', 'modelo', 'ns', 'id_equipo', 'ubicacion',
+        'tipo_instrumento', 'numero_cca', 'holograma_anterior', 'holograma_actualizado',
+        'funcionamiento', 'puntos_apoyo', 'cliente', 'sucursal', 'direccion', 'fecha', 'tecnico'
+      ]) {
+        if (instrumentData[field] != null) {
+          updateMap[field] = instrumentData[field].toString();
+        }
+      }
+      if (instrumentData['alcance_max'] != null) {
+        updateMap['alcance_max'] = _toDouble(instrumentData['alcance_max']);
+      }
+      if (instrumentData['div_minima'] != null) {
+        updateMap['div_minima'] = _toDouble(instrumentData['div_minima']);
+      }
+      if (instrumentData['div_verificacion'] != null) {
+        updateMap['div_verificacion'] = _toDouble(instrumentData['div_verificacion']);
+      }
+      if (instrumentData['aplica_excentricidad'] != null) {
+        updateMap['aplica_excentricidad'] = _toBoolInt(instrumentData['aplica_excentricidad']);
+      }
+    }
+
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+      final existingCols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+      final sanitizedMap = <String, dynamic>{};
+      updateMap.forEach((k, v) {
+        if (existingCols.contains(k.toLowerCase())) {
+          sanitizedMap[k] = v;
+        }
+      });
+
+      final String? folio = instrumentData?['folio_os']?.toString().trim();
+      if (localId > 0) {
+        await db.update(
+          'ordenes_servicio',
+          sanitizedMap,
+          where: 'local_id = ?',
+          whereArgs: [localId],
+        );
+      } else if (folio != null && folio.isNotEmpty) {
+        await db.update(
+          'ordenes_servicio',
+          sanitizedMap,
+          where: 'folio_os = ?',
+          whereArgs: [folio],
+        );
+      }
+    } catch (e) {
+      debugPrint('[LocalDB] Error en saveLecturas: $e');
+    }
   }
 
-  Future<void> savePdfPath(int localId, String path) async {
+  Future<void> savePdfPath(int localId, String path, {String? folio, String? pdfB64}) async {
     final db = await _ensureInit();
+    final whereClause = (localId > 0) ? 'local_id = ?' : 'folio_os = ?';
+    final whereArg = (localId > 0) ? localId : (folio ?? '');
     await db.update(
       'ordenes_servicio',
       {
         'pdf_path_local': path,
+        if (pdfB64 != null && pdfB64.isNotEmpty) 'pdf_b64_local': pdfB64,
         'estado': 'COMPLETADA_DIGITAL',
         'sync_status': 'PENDIENTE_ACTUALIZAR',
+        'pdf_subido': 0,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       },
-      where: 'local_id = ?',
-      whereArgs: [localId],
+      where: whereClause,
+      whereArgs: [whereArg],
     );
   }
 
@@ -420,6 +608,7 @@ class LocalDbService {
         if (puestoIng != null)    'puesto_ing':     puestoIng,
         'estado':        'COMPLETADA_DIGITAL',
         'sync_status':   'PENDIENTE_ACTUALIZAR',
+        'pdf_subido':    0,
         'updated_at':    DateTime.now().toUtc().toIso8601String(),
       },
       where: 'local_id = ?',
@@ -469,6 +658,8 @@ class LocalDbService {
     String puestoIng = '',
   }) async {
     final db = await _ensureInit();
+    final whereClause = (localId > 0) ? 'local_id = ?' : 'folio_os = ?';
+    final whereArg = (localId > 0) ? localId : folio;
     await db.update(
       'ordenes_servicio',
       {
@@ -477,7 +668,7 @@ class LocalDbService {
         'nombre_ing':    nombreIng,
         'puesto_ing':    puestoIng,
       },
-      where: 'local_id = ?', whereArgs: [localId],
+      where: whereClause, whereArgs: [whereArg],
     );
     await db.insert('firmas_pendientes', {
       'folio_os':      folio,
@@ -489,13 +680,41 @@ class LocalDbService {
     });
   }
 
-  Future<void> markOsSincronizada(int localId, int newVersion) async {
+  Future<void> markOsSincronizada(int localId, int newVersion, {String? folio}) async {
     final db = await _ensureInit();
+    final whereClause = (localId > 0) ? 'local_id = ?' : 'folio_os = ?';
+    final whereArg = (localId > 0) ? localId : (folio ?? '');
     await db.update(
       'ordenes_servicio',
       {'sync_status': 'SINCRONIZADO', 'sync_version': newVersion},
-      where: 'local_id = ?', whereArgs: [localId],
+      where: whereClause, whereArgs: [whereArg],
     );
+  }
+
+  /// Marca que el archivo PDF binario fue recibido y confirmado por Render (HTTP 200).
+  Future<void> markPdfSubido(int localId, {String? folio}) async {
+    final db = await _ensureInit();
+    final whereClause = (localId > 0) ? 'local_id = ?' : 'folio_os = ?';
+    final whereArg = (localId > 0) ? localId : (folio ?? '');
+    await db.update(
+      'ordenes_servicio',
+      {
+        'pdf_subido': 1,
+        if (folio != null && folio.isNotEmpty) 'pdf_url': '/uploads/$folio.pdf',
+      },
+      where: whereClause,
+      whereArgs: [whereArg],
+    );
+  }
+
+  /// Obtiene órdenes completadas/cerradas cuyo PDF aún no se ha confirmado subido al servidor.
+  Future<List<Map<String, dynamic>>> getOsParaSubirPdf() async {
+    final db = await _ensureInit();
+    return await db.rawQuery('''
+      SELECT * FROM ordenes_servicio 
+      WHERE (estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA'))
+        AND (pdf_subido IS NULL OR pdf_subido = 0)
+    ''');
   }
 
   Future<void> markFirmaSincronizada(int localId) async {

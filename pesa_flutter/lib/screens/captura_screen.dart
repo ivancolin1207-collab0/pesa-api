@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import '../services/local_db_service.dart';
 import '../services/tipo_servicio_rules.dart';
+import '../services/metrology_helper.dart';
 import '../widgets/repetibilidad_table.dart';
 import '../widgets/excentricidad_table.dart';
 import '../widgets/exactitud_table.dart';
@@ -19,6 +20,7 @@ const _kDark = Color(0xFF1A1A2E);
 const _kExcInstrumentos = {
   'Báscula de plataforma',
   'Báscula camionera',
+  'Báscula de ferrocarril',
   'Báscula tolva',
   'Báscula circular',
 };
@@ -60,8 +62,9 @@ class _CapturaScreenState extends State<CapturaScreen>
   final _factorSustCtrl = TextEditingController();
 
   String? _tipoInstrumento;
-  String  _funcionamiento = 'Electr\u00f3nico'; // nuevo campo
+  String  _funcionamiento = 'Electrónico'; // nuevo campo
   int     _puntosApoyo    = 4;               // nuevo campo
+  String  _unidadMedida   = 'kg';            // selector 'kg' o 'g'
   bool    _jChecked = false, _iChecked = false, _aChecked = false;
   bool    _usaSustitucion = false;
   bool?   _aplExcOverride;  // null = auto-determinar por instrumento
@@ -74,10 +77,14 @@ class _CapturaScreenState extends State<CapturaScreen>
   final _firmaClienteNombreCtrl = TextEditingController();  // nombre cliente — obligatorio
   String _dictamen = 'APTO';
   bool   _saving   = false;
+  bool   _permitirSalida = false;
+  bool   _dataLoaded = false;
+  int    _dataVersion = 0;
 
   static const _tiposInstrumento = [
     'Báscula de plataforma',
     'Báscula camionera',
+    'Báscula de ferrocarril',
     'Báscula tolva',
     'Báscula colgante / grúa',
     'Báscula analítica',
@@ -140,9 +147,18 @@ class _CapturaScreenState extends State<CapturaScreen>
     final ti = _str('tipo_instrumento');
     if (ti.isNotEmpty && _tiposInstrumento.contains(ti)) {
       _tipoInstrumento = ti;
-    } else if (ti.toLowerCase().contains('camionera') ||
+    } else if (ti.toLowerCase().contains('camion') ||
                ti.toLowerCase().contains('puente')) {
-      _tipoInstrumento = 'Camionera';
+      _tipoInstrumento = 'Báscula camionera';
+    } else if (ti.toLowerCase().contains('ferrocarril') ||
+               ti.toLowerCase().contains('ferrovi')) {
+      _tipoInstrumento = 'Báscula de ferrocarril';
+    } else if (ti.toLowerCase().contains('plataforma')) {
+      _tipoInstrumento = 'Báscula de plataforma';
+    } else if (ti.toLowerCase().contains('circular')) {
+      _tipoInstrumento = 'Báscula circular';
+    } else if (ti.toLowerCase().contains('tolva')) {
+      _tipoInstrumento = 'Báscula tolva';
     }
 
     // Nuevos campos: Funcionamiento y Puntos de Apoyo
@@ -158,6 +174,12 @@ class _CapturaScreenState extends State<CapturaScreen>
     _jChecked = _asBool(_os['jia_j']);
     _iChecked = _asBool(_os['jia_i']);
     _aChecked = _asBool(_os['jia_a']);
+
+    // Unidad de medida (kg / g)
+    final u = _str('unidad_medida').toLowerCase();
+    if (u == 'kg' || u == 'g') {
+      _unidadMedida = u;
+    }
   }
 
   /// Determina si aplica excentricidad:
@@ -197,29 +219,6 @@ class _CapturaScreenState extends State<CapturaScreen>
 
   // ── Utilidades metrológicas OIML R 76 ─────────────────────────────────
 
-  /// Calcula decimales exactos a partir del valor d (división mínima).
-  static int _decimalsFromD(double d) {
-    if (d <= 0) return 4;
-    if (d >= 1) return 0;
-    int dec = 0;
-    double v = d;
-    while (v < 1.0 && dec < 10) { v *= 10; dec++; }
-    return dec;
-  }
-
-  /// Calcula el EMT según OIML R 76 Clase III.
-  ///   0 ≤ m ≤ 500e → ±1e
-  ///   500e < m ≤ 2000e → ±2e
-  ///   2000e < m ≤ 10000e → ±3e
-  static double _calcEmt(double cargaKg, double eKg) {
-    if (eKg <= 0) return eKg;
-    final m = cargaKg / eKg;
-    if (m <= 500)   return eKg;
-    if (m <= 2000)  return 2 * eKg;
-    if (m <= 10000) return 3 * eKg;
-    return 3 * eKg;
-  }
-
   /// Parsea d desde el texto del controlador (soporta 'kg' y 'g').
   double? get _dValue {
     final raw = _divMinCtrl.text.trim().replaceAll(',', '.');
@@ -233,30 +232,166 @@ class _CapturaScreenState extends State<CapturaScreen>
   }
 
   Future<void> _loadLocalData() async {
-    final saved = await LocalDbService.instance.getOs(widget.osId);
-    if (saved == null) return;
-    setState(() {
-      // Combinar: datos del servidor + override local (local gana en valores de lectura)
-      for (final k in saved.keys) {
-        if (saved[k] != null && saved[k] != '') _os[k] = saved[k];
+    final folio = (_os['folio_os'] ?? widget.osData['folio_os'] ?? widget.osId.toString()).toString().trim();
+
+    // 1. Cargar borrador persistido indexado por folio (ej. draft_OS-26-570)
+    final draft = await LocalDbService.instance.getDraft(folio);
+    if (draft != null) {
+      debugPrint('[Captura] Rehidratando formulario desde borrador para $folio');
+      if (mounted) {
+        setState(() {
+          if (draft['marca'] != null && draft['marca'].toString().isNotEmpty) {
+            _marcaCtrl.text = draft['marca'].toString();
+            _os['marca'] = _marcaCtrl.text;
+          }
+          if (draft['modelo'] != null && draft['modelo'].toString().isNotEmpty) {
+            _modeloCtrl.text = draft['modelo'].toString();
+            _os['modelo'] = _modeloCtrl.text;
+          }
+          if (draft['ns'] != null && draft['ns'].toString().isNotEmpty) {
+            _nsCtrl.text = draft['ns'].toString();
+            _os['ns'] = _nsCtrl.text;
+          }
+          if (draft['id_equipo'] != null && draft['id_equipo'].toString().isNotEmpty) {
+            _idEquipoCtrl.text = draft['id_equipo'].toString();
+            _os['id_equipo'] = _idEquipoCtrl.text;
+          }
+          if (draft['ubicacion'] != null && draft['ubicacion'].toString().isNotEmpty) {
+            _ubicCtrl.text = draft['ubicacion'].toString();
+            _os['ubicacion'] = _ubicCtrl.text;
+          }
+          if (draft['cap_max'] != null && draft['cap_max'].toString().isNotEmpty) {
+            _capMaxCtrl.text = draft['cap_max'].toString();
+            _os['alcance_max'] = _capMaxCtrl.text;
+          }
+          if (draft['div_min'] != null && draft['div_min'].toString().isNotEmpty) {
+            _divMinCtrl.text = draft['div_min'].toString();
+            _os['div_minima'] = _divMinCtrl.text;
+          }
+          if (draft['div_ver'] != null && draft['div_ver'].toString().isNotEmpty) {
+            _divVerCtrl.text = draft['div_ver'].toString();
+            _os['div_verificacion'] = _divVerCtrl.text;
+          }
+          if (draft['numero_cca'] != null && draft['numero_cca'].toString().isNotEmpty) {
+            _ccaCtrl.text = draft['numero_cca'].toString();
+            _os['numero_cca'] = _ccaCtrl.text;
+          }
+          if (draft['holograma_anterior'] != null && draft['holograma_anterior'].toString().isNotEmpty) {
+            _holoAntCtrl.text = draft['holograma_anterior'].toString();
+            _os['holograma_anterior'] = _holoAntCtrl.text;
+          }
+          if (draft['holograma_actualizado'] != null && draft['holograma_actualizado'].toString().isNotEmpty) {
+            _holoActCtrl.text = draft['holograma_actualizado'].toString();
+            _os['holograma_actualizado'] = _holoActCtrl.text;
+          }
+          if (draft['observaciones'] != null && draft['observaciones'].toString().isNotEmpty) {
+            _obsCtrl.text = draft['observaciones'].toString();
+            _os['observaciones'] = _obsCtrl.text;
+          }
+          if (draft['firma_cliente_nombre'] != null && draft['firma_cliente_nombre'].toString().isNotEmpty) {
+            _firmaClienteNombreCtrl.text = draft['firma_cliente_nombre'].toString();
+            _os['firma_cliente_nombre'] = _firmaClienteNombreCtrl.text;
+          }
+          if (draft['masa_patron'] != null && draft['masa_patron'].toString().isNotEmpty) {
+            _masaPatronCtrl.text = draft['masa_patron'].toString();
+          }
+          if (draft['factor_sustitucion'] != null && draft['factor_sustitucion'].toString().isNotEmpty) {
+            _factorSustCtrl.text = draft['factor_sustitucion'].toString();
+          }
+          if (draft['tipo_instrumento'] != null && draft['tipo_instrumento'].toString().isNotEmpty) {
+            _tipoInstrumento = draft['tipo_instrumento'].toString();
+            _os['tipo_instrumento'] = _tipoInstrumento;
+          }
+          if (draft['funcionamiento'] != null && draft['funcionamiento'].toString().isNotEmpty) {
+            _funcionamiento = draft['funcionamiento'].toString();
+            _os['funcionamiento'] = _funcionamiento;
+          }
+          if (draft['puntos_apoyo'] != null) {
+            _puntosApoyo = int.tryParse(draft['puntos_apoyo'].toString()) ?? _puntosApoyo;
+            _os['puntos_apoyo'] = _puntosApoyo;
+          }
+          if (draft['jia_j'] != null) _jChecked = draft['jia_j'] == true;
+          if (draft['jia_i'] != null) _iChecked = draft['jia_i'] == true;
+          if (draft['jia_a'] != null) _aChecked = draft['jia_a'] == true;
+          if (draft['aplica_excentricidad'] != null) {
+            _aplExcOverride = draft['aplica_excentricidad'] == true;
+          }
+          if (draft['usa_sustitucion'] != null) {
+            _usaSustitucion = draft['usa_sustitucion'] == true;
+          }
+          if (draft['unidad_medida'] != null && draft['unidad_medida'].toString().isNotEmpty) {
+            _unidadMedida = draft['unidad_medida'].toString();
+            _os['unidad_medida'] = _unidadMedida;
+          }
+          if (draft['dictamen'] != null) {
+            _dictamen = draft['dictamen'].toString();
+          }
+
+          if (draft['rep_rows'] is List && (draft['rep_rows'] as List).isNotEmpty) {
+            _repRows = (draft['rep_rows'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          }
+          if (draft['exc_rows'] is List && (draft['exc_rows'] as List).isNotEmpty) {
+            _excRows = (draft['exc_rows'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          }
+          if (draft['exac_rows'] is List && (draft['exac_rows'] as List).isNotEmpty) {
+            _exacRows = (draft['exac_rows'] as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+          }
+          _dataLoaded = true;
+          _dataVersion++;
+        });
+        return;
       }
-      _obsCtrl.text = saved['observaciones'] ?? _obsCtrl.text;
-      try {
-        if (saved['rep_json']  != null && saved['rep_json']  != '')
-          _repRows  = (_jsonSafe(saved['rep_json'])  as List).cast<Map<String, dynamic>>();
-        if (saved['exc_json']  != null && saved['exc_json']  != '')
-          _excRows  = (_jsonSafe(saved['exc_json'])  as List).cast<Map<String, dynamic>>();
-        if (saved['exac_json'] != null && saved['exac_json'] != '')
-          _exacRows = (_jsonSafe(saved['exac_json']) as List).cast<Map<String, dynamic>>();
-      } catch (_) {}
-    });
-    _precargaCampos();
+    }
+
+    // 2. Fallback: cargar desde SQLite ordenes_servicio
+    final saved = (widget.osId > 0
+            ? await LocalDbService.instance.getOs(widget.osId)
+            : null) ??
+        (folio.isNotEmpty
+            ? await LocalDbService.instance.getOsByFolio(folio)
+            : null);
+    if (saved != null && mounted) {
+      setState(() {
+        for (final k in saved.keys) {
+          if (saved[k] != null && saved[k] != '') _os[k] = saved[k];
+        }
+        if (saved['unidad_medida'] != null && saved['unidad_medida'].toString().isNotEmpty) {
+          _unidadMedida = saved['unidad_medida'].toString();
+          _os['unidad_medida'] = _unidadMedida;
+        }
+        _obsCtrl.text = saved['observaciones'] ?? _obsCtrl.text;
+        try {
+          if (saved['rep_json'] != null && saved['rep_json'] != '')
+            _repRows = (_jsonSafe(saved['rep_json']) as List).cast<Map<String, dynamic>>();
+          if (saved['exc_json'] != null && saved['exc_json'] != '')
+            _excRows = (_jsonSafe(saved['exc_json']) as List).cast<Map<String, dynamic>>();
+          if (saved['exac_json'] != null && saved['exac_json'] != '')
+            _exacRows = (_jsonSafe(saved['exac_json']) as List).cast<Map<String, dynamic>>();
+        } catch (_) {}
+      });
+      _precargaCampos();
+    }
+    if (mounted) {
+      setState(() {
+        _dataLoaded = true;
+        _dataVersion++;
+      });
+    }
   }
 
   // ── BUILD ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
+    if (!_dataLoaded) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF5F5F7),
+        body: Center(
+          child: CircularProgressIndicator(color: _kRed),
+        ),
+      );
+    }
+
     final folio   = _os['folio_os'] ?? widget.osId.toString();
     final nPuntos = (_os['num_puntos_exactitud'] as int?) ?? 10;
     final nCeldas = _os['num_celdas_camionera'] is int
@@ -264,62 +399,77 @@ class _CapturaScreenState extends State<CapturaScreen>
         : int.tryParse(_os['num_celdas_camionera']?.toString() ?? '0') ?? 0;
     final bottom  = MediaQuery.of(context).viewPadding.bottom;
 
-    return SafeArea(
-      bottom: false,
-      child: Scaffold(
-        resizeToAvoidBottomInset: true,
-        backgroundColor: const Color(0xFFF5F5F7),
-        appBar: AppBar(
-          backgroundColor: _kDark,
-          foregroundColor: Colors.white,
-          title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(folio, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-            Text(_os['cliente'] ?? '',
-                style: const TextStyle(fontSize: 11, color: Colors.white70)),
-          ]),
-          bottom: TabBar(
-            controller: _tabCtrl,
-            indicatorColor: Colors.white,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white60,
-            isScrollable: true,
-            tabAlignment: TabAlignment.start,
-            labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-            tabs: const [
-              Tab(text: 'Instrumento',   icon: Icon(Icons.scale,              size: 16)),
-              Tab(text: 'Repetibilidad', icon: Icon(Icons.repeat,             size: 16)),
-              Tab(text: 'Excentricidad', icon: Icon(Icons.center_focus_weak,  size: 16)),
-              Tab(text: 'Exactitud',     icon: Icon(Icons.straighten,         size: 16)),
-            ],
-          ),
-        ),
-        body: Column(children: [
-          Expanded(
-            child: TabBarView(
+    return PopScope(
+      canPop: _permitirSalida,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (didPop || _permitirSalida) return;
+        await _mostrarDialogoSalida(context);
+      },
+      child: SafeArea(
+        bottom: false,
+        child: Scaffold(
+          resizeToAvoidBottomInset: true,
+          backgroundColor: const Color(0xFFF5F5F7),
+          appBar: AppBar(
+            backgroundColor: _kDark,
+            foregroundColor: Colors.white,
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () async {
+                await _mostrarDialogoSalida(context);
+              },
+            ),
+            title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(folio, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
+              Text(_os['cliente'] ?? '',
+                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+            ]),
+            bottom: TabBar(
               controller: _tabCtrl,
-              children: [
-                _buildTabInstrumento(),
-                RepetibilidadTable(
-                  rows: _repRows,
-                  divMin: _dValue,
-                  onChanged: (r) => setState(() => _repRows = r),
-                ),
-                _buildExcentricidadTab(nCeldas),
-                ExactitudTable(
-                  numPuntos: nPuntos,
-                  rows: _exacRows,
-                  divMin: _dValue,
-                  onChanged: (r) => setState(() => _exacRows = r),
-                ),
+              indicatorColor: Colors.white,
+              labelColor: Colors.white,
+              unselectedLabelColor: Colors.white60,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              tabs: const [
+                Tab(text: 'Instrumento',   icon: Icon(Icons.scale,              size: 16)),
+                Tab(text: 'Repetibilidad', icon: Icon(Icons.repeat,             size: 16)),
+                Tab(text: 'Excentricidad', icon: Icon(Icons.center_focus_weak,  size: 16)),
+                Tab(text: 'Exactitud',     icon: Icon(Icons.straighten,         size: 16)),
               ],
             ),
           ),
-          _buildObsPanel(),
-          Padding(
-            padding: EdgeInsets.only(bottom: bottom > 0 ? bottom : 16),
-            child: _buildActionBar(folio),
-          ),
-        ]),
+          body: Column(children: [
+            Expanded(
+              child: TabBarView(
+                controller: _tabCtrl,
+                children: [
+                  _buildTabInstrumento(),
+                  RepetibilidadTable(
+                    key: ValueKey('rep_$_dataVersion'),
+                    rows: _repRows,
+                    divMin: _dValue,
+                    onChanged: (r) => setState(() => _repRows = r),
+                  ),
+                  _buildExcentricidadTab(nCeldas),
+                  ExactitudTable(
+                    key: ValueKey('exac_$_dataVersion'),
+                    numPuntos: nPuntos,
+                    rows: _exacRows,
+                    divMin: _dValue,
+                    onChanged: (r) => setState(() => _exacRows = r),
+                  ),
+                ],
+              ),
+            ),
+            _buildObsPanel(),
+            Padding(
+              padding: EdgeInsets.only(bottom: bottom > 0 ? bottom : 16),
+              child: _buildActionBar(folio),
+            ),
+          ]),
+        ),
       ),
     );
   }
@@ -364,19 +514,43 @@ class _CapturaScreenState extends State<CapturaScreen>
           onChanged: (v) => setState(() {
             _tipoInstrumento = v;
             _os['tipo_instrumento'] = v;
+            _dataVersion++;
             // Recalcular excentricidad si no hay override manual
             if (_aplExcOverride == null) setState(() {});
           }),
         ),
         const SizedBox(height: 16),
 
-        // ── Parámetros metrológicos base (Cap + Div — SIN DVE aquí) ────────
+        // ── Parámetros metrológicos base (Cap + Div + Unidad) ────────
         _SectionTitle('Parámetros Metrológicos'),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _NumField('Capacidad Máx. (kg)', _capMaxCtrl)),
-          const SizedBox(width: 12),
-          Expanded(child: _NumField('División Mín. (kg)',  _divMinCtrl)),
+          Expanded(
+            flex: 3,
+            child: _NumField('Capacidad Máx. ($_unidadMedida)', _capMaxCtrl),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 3,
+            child: _NumField('División Mín. ($_unidadMedida)',  _divMinCtrl),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 2,
+            child: DropdownButtonFormField<String>(
+              value: _unidadMedida,
+              decoration: _kInputDeco('Unidad'),
+              items: const [
+                DropdownMenuItem(value: 'kg', child: Text('kg', style: TextStyle(fontWeight: FontWeight.bold))),
+                DropdownMenuItem(value: 'g',  child: Text('g',  style: TextStyle(fontWeight: FontWeight.bold))),
+              ],
+              onChanged: (v) => setState(() {
+                _unidadMedida = v ?? 'kg';
+                _os['unidad_medida'] = _unidadMedida;
+                _dataVersion++;
+              }),
+            ),
+          ),
         ]),
         const SizedBox(height: 12),
 
@@ -553,6 +727,8 @@ class _CapturaScreenState extends State<CapturaScreen>
 
   // ── Tab 2: Excentricidad ──────────────────────────────────────────────────
   Widget _buildExcentricidadTab(int nCeldas) {
+    final nSecRaw = _os['num_secciones'] ?? _os['secciones'] ?? _os['num_secciones_camionera'];
+    final nSec = (nSecRaw is int) ? nSecRaw : int.tryParse(nSecRaw?.toString() ?? '');
     return Column(children: [
       AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -565,8 +741,8 @@ class _CapturaScreenState extends State<CapturaScreen>
           const SizedBox(width: 8),
           Expanded(child: Text(
             _aplExc
-                ? 'Excentricidad activada — captura los valores de cada punto.'
-                : 'Excentricidad desactivada. Actívala en la pestaña Instrumento.',
+                ? 'Excentricidad activada — captura los valores de cada posición.'
+                : 'Excentricidad desactivada. Marcada como No Aplica.',
             style: TextStyle(fontSize: 12,
                 color: _aplExc ? Colors.green.shade800 : Colors.orange.shade800),
           )),
@@ -578,27 +754,19 @@ class _CapturaScreenState extends State<CapturaScreen>
           ),
         ]),
       ),
-      Expanded(child: _aplExc
-          ? ExcentricidadTable(
-              numCeldas: nCeldas,
-              rows: _excRows,
-              divMin: _dValue,
-              geometria: _os['geometria_plataforma'] as String?,
-              onChanged: (r) => setState(() => _excRows = r),
-            )
-          : Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-              Icon(Icons.center_focus_weak, size: 48, color: Colors.grey.shade300),
-              const SizedBox(height: 8),
-              Text('Excentricidad no aplica para esta orden.',
-                  style: TextStyle(color: Colors.grey.shade500)),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                onPressed: () => setState(() => _aplExcOverride = true),
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: _kRed, foregroundColor: Colors.white),
-                child: const Text('Habilitar manualmente'),
-              ),
-            ]))),
+      Expanded(
+        child: ExcentricidadTable(
+          key: ValueKey('exc_${_dataVersion}_$_tipoInstrumento'),
+          numCeldas: nCeldas,
+          numSecciones: nSec,
+          rows: _excRows,
+          divMin: _dValue,
+          geometria: _os['geometria_plataforma'] as String?,
+          tipoInstrumento: _tipoInstrumento,
+          aplicaExcentricidad: _aplExc,
+          onChanged: (r) => setState(() => _excRows = r),
+        ),
+      ),
     ]);
   }
 
@@ -671,13 +839,15 @@ class _CapturaScreenState extends State<CapturaScreen>
         OutlinedButton.icon(
           icon: const Icon(Icons.save_outlined),
           label: const Text('Guardar Borrador'),
-          onPressed: _saving ? null : _guardarBorrador,
+          onPressed: () => _guardarBorrador(mostrarSnackbar: true),
         ),
         const Spacer(),
         ElevatedButton.icon(
           style: ElevatedButton.styleFrom(
             backgroundColor: const Color(0xFF1A7F64),
+            disabledBackgroundColor: const Color(0xFF1A7F64),
             foregroundColor: Colors.white,
+            disabledForegroundColor: Colors.white,
             minimumSize: const Size(180, 48),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
@@ -700,7 +870,9 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['marca']                 = _marcaCtrl.text.trim();
     _os['modelo']                = _modeloCtrl.text.trim();
     _os['ns']                    = _nsCtrl.text.trim();
+    _os['serie']                 = _nsCtrl.text.trim();
     _os['id_equipo']             = _idEquipoCtrl.text.trim();
+    _os['id_indicador']          = _idEquipoCtrl.text.trim();
     _os['ubicacion']             = _ubicCtrl.text.trim();
     _os['tipo_instrumento']      = _tipoInstrumento;
     _os['jia_j']                 = _jChecked;
@@ -708,13 +880,16 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['jia_a']                 = _aChecked;
     _os['aplica_excentricidad']  = _aplExc;
     _os['usa_sustitucion']       = _usaSustitucion;
-    // Nuevos campos
     _os['funcionamiento']        = _funcionamiento;
     _os['puntos_apoyo']          = _puntosApoyo;
+    _os['unidad_medida']         = _unidadMedida;
+    _os['capacidad_max']         = _capMaxCtrl.text.trim();
+    _os['division_minima']       = _divMinCtrl.text.trim();
 
     // Solo guardar campos condicionales si aplican según las reglas activas
     if (rules.tieneCalibracion) {
       _os['numero_cca'] = _ccaCtrl.text.trim();
+      _os['cca_aplica'] = true;
     }
     if (rules.tieneInspeccion) {
       _os['holograma_anterior']    = _holoAntCtrl.text.trim();
@@ -726,31 +901,148 @@ class _CapturaScreenState extends State<CapturaScreen>
       _os['factor_sustitucion']     = double.tryParse(_factorSustCtrl.text) ?? 0;
     }
 
-    final maxV = double.tryParse(_capMaxCtrl.text);
-    final divV = double.tryParse(_divMinCtrl.text);
+    final maxV = double.tryParse(_capMaxCtrl.text.replaceAll(',', '.'));
+    final divV = double.tryParse(_divMinCtrl.text.replaceAll(',', '.'));
     if (maxV != null) _os['alcance_max'] = maxV;
     if (divV != null) _os['div_minima']  = divV;
     // Nombre del cliente — siempre persiste en el mapa
     _os['firma_cliente_nombre'] = _firmaClienteNombreCtrl.text.trim();
   }
 
-  Future<void> _guardarBorrador() async {
-    _guardarDatosInstrumento();
-    setState(() => _saving = true);
-    await LocalDbService.instance.saveLecturas(
-      localId:              widget.osId,
-      repRows:              _repRows,
-      excRows:              _excRows,
-      exacRows:             _exacRows,
-      observaciones:        _obsCtrl.text.trim(),
-      firmaClienteNombre:   _firmaClienteNombreCtrl.text.trim(),
+  Future<void> _mostrarDialogoSalida(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.save_outlined, color: Color(0xFFC8102E), size: 28),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '¿Guardar en borrador?',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          '¿Deseas guardar en borrador antes de salir?\n\n'
+          '• [Sí, Guardar Borrador]: Guarda tu avance localmente y sale.\n'
+          '• [No]: Descarta los cambios no guardados y sale.\n'
+          '• [Cancelar]: Permanece en la pantalla de captura.',
+          style: TextStyle(fontSize: 13, height: 1.4),
+        ),
+        actionsPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogCtx).pop(); // Cierra únicamente el modal
+            },
+            child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogCtx).pop(); // Cierra el modal
+              _permitirSalida = true;
+              if (context.mounted) {
+                Navigator.of(context).pop(); // Sale sin persistir cambios
+              }
+            },
+            child: const Text('No (Descartar)', style: TextStyle(color: Colors.red)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1A7F64),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () async {
+              await _guardarBorrador(mostrarSnackbar: false);
+              if (dialogCtx.mounted) {
+                Navigator.of(dialogCtx).pop(); // Cierra el modal
+              }
+              _permitirSalida = true;
+              if (context.mounted) {
+                Navigator.of(context).pop(); // Sale al Dashboard con datos guardados
+              }
+            },
+            child: const Text('Sí, Guardar Borrador'),
+          ),
+        ],
+      ),
     );
-    setState(() => _saving = false);
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Borrador guardado ✓'),
-            backgroundColor: Colors.green),
+  }
+
+  Future<void> _guardarBorrador({bool mostrarSnackbar = true}) async {
+    _guardarDatosInstrumento();
+    final rules = _rules;
+    final folio = (_os['folio_os'] ?? widget.osData['folio_os'] ?? widget.osId.toString()).toString().trim();
+    setState(() => _saving = true);
+    try {
+      final draftMap = <String, dynamic>{
+        'folio_os':              folio,
+        'marca':                 _marcaCtrl.text.trim(),
+        'modelo':                _modeloCtrl.text.trim(),
+        'ns':                    _nsCtrl.text.trim(),
+        'serie':                 _nsCtrl.text.trim(),
+        'id_equipo':             _idEquipoCtrl.text.trim(),
+        'id_indicador':          _idEquipoCtrl.text.trim(),
+        'ubicacion':             _ubicCtrl.text.trim(),
+        'cap_max':               _capMaxCtrl.text.trim(),
+        'capacidad_max':         _capMaxCtrl.text.trim(),
+        'div_min':               _divMinCtrl.text.trim(),
+        'division_minima':       _divMinCtrl.text.trim(),
+        'div_ver':               _divVerCtrl.text.trim(),
+        'numero_cca':            _ccaCtrl.text.trim(),
+        'cca_aplica':            rules.tieneCalibracion || _ccaCtrl.text.trim().isNotEmpty,
+        'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
+        'holograma_anterior':    _holoAntCtrl.text.trim(),
+        'holograma_actualizado': _holoActCtrl.text.trim(),
+        'tipo_instrumento':      _tipoInstrumento,
+        'funcionamiento':        _funcionamiento,
+        'puntos_apoyo':          _puntosApoyo,
+        'unidad_medida':         _unidadMedida,
+        'jia_j':                 _jChecked,
+        'jia_i':                 _iChecked,
+        'jia_a':                 _aChecked,
+        'aplica_excentricidad':  _aplExc,
+        'apl_exc_override':      _aplExcOverride,
+        'usa_sustitucion':       _usaSustitucion,
+        'masa_patron':           _masaPatronCtrl.text.trim(),
+        'factor_sustitucion':    _factorSustCtrl.text.trim(),
+        'rep_rows':              _repRows,
+        'exc_rows':              _excRows,
+        'exac_rows':             _exacRows,
+        'observaciones':         _obsCtrl.text.trim(),
+        'firma_cliente_nombre':  _firmaClienteNombreCtrl.text.trim(),
+        'dictamen':              _dictamen,
+      };
+
+      await LocalDbService.instance.saveDraft(folio, draftMap);
+
+      await LocalDbService.instance.saveLecturas(
+        localId:              widget.osId,
+        repRows:              _repRows,
+        excRows:              _excRows,
+        exacRows:             _exacRows,
+        observaciones:        _obsCtrl.text.trim(),
+        firmaClienteNombre:   _firmaClienteNombreCtrl.text.trim(),
+        isDraft:              true,
+        instrumentData:       _os,
+        unidadMedida:         _unidadMedida,
       );
+      if (mounted && mostrarSnackbar) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Borrador guardado ✓'),
+              backgroundColor: Colors.green),
+        );
+      }
+    } catch (e) {
+      debugPrint('[Captura] Error guardando borrador: $e');
+    } finally {
+      if (mounted) setState(() => _saving = false);
     }
   }
 
@@ -758,7 +1050,53 @@ class _CapturaScreenState extends State<CapturaScreen>
     _guardarDatosInstrumento();
     final rules = _rules;
 
-    // ── Validaciones obligatorias ─────────────────────────────────────────
+    // ── Validaciones metrológicas de división mínima (d) ───────────────
+    final d = _dValue;
+    if (d != null && d > 0) {
+      for (int i = 0; i < _repRows.length; i++) {
+        final r = _repRows[i];
+        for (final k in ['valor_kg', 'lectura_inicial', 'lectura_final']) {
+          final s = r[k]?.toString().trim() ?? '';
+          if (s.isEmpty) continue;
+          final v = double.tryParse(s.replaceAll(',', '.'));
+          if (v != null && v > 0 && !isValidDivMin(v, d)) {
+            _tabCtrl.animateTo(1);
+            _showError('Repetibilidad (Fila ${i + 1}): El valor $v debe ser múltiplo de la división mínima ($d).');
+            return;
+          }
+        }
+      }
+      if (_aplExc) {
+        for (int i = 0; i < _excRows.length; i++) {
+          final r = _excRows[i];
+          for (final k in ['carga_kg', 'carga', 'lectura_inicial', 'lectura_final']) {
+            final s = r[k]?.toString().trim() ?? '';
+            if (s.isEmpty) continue;
+            final v = double.tryParse(s.replaceAll(',', '.'));
+            if (v != null && v > 0 && !isValidDivMin(v, d)) {
+              _tabCtrl.animateTo(2);
+              _showError('Excentricidad (${r['posicion'] ?? r['posicion_nombre'] ?? 'Pos ${i + 1}'}): El valor $v debe ser múltiplo de la división mínima ($d).');
+              return;
+            }
+          }
+        }
+      }
+      for (int i = 0; i < _exacRows.length; i++) {
+        final r = _exacRows[i];
+        for (final k in ['carga_patron', 'lectura_subida', 'lectura_bajada']) {
+          final s = r[k]?.toString().trim() ?? '';
+          if (s.isEmpty) continue;
+          final v = double.tryParse(s.replaceAll(',', '.'));
+          if (v != null && v > 0 && !isValidDivMin(v, d)) {
+            _tabCtrl.animateTo(3);
+            _showError('Exactitud (Punto ${i + 1}): El valor $v debe ser múltiplo de la división mínima ($d).');
+            return;
+          }
+        }
+      }
+    }
+
+    // ── Validaciones obligatorias de servicio ───────────────────────────
     if (rules.tieneCalibracion && _ccaCtrl.text.trim().isEmpty) {
       _tabCtrl.animateTo(0);
       _showError('El Número de CCA es obligatorio para este tipo de servicio.');
@@ -774,39 +1112,76 @@ class _CapturaScreenState extends State<CapturaScreen>
       _showError('Selecciona la Inicial del Calibrador (J, I o A).');
       return;
     }
-    // Nombre del cliente es obligatorio en Android (firma sólo posible en Windows)
-    if (_firmaClienteNombreCtrl.text.trim().isEmpty) {
-      _showError('El nombre de quien recibe es obligatorio.');
-      return;
+
+    // Nombre del cliente — si no se ingresó, usar el cliente de la OS para no bloquear
+    String nombreCliente = _firmaClienteNombreCtrl.text.trim();
+    if (nombreCliente.isEmpty) {
+      nombreCliente = _os['cliente']?.toString().trim() ?? 'Cliente en Sitio';
+      if (nombreCliente.isEmpty) nombreCliente = 'Cliente en Sitio';
+      _firmaClienteNombreCtrl.text = nombreCliente;
+      _showInfo('Se asignó "$nombreCliente" como receptor.');
     }
 
-    await _guardarBorrador();
+    await _guardarBorrador(mostrarSnackbar: false);
+
+    final String fechaActual = (_os['fecha'] != null && _os['fecha'].toString().isNotEmpty && _os['fecha'].toString() != 'null')
+        ? _os['fecha'].toString().split(' ')[0]
+        : DateTime.now().toIso8601String().substring(0, 10);
+    final String clienteFinal = (_os['cliente'] ?? _os['cliente_nombre'] ?? _os['razon_social'] ?? '').toString();
+    final String direccionFinal = (_os['direccion'] ?? _os['direccion_cliente'] ?? _os['sucursal'] ?? _os['planta'] ?? _os['sucursal_nombre'] ?? '').toString();
 
     if (mounted) {
       context.push('/firma/${widget.osId}', extra: {
+        ..._os,
         'folio_os':              folio,
         'tecnico':               _os['tecnico'] ?? '',
-        'cliente':               _os['cliente'] ?? '',
+        'tecnico_nombre':        _os['tecnico_nombre'] ?? _os['tecnico'] ?? '',
+        'cliente':               clienteFinal,
+        'cliente_nombre':        clienteFinal,
+        'direccion':             direccionFinal,
+        'direccion_cliente':     direccionFinal,
+        'sucursal':              _os['sucursal'] ?? direccionFinal,
+        'fecha':                 fechaActual,
+        'fecha_servicio':        fechaActual,
         'rep_rows':              _repRows,
         'exc_rows':              _excRows,
         'exac_rows':             _exacRows,
         'observaciones':         _obsCtrl.text.trim(),
-        'firma_cliente_nombre':  _firmaClienteNombreCtrl.text.trim(),
+        'firma_cliente_nombre':  nombreCliente,
+        'nombre_ing':            nombreCliente,
         'dictamen':              _dictamen,
         'jia_j':                 _jChecked,
         'jia_i':                 _iChecked,
         'jia_a':                 _aChecked,
         'marca':                 _marcaCtrl.text.trim(),
+        'equipo_marca':          _marcaCtrl.text.trim(),
         'modelo':                _modeloCtrl.text.trim(),
+        'equipo_modelo':         _modeloCtrl.text.trim(),
         'ns':                    _nsCtrl.text.trim(),
+        'serie':                 _nsCtrl.text.trim(),
+        'equipo_ns':             _nsCtrl.text.trim(),
+        'id_equipo':             _idEquipoCtrl.text.trim(),
+        'id_indicador':          _idEquipoCtrl.text.trim(),
+        'ubicacion':             _ubicCtrl.text.trim(),
+        'equipo_ubicacion':      _ubicCtrl.text.trim(),
+        'capacidad_max':         _capMaxCtrl.text.trim(),
+        'alcance_max':           _capMaxCtrl.text.trim(),
+        'equipo_alcance':        _capMaxCtrl.text.trim(),
+        'division_minima':       _divMinCtrl.text.trim(),
+        'div_minima':            _divMinCtrl.text.trim(),
+        'equipo_division':       _divMinCtrl.text.trim(),
+        'div_verificacion':      _divVerCtrl.text.trim(),
         'numero_cca':            _ccaCtrl.text.trim(),
+        'cca_aplica':            rules.tieneCalibracion || _ccaCtrl.text.trim().isNotEmpty,
+        'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
+        'unidad_medida':         _unidadMedida,
         'holograma_anterior':    _holoAntCtrl.text.trim(),
         'holograma_actualizado': _holoActCtrl.text.trim(),
         'tipo_instrumento':      _tipoInstrumento ?? '',
         'tipo_servicio':         _os['tipo_servicio'] ?? '',
         'funcionamiento':        _funcionamiento,
         'puntos_apoyo':          _puntosApoyo,
-        'div_minima':            _dValue,
+        'aplica_excentricidad':  _aplExc,
       });
     }
   }
@@ -817,6 +1192,15 @@ class _CapturaScreenState extends State<CapturaScreen>
       content: Text(msg),
       backgroundColor: Colors.red.shade700,
       duration: const Duration(seconds: 4),
+    ));
+  }
+
+  void _showInfo(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(msg),
+      backgroundColor: const Color(0xFF2563EB),
+      duration: const Duration(seconds: 3),
     ));
   }
 

@@ -1,0 +1,436 @@
+// lib/widgets/repetibilidad_table.dart — Tabla táctil de Repetibilidad
+// v3.0: Carga única propagada + validación estricta de división mínima (d)
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import '../services/metrology_helper.dart';
+
+const _kRed = Color(0xFFC8102E);
+
+class RepetibilidadTable extends StatefulWidget {
+  final List<Map<String, dynamic>> rows;
+  final ValueChanged<List<Map<String, dynamic>>> onChanged;
+  /// División mínima en kg — controla decimales y validación de múltiplos
+  final double? divMin;
+
+  const RepetibilidadTable({
+    super.key,
+    required this.rows,
+    required this.onChanged,
+    this.divMin,
+  });
+
+  @override
+  State<RepetibilidadTable> createState() => _RepetibilidadTableState();
+}
+
+class _RepetibilidadTableState extends State<RepetibilidadTable> {
+  late TextEditingController _cargaCtrl;
+  late List<_RepRow> _rows;
+
+  @override
+  void initState() {
+    super.initState();
+    // Extraer carga única previa si existe
+    String cargaPrevia = '';
+    if (widget.rows.isNotEmpty) {
+      final v = widget.rows.first['valor'] ?? widget.rows.first['valor_kg'];
+      if (v != null && v.toString().isNotEmpty) {
+        cargaPrevia = v.toString();
+      }
+    }
+
+    _cargaCtrl = TextEditingController(text: cargaPrevia);
+    _cargaCtrl.addListener(_notify);
+
+    // 3 repeticiones estándar
+    _rows = List.generate(3, (i) {
+      final saved = i < widget.rows.length ? widget.rows[i] : null;
+      return _RepRow(
+        inicialCtrl: TextEditingController(
+            text: saved?['lectura_inicial']?.toString() ?? ''),
+        finalCtrl: TextEditingController(
+            text: saved?['lectura_final']?.toString() ?? ''),
+      );
+    });
+
+    for (final r in _rows) {
+      r.inicialCtrl.addListener(_notify);
+      r.finalCtrl.addListener(_notify);
+    }
+  }
+
+  @override
+  void dispose() {
+    _cargaCtrl.dispose();
+    for (final r in _rows) {
+      r.inicialCtrl.dispose();
+      r.finalCtrl.dispose();
+    }
+    super.dispose();
+  }
+
+  void _notify() => widget.onChanged(_serialize());
+
+  List<Map<String, dynamic>> _serialize() {
+    final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
+    final dec = decimalsFromDivMin(widget.divMin);
+
+    return _rows.asMap().entries.map((e) {
+      final ini = double.tryParse(e.value.inicialCtrl.text.trim().replaceAll(',', '.'));
+      final fin = double.tryParse(e.value.finalCtrl.text.trim().replaceAll(',', '.'));
+      double? error;
+      if (fin != null) {
+        final iniVal = ini ?? 0.0;
+        error = (fin - iniVal) - carga;
+      }
+      return {
+        'posicion_id':    e.key + 1,
+        'valor':          carga,
+        'valor_kg':       carga,
+        'lectura_inicial': ini,
+        'lectura_final':  fin,
+        'error':          error,
+        'decimales':      dec,
+        'valido_d':       isValidDivMin(carga, widget.divMin) &&
+                          (ini == null || isValidDivMin(ini, widget.divMin)) &&
+                          isValidDivMin(fin, widget.divMin),
+      };
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final dec = decimalsFromDivMin(widget.divMin);
+    final cargaVal = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.'));
+    final cargaInvalida = cargaVal != null && !isValidDivMin(cargaVal, widget.divMin);
+
+    // Revisar si hay algún campo inválido en las repeticiones
+    bool hayCamposInvalidos = cargaInvalida;
+    for (final r in _rows) {
+      final ini = double.tryParse(r.inicialCtrl.text.trim().replaceAll(',', '.'));
+      final fin = double.tryParse(r.finalCtrl.text.trim().replaceAll(',', '.'));
+      if (ini != null && !isValidDivMin(ini, widget.divMin)) hayCamposInvalidos = true;
+      if (fin != null && !isValidDivMin(fin, widget.divMin)) hayCamposInvalidos = true;
+    }
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Campo ÚNICO de Carga de Prueba ─────────────────────────────────
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: cargaInvalida ? Colors.red : Colors.grey.shade200,
+                width: cargaInvalida ? 1.5 : 1,
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.fitness_center, color: _kRed, size: 20),
+                      const SizedBox(width: 12),
+                      const Text(
+                        'Carga de Prueba (kg):',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Focus(
+                          onFocusChange: (hasFocus) {
+                            if (!hasFocus && _cargaCtrl.text.trim().isNotEmpty) {
+                              double? n = double.tryParse(_cargaCtrl.text.replaceAll(',', '.'));
+                              if (n != null) _cargaCtrl.text = n.toStringAsFixed(dec);
+                            }
+                          },
+                          child: TextField(
+                            controller: _cargaCtrl,
+                            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                            textInputAction: TextInputAction.next,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))
+                            ],
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: cargaInvalida ? Colors.red : _kRed,
+                            ),
+                            decoration: InputDecoration(
+                              isDense: true,
+                              hintText: '0.${'0' * dec}',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: cargaInvalida ? Colors.red : _kRed,
+                                  width: 1.5,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: cargaInvalida ? Colors.red : _kRed,
+                                  width: 2,
+                                ),
+                              ),
+                              fillColor: cargaInvalida ? const Color(0xFFFFEBEE) : Colors.white,
+                              filled: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        'Propagada a los 3 puntos\n(d=${widget.divMin ?? '?'})',
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                        textAlign: TextAlign.right,
+                      ),
+                    ],
+                  ),
+                  if (cargaInvalida)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8, left: 32),
+                      child: Text(
+                        divMinErrorMsg(widget.divMin),
+                        style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // ── Alerta global si hay valores con división mínima incorrecta ───
+          if (hayCamposInvalidos)
+            Container(
+              margin: const EdgeInsets.only(bottom: 12),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFEBEE),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.shade300),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      divMinErrorMsg(widget.divMin),
+                      style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+          // ── Tabla de Repeticiones ─────────────────────────────────────────
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'REPETIBILIDAD',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 13,
+                          color: _kRed,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                      const Spacer(),
+                      Text(
+                        'Captura únicamente lecturas inicial y final',
+                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Table(
+                    border: TableBorder.all(color: Colors.grey.shade200),
+                    columnWidths: const {
+                      0: FlexColumnWidth(0.8),
+                      1: FlexColumnWidth(1.6),
+                      2: FlexColumnWidth(1.8),
+                      3: FlexColumnWidth(1.8),
+                      4: FlexColumnWidth(1.5),
+                    },
+                    children: [
+                      _headerRow(['N', 'CARGA (kg)', 'L. INICIAL', 'L. FINAL', 'ERROR']),
+                      for (int i = 0; i < _rows.length; i++)
+                        _dataRow(i, dec),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  TableRow _headerRow(List<String> labels) => TableRow(
+    decoration: const BoxDecoration(color: Color(0xFF1C1C1C)),
+    children: labels.map((l) => Padding(
+      padding: const EdgeInsets.all(8),
+      child: Text(
+        l,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: Colors.white,
+        ),
+      ),
+    )).toList(),
+  );
+
+  TableRow _dataRow(int i, int dec) {
+    final ini = double.tryParse(_rows[i].inicialCtrl.text.trim().replaceAll(',', '.'));
+    final fin = double.tryParse(_rows[i].finalCtrl.text.trim().replaceAll(',', '.'));
+    final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
+    double? err;
+    if (fin != null) {
+      final iniVal = ini ?? 0.0;
+      err = (fin - iniVal) - carga;
+    }
+
+    final cargaTxt = _cargaCtrl.text.trim().isNotEmpty ? _cargaCtrl.text.trim() : '—';
+
+    return TableRow(
+      decoration: BoxDecoration(
+        color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9),
+      ),
+      children: [
+        _cell(Text(
+          '${i + 1}',
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+        )),
+        // Columna de carga nominal propagada (solo lectura / informativa)
+        _cell(
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            alignment: Alignment.center,
+            child: Text(
+              cargaTxt,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+                color: Color(0xFF1D1D1F),
+              ),
+            ),
+          ),
+        ),
+        _cellInput(_rows[i].inicialCtrl, dec, hint: '0.${'0' * dec}'),
+        _cellInput(_rows[i].finalCtrl, dec, hint: '0.${'0' * dec}'),
+        _cell(err == null
+            ? const Center(
+                child: Text('—', style: TextStyle(color: Colors.grey, fontSize: 13)))
+            : Text(
+                err.toStringAsFixed(dec),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: err > (widget.divMin ?? 0.001)
+                      ? _kRed
+                      : Colors.green.shade700,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              )),
+      ],
+    );
+  }
+
+  Widget _cell(Widget child) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+    child: child,
+  );
+
+  Widget _cellInput(TextEditingController ctrl, int dec, {String? hint}) {
+    final val = double.tryParse(ctrl.text.trim().replaceAll(',', '.'));
+    final invalido = val != null && !isValidDivMin(val, widget.divMin);
+
+    return Padding(
+      padding: const EdgeInsets.all(2),
+      child: Focus(
+        onFocusChange: (hasFocus) {
+          if (!hasFocus && ctrl.text.trim().isNotEmpty) {
+            double? n = double.tryParse(ctrl.text.replaceAll(',', '.'));
+            if (n != null) ctrl.text = n.toStringAsFixed(dec);
+            setState(() {});
+          }
+        },
+        child: TextField(
+          controller: ctrl,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+          textInputAction: TextInputAction.next,
+          inputFormatters: [
+            FilteringTextInputFormatter.allow(RegExp(r'[\d.,\-]'))
+          ],
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            color: invalido ? Colors.red : Colors.black87,
+          ),
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: hint ?? '0.${'0' * dec}',
+            hintStyle: TextStyle(color: Colors.grey.shade300, fontSize: 11),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(
+                color: invalido ? Colors.red : Colors.grey.shade300,
+                width: invalido ? 1.5 : 1,
+              ),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(
+                color: invalido ? Colors.red : Colors.grey.shade300,
+                width: invalido ? 1.5 : 1,
+              ),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(6),
+              borderSide: BorderSide(
+                color: invalido ? Colors.red : _kRed,
+                width: 2,
+              ),
+            ),
+            fillColor: invalido ? const Color(0xFFFFEBEE) : Colors.white,
+            filled: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RepRow {
+  final TextEditingController inicialCtrl;
+  final TextEditingController finalCtrl;
+  _RepRow({
+    required this.inicialCtrl,
+    required this.finalCtrl,
+  });
+}

@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:path_provider/path_provider.dart';
 import 'api_service.dart';
 import 'local_db_service.dart';
 
@@ -191,10 +192,15 @@ class SyncService extends ChangeNotifier {
     _setState(SyncState.syncing, 'Sincronizando con el servidor...');
 
     try {
-      // 1. Push: subir cambios locales pendientes
+      // 1. Push: subir cambios locales pendientes (JSON metrológico)
       debugPrint('[Sync] PUSH: subiendo cambios locales...');
       final pushCount = await _pushPendientes();
       debugPrint('[Sync] PUSH completado: $pushCount OS subidas');
+
+      // 1.5. Push PDF: subir archivos binarios PDF generados offline a Render vía multipart POST
+      debugPrint('[Sync] PUSH PDF: subiendo archivos binarios PDF...');
+      final pdfCount = await _subirPdfsPendientes();
+      debugPrint('[Sync] PUSH PDF completado: $pdfCount PDFs subidos');
 
       // 2. Pull: descargar nuevas asignaciones del servidor
       debugPrint('[Sync] PULL: descargando ordenes del servidor...');
@@ -301,11 +307,149 @@ class SyncService extends ChangeNotifier {
           result['sync_version'] as int? ?? 0,
         );
         uploaded++;
+
+        // ── Subida obligatoria del binario PDF por Multipart POST ─────────────
+        final pdfFile = await _resolveLocalPdfFile(os);
+        if (pdfFile != null && await pdfFile.exists()) {
+          debugPrint('[Sync] Subiendo binario PDF multipart para ${os['folio_os']} (${await pdfFile.length()} bytes)...');
+          final uploadOk = await ApiService.instance.uploadPdf(
+            os['folio_os'] as String,
+            pdfFile,
+            osId: os['local_id'] as int?,
+            data: {
+              'folio_os': os['folio_os'],
+              'observaciones': os['observaciones'],
+              'rep_rows': _decodeJson(os['rep_json']),
+              'exc_rows': _decodeJson(os['exc_json']),
+              'exac_rows': _decodeJson(os['exac_json']),
+              'firma_tecnico': os['firma_tecnico'],
+              'firma_cliente': os['firma_cliente'],
+              'nombre_ing': os['nombre_ing'],
+              'puesto_ing': os['puesto_ing'],
+              'unidad_medida': os['unidad_medida'] ?? 'kg',
+            },
+          );
+          if (uploadOk) {
+            debugPrint('[Sync] ✅ PDF binario subido y confirmado por Render para ${os['folio_os']}');
+            await db.markPdfSubido(os['local_id'] as int, folio: os['folio_os'] as String?);
+          } else {
+            debugPrint('[Sync] ⚠️ Subida de PDF falló para ${os['folio_os']}, se reintentará');
+          }
+        }
       } catch (e) {
         debugPrint('Push error para ${os['folio_os']}: $e');
       }
     }
     return uploaded;
+  }
+
+  /// Encuentra o reconstruye el archivo binario PDF en el disco de la tablet.
+  Future<File?> _resolveLocalPdfFile(Map<String, dynamic> os) async {
+    final folio = (os['folio_os'] as String? ?? '').trim();
+    if (folio.isEmpty) return null;
+
+    // 1. Ruta registrada en la BD
+    final pathLocal = os['pdf_path_local'] as String?;
+    if (pathLocal != null && pathLocal.isNotEmpty) {
+      final f = File(pathLocal);
+      if (await f.exists() && await f.length() > 500) {
+        return f;
+      }
+    }
+
+    // 2. Carpeta Documents / PESA_Tablet / PDF_OS
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final cand1 = File('${appDocDir.path}/PESA_Tablet/PDF_OS/$folio.pdf');
+      if (await cand1.exists() && await cand1.length() > 500) {
+        return cand1;
+      }
+    } catch (_) {}
+
+    // 3. Carpeta Temporal / PESA_Tablet / PDF_OS
+    try {
+      final tmpDir = await getTemporaryDirectory();
+      final cand2 = File('${tmpDir.path}/PESA_Tablet/PDF_OS/$folio.pdf');
+      if (await cand2.exists() && await cand2.length() > 500) {
+        return cand2;
+      }
+      final cand3 = File('${tmpDir.path}/$folio.pdf');
+      if (await cand3.exists() && await cand3.length() > 500) {
+        return cand3;
+      }
+    } catch (_) {}
+
+    // 4. Reconstrucción desde pdf_b64_local almacenado en SQLite
+    final b64 = os['pdf_b64_local'] as String?;
+    if (b64 != null && b64.trim().isNotEmpty) {
+      try {
+        final appDocDir = await getApplicationDocumentsDirectory();
+        final dir = Directory('${appDocDir.path}/PESA_Tablet/PDF_OS');
+        await dir.create(recursive: true);
+        final restored = File('${dir.path}/$folio.pdf');
+        await restored.writeAsBytes(base64Decode(b64.trim()));
+        debugPrint('[Sync] PDF reconstruido desde Base64 local para $folio (${await restored.length()} bytes)');
+        return restored;
+      } catch (e) {
+        debugPrint('[Sync] Error al reconstruir PDF desde Base64 para $folio: $e');
+      }
+    }
+
+    return null;
+  }
+
+  /// Sube los PDFs binarios pendientes de órdenes completadas/cerradas a Render.
+  /// Obligatorio: envía HTTP Multipart POST a /api/v1/ordenes/{folio}/upload-pdf.
+  /// Solo al recibir HTTP 200 OK marca el PDF como subido en SQLite.
+  Future<int> _subirPdfsPendientes() async {
+    final db = LocalDbService.instance;
+    final pendentesPdf = await db.getOsParaSubirPdf();
+    int subidos = 0;
+
+    for (final os in pendentesPdf) {
+      final folio = (os['folio_os'] as String? ?? '').trim();
+      if (folio.isEmpty) continue;
+
+      try {
+        final pdfFile = await _resolveLocalPdfFile(os);
+        if (pdfFile == null || !await pdfFile.exists()) {
+          debugPrint('[Sync] ⚠️ No se encontró PDF local en tablet para folio $folio');
+          continue;
+        }
+
+        final osId = os['local_id'] as int?;
+        debugPrint('[Sync] Subiendo binario PDF multipart para $folio (${await pdfFile.length()} bytes)...');
+        final uploadOk = await ApiService.instance.uploadPdf(
+          folio,
+          pdfFile,
+          osId: osId,
+          data: {
+            'folio_os': folio,
+            'observaciones': os['observaciones'],
+            'rep_rows': _decodeJson(os['rep_json']),
+            'exc_rows': _decodeJson(os['exc_json']),
+            'exac_rows': _decodeJson(os['exac_json']),
+            'firma_tecnico': os['firma_tecnico'],
+            'firma_cliente': os['firma_cliente'],
+            'nombre_ing': os['nombre_ing'],
+            'puesto_ing': os['puesto_ing'],
+            'unidad_medida': os['unidad_medida'] ?? 'kg',
+          },
+        );
+
+        if (uploadOk) {
+          debugPrint('[Sync] ✅ PDF binario subido exitosamente a Render para $folio');
+          await db.markPdfSubido(osId ?? 0, folio: folio);
+          subidos++;
+        } else {
+          debugPrint('[Sync] ❌ Subida multipart de PDF falló para $folio');
+        }
+      } catch (e) {
+        debugPrint('[Sync] Error subiendo PDF para $folio: $e');
+      }
+    }
+
+    return subidos;
   }
 
   /// Lee el archivo PDF local y lo convierte a Base64 para el push.

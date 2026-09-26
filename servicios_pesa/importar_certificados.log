@@ -1,0 +1,160 @@
+2026-08-13 15:50:03,388  INFO      ======================================================================
+2026-08-13 15:50:03,389  INFO      IMPORTADOR DE CERTIFICADOS DE CALIBRACION - Basculas PESA
+2026-08-13 15:50:03,389  INFO      Inicio    : 2026-08-13 15:50:03
+2026-08-13 15:50:03,389  INFO      Carpeta   : C:\Users\ivan1\OneDrive\Escritorio\Proyecto Pesa ERP\f\Sistema\Certificados
+2026-08-13 15:50:03,389  INFO      PDFs      : 3072
+2026-08-13 15:50:03,389  INFO      DRY-RUN   : True
+2026-08-13 15:50:03,389  INFO      ======================================================================
+2026-08-13 15:50:03,488  INFO        [1/3072] --CCA.25.00083 PQ-MA-301 IND 2 Rev 17.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-301 IND 2
+2026-08-13 15:50:03,575  INFO        [2/3072] --CCA.25.00084 PQ-MA-301 IND 1 Rev 17.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-301 IND 1
+2026-08-13 15:50:03,667  INFO        [3/3072] --CCA.25.00098 PQ-MA-100 Rev 16.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-100 Ubicación: Caseta
+2026-08-13 15:50:03,774  INFO        [4/3072] --CCA.25.00100 LI-MA-159 Rev 17.pdf | Sika Mexicana | S/N: B15156549 | ID: LI-MA-159
+2026-08-13 15:50:03,870  INFO        [5/3072] --CCA.25.00101 LI-MA-132 Rev 17.pdf | Sika Mexicana | S/N: 1123441330 | ID: LI-MA-132
+2026-08-13 15:50:03,959  INFO        [6/3072] --CCA.25.00102 PQ-MA-164 Rev 17.pdf | Sika Mexicana | S/N: 000036343 | ID: PQ-MA-164
+2026-08-13 15:50:04,050  INFO        [7/3072] --CCA.25.00103 PQ-MA-086 Rev 17.pdf | Sika Mexicana | S/N: 000041554 | ID: PQ-MA-086
+2026-08-13 15:50:04,145  INFO        [8/3072] --CCA.25.00104 PQ-MA-080 Rev 17.pdf | Sika Mexicana | S/N: 0000410287 | ID: PQ-MA-080
+2026-08-13 15:50:04,235  INFO        [9/3072] --CCA.25.00105 PQ-MA-230 Rev 17.pdf | Sika Mexicana | S/N: 132713 | ID: PQ-MA-230
+2026-08-13 15:50:04,327  INFO        [10/3072] --CCA.25.00106 PQ-MA-259 Rev 17.pdf | Sika Mexicana | S/N: 932725 | ID: PQ-MA-259
+2026-08-13 15:50:04,427  INFO        [11/3072] --CCA.25.00184 PQ-MA-289 Rev 17.pdf | Sika Mexicana | S/N: 1437794950010 | ID: PQ-MA-289
+2026-08-13 15:50:04,516  INFO        [12/3072] --CCA.25.00185 PQ-MA-268 IND2 Rev 17.pdf | Sika Mexicana | S/N: 46120016 | ID: PQ-MA-268 IND2
+2026-08-13 15:50:04,608  INFO        [13/3072] --CCA.25.00186 PQ-MA-268 IND1 Rev 17.pdf | Sika Mexicana | S/N: 46120016 | ID: PQ-MA-268 IND1
+2026-08-13 15:50:04,698  INFO        [14/3072] --CCA.25.00187 PQ-MA-044 Rev 17.pdf | Sika Mexicana | S/N: 191130 | ID: PQ-MA-044
+2026-08-13 15:50:04,789  INFO        [15/3072] --CCA.25.00188 PQ-MA-064 Rev 17.pdf | Sika Mexicana | S/N: XL703899 | ID: PQ-MA-064
+2026-08-13 15:50:04,899  INFO        [16/3072] --CCA.25.00189 PQ-MA-074 Rev 17.pdf | Sika Mexicana | S/N: 325815 | ID: PQ-MA-074
+2026-08-13 15:50:04,993  INFO        [17/3072] --CCA.25.00190 PQ-MA-061 Rev 17.pdf | Sika Mexicana | S/N: 167672 | ID: PQ-MA-061
+2026-08-13 15:50:05,083  INFO        [18/3072] --CCA.25.00191 PQ-MA-224 Rev 17.pdf | Sika Mexicana | S/N: IX-18T10EE52061 | ID: PQ-MA-224
+2026-08-13 15:50:05,170  INFO        [19/3072] --CCA.25.00192 PQ-MA-110 Rev 17.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-110
+2026-08-13 15:50:05,264  INFO        [20/3072] --CCA.25.00193 PQ-MA-225 Rev 17.pdf | Sika Mexicana | S/N: 0002221 | ID: PQ-MA-225
+2026-08-13 15:50:05,363  INFO        [21/3072] --CCA.25.00265 PQ-MA-048 Rev 17.pdf | Sika Mexicana | S/N: 2016400115 | ID: PQ-MA-048
+2026-08-13 15:50:05,459  INFO        [22/3072] --CCA.25.00266 PQ-MA-060 Rev 17.pdf | Sika Mexicana | S/N: 2075300037 | ID: PQ-MA-060
+2026-08-13 15:50:05,548  INFO        [23/3072] --CCA.25.00404 PQ-MA-317 Rev 17.pdf | Sika Mexicana | S/N: E02 49093 | ID: PQ-MA-317
+2026-08-13 15:50:05,643  INFO        [24/3072] --CCA.25.00405 PQ-MA-318 Rev 17.pdf | Sika Mexicana | S/N: 091100000087 | ID: PQ-MA-318
+2026-08-13 15:50:05,734  INFO        [25/3072] --CCA.25.00406 PQ-MA-319 Rev 17.pdf | Sika Mexicana | S/N: 088154 | ID: PQ-MA-319
+2026-08-13 15:50:05,826  INFO        [26/3072] --CCA.25.00408 PQ-MA-287 Rev 17.pdf | Sika Mexicana | S/N: 180919023 | ID: PQ-MA-287
+2026-08-13 15:50:05,910  INFO        [27/3072] --CCA.25.00630 PQ-MA-269 Rev 17.pdf | Sika Mexicana | S/N: 152550188 | ID: PQ-MA-269
+2026-08-13 15:50:05,994  INFO        [28/3072] --CCA.25.00631 PQ-MA-126 Rev 17.pdf | Sika Mexicana | S/N: 1912241480 | ID: PQ-MA-126
+2026-08-13 15:50:06,076  INFO        [29/3072] --CCA.25.00632 PQ-MA-263 Rev 17.pdf | Sika Mexicana | S/N: A-9220P-0682 | ID: PQ-MA-263
+2026-08-13 15:50:06,153  INFO        [30/3072] --CCA.25.00633 PQ-MA-236 REV 17.pdf | Sika Mexicana | S/N: 140228826E | ID: PQ-MA-236
+2026-08-13 15:50:06,230  INFO        [31/3072] --CCA.25.00634 PQ-MA-088 REV 17.pdf | Sika Mexicana | S/N: 005900 | ID: PQ-MA-088
+2026-08-13 15:50:06,320  INFO        [32/3072] --CCA.25.00635 PQ-MA-206 REV 17.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-206
+2026-08-13 15:50:06,405  INFO        [33/3072] --CCA.25.00636 PQ-MA-260 REV 17.pdf | Sika Mexicana | S/N: A-4210-0245 | ID: PQ-MA-260
+2026-08-13 15:50:06,494  INFO        [34/3072] --CCA.25.00637 PQ-MA-094 M2 REV 17.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-094 M2
+2026-08-13 15:50:06,579  INFO        [35/3072] --CCA.25.00638 PQ-MA-094 M1 REV 17.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-094 M1
+2026-08-13 15:50:06,661  INFO        [36/3072] --CCA.25.00639 PQ-MA-180 REV 17.pdf | Sika Mexicana | S/N: 1204100C19 | ID: PQ-MA-180
+2026-08-13 15:50:06,744  INFO        [37/3072] --CCA.25.00844 PQ-MA-234 REV 17.pdf | Sika Mexicana | S/N: 1504238DAI | ID: PQ-MA-234
+2026-08-13 15:50:06,848  INFO        [38/3072] --CCA.25.00845 PQ-MA-279 REV 17.pdf | Sika Mexicana | S/N: 35847 | ID: PQ-MA-279
+2026-08-13 15:50:06,932  INFO        [39/3072] --CCA.25.00846 PQ-MA-248 REV 17.pdf | Sika Mexicana | S/N: 011600019 | ID: PQ-MA-248
+2026-08-13 15:50:07,017  INFO        [40/3072] --CCA.25.00847 PQ-MA-227 REV 17.pdf | Sika Mexicana | S/N: 22062311FE | ID: PQ-MA-227
+2026-08-13 15:50:07,094  INFO        [41/3072] --CCA.25.00848 PQ-MA-285 REV 17.pdf | Sika Mexicana | S/N: 22062312A4 | ID: PQ-MA-285
+2026-08-13 15:50:07,173  INFO        [42/3072] --CCA.25.00977 PQ-MA-311 REV 17.pdf | Sika Mexicana | S/N: 12070603BE | ID: PQ-MA-311
+2026-08-13 15:50:07,257  INFO        [43/3072] --CCA.25.00978 PQ-MA-281 REV 17.pdf | Sika Mexicana | S/N: 1809190324 | ID: PQ-MA-281
+2026-08-13 15:50:07,341  INFO        [44/3072] --CCA.25.01439 PQ-MA-186 REV 17.pdf | Sika Mexicana | S/N: 000041354Z | ID: PQ-MA-186
+2026-08-13 15:50:07,424  INFO        [45/3072] --CCA.25.01440 PQ-MA-185 REV 17.pdf | Sika Mexicana | S/N: 000084 | ID: PQ-MA-185
+2026-08-13 15:50:07,508  INFO        [46/3072] --CCA.25.01441 PQ-MA-205 REV 17.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-205
+2026-08-13 15:50:07,596  INFO        [47/3072] --CCA.25.01442 PQ-MA-096 REV 17.pdf | Sika Mexicana | S/N: 1733300141 | ID: PQ-MA-096
+2026-08-13 15:50:07,679  INFO        [48/3072] --CCA.25.01443 LI-MA-226 REV 17.pdf | Sika Mexicana | S/N: B429832627 | ID: LI-MA-226
+2026-08-13 15:50:07,759  INFO        [49/3072] --CCA.25.01444 LI-MA-307 REV 17.pdf | Sika Mexicana | S/N: E220356322 | ID: LI-MA-307
+2026-08-13 15:50:07,854  INFO        [50/3072] --CCA.25.01445 PQ-MA-286 REV 17.pdf | Sika Mexicana | S/N: 2409030B70 | ID: PQ-MA-286
+2026-08-13 15:50:07,933  INFO        [51/3072] --CCA.25.01446 PQ-MA-290 REV 17.pdf | Sika Mexicana | S/N: 2311060639 | ID: PQ-MA-290
+2026-08-13 15:50:08,010  INFO        [52/3072] --CCA.25.01672 PQ-MA-305 REV 18.pdf | Sika Mexicana | S/N: 200321018D | ID: PQ-MA-305
+2026-08-13 15:50:08,090  INFO        [53/3072] --CCA.25.01673 PQ-MA-315 REV 18.pdf | Sika Mexicana | S/N: 1970100104 | ID: PQ-MA-315
+2026-08-13 15:50:08,309  INFO        [54/3072] --CCA.25.01977 PQ-MA-257 REV 18.pdf | Sika Mexicana | S/N: 1512222831A | ID: PQ-MA-257
+2026-08-13 15:50:08,392  INFO        [55/3072] --CCA.25.01978 PQ-MA-228 REV 18.pdf | Sika Mexicana | S/N: 2409030B7C | ID: PQ-MA-228
+2026-08-13 15:50:08,602  INFO        [56/3072] --CCA.25.01979 PQ-MA-210 REV 18.pdf | Sika Mexicana | S/N: (sin serie) | ID: PQ-MA-210
+2026-08-13 15:50:08,682  INFO        [57/3072] --CCA.25.01979 SIN ID REV 18.pdf | Sika Mexicana | S/N: (sin serie) | ID: Sin ID
+2026-08-13 15:50:08,888  INFO        [58/3072] --CCA.25.01980 PQ-MA-202 REV 18.pdf | Sika Mexicana | S/N: 2409030B84 | ID: PQ-MA-202
+2026-08-13 15:50:08,971  INFO        [59/3072] --CCA.25.01980 SIN ID REV 18.pdf | Sika Mexicana | S/N: 2409030B84 | ID: Sin ID
+2026-08-13 15:50:09,052  INFO        [60/3072] --CCA.25.01981 SA-MA-184 REV 18.pdf | Sika Mexicana | S/N: MICM005 | ID: SA-MA-184
+2026-08-13 15:50:09,131  INFO        [61/3072] --CCA.25.01982 PQ-MA-051 REV 18.pdf | Sika Mexicana | S/N: 144193 | ID: PQ-MA-051
+2026-08-13 15:50:09,211  INFO        [62/3072] --CCA.25.01983 PQ-MA-138 REV 18.pdf | Sika Mexicana | S/N: 1348400062 | ID: PQ-MA-138 Menores
+2026-08-13 15:50:09,290  INFO        [63/3072] --CCA.25.02463 LI-MA-133 REV 18.pdf | Sika Mexicana | S/N: 1123441326 | ID: LI-MA-133
+2026-08-13 15:50:09,377  INFO        [64/3072] --CCA.25.02464 LI-MA-136 REV 18.pdf | Sika Mexicana | S/N: B033060463 | ID: LI-MA-136
+2026-08-13 15:50:09,452  INFO        [65/3072] --CCA.25.02465 LI-MA-160 REV 18.pdf | Sika Mexicana | S/N: B151565490 | ID: LI-MA-160
+2026-08-13 15:50:09,537  INFO        [66/3072] --CCA.25.02466 PQ-MA-078 REV 18.pdf | Sika Mexicana | S/N: 141792 | ID: PQ-MA-078
+2026-08-13 15:50:09,619  INFO        [67/3072] --CCA.25.02469 PQ-MA-079 REV 18.pdf | Sika Mexicana | S/N: 000060395 | ID: PQ-MA-079
+2026-08-13 15:50:09,735  INFO        [68/3072] -CCA.23.01158 BSD 149 A 151 3 PESAAASSS.pdf | Básculas y Soluciones de México, S. | S/N: (sin serie) | ID: Indicado en hoja 2 Densidad estimada: 6 070 kg/m3 U(ρ ) 122 kg/m3
+2026-08-13 15:50:09,835  INFO        [69/3072] -CCA.25.00407 PQ-MA-288 Rev 17.pdf | Sika Mexicana | S/N: 1903220FF3 | ID: PQ-MA-288
+2026-08-13 15:50:09,838  INFO        [OMITIDO] CCA-20-00115.pdf
+2026-08-13 15:50:09,843  INFO        [OMITIDO] CCA-20-00116.pdf
+2026-08-13 15:50:09,847  INFO        [OMITIDO] CCA-20-00128.pdf
+2026-08-13 15:50:09,851  INFO        [OMITIDO] CCA-20-00129.pdf
+2026-08-13 15:50:09,855  INFO        [OMITIDO] CCA-20-00130.pdf
+2026-08-13 15:50:09,859  INFO        [OMITIDO] CCA-20-00131.pdf
+2026-08-13 15:50:09,863  INFO        [OMITIDO] CCA-20-00132.pdf
+2026-08-13 15:50:09,866  INFO        [OMITIDO] CCA-20-00133.pdf
+2026-08-13 15:50:09,870  INFO        [OMITIDO] CCA-20-00267.pdf
+2026-08-13 15:50:09,873  INFO        [OMITIDO] CCA-20-01113.pdf
+2026-08-13 15:50:09,878  INFO        [OMITIDO] CCA-20-01122.pdf
+2026-08-13 15:50:09,882  INFO        [OMITIDO] CCA-20-01123.pdf
+2026-08-13 15:50:09,886  INFO        [OMITIDO] CCA-20-01124.pdf
+2026-08-13 15:50:09,890  INFO        [OMITIDO] CCA-20-1053.pdf
+2026-08-13 15:50:09,893  INFO        [OMITIDO] CCA-20-1054.pdf
+2026-08-13 15:50:09,901  INFO        [OMITIDO] CCA-20-1055.pdf
+2026-08-13 15:50:09,904  INFO        [OMITIDO] CCA-20-1056.pdf
+2026-08-13 15:50:09,907  INFO        [OMITIDO] CCA-20-1057.pdf
+2026-08-13 15:50:09,910  INFO        [OMITIDO] CCA-20-1058.pdf
+2026-08-13 15:50:09,913  INFO        [OMITIDO] CCA-20-1059.pdf
+2026-08-13 15:50:09,916  INFO        [OMITIDO] CCA-20-1060.pdf
+2026-08-13 15:50:09,919  INFO        [OMITIDO] CCA-20-1061.pdf
+2026-08-13 15:50:09,921  INFO        [OMITIDO] CCA-20-1062.pdf
+2026-08-13 15:50:09,924  INFO        [OMITIDO] CCA-20-1063.pdf
+2026-08-13 15:50:09,927  INFO        [OMITIDO] CCA-20-1067.pdf
+2026-08-13 15:50:09,931  INFO        [OMITIDO] CCA-21-00024.pdf
+2026-08-13 15:50:09,934  INFO        [OMITIDO] CCA-21-00037.pdf
+2026-08-13 15:50:09,937  INFO        [OMITIDO] CCA-21-00081.pdf
+2026-08-13 15:50:09,940  INFO        [OMITIDO] CCA-21-00082.pdf
+2026-08-13 15:50:09,943  INFO        [OMITIDO] CCA-21-00083.pdf
+2026-08-13 15:50:09,946  INFO        [OMITIDO] CCA-21-00084.pdf
+2026-08-13 15:50:09,949  INFO        [OMITIDO] CCA-21-00085.pdf
+2026-08-13 15:50:09,953  INFO        [OMITIDO] CCA-21-00086.pdf
+2026-08-13 15:50:09,955  INFO        [OMITIDO] CCA-21-00087.pdf
+2026-08-13 15:50:32,566  INFO      ======================================================================
+2026-08-13 15:50:32,566  INFO      IMPORTADOR DE CERTIFICADOS DE CALIBRACION - Basculas PESA
+2026-08-13 15:50:32,566  INFO      Inicio    : 2026-08-13 15:50:32
+2026-08-13 15:50:32,566  INFO      Carpeta   : C:\Users\ivan1\OneDrive\Escritorio\Proyecto Pesa ERP\f\Sistema\Certificados
+2026-08-13 15:50:32,566  INFO      PDFs      : 3072
+2026-08-13 15:50:32,566  INFO      DRY-RUN   : False
+2026-08-13 15:50:32,566  INFO      ======================================================================
+2026-08-13 15:50:32,624  INFO      [OK] Conexion a PostgreSQL establecida
+2026-08-13 15:50:43,449  INFO        ... 100 procesados, 93 equipos nuevos, 7 actualizados
+2026-08-13 15:50:53,529  INFO        ... 200 procesados, 191 equipos nuevos, 9 actualizados
+2026-08-13 15:51:03,745  INFO        ... 300 procesados, 289 equipos nuevos, 11 actualizados
+2026-08-13 15:51:14,409  INFO        ... 400 procesados, 381 equipos nuevos, 19 actualizados
+2026-08-13 15:51:24,242  INFO        ... 500 procesados, 473 equipos nuevos, 27 actualizados
+2026-08-13 15:51:33,489  INFO        ... 600 procesados, 571 equipos nuevos, 29 actualizados
+2026-08-13 15:51:43,434  INFO        ... 700 procesados, 663 equipos nuevos, 37 actualizados
+2026-08-13 15:51:53,197  INFO        ... 800 procesados, 754 equipos nuevos, 46 actualizados
+2026-08-13 15:52:03,477  INFO        ... 900 procesados, 832 equipos nuevos, 68 actualizados
+2026-08-13 15:52:13,330  INFO        ... 1000 procesados, 926 equipos nuevos, 74 actualizados
+2026-08-13 15:52:22,260  INFO        ... 1100 procesados, 1010 equipos nuevos, 90 actualizados
+2026-08-13 15:52:31,160  INFO        ... 1200 procesados, 1079 equipos nuevos, 121 actualizados
+2026-08-13 15:52:41,100  INFO        ... 1300 procesados, 1164 equipos nuevos, 136 actualizados
+2026-08-13 15:52:50,367  INFO        ... 1400 procesados, 1241 equipos nuevos, 159 actualizados
+2026-08-13 15:52:59,626  INFO        ... 1500 procesados, 1324 equipos nuevos, 176 actualizados
+2026-08-13 15:53:08,950  INFO        ... 1600 procesados, 1414 equipos nuevos, 186 actualizados
+2026-08-13 15:53:18,105  INFO        ... 1700 procesados, 1502 equipos nuevos, 198 actualizados
+2026-08-13 15:53:26,228  INFO        ... 1800 procesados, 1588 equipos nuevos, 212 actualizados
+2026-08-13 15:53:35,618  INFO        ... 1900 procesados, 1685 equipos nuevos, 215 actualizados
+2026-08-13 15:53:44,708  INFO        ... 2000 procesados, 1766 equipos nuevos, 234 actualizados
+2026-08-13 15:53:53,184  INFO        ... 2100 procesados, 1839 equipos nuevos, 261 actualizados
+2026-08-13 15:54:02,977  INFO        ... 2200 procesados, 1925 equipos nuevos, 275 actualizados
+2026-08-13 15:54:12,050  INFO        ... 2300 procesados, 2001 equipos nuevos, 299 actualizados
+2026-08-13 15:54:20,647  INFO        ... 2400 procesados, 2056 equipos nuevos, 344 actualizados
+2026-08-13 15:54:29,233  INFO        ... 2500 procesados, 2105 equipos nuevos, 395 actualizados
+2026-08-13 15:54:39,583  INFO        ... 2600 procesados, 2162 equipos nuevos, 438 actualizados
+2026-08-13 15:54:42,094  INFO      
+2026-08-13 15:54:42,094  INFO      ======================================================================
+2026-08-13 15:54:42,094  INFO      RESUMEN FINAL
+2026-08-13 15:54:42,094  INFO      ======================================================================
+2026-08-13 15:54:42,094  INFO        PDFs encontrados          : 3072
+2026-08-13 15:54:42,094  INFO        Certificados procesados   : 2619
+2026-08-13 15:54:42,095  INFO        Omitidos (sin datos)      : 453
+2026-08-13 15:54:42,095  INFO        Errores                   : 0
+2026-08-13 15:54:42,095  INFO        ----------------------------------------
+2026-08-13 15:54:42,095  INFO        [BD] Clientes creados     : 208
+2026-08-13 15:54:42,095  INFO        [BD] Sucursales creadas   : 0
+2026-08-13 15:54:42,095  INFO        [BD] Equipos NUEVOS       : 2176
+2026-08-13 15:54:42,095  INFO        [BD] Equipos ACTUALIZADOS : 443
+2026-08-13 15:54:42,095  INFO      ======================================================================
+2026-08-13 15:54:42,095  INFO      Fin: 2026-08-13 15:54:42
+2026-08-13 15:54:42,095  INFO      [OK] Conexion cerrada.

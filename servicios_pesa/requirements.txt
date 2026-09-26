@@ -1,0 +1,21 @@
+# ─── Servicios PESA — Dependencias ────────────────────────────────────────────
+# Instalar con: pip install -r requirements.txt
+
+# Interfaz Gráfica
+PyQt6>=6.7.0
+PyQt6-Qt6>=6.7.0
+
+# Base de Datos
+psycopg2-binary>=2.9.9
+
+# Generación de PDFs
+reportlab>=4.2.0
+
+# Procesamiento de imágenes (logos, escaneos)
+Pillow>=10.4.0
+
+# Variables de entorno
+python-dotenv>=1.0.1
+
+# Utilidades
+pywin32>=306; sys_platform=="win32"   # Para rutas UNC en Windows

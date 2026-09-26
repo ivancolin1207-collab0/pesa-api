@@ -21,6 +21,7 @@ import 'screens/attach_scan_screen.dart';
 import 'screens/catalogos_screen.dart';
 import 'screens/nuevo_doc_screen.dart';
 import 'screens/mi_firma_screen.dart';
+import 'screens/pdf_viewer_screen.dart';
 import 'widgets/captura_firma_tecnico_dialog.dart';
 
 void main() async {
@@ -169,6 +170,17 @@ final _router = GoRouter(
     GoRoute(
       path: '/nuevo-doc',
       builder: (ctx, state) => const NuevoDocScreen(),
+    ),
+    GoRoute(
+      path: '/pdf-viewer',
+      builder: (ctx, state) {
+        final extra = state.extra as Map<String, dynamic>? ?? {};
+        return PdfViewerScreen(
+          pdfPath: extra['pdfPath'] as String?,
+          pdfBytes: extra['pdfBytes'] as Uint8List?,
+          folio: extra['folio'] as String? ?? 'Documento',
+        );
+      },
     ),
   ],
 );

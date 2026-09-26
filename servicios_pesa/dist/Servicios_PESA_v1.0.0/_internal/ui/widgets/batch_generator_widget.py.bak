@@ -1,0 +1,3504 @@
+"""
+batch_generator_widget.py — Asistente de Generación de Formatos (4 pasos)
+Servicios PESA v2.1
+
+Flujo:
+  Paso 1 → Modalidad      : Digital (Tablet) | Físico (Calca)
+  Paso 2 → Tipo documento : OS | RMA | RE
+  Paso 3 → Parámetros     : Cliente, Técnico, Cantidad, Fecha
+  Paso 4 → Acción         : Generar PDF  |  Asignar a Tablet
+"""
+from __future__ import annotations
+
+import logging
+import datetime
+from datetime import date
+from typing import Optional
+
+from PyQt6.QtCore    import Qt, QTimer, pyqtSignal
+from PyQt6.QtGui     import QFont, QColor
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QPushButton, QFrame, QSpinBox, QDateEdit,
+    QComboBox, QScrollArea, QSizePolicy,
+    QButtonGroup, QRadioButton, QMessageBox,
+    QProgressBar, QAbstractItemView, QTextEdit, QLineEdit, QCompleter,
+)
+from PyQt6.QtCore import QDate
+
+logger = logging.getLogger(__name__)
+
+# ─── Dependencias opcionales ──────────────────────────────────────────────────
+try:
+    from database.connection import db_pool as _db_pool
+    _HAS_DB = True
+except ImportError:
+    _HAS_DB = False
+    _db_pool = None
+
+try:
+    from auth.session_context import session
+    _HAS_SESSION = True
+except ImportError:
+    _HAS_SESSION = False
+    session = None
+
+# ─── Paleta ───────────────────────────────────────────────────────────────────
+_BG    = "#F5F5F7"
+_WHITE = "#FFFFFF"
+_DARK  = "#1D1D1F"
+_GRAY  = "#86868B"
+_RED   = "#E63946"
+_BLUE  = "#007AFF"
+_GREEN = "#34C759"
+_AMBER = "#FF9F0A"
+
+# (Sin datos hardcoded — los catálogos se cargan exclusivamente desde PostgreSQL)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# EquipoCard — Tarjeta de datos del instrumento por índice de equipo
+# ══════════════════════════════════════════════════════════════════════════════
+_EQUIPO_FIELD_STYLE = """
+    QLineEdit {
+        background: #F8FAFC;
+        border: 1.5px solid #D1D5DB;
+        border-radius: 8px;
+        padding: 7px 12px;
+        font-size: 13px;
+        color: #1D1D1F;
+        min-height: 36px;
+    }
+    QLineEdit:focus {
+        border-color: #007AFF;
+        background: #FFFFFF;
+    }
+    QLineEdit::placeholder { color: #A0ADB8; }
+"""
+
+class EquipoCard(QFrame):
+    """
+    Tarjeta colapsable con 6 campos opcionales para pre-llenar los datos
+    del instrumento antes de imprimir el formato.
+    Todos los campos son opcionales: si se dejan en blanco, el técnico
+    los llena en campo.
+    """
+    def __init__(self, index: int, parent=None):
+        super().__init__(parent)
+        self._index = index
+        self._expanded = True
+        self._catalog = []
+        self._build()
+
+    def set_instrument_catalog(self, catalog: list[dict]) -> None:
+        """Configura el catálogo de instrumentos sugeridos y actualiza el QCompleter."""
+        self._catalog = catalog
+        
+        # Extraer sugerencias únicas para ID y Serie
+        ids = list({str(item.get("id_indicador", "")) for item in catalog if item.get("id_indicador")})
+        series = list({str(item.get("numero_serie", "")) for item in catalog if item.get("numero_serie")})
+        
+        # Configurar completer para ID
+        if ids:
+            completer_id = QCompleter(ids, self)
+            completer_id.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer_id.setFilterMode(Qt.MatchFlag.MatchContains)
+            completer_id.activated.connect(lambda text: self._on_completer_activated(text, "id_indicador"))
+            self._inp_id.setCompleter(completer_id)
+            
+        # Configurar completer para Serie
+        if series:
+            completer_ns = QCompleter(series, self)
+            completer_ns.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer_ns.setFilterMode(Qt.MatchFlag.MatchContains)
+            completer_ns.activated.connect(lambda text: self._on_completer_activated(text, "numero_serie"))
+            self._inp_ns.setCompleter(completer_ns)
+
+    def _on_completer_activated(self, text: str, field_name: str) -> None:
+        """Al seleccionar un item, auto-rellena el resto de los campos."""
+        for item in self._catalog:
+            if str(item.get(field_name, "")) == text:
+                if item.get("marca") and not self._inp_marca.text():
+                    self._inp_marca.setText(str(item["marca"]))
+                if item.get("modelo") and not self._inp_modelo.text():
+                    self._inp_modelo.setText(str(item["modelo"]))
+                if item.get("capacidad_max") and not self._inp_alcance.text():
+                    self._inp_alcance.setText(str(item["capacidad_max"]))
+                if item.get("division_min") and not self._inp_division.text():
+                    self._inp_division.setText(str(item["division_min"]))
+                if item.get("ubicacion") and not self._inp_ubicacion.text():
+                    self._inp_ubicacion.setText(str(item["ubicacion"]))
+                # Rellenar también ID/Serie si están vacíos
+                if field_name == "numero_serie" and item.get("id_indicador") and not self._inp_id.text():
+                    self._inp_id.setText(str(item["id_indicador"]))
+                if field_name == "id_indicador" and item.get("numero_serie") and not self._inp_ns.text():
+                    self._inp_ns.setText(str(item["numero_serie"]))
+                break
+
+    def _build(self) -> None:
+        self.setObjectName(f"equipo_card_{self._index}")
+        self.setStyleSheet("""
+            QFrame {
+                background: #FFFFFF;
+                border: 1px solid rgba(0,0,0,0.07);
+                border-radius: 12px;
+            }
+        """)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(18, 14, 18, 14)
+        root.setSpacing(10)
+
+        # ── Cabecera de la tarjeta ─────────────────────────────────────
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+
+        badge = QLabel(str(self._index))
+        badge.setFixedSize(22, 22)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(
+            f"background: {_RED}; color: #FFFFFF; border-radius: 11px; "
+            f"font-size: 11px; font-weight: 700;"
+        )
+        header.addWidget(badge)
+
+        lbl = QLabel(f"Instrumento {self._index}  ·  (datos opcionales)")
+        lbl.setStyleSheet(
+            f"font-size: 13px; font-weight: 700; color: {_DARK}; background: transparent;"
+        )
+        header.addWidget(lbl, stretch=1)
+
+        self._btn_toggle = QPushButton("−")
+        self._btn_toggle.setFixedSize(24, 24)
+        self._btn_toggle.setStyleSheet(
+            f"QPushButton {{ background: transparent; color: {_GRAY}; border: none; "
+            f"font-size: 16px; font-weight: 700; }}"
+            f"QPushButton:hover {{ color: {_DARK}; }}"
+        )
+        self._btn_toggle.clicked.connect(self._toggle)
+        header.addWidget(self._btn_toggle)
+        root.addLayout(header)
+
+        # ── Campos editables ───────────────────────────────────────────
+        self._fields_widget = QWidget()
+        self._fields_widget.setStyleSheet("background: transparent;")
+        fields_lay = QVBoxLayout(self._fields_widget)
+        fields_lay.setContentsMargins(0, 4, 0, 0)
+        fields_lay.setSpacing(10)
+
+        # Fila 1: Marca / Modelo / N° de Serie / ID
+        row1 = QHBoxLayout()
+        row1.setSpacing(12)
+        self._inp_marca    = self._make_input("Marca (ej: METTLER TOLEDO)",    row1, "Marca")
+        self._inp_modelo   = self._make_input("Modelo (ej: IND560)",           row1, "Modelo")
+        self._inp_ns       = self._make_input("N° de Serie (ej: B215004321)",  row1, "N° de Serie")
+        self._inp_id       = self._make_input("ID Indicador / Equipo (ej: Trailer A)", row1, "ID Indicador / Equipo")
+        fields_lay.addLayout(row1)
+
+        # Fila 2: Capacidad Máxima / División Mínima / Ubicación
+        row2 = QHBoxLayout()
+        row2.setSpacing(12)
+        self._inp_alcance   = self._make_input("Capacidad Máxima (ej: 500 kg)",   row2, "Capacidad Máx.")
+        self._inp_division  = self._make_input("División Mínima (ej: 50 g)",      row2, "División Mín.")
+        self._inp_ubicacion = self._make_input("Ubicación (ej: Planta Norte)",     row2, "Ubicación")
+        fields_lay.addLayout(row2)
+
+        root.addWidget(self._fields_widget)
+
+    def _make_input(self, placeholder: str, layout: QHBoxLayout,
+                    label_txt: str) -> QLineEdit:
+        col = QVBoxLayout()
+        col.setSpacing(4)
+        lbl = QLabel(label_txt)
+        lbl.setStyleSheet(
+            "font-size: 11px; font-weight: 700; color: #86868B; "
+            "letter-spacing: 0.3px; background: transparent;"
+        )
+        col.addWidget(lbl)
+        inp = QLineEdit()
+        inp.setPlaceholderText(placeholder)
+        inp.setStyleSheet(_EQUIPO_FIELD_STYLE)
+        inp.setFixedHeight(40)
+        col.addWidget(inp)
+        layout.addLayout(col, stretch=1)
+        return inp
+
+    def _toggle(self) -> None:
+        self._expanded = not self._expanded
+        self._fields_widget.setVisible(self._expanded)
+        self._btn_toggle.setText("−" if self._expanded else "+")
+
+    def get_data(self) -> dict:
+        """Retorna los datos del equipo (campos en blanco = None)."""
+        def _v(inp: QLineEdit) -> Optional[str]:
+            t = inp.text().strip()
+            return t if t else None
+        return {
+            "equipo_marca":     _v(self._inp_marca),
+            "equipo_modelo":    _v(self._inp_modelo),
+            "equipo_ns":        _v(self._inp_ns),
+            "equipo_id":        _v(self._inp_id),
+            "equipo_alcance":   _v(self._inp_alcance),
+            "equipo_division":  _v(self._inp_division),
+            "equipo_ubicacion": _v(self._inp_ubicacion),
+        }
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# HELPERS — tarjetas de selección
+# ══════════════════════════════════════════════════════════════════════════════
+class SelectCard(QPushButton):
+    """
+    Tarjeta seleccionable tipo toggle.
+    Muestra: ícono + título + descripción corta.
+    """
+    def __init__(self, icon: str, title: str, desc: str,
+                 accent: str = _RED, parent=None):
+        super().__init__(parent)
+        self._accent = accent
+        self._selected = False
+        self.setCheckable(True)
+        self.setFixedHeight(96)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(4)
+
+        top = QHBoxLayout()
+        top.setSpacing(10)
+
+        lbl_icon = QLabel(icon)
+        lbl_icon.setStyleSheet(f"font-size: 22px; background: transparent; color: {accent};")
+        lbl_icon.setFixedWidth(30)
+        top.addWidget(lbl_icon)
+
+        lbl_title = QLabel(title)
+        lbl_title.setStyleSheet(
+            f"font-size: 14px; font-weight: 700; color: {_DARK}; background: transparent;"
+        )
+        top.addWidget(lbl_title, stretch=1)
+        lay.addLayout(top)
+
+        lbl_desc = QLabel(desc)
+        lbl_desc.setWordWrap(True)
+        lbl_desc.setStyleSheet(
+            f"font-size: 11px; color: {_GRAY}; background: transparent;"
+        )
+        lay.addWidget(lbl_desc)
+
+        self._apply_style(False)
+        self.toggled.connect(self._apply_style)
+
+    def _apply_style(self, checked: bool) -> None:
+        if checked:
+            self.setStyleSheet(f"""
+                QPushButton {{
+                    background: rgba({self._rgb()}, 0.08);
+                    border: 2px solid {self._accent};
+                    border-radius: 12px;
+                    text-align: left;
+                }}
+            """)
+        else:
+            self.setStyleSheet("""
+                QPushButton {
+                    background: #FFFFFF;
+                    border: 1.5px solid rgba(0,0,0,0.10);
+                    border-radius: 12px;
+                    text-align: left;
+                }
+                QPushButton:hover {
+                    border-color: rgba(0,0,0,0.18);
+                    background: #FAFAFA;
+                }
+            """)
+
+    def _rgb(self) -> str:
+        h = self._accent.lstrip("#")
+        return f"{int(h[0:2],16)}, {int(h[2:4],16)}, {int(h[4:6],16)}"
+
+
+class StepHeader(QWidget):
+    """Cabecera de un paso con número, ícono y título."""
+    def __init__(self, step: int, icon: str, title: str, parent=None):
+        super().__init__(parent)
+        self.setStyleSheet("background: transparent;")
+        lay = QHBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+
+        badge = QLabel(str(step))
+        badge.setFixedSize(26, 26)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge.setStyleSheet(f"""
+            background: {_RED}; color: #FFFFFF;
+            border-radius: 13px;
+            font-size: 12px; font-weight: 700;
+        """)
+        lay.addWidget(badge)
+
+        lbl = QLabel(f"{icon}  {title}")
+        lbl.setStyleSheet(
+            f"font-size: 13px; font-weight: 700; color: {_DARK}; background: transparent;"
+        )
+        lay.addWidget(lbl)
+        lay.addStretch()
+
+
+def _sep() -> QFrame:
+    f = QFrame()
+    f.setFrameShape(QFrame.Shape.HLine)
+    f.setStyleSheet("background: rgba(0,0,0,0.06); border: none; margin: 2px 0;")
+    f.setFixedHeight(1)
+    return f
+
+
+def _section_card() -> tuple[QFrame, QVBoxLayout]:
+    card = QFrame()
+    card.setStyleSheet("""
+        QFrame {
+            background: #FFFFFF;
+            border: 1px solid rgba(0,0,0,0.07);
+            border-radius: 14px;
+        }
+    """)
+    lay = QVBoxLayout(card)
+    lay.setContentsMargins(22, 18, 22, 18)
+    lay.setSpacing(14)
+    return card, lay
+
+
+def _field_label(text: str, required: bool = False) -> QLabel:
+    suffix = "  <span style='color:#E63946'>*</span>" if required else ""
+    lbl = QLabel(f"{text}{suffix}")
+    lbl.setTextFormat(Qt.TextFormat.RichText)
+    lbl.setStyleSheet(
+        "font-size: 11px; font-weight: 700; color: #86868B; "
+        "letter-spacing: 0.3px; background: transparent;"
+    )
+    return lbl
+
+
+def _input_style() -> str:
+    return """
+        QComboBox, QSpinBox, QDateEdit {
+            background: #F8FAFC;
+            border: 1.5px solid #D1D5DB;
+            border-radius: 8px;
+            padding: 7px 12px;
+            font-size: 13px;
+            color: #1D1D1F;
+            min-height: 36px;
+        }
+        QComboBox:focus, QSpinBox:focus, QDateEdit:focus {
+            border-color: #007AFF;
+            background: #FFFFFF;
+        }
+        QComboBox::drop-down { border: none; width: 28px; }
+    """
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# WIDGET PRINCIPAL
+# ══════════════════════════════════════════════════════════════════════════════
+class BatchGeneratorWidget(QWidget):
+    """
+    Asistente de generación de formatos en 4 pasos.
+
+    Paso 1 → Modalidad   (Digital | Físico)
+    Paso 2 → Documento   (OS | RMA | RE)
+    Paso 3 → Parámetros  (Cliente, Técnico, Cantidad, Fecha)
+    Paso 4 → Resumen + Acción
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._modalidad:  str = ""   # "DIGITAL" | "FISICO"
+        self._tipo_doc:   str = ""   # "OS" | "RMA" | "RE"
+        self._clientes:   list[str] = []
+        self._tecnicos:   list[tuple[int, str]] = []
+        self._folios_preview: list[str] = []
+        self._equipo_cards: list[EquipoCard] = []   # tarjetas de equipo
+
+        self._current_catalog: list[dict] = []      # catálogo de instrumentos del cliente actual
+
+        self._build_ui()
+        QTimer.singleShot(100, self._load_catalogs)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # BUILD UI
+    # ══════════════════════════════════════════════════════════════════════════
+    def _build_ui(self) -> None:
+        self.setStyleSheet(f"background: {_BG};")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # Scroll exterior
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet("background: transparent; border: none;")
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        inner = QWidget()
+        inner.setStyleSheet(f"background: {_BG};")
+        self._main_lay = QVBoxLayout(inner)
+        self._main_lay.setContentsMargins(28, 24, 28, 40)
+        self._main_lay.setSpacing(20)
+        scroll.setWidget(inner)
+        root.addWidget(scroll)
+
+        # ── Título de página ──────────────────────────────────────────────────
+        self._lbl_title = QLabel("🖨️  Asistente de Generación de Formatos")
+        self._lbl_title.setStyleSheet(
+            f"font-size: 22px; font-weight: 700; color: {_DARK}; "
+            f"letter-spacing: -0.4px; background: transparent;"
+        )
+        self._main_lay.addWidget(self._lbl_title)
+
+        self._lbl_sub = QLabel("Completa los 4 pasos para reservar folios y generar los documentos.")
+        self._lbl_sub.setStyleSheet(f"font-size: 12px; color: {_GRAY}; background: transparent;")
+        self._main_lay.addWidget(self._lbl_sub)
+
+        # ── PASO 1: Modalidad ─────────────────────────────────────────────────
+        self._main_lay.addWidget(self._build_step1())
+
+        # ── PASO 2: Tipo de documento ─────────────────────────────────────────
+        self._card_step2, step2_lay = _section_card()
+        step2_lay.addWidget(StepHeader(2, "📄", "Tipo de Documento"))
+        step2_lay.addWidget(_sep())
+        self._card_step2_content = self._build_step2_content()
+        step2_lay.addWidget(self._card_step2_content)
+        self._main_lay.addWidget(self._card_step2)
+        self._card_step2.setEnabled(False)
+        self._card_step2.setStyleSheet("""
+            QFrame { background: #FAFAFA; border: 1px solid rgba(0,0,0,0.05);
+                     border-radius: 14px; }
+        """)
+
+        # ── PASO 3: Parámetros ────────────────────────────────────────────────
+        self._card_step3, step3_lay = _section_card()
+        step3_lay.addWidget(StepHeader(3, "⚙️", "Parámetros del Formato"))
+        step3_lay.addWidget(_sep())
+        self._card_step3_content = self._build_step3_content()
+        step3_lay.addWidget(self._card_step3_content)
+        self._main_lay.addWidget(self._card_step3)
+        self._card_step3.setEnabled(False)
+        self._card_step3.setStyleSheet("""
+            QFrame { background: #FAFAFA; border: 1px solid rgba(0,0,0,0.05);
+                     border-radius: 14px; }
+        """)
+
+        # ── PASO 4: Resumen + acción ──────────────────────────────────────────
+        self._card_step4, step4_lay = _section_card()
+        step4_lay.addWidget(StepHeader(4, "🚀", "Confirmar y Ejecutar"))
+        step4_lay.addWidget(_sep())
+        self._step4_content = self._build_step4_content()
+        step4_lay.addWidget(self._step4_content)
+        self._main_lay.addWidget(self._card_step4)
+        self._card_step4.setEnabled(False)
+        self._card_step4.setStyleSheet("""
+            QFrame { background: #FAFAFA; border: 1px solid rgba(0,0,0,0.05);
+                     border-radius: 14px; }
+        """)
+
+        self._main_lay.addStretch()
+
+        # ── Barra inferior de acciones ────────────────────────────────────────
+        root.addWidget(self._build_action_bar())
+
+    # ── PASO 1 ────────────────────────────────────────────────────────────────
+    def _build_step1(self) -> QFrame:
+        card, lay = _section_card()
+        lay.addWidget(StepHeader(1, "📱", "Modalidad de Trabajo"))
+        lay.addWidget(_sep())
+
+        cards_row = QHBoxLayout()
+        cards_row.setSpacing(14)
+
+        self._card_digital = SelectCard(
+            "📱", "Digital — Tablet",
+            "El técnico llena el formato en campo con la app móvil.\n"
+            "Firma digital integrada. Sincronización automática.",
+            accent=_BLUE,
+        )
+        self._card_fisico = SelectCard(
+            "🖨️", "Físico — Impresión Calca",
+            "Genera PDF para papel duplicado carbón.\n"
+            "Requiere escaneo posterior del original firmado.",
+            accent=_RED,
+        )
+
+        # Grupo exclusivo
+        self._modal_group = QButtonGroup(self)
+        self._modal_group.setExclusive(True)
+        self._modal_group.addButton(self._card_digital, 1)
+        self._modal_group.addButton(self._card_fisico,  2)
+
+        self._card_digital.toggled.connect(lambda chk: chk and self._on_modalidad("DIGITAL"))
+        self._card_fisico.toggled.connect(lambda chk: chk and self._on_modalidad("FISICO"))
+
+        cards_row.addWidget(self._card_digital)
+        cards_row.addWidget(self._card_fisico)
+        lay.addLayout(cards_row)
+        return card
+
+    # ── PASO 2 ────────────────────────────────────────────────────────────────
+    def _build_step2_content(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        row = QHBoxLayout(w)
+        row.setSpacing(14)
+        row.setContentsMargins(0, 0, 0, 0)
+
+        self._card_os = SelectCard(
+            "📄", "Orden de Servicio (OS)",
+            "Calibración, ajuste e inspección de instrumentos.",
+            accent=_RED,
+        )
+        self._card_rma = SelectCard(
+            "📋", "Remisión de Material (RMA)",
+            "Traslado de equipos o partes para servicio.",
+            accent=_BLUE,
+        )
+        self._card_re = SelectCard(
+            "⚖️", "Revisión de Báscula (RE)",
+            "Verificación de celdas de carga y básculas.",
+            accent="#8B5CF6",
+        )
+        self._card_lp = SelectCard(
+            "📋", "Levantamiento de Proyecto (LP)",
+            "Levantamiento técnico de campo y proyectos.",
+            accent="#D32F2F",
+        )
+        self._card_lv = SelectCard(
+            "📏", "Levantamiento Metrológico (LV)",
+            "Pre-Visita: N básculas, logística de pesas patrón.",
+            accent="#E67E22",
+        )
+
+        self._doc_group = QButtonGroup(self)
+        self._doc_group.setExclusive(True)
+        self._doc_group.addButton(self._card_os,  1)
+        self._doc_group.addButton(self._card_rma, 2)
+        self._doc_group.addButton(self._card_re,  3)
+        self._doc_group.addButton(self._card_lp,  4)
+        self._doc_group.addButton(self._card_lv,  5)
+
+        self._card_os.toggled.connect(lambda chk: chk and self._on_tipo_doc("OS"))
+        self._card_rma.toggled.connect(lambda chk: chk and self._on_tipo_doc("RMA"))
+        self._card_re.toggled.connect(lambda chk: chk and self._on_tipo_doc("RE"))
+        self._card_lp.toggled.connect(lambda chk: chk and self._on_tipo_doc("LP"))
+        self._card_lv.toggled.connect(lambda chk: chk and self._on_tipo_doc("LV"))
+
+        row.addWidget(self._card_os)
+        row.addWidget(self._card_rma)
+        row.addWidget(self._card_re)
+        row.addWidget(self._card_lp)
+        row.addWidget(self._card_lv)
+        return w
+
+    # ── PASO 3 ────────────────────────────────────────────────────────────────
+    def _build_step3_content(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        w.setStyleSheet(_input_style() + "QWidget { background: transparent; }")
+
+        grid = QVBoxLayout(w)
+        grid.setSpacing(14)
+        grid.setContentsMargins(0, 0, 0, 0)
+
+        # Fila 1: Cliente + Sucursal + Técnico
+        row1 = QHBoxLayout()
+        row1.setSpacing(16)
+
+        col_cliente = QVBoxLayout()
+        col_cliente.setSpacing(6)
+        col_cliente.addWidget(_field_label("Cliente / Razón Social", required=True))
+        self.cmb_cliente = QComboBox()
+        self.cmb_cliente.setMinimumWidth(240)
+        self.cmb_cliente.setEditable(True)
+        self.cmb_cliente.setPlaceholderText("— Selecciona un cliente —")
+        self.cmb_cliente.currentIndexChanged.connect(self._on_cliente_changed)
+        col_cliente.addWidget(self.cmb_cliente)
+        row1.addLayout(col_cliente, stretch=2)
+
+        col_sucursal = QVBoxLayout()
+        col_sucursal.setSpacing(6)
+        col_sucursal.addWidget(_field_label("Sucursal / Planta", required=True))
+        self.cmb_sucursal = QComboBox()
+        self.cmb_sucursal.setMinimumWidth(240)
+        self.cmb_sucursal.setEditable(False)
+        self.cmb_sucursal.setEnabled(False)
+        self.cmb_sucursal.currentIndexChanged.connect(self._on_params_changed)
+        col_sucursal.addWidget(self.cmb_sucursal)
+        row1.addLayout(col_sucursal, stretch=2)
+
+        col_tec = QVBoxLayout()
+        col_tec.setSpacing(6)
+        col_tec.addWidget(_field_label("Técnico Asignado", required=True))
+        self.cmb_tecnico = QComboBox()
+        self.cmb_tecnico.setMinimumWidth(200)
+        self.cmb_tecnico.setPlaceholderText("— Selecciona técnico —")
+        self.cmb_tecnico.currentIndexChanged.connect(self._on_params_changed)
+        col_tec.addWidget(self.cmb_tecnico)
+        row1.addLayout(col_tec, stretch=2)
+        grid.addLayout(row1)
+
+        # Fila 1b: Tipo de Servicio y Tipo de Instrumento
+        # Se oculta para documentos RE (no aplica)
+        self._widget_row_tipo_serv = QWidget()
+        _row1b_lay = QHBoxLayout(self._widget_row_tipo_serv)
+        _row1b_lay.setContentsMargins(0, 0, 0, 0)
+        _row1b_lay.setSpacing(16)
+
+        col_tipo_serv = QVBoxLayout()
+        col_tipo_serv.setSpacing(6)
+        col_tipo_serv.addWidget(_field_label("Tipo de Servicio", required=True))
+        self.cmb_tipo_servicio = QComboBox()
+        self.cmb_tipo_servicio.setMinimumWidth(340)
+        self.cmb_tipo_servicio.setPlaceholderText("— Selecciona el tipo de servicio —")
+        self.cmb_tipo_servicio.currentIndexChanged.connect(self._on_params_changed)
+        col_tipo_serv.addWidget(self.cmb_tipo_servicio)
+        _row1b_lay.addLayout(col_tipo_serv, stretch=2)
+
+        col_tipo_inst = QVBoxLayout()
+        col_tipo_inst.setSpacing(6)
+        col_tipo_inst.addWidget(_field_label("Tipo de Instrumento", required=True))
+        self.cmb_tipo_instrumento = QComboBox()
+        self.cmb_tipo_instrumento.setMinimumWidth(240)
+        self.cmb_tipo_instrumento.setPlaceholderText("— Selecciona instrumento —")
+        self.cmb_tipo_instrumento.currentIndexChanged.connect(self._on_params_changed)
+        col_tipo_inst.addWidget(self.cmb_tipo_instrumento)
+        _row1b_lay.addLayout(col_tipo_inst, stretch=2)
+        grid.addWidget(self._widget_row_tipo_serv)
+
+        # Fila Extra: Excentricidad (se oculta para RE)
+        self._widget_row_exc = QWidget()
+        _row_exc_lay = QHBoxLayout(self._widget_row_exc)
+        _row_exc_lay.setContentsMargins(0, 0, 0, 0)
+        _row_exc_lay.setSpacing(16)
+
+        col_aplica = QVBoxLayout()
+        col_aplica.setSpacing(6)
+        col_aplica.addWidget(_field_label("\u00bfAplica prueba de excentricidad?"))
+        self.cmb_aplica_exc = QComboBox()
+        self.cmb_aplica_exc.addItems(["S\u00cd", "NO"])
+        self.cmb_aplica_exc.currentIndexChanged.connect(self._on_aplica_exc_changed)
+        self.cmb_aplica_exc.currentIndexChanged.connect(self._on_params_changed)
+        self.cmb_aplica_exc.setFixedWidth(100)
+        col_aplica.addWidget(self.cmb_aplica_exc)
+        _row_exc_lay.addLayout(col_aplica)
+
+        col_filas = QVBoxLayout()
+        col_filas.setSpacing(6)
+        col_filas.addWidget(_field_label("Filas (Excentricidad)"))
+        self.cmb_filas_exc = QComboBox()
+        self.cmb_filas_exc.addItems(["3", "4", "5", "6"])
+        self.cmb_filas_exc.setCurrentText("5")
+        self.cmb_filas_exc.currentIndexChanged.connect(self._on_params_changed)
+        self.cmb_filas_exc.setFixedWidth(100)
+        col_filas.addWidget(self.cmb_filas_exc)
+        _row_exc_lay.addLayout(col_filas)
+
+        col_exactitud = QVBoxLayout()
+        col_exactitud.setSpacing(6)
+        col_exactitud.addWidget(_field_label("Puntos de Exactitud"))
+        self.cmb_puntos_exactitud = QComboBox()
+        self.cmb_puntos_exactitud.addItems(["3", "4", "5", "6", "7", "8", "9", "10"])
+        self.cmb_puntos_exactitud.setCurrentText("5")
+        self.cmb_puntos_exactitud.currentIndexChanged.connect(self._on_params_changed)
+        self.cmb_puntos_exactitud.setFixedWidth(100)
+        col_exactitud.addWidget(self.cmb_puntos_exactitud)
+        _row_exc_lay.addLayout(col_exactitud)
+
+        col_puntos_apoyo = QVBoxLayout()
+        col_puntos_apoyo.setSpacing(6)
+        col_puntos_apoyo.addWidget(_field_label("Puntos de Apoyo"))
+        self.cmb_puntos_apoyo = QComboBox()
+        self.cmb_puntos_apoyo.addItems(["", "3", "4", "5", "6", "8", "Libre"])
+        self.cmb_puntos_apoyo.setCurrentIndex(0)  # vacío por defecto
+        self.cmb_puntos_apoyo.setFixedWidth(100)
+        col_puntos_apoyo.addWidget(self.cmb_puntos_apoyo)
+        _row_exc_lay.addLayout(col_puntos_apoyo)
+
+        _row_exc_lay.addStretch()
+        grid.addWidget(self._widget_row_exc)
+
+        # ── Fila de Geometria / Motivo No-Aplica (condicional a excentricidad) ───
+        self._widget_row_geo = QWidget()
+        _row_geo_lay = QHBoxLayout(self._widget_row_geo)
+        _row_geo_lay.setContentsMargins(0, 0, 0, 0)
+        _row_geo_lay.setSpacing(16)
+
+        # Panel SÍ aplica: geometria de plataforma
+        self._wgt_geo_si = QWidget()
+        _si_lay = QHBoxLayout(self._wgt_geo_si)
+        _si_lay.setContentsMargins(0, 0, 0, 0)
+        _si_lay.setSpacing(12)
+
+        _col_geo = QVBoxLayout()
+        _col_geo.setSpacing(4)
+        _col_geo.addWidget(_field_label("Geometria / Tipo de Plataforma"))
+        self._combo_geometria_batch = QComboBox()
+        self._combo_geometria_batch.addItems([
+            "— Libre / Selección en Campo —",
+            "Plataforma Cuadrada / Rectangular",
+            "Plataforma Circular",
+            "Plataforma Camionera / FFCC",
+        ])
+        self._combo_geometria_batch.setFixedWidth(260)
+        self._combo_geometria_batch.currentIndexChanged.connect(self._on_geometria_batch_changed)
+        self._combo_geometria_batch.currentIndexChanged.connect(self._on_params_changed)
+        _col_geo.addWidget(self._combo_geometria_batch)
+        _si_lay.addLayout(_col_geo)
+
+        # Sub-panel secciones (solo visible Camionera)
+        self._wgt_secciones_batch = QWidget()
+        _sec_lay = QHBoxLayout(self._wgt_secciones_batch)
+        _sec_lay.setContentsMargins(0, 0, 0, 0)
+        _sec_lay.setSpacing(6)
+        _lbl_sec = QLabel("N de Secciones:")
+        _lbl_sec.setStyleSheet("color:#86868B; font-size:11px; font-weight:bold;")
+        _sec_lay.addWidget(_lbl_sec)
+        self._spin_secciones_batch = QSpinBox()
+        self._spin_secciones_batch.setRange(2, 8)
+        self._spin_secciones_batch.setValue(4)
+        self._spin_secciones_batch.setFixedWidth(80)
+        self._spin_secciones_batch.valueChanged.connect(self._on_secciones_batch_changed)
+        _sec_lay.addWidget(self._spin_secciones_batch)
+        self._wgt_secciones_batch.setVisible(False)
+        _si_lay.addWidget(self._wgt_secciones_batch)
+        _si_lay.addStretch()
+        _row_geo_lay.addWidget(self._wgt_geo_si)
+
+        # Panel NO aplica: motivo
+        self._wgt_geo_no = QWidget()
+        _no_lay = QHBoxLayout(self._wgt_geo_no)
+        _no_lay.setContentsMargins(0, 0, 0, 0)
+        _no_lay.setSpacing(12)
+        _col_mot = QVBoxLayout()
+        _col_mot.setSpacing(4)
+        _col_mot.addWidget(_field_label("Motivo / Tipo no apto"))
+        self._combo_motivo_no_batch = QComboBox()
+        self._combo_motivo_no_batch.addItems([
+            "Tolva / Tanque / Silo",
+            "Bascula de Grua / Gancho Dinamometrico",
+            "Otro (No apto)",
+        ])
+        self._combo_motivo_no_batch.setFixedWidth(300)
+        self._combo_motivo_no_batch.currentIndexChanged.connect(self._on_params_changed)
+        _col_mot.addWidget(self._combo_motivo_no_batch)
+        _no_lay.addLayout(_col_mot)
+        _no_lay.addStretch()
+        self._wgt_geo_no.setVisible(False)
+        _row_geo_lay.addWidget(self._wgt_geo_no)
+
+        _row_geo_lay.addStretch()
+        grid.addWidget(self._widget_row_geo)
+
+        # ── Bloque condicional: Parámetros de Calibración (J/I/A + Núm. CCA) ──────
+        # Visible SOLO cuando tipo_doc == OS y tipo_servicio contiene "calibrac"
+        self._frame_calibracion = QFrame()
+        self._frame_calibracion.setObjectName("frame_calibracion")
+        self._frame_calibracion.setStyleSheet("""
+            QFrame#frame_calibracion {
+                background: rgba(255,159,10,0.07);
+                border: 1.5px solid rgba(255,159,10,0.40);
+                border-radius: 10px;
+            }
+        """)
+        _cal_vlay = QVBoxLayout(self._frame_calibracion)
+        _cal_vlay.setContentsMargins(14, 10, 14, 10)
+        _cal_vlay.setSpacing(8)
+
+        _lbl_cal_sec = QLabel("🔬  Parámetros de Calibración")
+        _lbl_cal_sec.setStyleSheet(
+            "font-size: 12px; font-weight: 700; color: #B45309; background: transparent;"
+        )
+        _cal_vlay.addWidget(_lbl_cal_sec)
+
+        _cal_row = QHBoxLayout()
+        _cal_row.setSpacing(24)
+
+        # ── Selector Inicial del Calibrador (Ninguna / J / I / A) ──
+        _col_inicial = QVBoxLayout()
+        _col_inicial.setSpacing(6)
+        _lbl_inicial = QLabel("Inicial del Calibrador")
+        _lbl_inicial.setStyleSheet(
+            "font-size: 11px; font-weight: 600; color: #92400E; background: transparent;"
+        )
+        _col_inicial.addWidget(_lbl_inicial)
+
+        _inicial_btn_row = QHBoxLayout()
+        _inicial_btn_row.setSpacing(6)
+
+        _btn_style_base = """
+            QPushButton {
+                font-size: 12px; font-weight: 700;
+                border: 1.5px solid #D97706;
+                border-radius: 6px;
+                padding: 4px 12px;
+                background: #FFFFFF;
+                color: #92400E;
+            }
+            QPushButton:checked {
+                background: #D97706;
+                color: #FFFFFF;
+                border-color: #B45309;
+            }
+            QPushButton:hover:!checked {
+                background: rgba(217,119,6,0.12);
+            }
+        """
+
+        self._btn_grupo_inicial = QButtonGroup(self)
+        self._btn_grupo_inicial.setExclusive(True)
+
+        self._btn_inicial_ninguna = QPushButton("Ninguna")
+        self._btn_inicial_ninguna.setCheckable(True)
+        self._btn_inicial_ninguna.setChecked(True)
+        self._btn_inicial_ninguna.setStyleSheet(_btn_style_base)
+        self._btn_inicial_ninguna.setFixedHeight(30)
+        self._btn_inicial_ninguna.clicked.connect(self._on_params_changed)
+        self._btn_grupo_inicial.addButton(self._btn_inicial_ninguna, 0)
+        _inicial_btn_row.addWidget(self._btn_inicial_ninguna)
+
+        for _code, _btn_id in [("J", 1), ("I", 2), ("A", 3)]:
+            _b = QPushButton(_code)
+            _b.setCheckable(True)
+            _b.setFixedSize(38, 30)
+            _b.setStyleSheet(_btn_style_base)
+            _b.clicked.connect(self._on_params_changed)
+            self._btn_grupo_inicial.addButton(_b, _btn_id)
+            _inicial_btn_row.addWidget(_b)
+            setattr(self, f"_btn_inicial_{_code.lower()}", _b)
+
+        _inicial_btn_row.addStretch()
+        _col_inicial.addLayout(_inicial_btn_row)
+        _cal_row.addLayout(_col_inicial)
+
+        # ── Campo Número de Certificado / CCA ──
+        _col_cca = QVBoxLayout()
+        _col_cca.setSpacing(6)
+        _lbl_cca = QLabel("Número de Certificado / CCA")
+        _lbl_cca.setStyleSheet(
+            "font-size: 11px; font-weight: 600; color: #92400E; background: transparent;"
+        )
+        _col_cca.addWidget(_lbl_cca)
+        self.le_numero_cca = QLineEdit()
+        self.le_numero_cca.setPlaceholderText("Ej: CCA-2026-00123  (opcional — dejar en blanco para llenar a mano)")
+        self.le_numero_cca.setFixedHeight(30)
+        self.le_numero_cca.setMinimumWidth(320)
+        self.le_numero_cca.setStyleSheet("""
+            QLineEdit {
+                background: #FFFFFF;
+                border: 1.5px solid #D97706;
+                border-radius: 6px;
+                padding: 4px 10px;
+                font-size: 12px;
+                color: #1D1D1F;
+            }
+            QLineEdit:focus { border-color: #B45309; }
+        """)
+        self.le_numero_cca.textChanged.connect(self._on_params_changed)
+        _col_cca.addWidget(self.le_numero_cca)
+        _cal_row.addLayout(_col_cca, stretch=1)
+
+        _cal_row.addStretch()
+        _cal_vlay.addLayout(_cal_row)
+        grid.addWidget(self._frame_calibracion)
+        self._frame_calibracion.setVisible(False)  # oculto por defecto
+
+        # ── Bloque condicional: Tipo de Estructura para Revisión de Báscula (RE) ────
+        self._frame_re_estructura = QFrame()
+        self._frame_re_estructura.setObjectName("frame_re_estructura")
+        self._frame_re_estructura.setStyleSheet("""
+            QFrame#frame_re_estructura {
+                background: rgba(139,92,246,0.06);
+                border: 1.5px solid rgba(139,92,246,0.25);
+                border-radius: 10px;
+            }
+        """)
+        _re_vlay = QVBoxLayout(self._frame_re_estructura)
+        _re_vlay.setContentsMargins(14, 10, 14, 10)
+        _re_vlay.setSpacing(8)
+
+        _lbl_re_sec = QLabel("⚖️  Información de Estructura  (Revisión de Báscula)")
+        _lbl_re_sec.setStyleSheet(
+            "font-size: 12px; font-weight: 700; color: #8B5CF6; background: transparent;"
+        )
+        _re_vlay.addWidget(_lbl_re_sec)
+
+        _re_row = QHBoxLayout()
+        _re_row.setSpacing(16)
+
+        _col_estr = QVBoxLayout()
+        _col_estr.setSpacing(6)
+        _col_estr.addWidget(_field_label("Tipo de Estructura"))
+        self.cmb_tipo_estructura = QComboBox()
+        self.cmb_tipo_estructura.addItems(["Camionera", "Plataforma", "Tolva / Tanque"])
+        self.cmb_tipo_estructura.setFixedWidth(200)
+        self.cmb_tipo_estructura.currentIndexChanged.connect(self._on_tipo_estructura_changed)
+        self.cmb_tipo_estructura.currentIndexChanged.connect(self._on_params_changed)
+        _col_estr.addWidget(self.cmb_tipo_estructura)
+        _re_row.addLayout(_col_estr)
+
+        # Sub-bloque Camionera: Instalación + N° Secciones (se oculta para otros tipos)
+        self._widget_camionera_extra = QWidget()
+        self._widget_camionera_extra.setStyleSheet("background: transparent;")
+        _cam_lay = QHBoxLayout(self._widget_camionera_extra)
+        _cam_lay.setContentsMargins(0, 0, 0, 0)
+        _cam_lay.setSpacing(16)
+
+        _col_inst = QVBoxLayout()
+        _col_inst.setSpacing(6)
+        _col_inst.addWidget(_field_label("Instalación"))
+        self.cmb_instalacion_camionera = QComboBox()
+        self.cmb_instalacion_camionera.addItems(["Rampa", "Fosa"])
+        self.cmb_instalacion_camionera.setFixedWidth(140)
+        self.cmb_instalacion_camionera.currentIndexChanged.connect(self._on_params_changed)
+        _col_inst.addWidget(self.cmb_instalacion_camionera)
+        _cam_lay.addLayout(_col_inst)
+
+        _col_secc = QVBoxLayout()
+        _col_secc.setSpacing(6)
+        _col_secc.addWidget(_field_label("N° de Secciones"))
+        self.spn_secciones_camionera = QSpinBox()
+        self.spn_secciones_camionera.setRange(2, 5)
+        self.spn_secciones_camionera.setValue(2)
+        self.spn_secciones_camionera.setSuffix("  secc.")
+        self.spn_secciones_camionera.setFixedWidth(120)
+        self.spn_secciones_camionera.valueChanged.connect(self._on_params_changed)
+        _col_secc.addWidget(self.spn_secciones_camionera)
+        _cam_lay.addLayout(_col_secc)
+
+        _re_row.addWidget(self._widget_camionera_extra)
+        _re_row.addStretch()
+        _re_vlay.addLayout(_re_row)
+
+        # ── Ubicación del Indicador ──────────────────────────────────────────────
+        _ub_row = QHBoxLayout()
+        _ub_row.setSpacing(16)
+        _col_ub = QVBoxLayout(); _col_ub.setSpacing(6)
+        _col_ub.addWidget(_field_label("Ubicación del Indicador"))
+        self.cmb_ubicacion_indicador = QComboBox()
+        self.cmb_ubicacion_indicador.addItems([
+            "Manual (Dibujo del Técnico)",
+            "Derecha",
+            "Izquierda",
+            "Centro / Superior",
+        ])
+        self.cmb_ubicacion_indicador.setFixedWidth(220)
+        self.cmb_ubicacion_indicador.setToolTip(
+            "Manual: deja el espacio en blanco para que el técnico dibuje.\n"
+            "Derecha / Izquierda / Centro: imprime la caja INDICADOR en el PDF."
+        )
+        self.cmb_ubicacion_indicador.currentIndexChanged.connect(self._on_params_changed)
+        _col_ub.addWidget(self.cmb_ubicacion_indicador)
+        _ub_row.addLayout(_col_ub)
+        _ub_row.addStretch()
+        _re_vlay.addLayout(_ub_row)
+
+        # ── Sub-bloque 2: Indicador e Instrumento ────────────────────────────────
+        _lbl_sep2 = QLabel("📡  Indicador e Instrumento")
+        _lbl_sep2.setStyleSheet(
+            "font-size: 11px; font-weight: 600; color: #7C3AED; "
+            "border-top: 1px solid rgba(139,92,246,0.25); "
+            "padding-top: 6px; background: transparent;"
+        )
+        _re_vlay.addWidget(_lbl_sep2)
+
+        _ind_row1 = QHBoxLayout(); _ind_row1.setSpacing(12)
+        for _attr, _lbl, _w in [
+            ("le_ind_marca",  "Marca Indicador",  150),
+            ("le_ind_modelo", "Modelo Indicador", 170),
+            ("le_ind_serie",  "N° de Serie",      130),
+            ("le_ind_id",     "ID Indicador",     120),
+        ]:
+            _cv = QVBoxLayout(); _cv.setSpacing(4)
+            _cv.addWidget(_field_label(_lbl))
+            _le = QLineEdit(); _le.setPlaceholderText("—"); _le.setFixedWidth(_w)
+            setattr(self, _attr, _le)
+            _cv.addWidget(_le); _ind_row1.addLayout(_cv)
+        _ind_row1.addStretch()
+        _re_vlay.addLayout(_ind_row1)
+
+        _ind_row2 = QHBoxLayout(); _ind_row2.setSpacing(12)
+        for _attr, _lbl, _w in [
+            ("le_cap_maxima", "Capacidad Máxima",    160),
+            ("le_div_minima", "División Mínima (d)", 160),
+        ]:
+            _cv = QVBoxLayout(); _cv.setSpacing(4)
+            _cv.addWidget(_field_label(_lbl))
+            _le = QLineEdit(); _le.setPlaceholderText("—"); _le.setFixedWidth(_w)
+            setattr(self, _attr, _le)
+            _cv.addWidget(_le); _ind_row2.addLayout(_cv)
+        _ind_row2.addStretch()
+        _re_vlay.addLayout(_ind_row2)
+
+        # ── Sub-bloque 3: Configuración de Celdas de Carga ─────────────────────
+        _lbl_sep3 = QLabel("🔋  Celdas de Carga")
+        _lbl_sep3.setStyleSheet(
+            "font-size: 11px; font-weight: 600; color: #7C3AED; "
+            "border-top: 1px solid rgba(139,92,246,0.25); "
+            "padding-top: 6px; background: transparent;"
+        )
+        _re_vlay.addWidget(_lbl_sep3)
+
+        _row_homo = QHBoxLayout(); _row_homo.setSpacing(12)
+        _cv_homo = QVBoxLayout(); _cv_homo.setSpacing(4)
+        _cv_homo.addWidget(_field_label("¿Todas las celdas son de la misma marca/modelo?"))
+        self.cmb_celdas_homogeneas = QComboBox()
+        self.cmb_celdas_homogeneas.addItems(["SÍ — Homogéneas", "NO — Mixtas (2 grupos)"])
+        self.cmb_celdas_homogeneas.setFixedWidth(240)
+        self.cmb_celdas_homogeneas.currentIndexChanged.connect(self._on_celdas_homogeneas_changed)
+        _cv_homo.addWidget(self.cmb_celdas_homogeneas)
+        _row_homo.addLayout(_cv_homo); _row_homo.addStretch()
+        _re_vlay.addLayout(_row_homo)
+
+        # Grupo A — siempre visible
+        _lbl_ga = QLabel("Grupo A — Celdas")
+        _lbl_ga.setStyleSheet(
+            "font-size: 10px; font-weight: 700; color: #6D28D9; background: transparent;"
+        )
+        _re_vlay.addWidget(_lbl_ga)
+        _row_ga = QHBoxLayout(); _row_ga.setSpacing(12)
+        for _attr, _lbl, _w in [
+            ("le_celda_a_marca",     "Marca",     130),
+            ("le_celda_a_modelo",    "Modelo",    170),
+            ("le_celda_a_capacidad", "Capacidad", 120),
+        ]:
+            _cv = QVBoxLayout(); _cv.setSpacing(4)
+            _cv.addWidget(_field_label(_lbl))
+            _le = QLineEdit(); _le.setPlaceholderText("—"); _le.setFixedWidth(_w)
+            setattr(self, _attr, _le); _cv.addWidget(_le); _row_ga.addLayout(_cv)
+        _cv_cnt_a = QVBoxLayout(); _cv_cnt_a.setSpacing(4)
+        _cv_cnt_a.addWidget(_field_label("Cantidad"))
+        self.spn_celda_a_cantidad = QSpinBox()
+        self.spn_celda_a_cantidad.setRange(1, 20); self.spn_celda_a_cantidad.setValue(4)
+        self.spn_celda_a_cantidad.setFixedWidth(90)
+        _cv_cnt_a.addWidget(self.spn_celda_a_cantidad); _row_ga.addLayout(_cv_cnt_a)
+        _row_ga.addStretch(); _re_vlay.addLayout(_row_ga)
+
+        # Grupo B — visible solo si mixtas
+        self._widget_grupo_b = QWidget()
+        self._widget_grupo_b.setStyleSheet("background: transparent;")
+        _gb_vlay = QVBoxLayout(self._widget_grupo_b)
+        _gb_vlay.setContentsMargins(0, 0, 0, 0); _gb_vlay.setSpacing(4)
+        _lbl_gb = QLabel("Grupo B — Celdas (Mixtas)")
+        _lbl_gb.setStyleSheet(
+            "font-size: 10px; font-weight: 700; color: #DC2626; background: transparent;"
+        )
+        _gb_vlay.addWidget(_lbl_gb)
+        _row_gb = QHBoxLayout(); _row_gb.setSpacing(12)
+        for _attr, _lbl, _w in [
+            ("le_celda_b_marca",     "Marca",     130),
+            ("le_celda_b_modelo",    "Modelo",    170),
+            ("le_celda_b_capacidad", "Capacidad", 120),
+        ]:
+            _cv = QVBoxLayout(); _cv.setSpacing(4)
+            _cv.addWidget(_field_label(_lbl))
+            _le = QLineEdit(); _le.setPlaceholderText("—"); _le.setFixedWidth(_w)
+            setattr(self, _attr, _le); _cv.addWidget(_le); _row_gb.addLayout(_cv)
+        _cv_cnt_b = QVBoxLayout(); _cv_cnt_b.setSpacing(4)
+        _cv_cnt_b.addWidget(_field_label("Cantidad"))
+        self.spn_celda_b_cantidad = QSpinBox()
+        self.spn_celda_b_cantidad.setRange(1, 20); self.spn_celda_b_cantidad.setValue(2)
+        self.spn_celda_b_cantidad.setFixedWidth(90)
+        _cv_cnt_b.addWidget(self.spn_celda_b_cantidad); _row_gb.addLayout(_cv_cnt_b)
+        _row_gb.addStretch(); _gb_vlay.addLayout(_row_gb)
+        _re_vlay.addWidget(self._widget_grupo_b)
+        self._widget_grupo_b.setVisible(False)
+
+        grid.addWidget(self._frame_re_estructura)
+        self._frame_re_estructura.setVisible(False)
+
+        # Fila 2: Cantidad + Fecha
+        row2 = QHBoxLayout()
+        row2.setSpacing(16)
+
+        col_cant = QVBoxLayout()
+        col_cant.setSpacing(6)
+        col_cant.addWidget(_field_label("Cantidad de Formatos", required=True))
+        self.spn_cantidad = QSpinBox()
+        self.spn_cantidad.setRange(1, 50)
+        self.spn_cantidad.setValue(1)
+        self.spn_cantidad.setSuffix("  formato(s)")
+        self.spn_cantidad.setFixedWidth(180)
+        self.spn_cantidad.valueChanged.connect(self._on_params_changed)
+        col_cant.addWidget(self.spn_cantidad)
+        row2.addLayout(col_cant)
+
+        col_fecha = QVBoxLayout()
+        col_fecha.setSpacing(6)
+        col_fecha.addWidget(_field_label("Fecha de los Formatos", required=True))
+        self.dte_fecha = QDateEdit()
+        self.dte_fecha.setCalendarPopup(True)
+        self.dte_fecha.setDate(QDate.currentDate())
+        self.dte_fecha.setDisplayFormat("dd / MM / yyyy")
+        self.dte_fecha.setFixedWidth(180)
+        self.dte_fecha.dateChanged.connect(self._on_params_changed)
+        # ── Estilo del QCalendarWidget (tema claro institucional) ──
+        self.dte_fecha.calendarWidget().setStyleSheet("""
+            QCalendarWidget QWidget {
+                background-color: #FFFFFF;
+                color: #1D1D1F;
+                font-size: 12px;
+            }
+            /* Cabecera mes/año y botones de navegación */
+            QCalendarWidget QWidget#qt_calendar_navigationbar {
+                background-color: #E63946;
+                border-radius: 6px 6px 0 0;
+                padding: 4px;
+            }
+            QCalendarWidget QToolButton {
+                color: #FFFFFF;
+                background: transparent;
+                border: none;
+                font-size: 13px;
+                font-weight: 700;
+                padding: 4px 8px;
+            }
+            QCalendarWidget QToolButton:hover {
+                background: rgba(255,255,255,0.20);
+                border-radius: 4px;
+            }
+            QCalendarWidget QMenu {
+                background: #FFFFFF;
+                color: #1D1D1F;
+                border: 1px solid #D1D5DB;
+                border-radius: 6px;
+            }
+            QCalendarWidget QSpinBox {
+                color: #FFFFFF;
+                background: transparent;
+                border: none;
+                font-size: 13px;
+                font-weight: 700;
+            }
+            QCalendarWidget QSpinBox::up-button,
+            QCalendarWidget QSpinBox::down-button { width: 0; }
+            /* Cabecera de días (L M Mi J V S D) */
+            QCalendarWidget QHeaderView::section {
+                background-color: #F5F5F7;
+                color: #86868B;
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                border: none;
+                padding: 4px 0;
+            }
+            /* Días del mes */
+            QCalendarWidget QAbstractItemView {
+                background-color: #FFFFFF;
+                color: #1D1D1F;
+                selection-background-color: #E63946;
+                selection-color: #FFFFFF;
+                outline: none;
+                border: none;
+                gridline-color: #F0F0F0;
+            }
+            QCalendarWidget QAbstractItemView:enabled {
+                color: #1D1D1F;
+            }
+            QCalendarWidget QAbstractItemView:disabled {
+                color: #C7C7CC;
+            }
+        """)
+        col_fecha.addWidget(self.dte_fecha)
+        row2.addLayout(col_fecha)
+
+        row2.addStretch()
+        grid.addLayout(row2)
+
+        # Fila 3: Observaciones del Servicio
+        col_obs = QVBoxLayout()
+        col_obs.setSpacing(6)
+
+        obs_header = QHBoxLayout()
+        obs_header.addWidget(_field_label("Observaciones del Servicio"))
+        lbl_obs_hint = QLabel("(opcional — visible en app del técnico y en BD)")
+        lbl_obs_hint.setStyleSheet(
+            f"font-size: 10px; color: {_GRAY}; background: transparent;"
+        )
+        obs_header.addWidget(lbl_obs_hint)
+        obs_header.addStretch()
+        col_obs.addLayout(obs_header)
+
+        self.txt_observaciones = QTextEdit()
+        self.txt_observaciones.setPlaceholderText(
+            "Ej: Se reemplaza el 1100a por otro tanque y se recalibran celdas de carga. "
+            "Falla en celda Nº3 — pendiente revisión. Equipo requiere limpieza de display."
+        )
+        self.txt_observaciones.setMinimumHeight(80)
+        self.txt_observaciones.setMaximumHeight(120)
+        self.txt_observaciones.setStyleSheet("""
+            QTextEdit {
+                background: #FFFFFF;
+                border: 1.5px solid #D1D5DB;
+                border-radius: 8px;
+                padding: 8px 12px;
+                font-size: 13px;
+                color: #1D1D1F;
+            }
+            QTextEdit:focus {
+                border-color: #007AFF;
+                background: #FFFFFF;
+            }
+        """)
+        col_obs.addWidget(self.txt_observaciones)
+        grid.addLayout(col_obs)
+
+        # ── Sección de equipos por lote (se oculta para RE) ──────────────────
+        # Envuelta en QWidget para poder ocultarla cuando tipo_doc == "RE"
+        self._widget_equipos_section = QWidget()
+        self._widget_equipos_section.setStyleSheet("background: transparent;")
+        _eq_vlay = QVBoxLayout(self._widget_equipos_section)
+        _eq_vlay.setContentsMargins(0, 0, 0, 0)
+        _eq_vlay.setSpacing(10)
+
+        equipo_header = QHBoxLayout()
+        lbl_equipo_sec = _field_label("Datos del Instrumento por Equipo")
+        equipo_header.addWidget(lbl_equipo_sec)
+        lbl_equipo_hint = QLabel("(todos los campos son opcionales — el técnico puede completarlos en campo)")
+        lbl_equipo_hint.setStyleSheet(f"font-size: 10px; color: {_GRAY}; background: transparent;")
+        equipo_header.addWidget(lbl_equipo_hint)
+        equipo_header.addStretch()
+        _eq_vlay.addLayout(equipo_header)
+
+        # Contenedor dinámico de tarjetas de equipo
+        self._equipos_container = QVBoxLayout()
+        self._equipos_container.setSpacing(10)
+        self._equipos_container.setContentsMargins(0, 0, 0, 0)
+        _eq_vlay.addLayout(self._equipos_container)
+        grid.addWidget(self._widget_equipos_section)
+
+        # Inicializar con 1 tarjeta de equipo
+        self._update_equipos_section(1)
+
+        # Conectar cambio de cantidad → actualizar tarjetas
+        self.spn_cantidad.valueChanged.connect(self._update_equipos_section)
+
+        # ── Bloque exclusivo RMA: Tabla de ítems (Refacciones / Materiales) ────────
+        self._frame_rma_items = QFrame()
+        self._frame_rma_items.setObjectName("frame_rma_items")
+        self._frame_rma_items.setStyleSheet("""
+            QFrame#frame_rma_items {
+                background: rgba(37,99,235,0.04);
+                border: 1.5px solid rgba(37,99,235,0.22);
+                border-radius: 10px;
+            }
+        """)
+        _rma_vlay = QVBoxLayout(self._frame_rma_items)
+        _rma_vlay.setContentsMargins(14, 10, 14, 10)
+        _rma_vlay.setSpacing(10)
+
+        _lbl_rma_sec = QLabel("📦  Partidas / Refacciones a Entregar")
+        _lbl_rma_sec.setStyleSheet(
+            "font-size: 12px; font-weight: 700; color: #1D4ED8; background: transparent;"
+        )
+        _rma_vlay.addWidget(_lbl_rma_sec)
+
+        # Cabecera de la tabla de ítems
+        _rma_hdr = QWidget()
+        _rma_hdr.setStyleSheet("background: #1C1C1C; border-radius: 6px;")
+        _rma_hdr_lay = QHBoxLayout(_rma_hdr)
+        _rma_hdr_lay.setContentsMargins(8, 6, 8, 6)
+        _rma_hdr_lay.setSpacing(0)
+        for _col_lbl, _col_stretch in [
+            ("CANTIDAD", 1), ("N° DE PARTE", 2),
+            ("DESCRIPCIÓN", 4), ("N° DE SERIE", 2),
+        ]:
+            _h = QLabel(_col_lbl)
+            _h.setStyleSheet(
+                "color: #FFFFFF; font-size: 10px; font-weight: 700; background: transparent;"
+            )
+            _h.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _rma_hdr_lay.addWidget(_h, stretch=_col_stretch)
+        _rma_vlay.addWidget(_rma_hdr)
+
+        # Contenedor dinámico de filas de ítems
+        self._rma_items_container = QVBoxLayout()
+        self._rma_items_container.setSpacing(4)
+        self._rma_items_container.setContentsMargins(0, 0, 0, 0)
+        _rma_vlay.addLayout(self._rma_items_container)
+        self._rma_item_rows: list[dict] = []   # lista de dicts con los QLineEdit de cada fila
+
+        # Botón agregar fila
+        _btn_add_item = QPushButton("➕  Agregar Refacción")
+        _btn_add_item.setFixedHeight(32)
+        _btn_add_item.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #1D4ED8;
+                font-size: 12px;
+                font-weight: 600;
+                border: 1.5px dashed #93C5FD;
+                border-radius: 6px;
+                padding: 0 14px;
+            }
+            QPushButton:hover { background: rgba(37,99,235,0.06); }
+        """)
+        _btn_add_item.clicked.connect(self._rma_add_item_row)
+        _rma_vlay.addWidget(_btn_add_item)
+
+        grid.addWidget(self._frame_rma_items)
+        self._frame_rma_items.setVisible(False)
+
+        # Agregar 3 filas iniciales RMA (visibles solo cuando RMA esté activo)
+        for _ in range(3):
+            self._rma_add_item_row()
+
+        # ── Bloque exclusivo LV: N Básculas + Logística de Pesas Patrón ─────────────
+        self._frame_lv_basculas = QFrame()
+        self._frame_lv_basculas.setObjectName("frame_lv_basculas")
+        self._frame_lv_basculas.setStyleSheet("""
+            QFrame#frame_lv_basculas {
+                background: rgba(230,126,34,0.05);
+                border: 1.5px solid rgba(230,126,34,0.35);
+                border-radius: 12px;
+            }
+        """)
+        _lv_vlay = QVBoxLayout(self._frame_lv_basculas)
+        _lv_vlay.setContentsMargins(16, 12, 16, 12)
+        _lv_vlay.setSpacing(10)
+
+        _lbl_lv_title = QLabel("\U0001f4cf  B\u00e1sculas e Instrumentos a Levantar")
+        _lbl_lv_title.setStyleSheet(
+            "font-size: 13px; font-weight: 700; color: #C0500A; background: transparent;"
+        )
+        _lv_vlay.addWidget(_lbl_lv_title)
+
+        # Fila de control: spin + botón agregar
+        _lv_ctrl = QHBoxLayout()
+        _lv_ctrl.setSpacing(12)
+        _lbl_cant_basc = QLabel("Cantidad de B\u00e1sculas a Levantar:")
+        _lbl_cant_basc.setStyleSheet("font-size: 12px; color: #7C3F00; background: transparent;")
+        _lv_ctrl.addWidget(_lbl_cant_basc)
+        self.spn_lv_basculas = QSpinBox()
+        self.spn_lv_basculas.setRange(1, 20)
+        self.spn_lv_basculas.setValue(1)
+        self.spn_lv_basculas.setFixedWidth(90)
+        self.spn_lv_basculas.setToolTip("N\u00famero de b\u00e1sculas o instrumentos a levantar en este pre-visita")
+        _lv_ctrl.addWidget(self.spn_lv_basculas)
+        _btn_add_basc = QPushButton("\u2795  Agregar B\u00e1scula")
+        _btn_add_basc.setFixedHeight(30)
+        _btn_add_basc.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #C0500A;
+                font-size: 11px; font-weight: 600;
+                border: 1.5px dashed rgba(230,126,34,0.7);
+                border-radius: 6px;
+                padding: 0 12px;
+            }
+            QPushButton:hover { background: rgba(230,126,34,0.08); }
+        """)
+        _btn_add_basc.clicked.connect(self._lv_add_bascula_row)
+        _lv_ctrl.addWidget(_btn_add_basc)
+        _lv_ctrl.addStretch()
+        _lv_vlay.addLayout(_lv_ctrl)
+
+        # Cabecera de tabla de básculas
+        _lv_hdr = QWidget()
+        _lv_hdr.setStyleSheet("background: #2C1810; border-radius: 6px;")
+        _lv_hdr_lay = QHBoxLayout(_lv_hdr)
+        _lv_hdr_lay.setContentsMargins(8, 5, 8, 5)
+        _lv_hdr_lay.setSpacing(0)
+        for _htxt, _hstretch in [
+            ("Tag / ID", 1), ("Tipo de Instrumento", 2),
+            ("Marca", 1), ("Modelo", 1),
+            ("N\u00b0 de Serie", 1), ("Cap. M\u00e1x.", 1),
+            ("Div. M\u00edn.", 1), ("Ubicaci\u00f3n en Planta", 2),
+        ]:
+            _hl = QLabel(_htxt)
+            _hl.setStyleSheet(
+                "color: #FED7AA; font-size: 9px; font-weight: 700; background: transparent;"
+            )
+            _hl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            _lv_hdr_lay.addWidget(_hl, stretch=_hstretch)
+        _lv_vlay.addWidget(_lv_hdr)
+
+        # Contenedor dinámico de filas de básculas
+        self._lv_basculas_container = QVBoxLayout()
+        self._lv_basculas_container.setSpacing(4)
+        self._lv_basculas_container.setContentsMargins(0, 0, 0, 0)
+        _lv_vlay.addLayout(self._lv_basculas_container)
+        self._lv_bascula_rows: list[dict] = []
+
+        # Agregar 1 fila inicial
+        self._lv_add_bascula_row()
+        # Conectar spinner para sincronizar filas
+        self.spn_lv_basculas.valueChanged.connect(self._lv_sync_bascula_rows)
+
+        # ── Sección Logística de Pesas Patrón ────────────────────────────────────
+        _sep = QFrame()
+        _sep.setFrameShape(QFrame.Shape.HLine)
+        _sep.setStyleSheet("color: rgba(230,126,34,0.4);")
+        _lv_vlay.addWidget(_sep)
+
+        _lbl_log = QLabel("\U0001f4e6  Log\u00edstica de Pesas Patr\u00f3n y Maniobras")
+        _lbl_log.setStyleSheet(
+            "font-size: 12px; font-weight: 700; color: #C0500A; background: transparent;"
+        )
+        _lv_vlay.addWidget(_lbl_log)
+
+        _log_row = QHBoxLayout()
+        _log_row.setSpacing(12)
+
+        _col_pesas = QVBoxLayout(); _col_pesas.setSpacing(4)
+        _lbl_pesas = QLabel("Pesas Patr\u00f3n a Llevar (cantidad / tipo):")
+        _lbl_pesas.setStyleSheet("font-size: 11px; font-weight: 600; color: #7C3F00; background: transparent;")
+        _col_pesas.addWidget(_lbl_pesas)
+        self.txt_lv_pesas = QTextEdit()
+        self.txt_lv_pesas.setPlaceholderText(
+            "Ej: 2 masas de 500 kg OIML F2, 4 masas de 100 kg, \n"
+            "Barra de 2 ton\u2026"
+        )
+        self.txt_lv_pesas.setMinimumHeight(70)
+        self.txt_lv_pesas.setMaximumHeight(100)
+        self.txt_lv_pesas.setStyleSheet("""
+            QTextEdit {
+                background: #FFFBF5;
+                border: 1.5px solid rgba(230,126,34,0.5);
+                border-radius: 7px;
+                padding: 6px 10px;
+                font-size: 12px; color: #1D1D1F;
+            }
+            QTextEdit:focus { border-color: #E67E22; }
+        """)
+        _col_pesas.addWidget(self.txt_lv_pesas)
+        _log_row.addLayout(_col_pesas, stretch=1)
+
+        _col_maniobra = QVBoxLayout(); _col_maniobra.setSpacing(4)
+        _lbl_maniobra = QLabel("Acomodo, Maniobras y Condiciones de Montaje:")
+        _lbl_maniobra.setStyleSheet("font-size: 11px; font-weight: 600; color: #7C3F00; background: transparent;")
+        _col_maniobra.addWidget(_lbl_maniobra)
+        self.txt_lv_maniobra = QTextEdit()
+        self.txt_lv_maniobra.setPlaceholderText(
+            "Ej: Requiere montacargas de 3 ton. Acceso por puerta norte. "
+            "Estibado en plataforma del proveedor\u2026"
+        )
+        self.txt_lv_maniobra.setMinimumHeight(70)
+        self.txt_lv_maniobra.setMaximumHeight(100)
+        self.txt_lv_maniobra.setStyleSheet("""
+            QTextEdit {
+                background: #FFFBF5;
+                border: 1.5px solid rgba(230,126,34,0.5);
+                border-radius: 7px;
+                padding: 6px 10px;
+                font-size: 12px; color: #1D1D1F;
+            }
+            QTextEdit:focus { border-color: #E67E22; }
+        """)
+        _col_maniobra.addWidget(self.txt_lv_maniobra)
+        _log_row.addLayout(_col_maniobra, stretch=1)
+
+        _lv_vlay.addLayout(_log_row)
+        grid.addWidget(self._frame_lv_basculas)
+        self._frame_lv_basculas.setVisible(False)
+
+        return w
+
+    # ── PASO 4 ────────────────────────────────────────────────────────────────
+    def _build_step4_content(self) -> QWidget:
+        w = QWidget()
+        w.setStyleSheet("background: transparent;")
+        lay = QVBoxLayout(w)
+        lay.setSpacing(12)
+        lay.setContentsMargins(0, 0, 0, 0)
+
+        # Resumen de la solicitud
+        self._lbl_resumen = QLabel("")
+        self._lbl_resumen.setWordWrap(True)
+        self._lbl_resumen.setTextFormat(Qt.TextFormat.RichText)
+        self._lbl_resumen.setStyleSheet(
+            f"font-size: 13px; color: {_DARK}; background: transparent; line-height: 1.7;"
+        )
+        lay.addWidget(self._lbl_resumen)
+
+        # Lista de folios con botón de edición (solo ADMIN)
+        folios_row = QHBoxLayout()
+        folios_row.setSpacing(8)
+
+        self._lbl_folios = QLabel("")
+        self._lbl_folios.setStyleSheet(
+            f"font-size: 12px; color: {_GRAY}; background: rgba(0,0,0,0.03); "
+            f"border-radius: 8px; padding: 10px 14px;"
+        )
+        self._lbl_folios.setWordWrap(True)
+        folios_row.addWidget(self._lbl_folios, stretch=1)
+
+        # Botón editar consecutivo — solo admin
+        is_admin = False
+        try:
+            from auth.session_context import session as _sess
+            is_admin = _sess.has_role("admin") if _sess else False
+        except Exception:
+            is_admin = True   # modo demo: siempre habilitar
+
+        self._btn_editar_consec = QPushButton("✏️ Cambiar")
+        self._btn_editar_consec.setFixedHeight(32)
+        self._btn_editar_consec.setFixedWidth(100)
+        self._btn_editar_consec.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_editar_consec.setVisible(is_admin)
+        self._btn_editar_consec.setStyleSheet(f"""
+            QPushButton {{
+                background: transparent;
+                color: {_BLUE};
+                border: 1px solid rgba(0,122,255,0.35);
+                border-radius: 7px;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0 10px;
+            }}
+            QPushButton:hover {{ background: rgba(0,122,255,0.07); }}
+        """)
+        self._btn_editar_consec.clicked.connect(self._on_cambiar_consecutivo)
+        folios_row.addWidget(self._btn_editar_consec)
+        lay.addLayout(folios_row)
+
+        # Indicador de modo
+        self._lbl_modo_badge = QLabel("")
+        self._lbl_modo_badge.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        lay.addWidget(self._lbl_modo_badge)
+
+        return w
+
+    # ── Barra de acción inferior ──────────────────────────────────────────────
+    def _build_action_bar(self) -> QWidget:
+        bar = QWidget()
+        bar.setFixedHeight(60)
+        bar.setStyleSheet("""
+            QWidget {
+                background: #FFFFFF;
+                border-top: 1px solid rgba(0,0,0,0.07);
+            }
+        """)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(28, 0, 28, 0)
+        lay.setSpacing(12)
+
+        # Botón reiniciar
+        self.btn_reiniciar = QPushButton("↺  Reiniciar")
+        self.btn_reiniciar.setFixedHeight(36)
+        self.btn_reiniciar.setStyleSheet("""
+            QPushButton {
+                background: transparent;
+                color: #86868B;
+                border: 1px solid rgba(0,0,0,0.12);
+                border-radius: 8px;
+                font-size: 13px;
+                padding: 0 16px;
+            }
+            QPushButton:hover { background: rgba(0,0,0,0.04); color: #1D1D1F; }
+        """)
+        self.btn_reiniciar.clicked.connect(self._reset)
+        lay.addWidget(self.btn_reiniciar)
+
+        lay.addStretch()
+
+        # Progreso (mientras genera)
+        self._progress = QProgressBar()
+        self._progress.setRange(0, 0)
+        self._progress.setFixedWidth(120)
+        self._progress.setFixedHeight(4)
+        self._progress.setVisible(False)
+        self._progress.setStyleSheet("""
+            QProgressBar { border: none; border-radius: 2px; background: #E5E5EA; }
+            QProgressBar::chunk { background: #E63946; border-radius: 2px; }
+        """)
+        lay.addWidget(self._progress)
+
+        # Botón de acción principal (cambia según modalidad)
+        self.btn_ejecutar = QPushButton("🖨️  Generar e Imprimir PDF")
+        self.btn_ejecutar.setFixedHeight(40)
+        self.btn_ejecutar.setEnabled(False)
+        self.btn_ejecutar.setStyleSheet("""
+            QPushButton {
+                background-color: #E63946;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 9px;
+                font-size: 14px;
+                font-weight: 700;
+                padding: 0 24px;
+            }
+            QPushButton:hover   { background-color: #D90429; }
+            QPushButton:pressed { background-color: #B70020; }
+            QPushButton:disabled {
+                background-color: #C7C7CC;
+                color: #FFFFFF;
+            }
+        """)
+        self.btn_ejecutar.clicked.connect(self._ejecutar)
+        lay.addWidget(self.btn_ejecutar)
+
+        # ── Botón Llenar Formulario Digital (solo visible tras asignación DIGITAL) ──
+        self.btn_llenar_digital = QPushButton("📝  Llenar Formulario Digital")
+        self.btn_llenar_digital.setFixedHeight(40)
+        self.btn_llenar_digital.setVisible(False)
+        self.btn_llenar_digital.setStyleSheet("""
+            QPushButton {
+                background-color: #8B5CF6;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 9px;
+                font-size: 13px;
+                font-weight: 700;
+                padding: 0 20px;
+            }
+            QPushButton:hover   { background-color: #7C3AED; }
+            QPushButton:pressed { background-color: #6D28D9; }
+        """)
+        self.btn_llenar_digital.clicked.connect(self._abrir_formulario_digital)
+        lay.addWidget(self.btn_llenar_digital)
+
+        # Guardar referencia al último lote asignado
+        self._ultimo_folio_digital: str = ""
+        self._ultimo_os_data_digital: dict = {}
+
+        return bar
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # CATÁLOGOS
+    # ══════════════════════════════════════════════════════════════════════════
+    def _load_catalogs(self) -> None:
+        """
+        Carga clientes y técnicos EXCLUSIVAMENTE desde PostgreSQL.
+        Si no hay conexión o las tablas están vacías, los QComboBox
+        quedan solo con su placeholder y el usuario verá el mensaje
+        de advertencia al intentar generar un formato.
+        """
+        self._clientes: list[str]         = []
+        self._clientes_ids: list[int]     = []   # id numérico de cada cliente
+        self._tecnicos: list[tuple]       = []
+
+        if _HAS_DB and _db_pool:
+            # ── Clientes ──────────────────────────────────────────────────────
+            try:
+                conn = _db_pool.get_connection()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT id, razon_social FROM cat_clientes "
+                            "WHERE activo = TRUE ORDER BY razon_social"
+                        )
+                        rows_c = cur.fetchall()
+                        self._clientes_ids = [r[0] for r in rows_c]
+                        self._clientes     = [r[1] for r in rows_c]
+                    conn.commit()
+                finally:
+                    _db_pool.release_connection(conn)
+            except Exception as exc:
+                logger.warning("Error cargando clientes desde BD: %s", exc)
+
+            # ── Técnicos: sólo roles operativos (Técnico / T.Calibrador / T.Inspector)
+            try:
+                from models.catalogo import tecnico_repo as _trepo
+                ops = _trepo.get_operativos()
+                self._tecnicos = [(r["id"], r["nombre_completo"]) for r in ops]
+            except Exception as exc_t:
+                logger.warning("Error cargando técnicos operativos: %s", exc_t)
+
+        else:
+            logger.info("Sin conexión a BD — catálogos vacíos.")
+
+
+        # ── Poblar QComboBox de Cliente ────────────────────────────────────────
+        self.cmb_cliente.clear()
+        self.cmb_cliente.addItem("— Selecciona un cliente —", None)
+        for cid, nombre in zip(self._clientes_ids, self._clientes):
+            self.cmb_cliente.addItem(nombre, cid)   # userData = id numérico
+
+        # ── Poblar QComboBox de Técnico (solo roles de campo) ─────────────────
+        self.cmb_tecnico.clear()
+        self.cmb_tecnico.addItem("— Selecciona técnico —", None)
+        for tid, tnom in self._tecnicos:
+            self.cmb_tecnico.addItem(tnom, tid)
+
+        # ── Poblar QComboBox de Tipo de Servicio ──────────────────────────
+        self.cmb_tipo_servicio.clear()
+        self.cmb_tipo_servicio.addItem("— Selecciona el tipo de servicio —", None)
+        _tipos_servicio_fallback = [
+            (1, "Ajuste"),
+            (2, "Ajuste e Inspección"),
+            (3, "Ajuste y Calibración"),
+            (4, "Ajuste, Calibración e Inspección"),
+        ]
+        try:
+            if _HAS_DB and _db_pool:
+                conn2 = _db_pool.get_connection()
+                try:
+                    with conn2.cursor() as cur2:
+                        cur2.execute(
+                            "SELECT id, nombre FROM cat_tipo_servicio ORDER BY id"
+                        )
+                        tipos = cur2.fetchall()
+                    conn2.commit()
+                finally:
+                    _db_pool.release_connection(conn2)
+                for tid, tnombre in tipos:
+                    self.cmb_tipo_servicio.addItem(tnombre, tid)
+            else:
+                raise RuntimeError("Sin BD")
+        except Exception:
+            for tid, tnombre in _tipos_servicio_fallback:
+                self.cmb_tipo_servicio.addItem(tnombre, tid)
+
+        # ── Poblar QComboBox de Tipo de Instrumento ────────────────────────
+        self.cmb_tipo_instrumento.clear()
+        self.cmb_tipo_instrumento.addItem("— Selecciona instrumento —", None)
+        try:
+            if _HAS_DB and _db_pool:
+                conn3 = _db_pool.get_connection()
+                try:
+                    with conn3.cursor() as cur3:
+                        cur3.execute("SELECT id, nombre FROM cat_tipo_instrumento ORDER BY nombre")
+                        tipos_inst = cur3.fetchall()
+                    conn3.commit()
+                finally:
+                    _db_pool.release_connection(conn3)
+                for tid, tnombre in tipos_inst:
+                    self.cmb_tipo_instrumento.addItem(tnombre, tid)
+        except Exception as exc:
+            logger.warning("Error cargando cat_tipo_instrumento: %s", exc)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # HANDLERS DE SELECCIÓN
+    # ══════════════════════════════════════════════════════════════════════════
+    def _on_modalidad(self, modalidad: str) -> None:
+        """Paso 1 completado → habilitar paso 2."""
+        self._modalidad = modalidad
+        self._tipo_doc  = ""
+
+        # Restablecer selección de documento
+        for btn in [self._card_os, self._card_rma, self._card_re]:
+            btn.setChecked(False)
+
+        # Habilitar paso 2
+        self._enable_card(self._card_step2)
+
+        # Actualizar botón de acción según modalidad
+        if modalidad == "DIGITAL":
+            self.btn_ejecutar.setText("📱  Asignar y Sincronizar a Tablet")
+            self.btn_ejecutar.setStyleSheet(self.btn_ejecutar.styleSheet()
+                                            .replace("#E63946", _BLUE)
+                                            .replace("#D90429", "#0062CC")
+                                            .replace("#B70020", "#004A99"))
+        else:
+            self.btn_ejecutar.setText("🖨️  Generar e Imprimir PDF")
+            # Restaurar rojo
+            self.btn_ejecutar.setStyleSheet("""
+                QPushButton {
+                    background-color: #E63946;
+                    color: #FFFFFF; border: none;
+                    border-radius: 9px;
+                    font-size: 14px; font-weight: 700;
+                    padding: 0 24px;
+                }
+                QPushButton:hover   { background-color: #D90429; }
+                QPushButton:pressed { background-color: #B70020; }
+                QPushButton:disabled { background-color: #C7C7CC; color: #FFFFFF; }
+            """)
+
+        self._update_title()
+        self.btn_ejecutar.setEnabled(False)
+
+    def _rma_add_item_row(self) -> None:
+        """Agrega una fila de ítem (Cantidad / N° Parte / Descripción / N° Serie) a la tabla RMA."""
+        row_widget = QWidget()
+        row_widget.setStyleSheet("background: transparent;")
+        row_lay = QHBoxLayout(row_widget)
+        row_lay.setContentsMargins(0, 2, 0, 2)
+        row_lay.setSpacing(0)
+
+        le_cant   = QLineEdit(); le_cant.setPlaceholderText("1");   le_cant.setFixedHeight(28)
+        le_parte  = QLineEdit(); le_parte.setPlaceholderText("RL-000");  le_parte.setFixedHeight(28)
+        le_desc   = QLineEdit(); le_desc.setPlaceholderText("Descripción del material"); le_desc.setFixedHeight(28)
+        le_serie  = QLineEdit(); le_serie.setPlaceholderText("N° Serie (opcional)");  le_serie.setFixedHeight(28)
+
+        for _le in (le_cant, le_parte, le_desc, le_serie):
+            _le.setStyleSheet("""
+                QLineEdit {
+                    background: #FFFFFF; border: 1px solid #D1D5DB;
+                    border-radius: 5px; padding: 2px 6px;
+                    font-size: 12px; color: #1D1D1F;
+                }
+                QLineEdit:focus { border-color: #2563EB; }
+            """)
+
+        btn_del = QPushButton("✖")
+        btn_del.setFixedSize(26, 26)
+        btn_del.setStyleSheet("""
+            QPushButton {
+                background: transparent; color: #9CA3AF;
+                border: none; font-size: 12px;
+            }
+            QPushButton:hover { color: #EF4444; }
+        """)
+
+        row_lay.addWidget(le_cant,  stretch=1)
+        row_lay.addSpacing(4)
+        row_lay.addWidget(le_parte, stretch=2)
+        row_lay.addSpacing(4)
+        row_lay.addWidget(le_desc,  stretch=4)
+        row_lay.addSpacing(4)
+        row_lay.addWidget(le_serie, stretch=2)
+        row_lay.addSpacing(4)
+        row_lay.addWidget(btn_del)
+
+        row_data = {
+            "widget":   row_widget,
+            "cantidad": le_cant,
+            "parte":    le_parte,
+            "desc":     le_desc,
+            "serie":    le_serie,
+        }
+        self._rma_item_rows.append(row_data)
+        self._rma_items_container.addWidget(row_widget)
+
+        def _remove():
+            row_widget.setParent(None)
+            if row_data in self._rma_item_rows:
+                self._rma_item_rows.remove(row_data)
+        btn_del.clicked.connect(_remove)
+
+    # ─── Helpers para el panel LV de básculas ────────────────────────────────
+    _LE_STYLE = (
+        "QLineEdit { background: #FFFBF5; border: 1px solid rgba(230,126,34,0.5); "
+        "border-radius: 5px; padding: 2px 5px; font-size: 11px; color: #1D1D1F; } "
+        "QLineEdit:focus { border-color: #E67E22; }"
+    )
+    _TIPOS_BASCULA = [
+        "", "Camionera", "Plataforma", "Tolva / Tanque",
+        "Analítica", "Conteo", "Colgante / Grúa", "Banco",
+    ]
+
+    def _lv_add_bascula_row(self) -> None:
+        """Agrega una fila de báscula al panel LV."""
+        idx = len(self._lv_bascula_rows) + 1
+        row_w = QWidget()
+        row_w.setStyleSheet("background: transparent;")
+        row_lay = QHBoxLayout(row_w)
+        row_lay.setContentsMargins(0, 2, 0, 2)
+        row_lay.setSpacing(4)
+
+        # Número de báscula (etiqueta)
+        lbl_n = QLabel(f"{idx}.")
+        lbl_n.setFixedWidth(20)
+        lbl_n.setStyleSheet("font-size: 11px; font-weight: 700; color: #C0500A; background: transparent;")
+        row_lay.addWidget(lbl_n)
+
+        # Tag / ID
+        le_tag = QLineEdit(); le_tag.setPlaceholderText("Tag/ID"); le_tag.setFixedHeight(27)
+        le_tag.setStyleSheet(self._LE_STYLE)
+        # Tipo de instrumento (combo)
+        cmb_tipo = QComboBox(); cmb_tipo.addItems(self._TIPOS_BASCULA)
+        cmb_tipo.setFixedHeight(27); cmb_tipo.setMinimumWidth(130)
+        # Marca
+        le_marca = QLineEdit(); le_marca.setPlaceholderText("Marca"); le_marca.setFixedHeight(27)
+        le_marca.setStyleSheet(self._LE_STYLE)
+        # Modelo
+        le_modelo = QLineEdit(); le_modelo.setPlaceholderText("Modelo"); le_modelo.setFixedHeight(27)
+        le_modelo.setStyleSheet(self._LE_STYLE)
+        # N° Serie
+        le_serie = QLineEdit(); le_serie.setPlaceholderText("Serie"); le_serie.setFixedHeight(27)
+        le_serie.setStyleSheet(self._LE_STYLE)
+        # Cap. Máx.
+        le_cap = QLineEdit(); le_cap.setPlaceholderText("Cap. Máx."); le_cap.setFixedHeight(27)
+        le_cap.setStyleSheet(self._LE_STYLE)
+        # Div. Mín.
+        le_div = QLineEdit(); le_div.setPlaceholderText("Div. Mín."); le_div.setFixedHeight(27)
+        le_div.setStyleSheet(self._LE_STYLE)
+        # Ubicación
+        le_ubic = QLineEdit(); le_ubic.setPlaceholderText("Ubicación en Planta"); le_ubic.setFixedHeight(27)
+        le_ubic.setStyleSheet(self._LE_STYLE)
+
+        # Botón eliminar
+        btn_del = QPushButton("✖")
+        btn_del.setFixedSize(24, 24)
+        btn_del.setStyleSheet(
+            "QPushButton { background: transparent; color: #9CA3AF; border: none; font-size: 11px; } "
+            "QPushButton:hover { color: #EF4444; }"
+        )
+
+        for _w, _stretch in [
+            (le_tag,    1), (cmb_tipo, 2), (le_marca,  1), (le_modelo, 1),
+            (le_serie,  1), (le_cap,   1), (le_div,    1), (le_ubic,   2),
+        ]:
+            row_lay.addWidget(_w, stretch=_stretch)
+        row_lay.addWidget(btn_del)
+
+        row_data = {
+            "widget":   row_w,
+            "tag":      le_tag,
+            "tipo":     cmb_tipo,
+            "marca":    le_marca,
+            "modelo":   le_modelo,
+            "serie":    le_serie,
+            "cap":      le_cap,
+            "div":      le_div,
+            "ubicacion": le_ubic,
+        }
+        self._lv_bascula_rows.append(row_data)
+        self._lv_basculas_container.addWidget(row_w)
+
+        def _remove():
+            row_w.setParent(None)
+            if row_data in self._lv_bascula_rows:
+                self._lv_bascula_rows.remove(row_data)
+            # Actualizar spinner
+            if hasattr(self, "spn_lv_basculas"):
+                self.spn_lv_basculas.blockSignals(True)
+                self.spn_lv_basculas.setValue(len(self._lv_bascula_rows))
+                self.spn_lv_basculas.blockSignals(False)
+        btn_del.clicked.connect(_remove)
+
+    def _lv_sync_bascula_rows(self, n: int) -> None:
+        """Agrega o elimina filas LV para tener exactamente n."""
+        while len(self._lv_bascula_rows) < n:
+            self._lv_add_bascula_row()
+        while len(self._lv_bascula_rows) > n:
+            row = self._lv_bascula_rows.pop()
+            row["widget"].setParent(None)
+
+    def _lv_collect_basculas(self) -> list:
+        """Recoge los datos de las filas de básculas LV."""
+        result = []
+        for row in getattr(self, "_lv_bascula_rows", []):
+            result.append({
+                "id_indicador":     row["tag"].text().strip(),
+                "tipo_instrumento": row["tipo"].currentText().strip(),
+                "marca":            row["marca"].text().strip(),
+                "modelo":           row["modelo"].text().strip(),
+                "numero_serie":     row["serie"].text().strip(),
+                "capacidad_max":    row["cap"].text().strip(),
+                "division_min":     row["div"].text().strip(),
+                "ubicacion_interna": row["ubicacion"].text().strip(),
+            })
+        return result
+
+    def _on_geometria_batch_changed(self) -> None:
+        """Muestra/oculta secciones y sincroniza Filas (Excentricidad) segun geometria."""
+        if not hasattr(self, "_combo_geometria_batch"):
+            return
+        geo_txt = self._combo_geometria_batch.currentText()
+        es_camionera = "Camionera" in geo_txt
+        es_libre = "Libre" in geo_txt or geo_txt.startswith("—")
+
+        # Mostrar/ocultar SpinBox de secciones
+        if hasattr(self, "_wgt_secciones_batch"):
+            self._wgt_secciones_batch.setVisible(es_camionera)
+
+        # Sincronizar cmb_filas_exc (solo si no es Libre)
+        if hasattr(self, "cmb_filas_exc") and not es_libre:
+            if es_camionera and hasattr(self, "_spin_secciones_batch"):
+                n = self._spin_secciones_batch.value()
+                txt = str(n)
+                if self.cmb_filas_exc.findText(txt) < 0:
+                    self.cmb_filas_exc.addItem(txt)
+                self.cmb_filas_exc.setCurrentText(txt)
+            else:
+                # Cuadrada o Circular: 5 posiciones fijas
+                self.cmb_filas_exc.setCurrentText("5")
+
+    def _on_secciones_batch_changed(self) -> None:
+        """Al cambiar N secciones (Camionera), actualiza Filas Excentricidad."""
+        if not hasattr(self, "_spin_secciones_batch") or not hasattr(self, "cmb_filas_exc"):
+            return
+        n = self._spin_secciones_batch.value()
+        txt = str(n)
+        if self.cmb_filas_exc.findText(txt) < 0:
+            self.cmb_filas_exc.addItem(txt)
+        self.cmb_filas_exc.setCurrentText(txt)
+        self._on_params_changed()
+
+
+    def _on_tipo_doc(self, tipo: str) -> None:
+        """Paso 2 completado → habilitar paso 3 y adaptar la UI segun el tipo de documento."""
+        self._tipo_doc = tipo
+        es_re  = (tipo == "RE")
+        es_rma = (tipo == "RMA")
+        es_os  = (tipo == "OS")
+        es_lv  = (tipo == "LV")
+        # LV redirige al formulario dedicado al ejecutar — no necesita campos extra en paso 3
+        # Los campos de OS / RE / RMA se ocultan para LP y LV
+        es_os_fields = es_os  # solo OS muestra tipo servicio, excentricidad, equipo
+
+        # Bloque estructura RE
+        if hasattr(self, "_frame_re_estructura"):
+            self._frame_re_estructura.setVisible(es_re)
+
+        # Bloque ítems RMA
+        if hasattr(self, "_frame_rma_items"):
+            self._frame_rma_items.setVisible(es_rma)
+
+        # Bloque básculas LV
+        if hasattr(self, "_frame_lv_basculas"):
+            self._frame_lv_basculas.setVisible(es_lv)
+
+        # Tipo de Servicio / Instrumento → visible solo para OS
+        if hasattr(self, "_widget_row_tipo_serv"):
+            self._widget_row_tipo_serv.setVisible(es_os_fields)
+
+        # Excentricidad / Puntos de Exactitud → visible solo para OS
+        if hasattr(self, "_widget_row_exc"):
+            self._widget_row_exc.setVisible(es_os_fields)
+
+        # Datos del Instrumento por Equipo → visible solo para OS
+        if hasattr(self, "_widget_equipos_section"):
+            self._widget_equipos_section.setVisible(es_os_fields)
+
+        # Frame de Calibración → siempre oculto al cambiar tipo de doc;
+        # _on_params_changed lo mostrará si aplica según el tipo de servicio.
+        if hasattr(self, "_frame_calibracion") and not es_os:
+            self._frame_calibracion.setVisible(False)
+
+        self._enable_card(self._card_step3)
+        self._on_params_changed()
+
+    def _on_aplica_exc_changed(self) -> None:
+        """Muestra u oculta la seleccion de filas segun si aplica o no excentricidad."""
+        aplica = self.cmb_aplica_exc.currentText() in ("SI", "SÍ")
+        self.cmb_filas_exc.setEnabled(aplica)
+        # Mostrar fila de geometria / motivo-no-aplica
+        if hasattr(self, "_widget_row_geo"):
+            self._widget_row_geo.setVisible(True)
+        if hasattr(self, "_wgt_geo_si"):
+            self._wgt_geo_si.setVisible(aplica)
+        if hasattr(self, "_wgt_geo_no"):
+            self._wgt_geo_no.setVisible(not aplica)
+
+    def _on_tipo_estructura_changed(self) -> None:
+        """Muestra/oculta controles de Instalación y N° Secciones según tipo de estructura."""
+        es_camionera = self.cmb_tipo_estructura.currentText() == "Camionera"
+        self._widget_camionera_extra.setVisible(es_camionera)
+
+    def _on_celdas_homogeneas_changed(self) -> None:
+        """Muestra/oculta el Grupo B de celdas según si son mixtas (NO Homogéneas)."""
+        mixtas = self.cmb_celdas_homogeneas.currentIndex() == 1  # 0=SÍ, 1=NO
+        self._widget_grupo_b.setVisible(mixtas)
+
+    def _get_inicial_calibrador(self) -> str:
+        """Retorna la letra del calibrador seleccionada (J, I o A), o cadena vacía si es 'Ninguna'."""
+        for _code in ["j", "i", "a"]:
+            _btn = getattr(self, f"_btn_inicial_{_code}", None)
+            if _btn and _btn.isChecked():
+                return _code.upper()
+        return ""
+
+    def _collect_rma_items(self) -> list:
+        """Recoge los datos de la tabla de ítems RMA y los retorna como lista de dicts."""
+        items = []
+        for row in getattr(self, "_rma_item_rows", []):
+            cant  = row["cantidad"].text().strip()
+            parte = row["parte"].text().strip()
+            desc  = row["desc"].text().strip()
+            serie = row["serie"].text().strip()
+            # Solo incluir filas que tengan al menos descripción o parte
+            if desc or parte:
+                items.append({
+                    "cantidad":      cant  or "1",
+                    "numero_parte":  parte,
+                    "descripcion":   desc,
+                    "numero_serie":  serie,
+                })
+        return items
+
+    def _on_cliente_changed(self, index: int) -> None:
+        """Carga las sucursales al seleccionar un cliente."""
+        self.cmb_sucursal.blockSignals(True)
+        self.cmb_sucursal.clear()
+        self.cmb_sucursal.addItem("— Selecciona sucursal —", None)
+        self.cmb_sucursal.setEnabled(False)
+
+        cliente_id = self.cmb_cliente.currentData()
+        if cliente_id:
+            try:
+                from models.catalogo import sucursal_repo
+                sucursales = sucursal_repo.get_by_cliente(cliente_id)
+                for suc in sucursales:
+                    self.cmb_sucursal.addItem(suc["nombre_sucursal"], suc["id"])
+                self.cmb_sucursal.setEnabled(bool(sucursales))
+            except Exception as exc:
+                logger.warning("Error al cargar sucursales en lote: %s", exc)
+
+        self.cmb_sucursal.blockSignals(False)
+        self._on_params_changed()
+
+    def _load_sucursal_equipos(self, sucursal_id: int) -> list[dict]:
+        """Carga los instrumentos registrados para la sucursal seleccionada."""
+        try:
+            from models.catalogo import equipo_sucursal_repo
+            return equipo_sucursal_repo.get_by_sucursal(sucursal_id)
+        except Exception as exc:
+            logger.warning("Error cargando equipos por sucursal: %s", exc)
+            return []
+
+    def _on_params_changed(self) -> None:
+        """Actualiza el paso 4 y habilita el botón ejecutar si todo está completo."""
+        if not (self._modalidad and self._tipo_doc):
+            return
+
+        # Visibilidad del bloque de calibración según tipo de servicio seleccionado
+        if hasattr(self, "_frame_calibracion"):
+            _ts_txt = self.cmb_tipo_servicio.currentText().lower() if hasattr(self, "cmb_tipo_servicio") else ""
+            _tiene_calib = "calibrac" in _ts_txt or "calibraci" in _ts_txt
+            _es_os = self._tipo_doc == "OS"
+            self._frame_calibracion.setVisible(_es_os and _tiene_calib)
+
+        cliente_idx = self.cmb_cliente.currentIndex()
+        tecnico_idx = self.cmb_tecnico.currentIndex()
+        sucursal_idx = self.cmb_sucursal.currentIndex()
+        cantidad    = self.spn_cantidad.value()
+        fecha       = self.dte_fecha.date().toPyDate()
+
+        cliente  = self.cmb_cliente.currentData() or self.cmb_cliente.currentText()
+        sucursal = self.cmb_sucursal.currentText() if sucursal_idx > 0 else ""
+        tecnico  = self.cmb_tecnico.currentText() if tecnico_idx > 0 else None
+
+        # Si cambió la sucursal seleccionada válida, cargar su catálogo
+        sucursal_id = self.cmb_sucursal.currentData()
+        if sucursal_id and isinstance(sucursal_id, int):
+            self._current_catalog = self._load_sucursal_equipos(sucursal_id)
+        else:
+            self._current_catalog = []
+
+        # Actualizar el catálogo de instrumentos en las tarjetas existentes
+        for card in self._equipo_cards:
+            card.set_instrument_catalog(self._current_catalog)
+
+        # Habilitar paso 4 si hay cliente y sucursal
+        params_ok = bool(cliente and cliente != "— Selecciona un cliente —" and sucursal_id)
+        if params_ok:
+            self._enable_card(self._card_step4)
+            self._update_step4(cliente, tecnico, cantidad, fecha)
+            self.btn_ejecutar.setEnabled(True)
+        else:
+            self.btn_ejecutar.setEnabled(False)
+
+    def _update_step4(self, cliente: str, tecnico: Optional[str],
+                      cantidad: int, fecha: date) -> None:
+        """Refresca el resumen del paso 4."""
+        tipo_label = {
+            "OS":  "Orden de Servicio",
+            "RMA": "Remisión de Material",
+            "RE":  "Revisión de Báscula",
+            "LP":  "Levantamiento de Proyecto",
+            "LV":  "Levantamiento Metrológico y Logística de Pesas",
+        }.get(self._tipo_doc, self._tipo_doc)
+        modal_label = "📱 Digital (Tablet)" if self._modalidad == "DIGITAL" else "🖨️ Físico (Calca)"
+        tec_txt = tecnico or "Sin técnico específico"
+
+        # Folios reales: consultar el próximo consecutivo sin incrementarlo
+        year = str(fecha.year)[2:]
+        start_num = self._peek_next_consecutivo(self._tipo_doc, fecha.year)
+        if start_num is not None:
+            folios_preview = [
+                f"{self._tipo_doc}-{year}-{start_num + i}"
+                for i in range(min(cantidad, 5))
+            ]
+        else:
+            folios_preview = [f"{self._tipo_doc}-{year}-???" for _ in range(min(cantidad, 5))]
+        sufijo = f"  + {cantidad - 5} más" if cantidad > 5 else ""
+
+        self._lbl_resumen.setText(
+            f"<b>Modalidad:</b> {modal_label}<br>"
+            f"<b>Documento:</b> {tipo_label} ({self._tipo_doc})<br>"
+            f"<b>Cliente:</b> {cliente}<br>"
+            f"<b>Técnico:</b> {tec_txt}<br>"
+            f"<b>Cantidad:</b> {cantidad} formato{'s' if cantidad > 1 else ''}<br>"
+            f"<b>Fecha:</b> {fecha.strftime('%d / %m / %Y')}"
+        )
+
+        self._lbl_folios.setText(
+            f"Folios a reservar: {', '.join(folios_preview)}{sufijo}"
+        )
+
+        if self._modalidad == "DIGITAL":
+            self._lbl_modo_badge.setText(
+                f"<span style='background:rgba(0,122,255,0.10);color:#007AFF;"
+                f"border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700;'>"
+                f"📱 Se crearán en estado PENDIENTE DIGITAL para sincronizar con la tablet de {tec_txt}"
+                f"</span>"
+            )
+        else:
+            self._lbl_modo_badge.setText(
+                f"<span style='background:rgba(230,57,70,0.10);color:#E63946;"
+                f"border-radius:5px;padding:3px 10px;font-size:11px;font-weight:700;'>"
+                f"🖨️ Se generará PDF para impresión en papel calca duplicado"
+                f"</span>"
+            )
+
+    def _on_cambiar_consecutivo(self) -> None:
+        """Permite al ADMIN ajustar el consecutivo desde el paso 4 (sin necesidad de ir a Configuracion)."""
+        from PyQt6.QtWidgets import QInputDialog, QMessageBox
+        anio      = datetime.date.today().year
+        anio_corto = str(anio)[2:]
+        tipo      = self._tipo_doc
+
+        # Leer el consecutivo almacenado actual (el que ya fue reservado)
+        siguiente = self._peek_next_consecutivo(tipo, anio)
+        almacenado = (siguiente - 1) if (siguiente is not None) else 0
+
+        nuevo, ok = QInputDialog.getInt(
+            self,
+            f"Cambiar Consecutivo — {tipo}",
+            f"Ingresa el ÚLTIMO número ya reservado para {tipo}-{anio_corto}-X.\n"
+            f"El próximo folio generado será el número siguiente.\n\n"
+            f"Consecutivo actual almacenado: {almacenado}",
+            almacenado,    # valor por defecto
+            0, 99999, 1
+        )
+        if not ok:
+            return
+
+        # ── Persistir en BD ────────────────────────────────────────────────────
+        guardado = False
+        try:
+            if _HAS_DB and _db_pool:
+                conn = _db_pool.get_connection()
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO control_folios
+                                   (tipo_folio, anio, ultimo_consecutivo, updated_at)
+                            VALUES (%s, %s, %s, NOW())
+                            ON CONFLICT (tipo_folio, anio)
+                            DO UPDATE SET ultimo_consecutivo = EXCLUDED.ultimo_consecutivo,
+                                          updated_at = NOW()
+                            """,
+                            (tipo, anio, nuevo)
+                        )
+                    conn.commit()
+                    guardado = True
+                finally:
+                    _db_pool.release_connection(conn)
+        except Exception as exc:
+            logger.warning("No se pudo actualizar consecutivo desde step-4: %s", exc)
+            QMessageBox.warning(
+                self,
+                "Error al guardar",
+                f"No se pudo guardar el consecutivo en la BD:\n{exc}\n\n"
+                f"Verifica la conexión y vuelve a intentarlo."
+            )
+
+        # ── Refrescar vista inmediatamente ─────────────────────────────────────
+        if guardado:
+            # Mostrar el próximo folio en la etiqueta inmediatamente
+            year = anio_corto
+            prox = nuevo + 1
+            cantidad = self.spn_cantidad.value() if hasattr(self, "spn_cantidad") else 1
+            preview = [f"{tipo}-{year}-{prox + i}" for i in range(min(cantidad, 5))]
+            sufijo = f"  + {cantidad - 5} más" if cantidad > 5 else ""
+            if hasattr(self, "_lbl_folios"):
+                self._lbl_folios.setText(f"Folios a reservar: {', '.join(preview)}{sufijo}")
+
+        # Refresco completo del paso 4 (actualiza también desde BD)
+        self._on_params_changed()
+
+
+    def _peek_next_consecutivo(self, tipo_doc: str, anio: int):
+        """Consulta el siguiente número de consecutivo SIN incrementarlo.
+        Usa las variables de módulo _db_pool / _HAS_DB (ya importadas al inicio).
+        Retorna un entero o None si no hay BD disponible."""
+        try:
+            if not (_HAS_DB and _db_pool):
+                return None
+            conn = _db_pool.get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        SELECT COALESCE(
+                            (SELECT ultimo_consecutivo + 1
+                             FROM   control_folios
+                             WHERE  tipo_folio = %s
+                               AND  anio = %s),
+                            1
+                        ) AS siguiente
+                        """,
+                        (tipo_doc, anio),
+                    )
+                    row = cur.fetchone()
+                    return int(row[0]) if row else None
+            finally:
+                _db_pool.release_connection(conn)
+        except Exception:
+            return None
+
+    def _update_title(self) -> None:
+        tipo_str = {"DIGITAL": "Digital — Tablet", "FISICO": "Físico — Impresión Calca"}.get(
+            self._modalidad, ""
+        )
+        self._lbl_title.setText(
+            f"{'📱' if self._modalidad == 'DIGITAL' else '🖨️'}  "
+            f"Asistente de Generación — {tipo_str}"
+        )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # EJECUTAR
+    # ══════════════════════════════════════════════════════════════════════════
+    def _validate_catalogs(self) -> bool:
+        """
+        Verifica que haya al menos un cliente y un técnico registrados
+        en los QComboBox antes de permitir la generación de un formato.
+
+        Retorna True si todo está OK para continuar.
+        Retorna False y muestra QMessageBox si falta algún catálogo.
+        """
+        sin_clientes = self.cmb_cliente.count() <= 1   # solo el placeholder
+        sin_tecnicos = self.cmb_tecnico.count() <= 1   # solo el placeholder
+
+        # Validar cliente seleccionado
+        cliente_data = self.cmb_cliente.currentData()
+        sin_seleccion_cliente = (cliente_data is None)
+
+        if sin_clientes:
+            QMessageBox.information(
+                self,
+                "⚠️  Sin clientes registrados",
+                "No hay clientes / razones sociales registradas en el sistema.\n\n"
+                "Por favor, ve al módulo ‘Catálogos’ y da de alta al menos "
+                "un cliente antes de generar un formato.",
+            )
+            return False
+
+        if sin_tecnicos:
+            QMessageBox.information(
+                self,
+                "⚠️  Sin técnicos registrados",
+                "No hay técnicos registrados en el sistema.\n\n"
+                "Por favor, ve al módulo ‘Catálogos’ y da de alta al menos "
+                "un técnico antes de generar un formato.",
+            )
+            return False
+
+        if sin_seleccion_cliente:
+            QMessageBox.warning(
+                self,
+                "Cliente requerido",
+                "Debes seleccionar un Cliente / Razón Social antes de continuar.",
+            )
+            return False
+
+        return True
+
+    def _ejecutar(self) -> None:
+        """Valida catálogos y procesa según modalidad elegida."""
+        if not self._validate_catalogs():
+            return
+            
+        # Guardar historial de equipos del cliente seleccionado
+        datos = self._collect_datos()
+        self._save_cliente_instrumentos(datos)
+        
+        if self._modalidad == "FISICO":
+            self._generar_pdf()
+        else:
+            self._asignar_tablet()
+
+    def _generar_pdf(self) -> None:
+        """Reserva folios y genera un único PDF con todos los folios del lote.
+        En modalidad FÍSICO: cada folio produce 2 páginas idénticas (papel calca)."""
+        self._set_loading(True)
+        try:
+            datos    = self._collect_datos()
+            registros = self._reservar_folios(datos)
+            self._set_loading(False)
+
+            if registros:
+                try:
+                    pdf_path = self._generar_pdf_lote(registros, datos)
+                    folios_str = ", ".join(registros)
+                    paginas = len(registros) * 2  # Original + Calca por folio
+                    QMessageBox.information(
+                        self, "✅ PDF Generado",
+                        f"Se generaron {len(registros)} folio(s) en un solo PDF:\n"
+                        f"{folios_str}\n\n"
+                        f"Total de páginas: {paginas} "
+                        f"(Original + Copia Calca por folio)\n\nAbriendo vista previa…"
+                    )
+                    self._abrir_pdf_preview(pdf_path)
+                except Exception as exc:
+                    logger.exception("Error generando PDF lote: %s", exc)
+                    QMessageBox.critical(
+                        self, "Error en PDF",
+                        f"No se pudo generar el PDF del lote:\n\n{exc}"
+                    )
+        except Exception as exc:
+            self._set_loading(False)
+            logger.exception("Error al generar PDF: %s", exc)
+            QMessageBox.critical(self, "Error", f"No se pudo generar el PDF:\n\n{exc}")
+
+
+    def _asignar_tablet(self) -> None:
+        """Reserva folios con estado ASIGNADA y marca para sync con tablet."""
+        self._set_loading(True)
+        try:
+            datos = self._collect_datos()
+            registros = self._reservar_folios(datos, estado="ASIGNADA")
+            self._set_loading(False)
+
+            if registros:
+                tec = datos.get("tecnico_nombre", "el técnico asignado")
+                info = "\n".join(f"  • {r}" for r in registros[:10])
+                QMessageBox.information(
+                    self, "📱 Asignado a Tablet",
+                    f"Se crearon {len(registros)} formato(s) en estado PENDIENTE DIGITAL:\n\n"
+                    f"{info}\n\n"
+                    f"Estarán disponibles para {tec}\n"
+                    f"en la próxima sincronización con la tablet."
+                )
+                # Guardar el primer folio del lote para abrir el formulario digital
+                self._ultimo_folio_digital = registros[0]
+                self._ultimo_os_data_digital = {
+                    "cliente":         datos.get("cliente", ""),
+                    "tecnico_nombre":  datos.get("tecnico_nombre", ""),
+                    "fecha":           str(datos.get("fecha", "")),
+                    "observaciones_tecnico": datos.get("observaciones_tecnico", ""),
+                    "id_cliente":      datos.get("id_cliente", 0),  # para autocomplete equipos
+                }
+                # Mostrar botón de formulario digital
+                self.btn_llenar_digital.setVisible(True)
+        except Exception as exc:
+            self._set_loading(False)
+            logger.exception("Error al asignar a tablet: %s", exc)
+            QMessageBox.critical(self, "Error", f"No se pudo asignar a tablet:\n\n{exc}")
+
+    def _abrir_formulario_digital(self) -> None:
+        """Abre el Formulario Digital para el último folio asignado a tablet."""
+        folio = self._ultimo_folio_digital
+        if not folio:
+            QMessageBox.information(
+                self, "Sin folio asignado",
+                "Primero debes completar el paso 'Asignar y Sincronizar a Tablet' "
+                "para generar un folio y luego llenar el formulario digital."
+            )
+            return
+
+        try:
+            from ui.dialogs.digital_service_dialog import open_digital_form
+            os_data    = self._ultimo_os_data_digital or {}
+            id_cliente = os_data.get("id_cliente", 0)
+            completado = open_digital_form(
+                folio_os   = folio,
+                os_data    = os_data,
+                os_id      = 0,
+                id_cliente = id_cliente,
+                parent     = self,
+            )
+            if completado:
+                logger.info("Formulario digital completado para folio: %s", folio)
+                self.btn_llenar_digital.setVisible(False)
+                self._ultimo_folio_digital = ""
+        except Exception as exc:
+            logger.exception("Error abriendo formulario digital: %s", exc)
+            QMessageBox.critical(self, "Error", f"No se pudo abrir el formulario digital:\n\n{exc}")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # ACTUALIZAR TARJETAS DE EQUIPO
+    # ══════════════════════════════════════════════════════════════════════════
+    def _update_equipos_section(self, n: int) -> None:
+        """Agrega o elimina EquipoCard para que haya exactamente n tarjetas."""
+        # Eliminar tarjetas sobrantes
+        while len(self._equipo_cards) > n:
+            card = self._equipo_cards.pop()
+            self._equipos_container.removeWidget(card)
+            card.deleteLater()
+
+        # Agregar tarjetas faltantes
+        while len(self._equipo_cards) < n:
+            idx  = len(self._equipo_cards) + 1
+            card = EquipoCard(idx)
+            card.set_instrument_catalog(self._current_catalog)
+            self._equipo_cards.append(card)
+            self._equipos_container.addWidget(card)
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # HELPERS
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def _get_direccion_cliente(self, id_cliente) -> str:
+        """
+        Consulta la dirección del cliente en cat_clientes dado su ID.
+        Retorna string vacío si no hay BD o el cliente no existe.
+        """
+        if not id_cliente:
+            return ""
+        try:
+            if not _HAS_DB or not _db_pool:
+                return ""
+            conn = _db_pool.get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COALESCE(direccion, '') FROM cat_clientes WHERE id = %s",
+                        (id_cliente,)
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+            finally:
+                _db_pool.release_connection(conn)
+            return str(row[0]) if row else ""
+        except Exception as exc:
+            logger.warning("No se pudo cargar dirección del cliente id=%s: %s", id_cliente, exc)
+            return ""
+
+    def _get_direccion_sucursal(self, sucursal_id) -> str:
+        """
+        Consulta la dirección de la sucursal en cliente_sucursales dado su ID.
+        Retorna string vacío si no hay BD o la sucursal no existe.
+        """
+        if not sucursal_id:
+            return ""
+        try:
+            if not _HAS_DB or not _db_pool:
+                return ""
+            conn = _db_pool.get_connection()
+            try:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT COALESCE(direccion, '') FROM cliente_sucursales WHERE id = %s",
+                        (sucursal_id,)
+                    )
+                    row = cur.fetchone()
+                conn.commit()
+            finally:
+                _db_pool.release_connection(conn)
+            return str(row[0]) if row else ""
+        except Exception as exc:
+            logger.warning("No se pudo cargar dirección de sucursal id=%s: %s", sucursal_id, exc)
+            return ""
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # COLLECT DATOS
+    # ══════════════════════════════════════════════════════════════════════════
+    def _save_cliente_instrumentos(self, datos: dict) -> None:
+        """Guarda o actualiza los instrumentos del cliente en la BD."""
+        cliente_id = datos.get("id_cliente")
+        if not cliente_id:
+            return
+            
+        equipos = datos.get("equipos", [])
+        
+        try:
+            from database.connection import DatabasePool
+            pool = DatabasePool()
+            with pool.transaction() as conn:
+                with conn.cursor() as cur:
+                    for eq in equipos:
+                        # Si no hay ID Indicador ni Número de Serie, no se puede guardar como único
+                        if not eq.get("equipo_id") and not eq.get("equipo_ns"):
+                            continue
+                            
+                        query = """
+                            INSERT INTO cliente_instrumentos 
+                            (cliente_id, id_indicador, marca, modelo, numero_serie, capacidad_max, division_min, ubicacion)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (cliente_id, id_indicador, numero_serie) 
+                            DO UPDATE SET 
+                                marca = EXCLUDED.marca,
+                                modelo = EXCLUDED.modelo,
+                                capacidad_max = EXCLUDED.capacidad_max,
+                                division_min = EXCLUDED.division_min,
+                                ubicacion = EXCLUDED.ubicacion
+                        """
+                        cur.execute(query, (
+                            cliente_id,
+                            eq.get("equipo_id") or "",
+                            eq.get("equipo_marca"),
+                            eq.get("equipo_modelo"),
+                            eq.get("equipo_ns") or "",
+                            eq.get("equipo_alcance"),
+                            eq.get("equipo_division"),
+                            eq.get("equipo_ubicacion")
+                        ))
+        except Exception as exc:
+            logger.warning("Error guardando cliente_instrumentos: %s", exc)
+
+    def _collect_datos(self) -> dict:
+        """Recoge los datos del formulario en un dict (incluye equipos y id_cliente)."""
+        cliente_idx  = self.cmb_cliente.currentIndex()
+        id_cliente   = self.cmb_cliente.currentData()   if cliente_idx > 0 else None
+        cliente_nom  = self.cmb_cliente.currentText()   if cliente_idx > 0 else ""
+
+        tecnico_idx  = self.cmb_tecnico.currentIndex()
+        tecnico_id   = self.cmb_tecnico.currentData()   if tecnico_idx > 0 else None
+        tecnico_nom  = self.cmb_tecnico.currentText()   if tecnico_idx > 0 else "Sin asignar"
+
+        obs          = self.txt_observaciones.toPlainText().strip() or None
+        equipos      = [card.get_data() for card in self._equipo_cards]
+
+        ts_idx        = self.cmb_tipo_servicio.currentIndex()
+        id_tipo_serv  = self.cmb_tipo_servicio.currentData() if ts_idx > 0 else None
+        tipo_serv_nom = self.cmb_tipo_servicio.currentText() if ts_idx > 0 else ""
+
+        inst_idx      = self.cmb_tipo_instrumento.currentIndex()
+        id_tipo_inst  = self.cmb_tipo_instrumento.currentData() if inst_idx > 0 else None
+        tipo_inst_nom = self.cmb_tipo_instrumento.currentText() if inst_idx > 0 else ""
+        # Descartar placeholder del combo
+        if tipo_inst_nom and ("—" in tipo_inst_nom or "Selecciona" in tipo_inst_nom):
+            tipo_inst_nom = ""
+
+        # Puntos de Apoyo (campo opcional)
+        puntos_apoyo_val = ""
+        if hasattr(self, "cmb_puntos_apoyo"):
+            puntos_apoyo_val = self.cmb_puntos_apoyo.currentText().strip()
+
+        # Sucursal seleccionada (para inyectar dirección en PDF)
+        sucursal_idx_sel = self.cmb_sucursal.currentIndex()
+        sucursal_id_sel  = self.cmb_sucursal.currentData() if sucursal_idx_sel > 0 else None
+        sucursal_nom_sel = self.cmb_sucursal.currentText() if sucursal_idx_sel > 0 else ""
+        
+        tipo_servicio_mapped = tipo_serv_nom
+        if self._tipo_doc == "RE":
+            tipo_servicio_mapped = "Revisión"
+        elif self._tipo_doc == "RMA":
+            tipo_servicio_mapped = "Entrega Refacciones"
+        
+        aplica_exc    = self.cmb_aplica_exc.currentText() in ("SI", "SÍ")
+        filas_exc          = int(self.cmb_filas_exc.currentText()) if aplica_exc else None
+        puntos_exactitud   = int(self.cmb_puntos_exactitud.currentText()) if hasattr(self, "cmb_puntos_exactitud") else 5
+
+        # Geometria / tipo especial para excentricidad (OS)
+        geometria_plataforma = None
+        num_secciones_geo    = None
+        tipo_no_aplica_exc   = None
+        if aplica_exc and hasattr(self, "_combo_geometria_batch"):
+            _geo_txt = self._combo_geometria_batch.currentText()
+            if "Libre" in _geo_txt or _geo_txt.startswith("—"):
+                # Libre: sin geometria preseleccionada, croquis muestra las 3 casillas vacias
+                geometria_plataforma = None
+                num_secciones_geo = self._spin_secciones_batch.value() if hasattr(self, "_spin_secciones_batch") else 4
+            elif "Cuadrada" in _geo_txt or "Rectangular" in _geo_txt:
+                geometria_plataforma = "cuadrada"
+            elif "Circular" in _geo_txt:
+                geometria_plataforma = "circular"
+            else:
+                geometria_plataforma = "camionera"
+                num_secciones_geo = self._spin_secciones_batch.value() if hasattr(self, "_spin_secciones_batch") else 4
+        elif not aplica_exc and hasattr(self, "_combo_motivo_no_batch"):
+            _motivo_txt = self._combo_motivo_no_batch.currentText()
+            if "Tolva" in _motivo_txt or "Tanque" in _motivo_txt or "Silo" in _motivo_txt:
+                tipo_no_aplica_exc = "tolva"
+            elif "Grua" in _motivo_txt or "Gancho" in _motivo_txt:
+                tipo_no_aplica_exc = "grua"
+            else:
+                tipo_no_aplica_exc = "otro"
+
+        # Campos de Tipo de Estructura, Indicador y Celdas (solo para RE)
+        tipo_estructura       = None
+        instalacion_camionera = None
+        secciones_camionera   = None
+        ubicacion_indicador   = "MANUAL"
+        indicador_marca = indicador_modelo = indicador_serie = indicador_id_val = None
+        cap_maxima = div_minima = None
+        celdas_mixtas = None
+        celda_a_marca = celda_a_modelo = celda_a_capacidad = celda_a_cantidad = None
+        celda_b_marca = celda_b_modelo = celda_b_capacidad = celda_b_cantidad = None
+
+        if self._tipo_doc == "RE":
+            _raw = self.cmb_tipo_estructura.currentText()
+            tipo_estructura = {
+                "Camionera":      "CAMIONERA",
+                "Plataforma":     "PLATAFORMA",
+                "Tolva / Tanque": "TOLVA_TANQUE",
+            }.get(_raw, _raw.upper())
+            if tipo_estructura == "CAMIONERA":
+                instalacion_camionera = self.cmb_instalacion_camionera.currentText().upper()
+                secciones_camionera   = self.spn_secciones_camionera.value()
+            # Ubicación del indicador en el diagrama
+            _ub_txt = self.cmb_ubicacion_indicador.currentText() if hasattr(self, "cmb_ubicacion_indicador") else "Manual (Dibujo del Técnico)"
+            ubicacion_indicador = {
+                "Manual (Dibujo del Técnico)": "MANUAL",
+                "Derecha":           "DERECHA",
+                "Izquierda":         "IZQUIERDA",
+                "Centro / Superior": "CENTRO",
+            }.get(_ub_txt, "MANUAL")
+            # Indicador e instrumento
+            indicador_marca   = self.le_ind_marca.text().strip() or None
+            indicador_modelo  = self.le_ind_modelo.text().strip() or None
+            indicador_serie   = self.le_ind_serie.text().strip() or None
+            indicador_id_val  = self.le_ind_id.text().strip() or None
+            cap_maxima        = self.le_cap_maxima.text().strip() or None
+            div_minima        = self.le_div_minima.text().strip() or None
+            # Celdas de carga
+            celdas_mixtas     = self.cmb_celdas_homogeneas.currentIndex() == 1
+            celda_a_marca     = self.le_celda_a_marca.text().strip() or None
+            celda_a_modelo    = self.le_celda_a_modelo.text().strip() or None
+            celda_a_capacidad = self.le_celda_a_capacidad.text().strip() or None
+            celda_a_cantidad  = self.spn_celda_a_cantidad.value()
+            if celdas_mixtas:
+                celda_b_marca     = self.le_celda_b_marca.text().strip() or None
+                celda_b_modelo    = self.le_celda_b_modelo.text().strip() or None
+                celda_b_capacidad = self.le_celda_b_capacidad.text().strip() or None
+                celda_b_cantidad  = self.spn_celda_b_cantidad.value()
+
+        return {
+            "modalidad":             self._modalidad,
+            "tipo_doc":              self._tipo_doc,
+            "cliente":               cliente_nom,
+            "id_cliente":            id_cliente,
+            "id_tecnico":            tecnico_id,
+            "tecnico_nombre":        tecnico_nom,
+            "cantidad":              self.spn_cantidad.value(),
+            "fecha":                 self.dte_fecha.date().toPyDate(),
+            "observaciones_tecnico": obs,
+            "equipos":               equipos,
+            "id_tipo_servicio":      id_tipo_serv,
+            "tipo_servicio_nombre":  tipo_serv_nom,
+            "tipo_servicio_mapped":  tipo_servicio_mapped,
+            "id_tipo_instrumento":   id_tipo_inst,
+            "tipo_instrumento_nombre": tipo_inst_nom,
+            "tipo_instrumento":        tipo_inst_nom,
+            "puntos_apoyo":            puntos_apoyo_val,
+            "sucursal_id":             sucursal_id_sel,
+            "sucursal_nombre":         sucursal_nom_sel,
+            "aplica_excentricidad":  aplica_exc,
+            "filas_excentricidad":   filas_exc,
+            "filas_exactitud":       puntos_exactitud,
+            "geometria_plataforma":  geometria_plataforma,
+            "num_secciones":         num_secciones_geo,
+            "tipo_no_aplica_exc":    tipo_no_aplica_exc,
+            "tipo_estructura":            tipo_estructura,
+            "tipo_instalacion_camionera": instalacion_camionera,
+            "secciones_camionera":        secciones_camionera,
+            "ubicacion_indicador":        ubicacion_indicador,
+            "indicador_marca":    indicador_marca,
+            "indicador_modelo":   indicador_modelo,
+            "indicador_serie":    indicador_serie,
+            "indicador_id":       indicador_id_val,
+            "cap_maxima":         cap_maxima,
+            "div_minima":         div_minima,
+            "celdas_mixtas":      celdas_mixtas,
+            "celda_a_marca":      celda_a_marca,
+            "celda_a_modelo":     celda_a_modelo,
+            "celda_a_capacidad":  celda_a_capacidad,
+            "celda_a_cantidad":   celda_a_cantidad,
+            "celda_b_marca":      celda_b_marca,
+            "celda_b_modelo":     celda_b_modelo,
+            "celda_b_capacidad":  celda_b_capacidad,
+            "celda_b_cantidad":   celda_b_cantidad,
+            "items":              self._collect_rma_items(),
+            # ── Datos de Calibración (Inicial J/I/A + Número CCA) ─────────────
+            "inicial_calibrador":      self._get_inicial_calibrador(),
+            "tipo_calibracion_inicial": self._get_inicial_calibrador(),
+            "numero_cca":              self.le_numero_cca.text().strip() if hasattr(self, "le_numero_cca") else "",
+            "numero_certificado":      self.le_numero_cca.text().strip() if hasattr(self, "le_numero_cca") else "",
+            # ── Datos específicos LV ───────────────────────────────────────────
+            "lv_basculas":        self._lv_collect_basculas() if self._tipo_doc == "LV" else [],
+            "lv_pesas":           (
+                self.txt_lv_pesas.toPlainText().strip()
+                if hasattr(self, "txt_lv_pesas") and self._tipo_doc == "LV" else ""
+            ),
+            "lv_maniobra":        (
+                self.txt_lv_maniobra.toPlainText().strip()
+                if hasattr(self, "txt_lv_maniobra") and self._tipo_doc == "LV" else ""
+            ),
+        }
+
+    def _reservar_folios(self, datos: dict, estado: str = "PROCESO") -> list[str]:
+        """
+        Reserva folios consecutivos y crea los registros en BD.
+
+        Usa la función PostgreSQL generate_folio() para garantizar atomicidad
+        y consecutividad incluso con múltiples usuarios simultáneos.
+        El consecutivo (entero) se persiste junto al texto completo del folio.
+
+        Estado para modal digital: 'ASIGNADA' (válido en chk_os_estado).
+        En modo demo retorna folios ficticios para previsualización.
+        """
+        tipo   = datos["tipo_doc"]
+        anio   = datos["fecha"].year
+        cant   = datos["cantidad"]
+        anio2  = str(anio)[2:]   # "26" para 2026
+        folios: list[str] = []
+
+        if not (_HAS_DB and _db_pool):
+            # Modo demo: folios ficticios sin tocar la BD
+            base = {"OS": 40, "RMA": 10, "RE": 5}.get(tipo, 1)
+            for i in range(cant):
+                folios.append(f"{tipo}-{anio2}-{base + i:04d}  [DEMO]")
+            return folios
+
+        # Normalizar estado: 'PENDIENTE_DIGITAL' no existe en chk_os_estado;
+        # el estado correcto para folios asignados a tablet es 'ASIGNADA'.
+        if estado == "PENDIENTE_DIGITAL":
+            estado = "ASIGNADA"
+
+        import uuid
+        id_lote = str(uuid.uuid4()) if cant > 1 else None
+
+        try:
+            conn = _db_pool.get_connection()
+            try:
+                with conn.cursor() as cur:
+                    for _ in range(cant):
+                        # 1. Generar folio atómico en BD (incrementa control_folios)
+                        cur.execute(
+                            "SELECT generate_folio(%s::varchar, %s::smallint) AS folio",
+                            (tipo, anio),
+                        )
+                        row = cur.fetchone()
+                        folio = row[0] if row else None
+                        if not folio:
+                            raise RuntimeError(
+                                f"generate_folio() no retornó valor para tipo={tipo}, anio={anio}"
+                            )
+
+                        # 2. Extraer el número entero consecutivo del texto del folio
+                        #    Formato: OS-26-43  →  parts[2] = '43'
+                        parts  = folio.split("-")
+                        consec = int(parts[2]) if len(parts) == 3 else 0
+
+                        # 3. Insertar registro en ordenes_servicio
+                        #    id_tipo_servicio se deja NULL (se asigna en formulario digital)
+                        cur.execute(
+                            """
+                            INSERT INTO ordenes_servicio (
+                                folio_os,
+                                consecutivo,
+                                tipo_documento,
+                                modalidad,
+                                fecha,
+                                id_tipo_servicio,
+                                tipo_servicio,
+                                id_cliente,
+                                id_tecnico,
+                                observaciones,
+                                estado,
+                                id_lote,
+                                id_tipo_instrumento,
+                                aplica_excentricidad,
+                                filas_excentricidad,
+                                tipo_estructura,
+                                secciones_camionera,
+                                tipo_instalacion_camionera
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (folio_os) DO NOTHING
+                            RETURNING folio_os
+                            """,
+                            (
+                                folio,
+                                consec,
+                                tipo,
+                                datos.get("modalidad", "FISICO"),
+                                datos["fecha"],
+                                datos.get("id_tipo_servicio"),
+                                datos.get("tipo_servicio_mapped"),
+                                datos.get("id_cliente"),
+                                datos.get("id_tecnico"),
+                                datos.get("observaciones_tecnico"),
+                                estado,
+                                id_lote,
+                                datos.get("id_tipo_instrumento"),
+                                datos.get("aplica_excentricidad"),
+                                datos.get("filas_excentricidad"),
+                                datos.get("tipo_estructura"),
+                                datos.get("secciones_camionera"),
+                                datos.get("tipo_instalacion_camionera"),
+                            ),
+                        )
+                        folios.append(folio)
+
+                conn.commit()
+            finally:
+                _db_pool.release_connection(conn)
+        except Exception as exc:
+            logger.error("Error reservando folios: %s", exc)
+            raise
+
+        return folios
+
+
+
+    def _generar_pdf_lote(self, folios: list[str], datos: dict) -> str:
+        """
+        Genera un único PDF que contiene todos los folios del lote.
+        En modalidad FÍSICO: cada folio aparece 2 veces seguidas (papel calca).
+        Las 2 páginas son idénticas, sin marca de agua ni etiqueta.
+        Retorna la ruta del PDF generado.
+        """
+        import pathlib
+
+        output_dir = pathlib.Path(r"C:\PesaServidorCentral\PDF_OS")
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError):
+            output_dir = pathlib.Path.home() / "PesaServidorLocal" / "PDF_OS"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Nombre del archivo: lote con el primer y último folio
+        nombre = folios[0] if len(folios) == 1 else f"{folios[0]}_a_{folios[-1]}"
+        
+        pdf_path_obj = output_dir / f"{nombre}.pdf"
+        counter = 1
+        while pdf_path_obj.exists():
+            try:
+                with open(pdf_path_obj, "a"):
+                    pass
+                break
+            except (PermissionError, OSError):
+                pdf_path_obj = output_dir / f"{nombre}_{counter}.pdf"
+                counter += 1
+        pdf_path = str(pdf_path_obj)
+
+        equipos = datos.get("equipos", [])
+
+        # ← Obtener la dirección del cliente desde BD
+        direccion_cliente = self._get_direccion_cliente(datos.get("id_cliente"))
+
+        tipo_doc = datos.get("tipo_doc", "OS")
+
+        # ── RE: Ficha Técnica Diagnóstica (RePdfGenerator) ────────────────────
+        if tipo_doc == "RE":
+            from services.re_pdf_generator import re_pdf_generator as _re_gen
+            import pathlib, shutil
+            # Obtener dirección de sucursal (preferida) o cliente (fallback)
+            sucursal_dir_re = self._get_direccion_sucursal(datos.get("sucursal_id")) or direccion_cliente
+            tmp_paths = []
+            for i, folio in enumerate(folios):
+                equipo_data = equipos[i] if i < len(equipos) else {}
+                re_data = {
+                    **datos,
+                    "folio_re":            folio,
+                    "folio_os":            folio,
+                    "cliente":             datos.get("cliente", "—"),
+                    "direccion":           sucursal_dir_re,
+                    "sucursal_direccion":  sucursal_dir_re,
+                    "direccion_planta":    sucursal_dir_re,
+                    "cliente_direccion":   sucursal_dir_re,
+                    "sucursal":            sucursal_dir_re,
+                    "tecnico_nombre":      datos.get("tecnico_nombre", ""),
+                    **equipo_data,
+                }
+                tmp = str(output_dir / f"{folio}_tmp.pdf")
+                _re_gen.generate(re_data, output_path=tmp)
+                tmp_paths.append(tmp)
+            if len(tmp_paths) == 1:
+                shutil.move(tmp_paths[0], pdf_path)
+            else:
+                try:
+                    from pypdf import PdfWriter, PdfReader
+                    writer = PdfWriter()
+                    for tmp in tmp_paths:
+                        for page in PdfReader(tmp).pages:
+                            writer.add_page(page)
+                    with open(pdf_path, "wb") as fh:
+                        writer.write(fh)
+                except ImportError:
+                    shutil.copy(tmp_paths[0], pdf_path)
+                finally:
+                    import os as _os
+                    for tmp in tmp_paths:
+                        try: _os.remove(tmp)
+                        except: pass
+            logger.info("PDF RE generado: %s (%d folios)", pdf_path, len(folios))
+            return pdf_path
+
+        # ── RMA: Remision de Material (lote calca) ────────────────────────────
+        if tipo_doc == "RMA":
+            from services.rma_pdf_generator import rma_pdf_generator as _rma_gen
+            import shutil as _shutil
+            # Obtener dirección de sucursal (preferida) o cliente (fallback)
+            sucursal_dir_rma = self._get_direccion_sucursal(datos.get("sucursal_id")) or direccion_cliente
+            tmp_paths_rma = []
+            is_calca_rma  = self._modalidad == "FISICO"
+            for i, folio in enumerate(folios):
+                rma_data = {
+                    **datos,
+                    "folio_rma":           folio,
+                    "cliente":             datos.get("cliente", "—"),
+                    "direccion":           sucursal_dir_rma,
+                    "sucursal_direccion":  sucursal_dir_rma,
+                    "direccion_planta":    sucursal_dir_rma,
+                    "cliente_direccion":   sucursal_dir_rma,
+                    "sucursal":            sucursal_dir_rma,
+                    "tecnico_nombre":      datos.get("tecnico_nombre", ""),
+                    "items":               datos.get("items", []),
+                    "observaciones":       datos.get("observaciones_tecnico", ""),
+                    "fecha":               datos.get("fecha"),
+                }
+                tmp = str(output_dir / f"{folio}_tmp.pdf")
+                _rma_gen.generate(rma_data, output_path=tmp, calca=is_calca_rma, force=True)
+                tmp_paths_rma.append(tmp)
+            if len(tmp_paths_rma) == 1:
+                _shutil.move(tmp_paths_rma[0], pdf_path)
+            else:
+                try:
+                    from pypdf import PdfWriter, PdfReader
+                    writer = PdfWriter()
+                    for tmp in tmp_paths_rma:
+                        for page in PdfReader(tmp).pages:
+                            writer.add_page(page)
+                    with open(pdf_path, "wb") as fh:
+                        writer.write(fh)
+                except ImportError:
+                    _shutil.copy(tmp_paths_rma[0], pdf_path)
+                finally:
+                    import os as _os
+                    for tmp in tmp_paths_rma:
+                        try: _os.remove(tmp)
+                        except: pass
+            logger.info("PDF RMA lote generado: %s (%d folios)", pdf_path, len(folios))
+            return pdf_path
+
+        # ── LP: Levantamiento de Proyecto (lote) ──────────────────────────────────
+        # NUNCA lleva página duplicada calca, se genera una sola vez.
+        if tipo_doc == "LP":
+            from services.lp_pdf_generator import LPPdfGenerator
+            import pathlib, shutil
+            # Obtener dirección de sucursal (preferida) o cliente (fallback)
+            sucursal_dir_lp = self._get_direccion_sucursal(datos.get("sucursal_id")) or direccion_cliente
+            tmp_paths = []
+            for i, folio in enumerate(folios):
+                equipo_data = equipos[i] if i < len(equipos) else {}
+                lp_data = {
+                    **datos,
+                    "folio_os":              folio,
+                    "cliente":               datos.get("cliente", "—"),
+                    "direccion":             sucursal_dir_lp,
+                    "sucursal_direccion":    sucursal_dir_lp,
+                    "direccion_planta":      sucursal_dir_lp,
+                    "cliente_direccion":     sucursal_dir_lp,
+                    "sucursal":              sucursal_dir_lp,
+                    "fecha":                 datos.get("fecha"),
+                    "id_tipo_servicio":      datos.get("id_tipo_servicio"),
+                    "tipo_servicio_nombre":  datos.get("tipo_servicio_nombre", ""),
+                    "observaciones":         datos.get("observaciones_tecnico", ""),
+                    **equipo_data,
+                }
+                tmp = str(output_dir / f"{folio}_tmp.pdf")
+                gen = LPPdfGenerator()
+                gen.generate(lp_data, output_path=tmp, force=True)
+                tmp_paths.append(tmp)
+            if len(tmp_paths) == 1:
+                shutil.move(tmp_paths[0], pdf_path)
+            else:
+                try:
+                    from pypdf import PdfWriter, PdfReader
+                    writer = PdfWriter()
+                    for tmp in tmp_paths:
+                        for page in PdfReader(tmp).pages:
+                            writer.add_page(page)
+                    with open(pdf_path, "wb") as fh:
+                        writer.write(fh)
+                except ImportError:
+                    shutil.copy(tmp_paths[0], pdf_path)
+                finally:
+                    import os as _os
+                    for tmp in tmp_paths:
+                        try: _os.remove(tmp)
+                        except: pass
+            logger.info("PDF LP lote generado: %s (%d folios)", pdf_path, len(folios))
+            return pdf_path
+
+        # ── LV: Levantamiento Metrológico y Logística de Pesas ────────────────
+        if tipo_doc == "LV":
+            from services.lv_pdf_generator import LvPdfGenerator
+            import shutil as _shutil_lv
+            # Obtener dirección de sucursal (preferida) o cliente (fallback)
+            sucursal_dir_lv = self._get_direccion_sucursal(datos.get("sucursal_id")) or direccion_cliente
+            tmp_paths_lv = []
+            for folio in folios:
+                lv_data = {
+                    **datos,
+                    "folio_os":             folio,
+                    "cliente":              datos.get("cliente", "—"),
+                    "direccion":            sucursal_dir_lv,
+                    "sucursal_direccion":   sucursal_dir_lv,
+                    "direccion_planta":     sucursal_dir_lv,
+                    "cliente_direccion":    sucursal_dir_lv,
+                    "sucursal":             sucursal_dir_lv,
+                    "tecnico_nombre":       datos.get("tecnico_nombre", ""),
+                    "fecha":                datos.get("fecha"),
+                    "levantamiento_metrologico": {
+                        "basculas":              datos.get("lv_basculas", []),
+                        "pesas_descripcion":     datos.get("lv_pesas", ""),
+                        "acomodo_maniobra":      datos.get("lv_maniobra", ""),
+                        "observaciones_generales": datos.get("observaciones_tecnico", ""),
+                    },
+                }
+                tmp = str(output_dir / f"{folio}_tmp.pdf")
+                gen = LvPdfGenerator()
+                gen.generate(lv_data, output_path=tmp, force=True)
+                tmp_paths_lv.append(tmp)
+            if len(tmp_paths_lv) == 1:
+                _shutil_lv.move(tmp_paths_lv[0], pdf_path)
+            else:
+                try:
+                    from pypdf import PdfWriter, PdfReader
+                    writer = PdfWriter()
+                    for tmp in tmp_paths_lv:
+                        for page in PdfReader(tmp).pages:
+                            writer.add_page(page)
+                    with open(pdf_path, "wb") as fh:
+                        writer.write(fh)
+                except ImportError:
+                    _shutil_lv.copy(tmp_paths_lv[0], pdf_path)
+                finally:
+                    import os as _os
+                    for tmp in tmp_paths_lv:
+                        try: _os.remove(tmp)
+                        except: pass
+            logger.info("PDF LV lote generado: %s (%d folios)", pdf_path, len(folios))
+            return pdf_path
+
+        # ── OS: plantilla calca estandar ──────────────────────────────────────────────
+        from services.os_pdf_generator import OsPdfGenerator
+        gen = OsPdfGenerator()
+
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas as rl_canvas_mod
+        except ImportError:
+            raise RuntimeError("ReportLab no instalado. Ejecutar: pip install reportlab")
+
+        c = rl_canvas_mod.Canvas(pdf_path, pagesize=letter)
+
+        # Obtener la dirección de la sucursal (más precisa que la del cliente)
+        sucursal_dir = self._get_direccion_sucursal(datos.get("sucursal_id"))
+        tipo_inst    = datos.get("tipo_instrumento") or datos.get("tipo_instrumento_nombre") or ""
+        puntos_apoyo = datos.get("puntos_apoyo") or ""
+
+        for i, folio in enumerate(folios):
+            equipo_data = equipos[i] if i < len(equipos) else {}
+
+            os_data = {
+                # equipo_data primero — los campos explicitos lo sobreescriben
+                **(equipo_data or {}),
+                "folio_os":              folio,
+                "cliente":               datos.get("cliente", "—"),
+                "direccion":             sucursal_dir or direccion_cliente,
+                "sucursal_direccion":    sucursal_dir or direccion_cliente,
+                "direccion_cliente":     direccion_cliente,
+                "fecha":                 datos.get("fecha"),
+                "id_tipo_servicio":      datos.get("id_tipo_servicio"),
+                "tipo_servicio_nombre":  datos.get("tipo_servicio_nombre", ""),
+                "observaciones":         datos.get("observaciones_tecnico", ""),
+                "aplica_excentricidad":  datos.get("aplica_excentricidad", True),
+                "filas_excentricidad":   datos.get("filas_excentricidad", 5),
+                "filas_exactitud":       datos.get("filas_exactitud", 5),
+                "tipo_instrumento":      tipo_inst,
+                "puntos_apoyo":          puntos_apoyo,
+                # Campos de Calibracion (Inicial J/I/A + CCA) - TODAS las variantes de clave
+                "inicial_calibrador":       datos.get("inicial_calibrador", ""),
+                "tipo_calibracion_inicial": datos.get("tipo_calibracion_inicial", ""),
+                "inicial":                  datos.get("inicial_calibrador", ""),
+                "numero_cca":              datos.get("numero_cca", ""),
+                "numero_certificado":      datos.get("numero_certificado", ""),
+                "cca":                     datos.get("numero_cca", ""),
+                "holograma_anterior":      datos.get("holograma_anterior", ""),
+                "holograma_actualizado":   datos.get("holograma_actualizado", ""),
+                # Geometria
+                "geometria_plataforma":    datos.get("geometria_plataforma"),
+                "num_secciones":           datos.get("num_secciones"),
+                "tipo_no_aplica_exc":      datos.get("tipo_no_aplica_exc"),
+            }
+            print(
+                f"[DEBUG LOTE] folio={folio} "
+                f"inicial={os_data.get('inicial_calibrador')!r} "
+                f"cca={os_data.get('numero_cca')!r} "
+                f"geo={os_data.get('geometria_plataforma')!r}"
+            )
+
+
+            gen._draw_page(c, os_data, [], [], [], datos.get("tecnico_nombre"))
+            c.showPage()
+            gen._draw_page(c, os_data, [], [], [], datos.get("tecnico_nombre"))
+            c.showPage()
+
+        c.save()
+        logger.info("PDF lote calca generado: %s (%d folios, %d páginas)",
+                    pdf_path, len(folios), len(folios) * 2)
+        return pdf_path
+
+    def _generar_pdf_real(self, folio: str, datos: dict,
+                           equipo_data: dict = None) -> str:
+        """
+        Genera el PDF de un solo folio (sin calca).
+        Retorna la ruta del PDF generado.
+        Funciona tanto en modo conectado a BD como en modo demo.
+        """
+        import pathlib
+
+        output_dir = pathlib.Path(r"C:\PesaServidorCentral\PDF_OS")
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, OSError):
+            output_dir = pathlib.Path.home() / "PesaServidorLocal" / "PDF_OS"
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+        pdf_path_obj = output_dir / f"{folio}.pdf"
+        counter = 1
+        while pdf_path_obj.exists():
+            try:
+                with open(pdf_path_obj, "a"):
+                    pass
+                break
+            except (PermissionError, OSError):
+                pdf_path_obj = output_dir / f"{folio}_{counter}.pdf"
+                counter += 1
+        pdf_path = str(pdf_path_obj)
+
+        # Obtener direccion del cliente (fallback) y de la sucursal (preferida)
+        direccion_cliente = self._get_direccion_cliente(datos.get("id_cliente"))
+        sucursal_dir = self._get_direccion_sucursal(datos.get("sucursal_id"))
+        tipo_inst    = datos.get("tipo_instrumento") or datos.get("tipo_instrumento_nombre") or ""
+        puntos_apoyo = datos.get("puntos_apoyo") or ""
+
+        os_data = {
+            # equipo_data PRIMERO: los campos explicitos lo sobreescriben
+            **(equipo_data or {}),
+            "folio_os":              folio,
+            "cliente":               datos.get("cliente", "—"),
+            "direccion":             sucursal_dir or direccion_cliente,
+            "sucursal_direccion":    sucursal_dir or direccion_cliente,
+            "direccion_cliente":     direccion_cliente,
+            "fecha":                 datos.get("fecha"),
+            "id_tipo_servicio":      datos.get("id_tipo_servicio"),
+            "tipo_servicio_nombre":  datos.get("tipo_servicio_nombre", ""),
+            "observaciones":         datos.get("observaciones_tecnico", ""),
+            "aplica_excentricidad":  datos.get("aplica_excentricidad", True),
+            "filas_excentricidad":   datos.get("filas_excentricidad", 5),
+            "filas_exactitud":       datos.get("filas_exactitud", 5),
+            "tipo_instrumento":      tipo_inst,
+            "puntos_apoyo":          puntos_apoyo,
+            # Calibracion: TODAS las variantes de clave
+            "inicial_calibrador":       datos.get("inicial_calibrador", ""),
+            "tipo_calibracion_inicial": datos.get("tipo_calibracion_inicial", ""),
+            "inicial":                  datos.get("inicial_calibrador", ""),
+            "numero_cca":              datos.get("numero_cca", ""),
+            "numero_certificado":      datos.get("numero_certificado", ""),
+            "cca":                     datos.get("numero_cca", ""),
+            "holograma_anterior":      datos.get("holograma_anterior", ""),
+            "holograma_actualizado":   datos.get("holograma_actualizado", ""),
+            # Geometria / Excentricidad
+            "geometria_plataforma":    datos.get("geometria_plataforma"),
+            "num_secciones":           datos.get("num_secciones"),
+            "tipo_no_aplica_exc":      datos.get("tipo_no_aplica_exc"),
+        }
+        # DEBUG: confirmar que los campos de calibracion llegan al PDF
+        print(
+            f"[DEBUG PDF] folio={folio} "
+            f"inicial={os_data.get('inicial_calibrador')!r} "
+            f"cca={os_data.get('numero_cca')!r} "
+            f"geo={os_data.get('geometria_plataforma')!r} "
+            f"no_aplica={os_data.get('tipo_no_aplica_exc')!r}"
+        )
+
+        # ── RMA: Remision de Material (folio individual) ──────────────────────────
+        if datos.get("tipo_doc") == "RMA":
+            from services.rma_pdf_generator import rma_pdf_generator as _rma_gen
+            is_calca = self._modalidad == "FISICO"
+            rma_dir = sucursal_dir or direccion_cliente
+            rma_data = {
+                **datos,
+                "folio_rma":           folio,
+                "cliente":             datos.get("cliente", "—"),
+                "direccion":           rma_dir,
+                "sucursal_direccion":  rma_dir,
+                "direccion_planta":    rma_dir,
+                "cliente_direccion":   rma_dir,
+                "sucursal":            rma_dir,
+                "tecnico_nombre":      datos.get("tecnico_nombre", ""),
+                "items":               datos.get("items", []),
+                "observaciones":       datos.get("observaciones_tecnico", ""),
+                "fecha":               datos.get("fecha"),
+            }
+            _rma_gen.generate(rma_data, output_path=pdf_path, calca=is_calca, force=True)
+            logger.info("PDF RMA individual generado: %s", pdf_path)
+            return pdf_path
+
+        # ── RE: Revisión de Báscula ───────────────────────────────────────────────
+        elif datos.get("tipo_doc") == "RE":
+            from services.re_pdf_generator import RePdfGenerator
+            gen = RePdfGenerator()
+            gen.generate_re_pdf(
+                re_data     = os_data,
+                output_path = pdf_path,
+                tecnico_nombre = datos.get("tecnico_nombre"),
+            )
+            logger.info("PDF RE generado: %s", pdf_path)
+            return pdf_path
+            
+        # ── LP: Levantamiento de Proyecto ─────────────────────────────────────────
+        elif datos.get("tipo_doc") == "LP":
+            from services.lp_pdf_generator import LPPdfGenerator
+            gen = LPPdfGenerator()
+            lp_dir = sucursal_dir or direccion_cliente
+            os_data["direccion"]          = lp_dir
+            os_data["sucursal_direccion"] = lp_dir
+            os_data["direccion_planta"]   = lp_dir
+            os_data["cliente_direccion"]  = lp_dir
+            os_data["sucursal"]           = lp_dir
+            gen.generate(
+                os_data     = os_data,
+                output_path = pdf_path,
+                force       = True
+            )
+            logger.info("PDF LP generado: %s", pdf_path)
+            return pdf_path
+
+        # ── OS: Orden de Servicio (Por Defecto) ───────────────────────────────────
+        else:
+            from services.os_pdf_generator import OsPdfGenerator
+            gen = OsPdfGenerator()
+            gen.generate_os_pdf(
+                os_data     = os_data,
+                output_path = pdf_path,
+                tecnico_nombre = datos.get("tecnico_nombre"),
+            )
+            logger.info("PDF OS generado: %s", pdf_path)
+            return pdf_path
+        logger.info("PDF generado: %s", pdf_path)
+        return pdf_path
+
+    def seleccionar_tipo_documento(self, tipo: str) -> None:
+        """
+        Selecciona visualmente la tarjeta requerida y despliega sus campos dinámicos.
+        Se activa el paso 1 si no está activo, y se selecciona la tarjeta del paso 2.
+        """
+        # Asegurar que el modal esté activado en Digital por defecto si no hay ninguno
+        if not self._card_digital.isChecked() and not self._card_fisico.isChecked():
+            self._card_digital.setChecked(True)
+            
+        # Marcar y activar el formulario correspondiente (el toggled llama a _on_tipo_doc automáticamente)
+        if tipo == "OS":
+            self._card_os.setChecked(True)
+        elif tipo == "RMA":
+            self._card_rma.setChecked(True)
+        elif tipo == "RE":
+            self._card_re.setChecked(True)
+        elif tipo == "LP":
+            self._card_lp.setChecked(True)
+        elif tipo == "LV":
+            if hasattr(self, "_card_lv"):
+                self._card_lv.setChecked(True)
+
+    def _abrir_pdf_preview(self, pdf_path: str) -> None:
+        """
+        Abre el PDF con el visor predeterminado del sistema.
+        Windows: os.startfile().
+        Linux/macOS: subprocess.run(['xdg-open' / 'open', ...])
+        """
+        import os, sys, subprocess, pathlib
+
+        path = pathlib.Path(pdf_path)
+        if not path.exists():
+            QMessageBox.warning(self, "PDF no encontrado",
+                                f"No se encontró el archivo:\n{pdf_path}")
+            return
+
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(path))          # Abre con el visor PDF de Windows
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(path)], check=True)
+            else:
+                subprocess.run(["xdg-open", str(path)], check=True)
+            logger.info("PDF abierto: %s", path)
+        except Exception as exc:
+            logger.error("Error al abrir PDF: %s", exc)
+            QMessageBox.warning(
+                self, "No se pudo abrir el PDF",
+                f"El PDF fue generado pero no se pudo abrir automáticamente:\n"
+                f"{path}\n\nError: {exc}"
+            )
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # HELPERS
+    # ══════════════════════════════════════════════════════════════════════════
+    def _enable_card(self, card: QFrame) -> None:
+        card.setEnabled(True)
+        card.setStyleSheet("""
+            QFrame {
+                background: #FFFFFF;
+                border: 1px solid rgba(0,0,0,0.07);
+                border-radius: 14px;
+            }
+        """)
+
+    def _set_loading(self, loading: bool) -> None:
+        self._progress.setVisible(loading)
+        self.btn_ejecutar.setEnabled(not loading)
+
+    def _reset(self) -> None:
+        """Reinicia el asistente a su estado inicial."""
+        self._modalidad = ""
+        self._tipo_doc  = ""
+
+        # Desmarcar tarjetas de modalidad
+        self._card_digital.setChecked(False)
+        self._card_fisico.setChecked(False)
+
+        # Desmarcar tarjetas de documento
+        for _btn in [self._card_os, self._card_rma, self._card_re, self._card_lp]:
+            _btn.setChecked(False)
+        if hasattr(self, "_card_lv"):
+            self._card_lv.setChecked(False)
+
+        # Resetear parámetros
+        self.cmb_cliente.setCurrentIndex(0)
+        self.cmb_tecnico.setCurrentIndex(0)
+        self.spn_cantidad.setValue(1)
+        self.dte_fecha.setDate(QDate.currentDate())
+        self.txt_observaciones.clear()
+        # Resetear campos de estructura RE
+        if hasattr(self, "_frame_re_estructura"):
+            self._frame_re_estructura.setVisible(False)
+        if hasattr(self, "cmb_tipo_estructura"):
+            self.cmb_tipo_estructura.setCurrentIndex(0)
+        if hasattr(self, "cmb_instalacion_camionera"):
+            self.cmb_instalacion_camionera.setCurrentIndex(0)
+        if hasattr(self, "spn_secciones_camionera"):
+            self.spn_secciones_camionera.setValue(2)
+        # Resetear campos de indicador y celdas RE
+        for _attr in [
+            "le_ind_marca", "le_ind_modelo", "le_ind_serie", "le_ind_id",
+            "le_cap_maxima", "le_div_minima",
+            "le_celda_a_marca", "le_celda_a_modelo", "le_celda_a_capacidad",
+            "le_celda_b_marca", "le_celda_b_modelo", "le_celda_b_capacidad",
+        ]:
+            if hasattr(self, _attr):
+                getattr(self, _attr).clear()
+        if hasattr(self, "spn_celda_a_cantidad"):
+            self.spn_celda_a_cantidad.setValue(4)
+        if hasattr(self, "spn_celda_b_cantidad"):
+            self.spn_celda_b_cantidad.setValue(2)
+        if hasattr(self, "cmb_celdas_homogeneas"):
+            self.cmb_celdas_homogeneas.setCurrentIndex(0)
+        if hasattr(self, "_widget_grupo_b"):
+            self._widget_grupo_b.setVisible(False)
+        # Resetear controles de calibración
+        if hasattr(self, "_btn_inicial_ninguna"):
+            self._btn_inicial_ninguna.setChecked(True)
+        if hasattr(self, "le_numero_cca"):
+            self.le_numero_cca.clear()
+        if hasattr(self, "_frame_calibracion"):
+            self._frame_calibracion.setVisible(False)
+
+        # Resetear tarjetas de equipo a 1
+        self._update_equipos_section(1)
+
+        # Deshabilitar pasos 2-4
+        for card in [self._card_step2, self._card_step3, self._card_step4]:
+            card.setEnabled(False)
+            card.setStyleSheet("""
+                QFrame { background: #FAFAFA; border: 1px solid rgba(0,0,0,0.05);
+                         border-radius: 14px; }
+            """)
+
+        self.btn_ejecutar.setEnabled(False)
+        self.btn_ejecutar.setText("🖨️  Generar e Imprimir PDF")
+        self._lbl_title.setText("🖨️  Asistente de Generación de Formatos")
+        self._lbl_resumen.setText("")
+        self._lbl_folios.setText("")
+        self._lbl_modo_badge.setText("")
