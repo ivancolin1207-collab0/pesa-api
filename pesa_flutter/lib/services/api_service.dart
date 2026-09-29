@@ -442,6 +442,8 @@ class ApiService {
     final resp = await _postWithRetry(
       Uri.parse('$_baseUrl/api/v1/sync/firmas/$folio'),
       jsonEncode({
+        'firma_tecnico':     firmaTecBase64,
+        'firma_cliente':     firmaCliBase64,
         'firma_tecnico_png': firmaTecBase64,
         'firma_cliente_png': firmaCliBase64,
         'nombre_ing':        nombreIng.trim(),
@@ -458,12 +460,13 @@ class ApiService {
   // ── Download PDF autenticado ──────────────────────────────────────────────
 
   /// Descarga un PDF desde la URL dada con el token Bearer y lo guarda
-  /// en el directorio temporal de la app. Retorna la ruta local del archivo.
-  Future<String> downloadPdf(String url) async {
+  /// en el almacenamiento persistente de documentos de la app (Pesa_PDFs). Retorna la ruta local del archivo.
+  Future<String> downloadPdf(String url, {String? targetFileName}) async {
     final urlsToTry = <String>[];
     final fullUrl = url.startsWith('http') ? url : '$_baseUrl$url';
     urlsToTry.add(fullUrl);
 
+    String? folioFromUrl;
     // Si la URL es de tipo ordenes u os, agregar endpoints alternativos y /uploads
     try {
       final uri = Uri.parse(fullUrl);
@@ -471,10 +474,11 @@ class ApiService {
       if (segments.contains('ordenes') || segments.contains('os')) {
         final folio = segments.lastWhere((s) => s != 'pdf' && s != 'download-pdf', orElse: () => '');
         if (folio.isNotEmpty) {
-          urlsToTry.add('$_baseUrl/api/v1/ordenes/$folio/pdf');
+          folioFromUrl = folio;
           urlsToTry.add('$_baseUrl/api/v1/ordenes/$folio/download-pdf');
-          urlsToTry.add('$_baseUrl/api/v1/os/$folio/pdf');
+          urlsToTry.add('$_baseUrl/api/v1/ordenes/$folio/pdf');
           urlsToTry.add('$_baseUrl/api/v1/os/$folio/download-pdf');
+          urlsToTry.add('$_baseUrl/api/v1/os/$folio/pdf');
           urlsToTry.add('$_baseUrl/uploads/$folio.pdf');
         }
       }
@@ -486,9 +490,12 @@ class ApiService {
         debugPrint('[API] downloadPdf intentando → $tryUrl');
         final resp = await _getWithRetry(Uri.parse(tryUrl), timeout: _syncTimeout);
         if (resp.statusCode == 200 && resp.bodyBytes.length > 500) {
-          final tmpDir = await getTemporaryDirectory();
-          final ts = DateTime.now().millisecondsSinceEpoch;
-          final localPath = '${tmpDir.path}/pesa_pdf_$ts.pdf';
+          final docDir = await getApplicationDocumentsDirectory();
+          final pdfDir = Directory('${docDir.path}/Pesa_PDFs');
+          if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
+
+          final cleanName = targetFileName ?? (folioFromUrl != null && folioFromUrl.isNotEmpty ? '$folioFromUrl.pdf' : 'pesa_pdf_${DateTime.now().millisecondsSinceEpoch}.pdf');
+          final localPath = '${pdfDir.path}/$cleanName';
           await File(localPath).writeAsBytes(resp.bodyBytes);
           debugPrint('[API] PDF descargado con éxito desde $tryUrl → $localPath');
           return localPath;

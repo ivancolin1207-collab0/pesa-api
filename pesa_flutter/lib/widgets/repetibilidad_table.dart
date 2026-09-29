@@ -11,12 +11,15 @@ class RepetibilidadTable extends StatefulWidget {
   final ValueChanged<List<Map<String, dynamic>>> onChanged;
   /// División mínima en kg — controla decimales y validación de múltiplos
   final double? divMin;
+  /// Widget opcional al final de la tabla (ej. botón de avance)
+  final Widget? footer;
 
   const RepetibilidadTable({
     super.key,
     required this.rows,
     required this.onChanged,
     this.divMin,
+    this.footer,
   });
 
   @override
@@ -317,6 +320,10 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
               ),
             ),
           ),
+          if (widget.footer != null) ...[
+            const SizedBox(height: 20),
+            widget.footer!,
+          ],
         ],
       ),
     );

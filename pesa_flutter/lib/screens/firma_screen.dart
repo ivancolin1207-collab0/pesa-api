@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:signature/signature.dart';
+import 'package:open_filex/open_filex.dart';
 import '../services/api_service.dart';
 import '../services/local_db_service.dart';
 import '../services/sync_service.dart';
@@ -57,7 +58,7 @@ class _FirmaScreenState extends State<FirmaScreen>
     if (initialPuesto.toString().isNotEmpty) {
       _puestoIngCtrl.text = initialPuesto.toString();
     }
-    _cargarFirmaTecnico();
+    _cargarFirmasExistentes();
     _cargarContactosPlanta();
   }
 
@@ -78,21 +79,65 @@ class _FirmaScreenState extends State<FirmaScreen>
     }
   }
 
-  // ── Estado de firma del técnico ────────────────────────────────────────────
-  bool    _firmaTecPrecargada = false;  // true = firma cargada desde perfil
-  String? _firmaTecBase64Guardada;      // firma guardada en perfil del técnico
+  // ── Estado de firmas (Técnico y Cliente) ──────────────────────────────────
+  bool    _firmaTecPrecargada = false;  // true = firma técnico cargada desde orden o perfil
+  String? _firmaTecBase64Guardada;
+  bool    _firmaCliPrecargada = false;  // true = firma cliente ya registrada en la orden
+  String? _firmaCliBase64Guardada;
 
-  /// Carga la firma persistida del técnico desde SecureStorage.
-  /// Si ya existe, se usa automáticamente sin que el técnico firme de nuevo.
-  Future<void> _cargarFirmaTecnico() async {
-    final auth     = context.read<AuthService>();
-    final username = auth.username ?? '';
-    final firma    = await FirmaTecnicoService.instance.getFirma(username);
-    if (firma != null && firma.isNotEmpty && mounted) {
-      setState(() {
-        _firmaTecPrecargada   = true;
-        _firmaTecBase64Guardada = firma;
-      });
+  /// Carga las firmas existentes (técnico y cliente) de la orden, BD local o perfil.
+  Future<void> _cargarFirmasExistentes() async {
+    // 1. Firma del Técnico: OS actual > SQLite > Perfil
+    final tecOs = (widget.capturaData['firma_tecnico'] ?? widget.capturaData['firma_tecnico_b64'] ?? '').toString().trim();
+    if (tecOs.length > 50) {
+      if (mounted) {
+        setState(() {
+          _firmaTecPrecargada = true;
+          _firmaTecBase64Guardada = tecOs;
+        });
+      }
+    } else {
+      if (widget.osId > 0) {
+        final osRow = await LocalDbService.instance.getOs(widget.osId);
+        final tecDb = (osRow?['firma_tecnico'] ?? osRow?['firma_tecnico_b64'] ?? '').toString().trim();
+        if (tecDb.length > 50 && mounted) {
+          setState(() {
+            _firmaTecPrecargada = true;
+            _firmaTecBase64Guardada = tecDb;
+          });
+        }
+      }
+      if (!_firmaTecPrecargada) {
+        final auth     = context.read<AuthService>();
+        final username = auth.username ?? '';
+        final firma    = await FirmaTecnicoService.instance.getFirma(username);
+        if (firma != null && firma.length > 50 && mounted) {
+          setState(() {
+            _firmaTecPrecargada   = true;
+            _firmaTecBase64Guardada = firma;
+          });
+        }
+      }
+    }
+
+    // 2. Firma del Cliente: OS actual > SQLite
+    final cliOs = (widget.capturaData['firma_cliente'] ?? widget.capturaData['firma_cliente_b64'] ?? '').toString().trim();
+    if (cliOs.length > 50) {
+      if (mounted) {
+        setState(() {
+          _firmaCliPrecargada = true;
+          _firmaCliBase64Guardada = cliOs;
+        });
+      }
+    } else if (widget.osId > 0) {
+      final osRow = await LocalDbService.instance.getOs(widget.osId);
+      final cliDb = (osRow?['firma_cliente'] ?? osRow?['firma_cliente_b64'] ?? '').toString().trim();
+      if (cliDb.length > 50 && mounted) {
+        setState(() {
+          _firmaCliPrecargada = true;
+          _firmaCliBase64Guardada = cliDb;
+        });
+      }
     }
   }
 
@@ -303,19 +348,19 @@ class _FirmaScreenState extends State<FirmaScreen>
     );
   }
 
-  Widget _badgePrecargada() {
+  Widget _badgePrecargada([String texto = 'Del perfil']) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: Colors.green.shade100,
         borderRadius: BorderRadius.circular(20),
       ),
-      child: const Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.verified, size: 12, color: Colors.green),
-        SizedBox(width: 4),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        const Icon(Icons.verified, size: 12, color: Colors.green),
+        const SizedBox(width: 4),
         Text(
-          'Del perfil',
-          style: TextStyle(fontSize: 11, color: Colors.green),
+          texto,
+          style: const TextStyle(fontSize: 11, color: Colors.green),
         ),
       ]),
     );
@@ -337,7 +382,9 @@ class _FirmaScreenState extends State<FirmaScreen>
               child: Text('Firma del Ingeniero de Planta / Cliente',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
             ),
-            _firmaEstadoBadge(_ctrlCliente),
+            _firmaCliPrecargada
+                ? _badgePrecargada('Validada')
+                : _firmaEstadoBadge(_ctrlCliente),
           ]),
           const SizedBox(height: 12),
 
@@ -414,16 +461,63 @@ class _FirmaScreenState extends State<FirmaScreen>
           ],
           const SizedBox(height: 12),
 
-          // Canvas
-          Expanded(child: _buildCanvas(_ctrlCliente)),
-          const SizedBox(height: 10),
-          _buildClearBtn(_ctrlCliente, 'Ingeniero/Cliente'),
-          const SizedBox(height: 4),
-          const Text(
-            'El responsable de la planta firma aqui para confirmar la recepcion del servicio.',
-            style: TextStyle(fontSize: 11, color: Colors.grey),
-            textAlign: TextAlign.center,
-          ),
+          // Si la firma ya fue sincronizada previamente, mostrar estado validado
+          if (_firmaCliPrecargada) ...[
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.green.shade300),
+                ),
+                padding: const EdgeInsets.all(20),
+                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                  const Icon(Icons.check_circle, color: Colors.green, size: 52),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Firma del Cliente registrada previamente',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: Colors.green,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Esta orden ya cuenta con la firma del cliente sincronizada.\n'
+                    'No es necesario volver a solicitarla.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                  const SizedBox(height: 16),
+                  OutlinedButton.icon(
+                    onPressed: () => setState(() {
+                      _firmaCliPrecargada     = false;
+                      _firmaCliBase64Guardada = null;
+                      _ctrlCliente.clear();
+                    }),
+                    icon: const Icon(Icons.edit, size: 16),
+                    label: const Text('Volver a firmar en esta orden (opcional)'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.grey.shade700,
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+          ] else ...[
+            // Canvas
+            Expanded(child: _buildCanvas(_ctrlCliente)),
+            const SizedBox(height: 10),
+            _buildClearBtn(_ctrlCliente, 'Ingeniero/Cliente'),
+            const SizedBox(height: 4),
+            const Text(
+              'El responsable de la planta firma aqui para confirmar la recepcion del servicio.',
+              style: TextStyle(fontSize: 11, color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+          ],
         ],
       ),
     );
@@ -532,9 +626,9 @@ class _FirmaScreenState extends State<FirmaScreen>
         children: [
           // Indicadores de progreso de firmas
           Row(children: [
-            _progressChip('Técnico', _ctrlTecnico),
+            _progressChip('Técnico', _ctrlTecnico, isPrecargada: _firmaTecPrecargada),
             const SizedBox(width: 8),
-            _progressChip('Ing./Cliente', _ctrlCliente),
+            _progressChip('Ing./Cliente', _ctrlCliente, isPrecargada: _firmaCliPrecargada),
           ]),
           const SizedBox(height: 10),
           ElevatedButton.icon(
@@ -560,19 +654,22 @@ class _FirmaScreenState extends State<FirmaScreen>
     );
   }
 
-  Widget _progressChip(String label, SignatureController ctrl) {
+  Widget _progressChip(String label, SignatureController ctrl, {bool isPrecargada = false}) {
     return AnimatedBuilder(
       animation: ctrl,
-      builder: (_, __) => Chip(
-        avatar: Icon(
-          ctrl.isNotEmpty ? Icons.check_circle : Icons.radio_button_unchecked,
-          size: 16,
-          color: ctrl.isNotEmpty ? Colors.green : Colors.grey,
-        ),
-        label: Text(label, style: const TextStyle(fontSize: 12)),
-        backgroundColor:
-            ctrl.isNotEmpty ? Colors.green.shade50 : Colors.grey.shade100,
-      ),
+      builder: (_, __) {
+        final ok = isPrecargada || ctrl.isNotEmpty;
+        return Chip(
+          avatar: Icon(
+            ok ? Icons.check_circle : Icons.radio_button_unchecked,
+            size: 16,
+            color: ok ? Colors.green : Colors.grey,
+          ),
+          label: Text(label, style: const TextStyle(fontSize: 12)),
+          backgroundColor:
+              ok ? Colors.green.shade50 : Colors.grey.shade100,
+        );
+      },
     );
   }
 
@@ -690,10 +787,14 @@ class _FirmaScreenState extends State<FirmaScreen>
         }
       }
 
-      // 2. Exportar firma cliente (OPCIONAL)
-      final Uint8List? imgCli =
-          _ctrlCliente.isNotEmpty ? await _ctrlCliente.toPngBytes() : null;
-      final cliBase64 = imgCli != null ? base64Encode(imgCli) : '';
+      // 2. Exportar firma cliente (si ya vino precargada usar esa, si no exportar canvas)
+      String cliBase64 = '';
+      if (_firmaCliPrecargada && _firmaCliBase64Guardada != null && _firmaCliBase64Guardada!.isNotEmpty) {
+        cliBase64 = _firmaCliBase64Guardada!;
+      } else if (_ctrlCliente.isNotEmpty) {
+        final Uint8List? imgCli = await _ctrlCliente.toPngBytes();
+        cliBase64 = imgCli != null ? base64Encode(imgCli) : '';
+      }
       final folio     = widget.capturaData['folio_os'] as String? ?? '';
       final nombreIng = _nombreIngCtrl.text.trim();
       final puestoIng = _puestoIngCtrl.text.trim();
@@ -770,15 +871,30 @@ class _FirmaScreenState extends State<FirmaScreen>
         } catch (_) {}
       }
 
+      final connResults = await Connectivity().checkConnectivity();
+      final isOnline = connResults.any((r) => r != ConnectivityResult.none);
+
       await LocalDbService.instance.savePdfPath(
         widget.osId,
         pdfPath,
         folio: folio,
         pdfB64: pdfB64,
+        isOnline: isOnline,
+        uploadOk: false,
       );
 
       // 5.1 Eliminar el borrador local correspondiente al completar la orden
       await LocalDbService.instance.deleteDraft(folio);
+
+      // 5.2 Actualizar estado en memoria reactivo en SyncService
+      if (mounted) {
+        context.read<SyncService>().updateLocalOrder(folio, {
+          'pdf_path_local': pdfPath,
+          'estado': 'COMPLETADA_DIGITAL',
+          'estatus': 'Cerrado',
+          'sync_check_status': isOnline ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET',
+        });
+      }
 
       // 6. Subida inmediata a Render si hay conexion (Wi-Fi o red movil)
       bool fueSincronizado = false;
@@ -792,8 +908,6 @@ class _FirmaScreenState extends State<FirmaScreen>
           'firma_cliente': cliBase64,
         };
 
-        final connResults = await Connectivity().checkConnectivity();
-        final isOnline = connResults.any((r) => r != ConnectivityResult.none);
         if (isOnline) {
           debugPrint('[Firma] Red detectada -> Subiendo PDF de inmediato a Render para $folio...');
           if (pdfFile.existsSync()) {
@@ -805,11 +919,29 @@ class _FirmaScreenState extends State<FirmaScreen>
             );
             if (uploadOk) {
               fueSincronizado = true;
+              await LocalDbService.instance.savePdfPath(
+                widget.osId,
+                pdfPath,
+                folio: folio,
+                pdfB64: pdfB64,
+                isOnline: true,
+                uploadOk: true,
+              );
               await LocalDbService.instance.markOsSincronizada(
                 widget.osId,
                 ((enrichedOs['sync_version'] as int? ?? 0) + 1),
                 folio: folio,
               );
+              if (mounted) {
+                context.read<SyncService>().updateLocalOrder(folio, {
+                  'pdf_path_local': pdfPath,
+                  'estado': 'COMPLETADA_DIGITAL',
+                  'estatus': 'Cerrado',
+                  'sync_check_status': 'SUBIDA_SERVIDOR',
+                  'sync_status': 'SINCRONIZADO',
+                  'pdf_subido': 1,
+                });
+              }
               debugPrint('[Firma] ✅ Orden $folio sincronizada en SQLite y en Render');
             }
           }
@@ -916,8 +1048,27 @@ class _FirmaScreenState extends State<FirmaScreen>
                 ),
                 icon: const Icon(Icons.picture_as_pdf, size: 18),
                 label: const Text('Ver PDF'),
-                onPressed: () {
-                  if (localPdfPath.isNotEmpty) {
+                onPressed: () async {
+                  if (localPdfPath.isNotEmpty && File(localPdfPath).existsSync()) {
+                    try {
+                      final res = await OpenFilex.open(localPdfPath);
+                      if (res.type == ResultType.noAppToOpen || res.type == ResultType.error) {
+                        if (context.mounted) {
+                          context.push('/pdf-viewer', extra: {
+                            'pdfPath': localPdfPath,
+                            'folio': folio,
+                          });
+                        }
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        context.push('/pdf-viewer', extra: {
+                          'pdfPath': localPdfPath,
+                          'folio': folio,
+                        });
+                      }
+                    }
+                  } else if (context.mounted) {
                     context.push('/pdf-viewer', extra: {
                       'pdfPath': localPdfPath,
                       'folio': folio,

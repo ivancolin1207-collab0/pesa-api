@@ -524,7 +524,6 @@ class _CapturaScreenState extends State<CapturaScreen>
     final nCeldas = _os['num_celdas_camionera'] is int
         ? _os['num_celdas_camionera'] as int
         : int.tryParse(_os['num_celdas_camionera']?.toString() ?? '0') ?? 0;
-    final bottom  = MediaQuery.of(context).viewPadding.bottom;
 
     return PopScope(
       canPop: _permitirSalida,
@@ -552,6 +551,18 @@ class _CapturaScreenState extends State<CapturaScreen>
                   style: const TextStyle(fontSize: 11, color: Colors.white70)),
             ]),
             actions: [
+              TextButton.icon(
+                style: TextButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  backgroundColor: Colors.white.withValues(alpha: 0.12),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                icon: const Icon(Icons.save_outlined, size: 16),
+                label: const Text('Borrador', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                onPressed: () => _guardarBorrador(mostrarSnackbar: true),
+              ),
+              const SizedBox(width: 8),
               Padding(
                 padding: const EdgeInsets.only(right: 14),
                 child: Center(
@@ -580,42 +591,14 @@ class _CapturaScreenState extends State<CapturaScreen>
               ],
             ),
           ),
-          body: Builder(
-            builder: (ctx) {
-              final isKeyboardOpen = MediaQuery.of(ctx).viewInsets.bottom > 100;
-              final bool editingObs = _firmaClienteFocusNode.hasFocus || _obsFocusNode.hasFocus;
-
-              return Column(children: [
-                Expanded(
-                  child: TabBarView(
-                    controller: _tabCtrl,
-                    children: [
-                      _buildTabInstrumento(),
-                      RepetibilidadTable(
-                        key: ValueKey('rep_$_dataVersion'),
-                        rows: _repRows,
-                        divMin: _dValue,
-                        onChanged: (r) => _repRows = r,
-                      ),
-                      _buildExcentricidadTab(nCeldas),
-                      ExactitudTable(
-                        key: ValueKey('exac_$_dataVersion'),
-                        numPuntos: nPuntos,
-                        rows: _exacRows,
-                        divMin: _dValue,
-                        onChanged: (r) => _exacRows = r,
-                      ),
-                    ],
-                  ),
-                ),
-                if (!isKeyboardOpen || editingObs) _buildObsPanel(),
-                if (!isKeyboardOpen)
-                  Padding(
-                    padding: EdgeInsets.only(bottom: bottom > 0 ? bottom : 16),
-                    child: _buildActionBar(folio),
-                  ),
-              ]);
-            },
+          body: TabBarView(
+            controller: _tabCtrl,
+            children: [
+              _buildTabInstrumento(),
+              _buildRepetibilidadTab(),
+              _buildExcentricidadTab(nCeldas),
+              _buildExactitudTab(nPuntos, folio),
+            ],
           ),
         ),
       ),
@@ -986,6 +969,43 @@ class _CapturaScreenState extends State<CapturaScreen>
     );
   }
 
+  // ── Tab 1: Repetibilidad ──────────────────────────────────────────────────
+  Widget _buildRepetibilidadTab() {
+    return RepetibilidadTable(
+      key: ValueKey('rep_$_dataVersion'),
+      rows: _repRows,
+      divMin: _dValue,
+      onChanged: (r) => _repRows = r,
+      footer: SizedBox(
+        width: double.infinity,
+        height: 50,
+        child: ElevatedButton.icon(
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _kRed,
+            foregroundColor: Colors.white,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            elevation: 2,
+          ),
+          icon: const Icon(Icons.arrow_forward),
+          label: Text(
+            _aplExc
+                ? 'Continuar con Prueba de Excentricidad →'
+                : 'Continuar con Prueba de Exactitud →',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
+          onPressed: () {
+            _guardarBorrador(mostrarSnackbar: false);
+            if (_aplExc) {
+              _tabCtrl.animateTo(2); // Excentricidad
+            } else {
+              _tabCtrl.animateTo(3); // Exactitud
+            }
+          },
+        ),
+      ),
+    );
+  }
+
   // ── Tab 2: Excentricidad ──────────────────────────────────────────────────
   Widget _buildExcentricidadTab(int nCeldas) {
     final nSecRaw = _os['num_secciones'] ?? _os['secciones'] ?? _os['num_secciones_camionera'];
@@ -1024,204 +1044,263 @@ class _CapturaScreenState extends State<CapturaScreen>
             aplicaExcentricidad: _aplExc,
             onChanged: (r) => _excRows = r,
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            child: SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _kRed,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 2,
+                ),
+                icon: const Icon(Icons.arrow_forward),
+                label: const Text(
+                  'Continuar con Prueba de Exactitud →',
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                ),
+                onPressed: () {
+                  _guardarBorrador(mostrarSnackbar: false);
+                  _tabCtrl.animateTo(3); // Exactitud
+                },
+              ),
+            ),
+          ),
         ],
       ),
     );
   }
 
-  // ── Panel observaciones + Nombre Cliente (obligatorio) ────────────────────
-  Widget _buildObsPanel() {
+  // ── Tab 3: Exactitud (Fin de las pruebas) ──────────────────────────────────
+  Widget _buildExactitudTab(int nPuntos, String folio) {
+    return ExactitudTable(
+      key: ValueKey('exac_$_dataVersion'),
+      numPuntos: nPuntos,
+      rows: _exacRows,
+      divMin: _dValue,
+      onChanged: (r) => _exacRows = r,
+      footer: _buildExactitudFooter(folio),
+    );
+  }
+
+  // ── Footer de Exactitud: Observaciones del Servicio + Dictamen + Botón a Firmas ──
+  Widget _buildExactitudFooter(String folio) {
     final nombreVacio = _firmaClienteNombreCtrl.text.trim().isEmpty;
-    return Container(
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: Colors.grey.shade300),
+      ),
       color: Colors.white,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(children: [
-          Expanded(child: TextField(
-            controller: _obsCtrl,
-            focusNode: _obsFocusNode,
-            decoration: const InputDecoration(
-              labelText: 'Observaciones',
-              border: OutlineInputBorder(
-                  borderRadius: BorderRadius.all(Radius.circular(8))),
-              isDense: true,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.notes, color: _kRed, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Observaciones del Servicio',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                ),
+              ],
             ),
-            maxLines: 1,
-          )),
-          const SizedBox(width: 12),
-          DropdownButton<String>(
-            value: _dictamen,
-            items: ['APTO', 'NO APTO', 'CONDICIONADO']
-                .map((d) => DropdownMenuItem(value: d, child: Text(d)))
-                .toList(),
-            onChanged: (v) => setState(() => _dictamen = v!),
-          ),
-        ]),
-        const SizedBox(height: 8),
-        // Nombre del cliente — OBLIGATORIO en Android y Windows con memoria y autocompletado por planta
-        RawAutocomplete<String>(
-          textEditingController: _firmaClienteNombreCtrl,
-          focusNode: _firmaClienteFocusNode,
-          optionsBuilder: (TextEditingValue textEditingValue) {
-            if (_contactosSugeridos.isEmpty) return const Iterable<String>.empty();
-            if (textEditingValue.text.isEmpty) return _contactosSugeridos;
-            return _contactosSugeridos.where((c) =>
-                c.toLowerCase().contains(textEditingValue.text.toLowerCase()));
-          },
-          onSelected: (String selection) {
-            setState(() {
-              _firmaClienteNombreCtrl.text = selection;
-            });
-          },
-          fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
-            return TextField(
-              controller: controller,
-              focusNode: focusNode,
-              decoration: InputDecoration(
-                labelText: 'Nombre de quien recibe / Conforme Cliente *',
-                labelStyle: const TextStyle(
-                    color: Color(0xFFC8102E), fontWeight: FontWeight.w600),
-                hintText: 'Nombre completo del receptor (ej. Janeth Lopez)',
+            const SizedBox(height: 10),
+            TextField(
+              controller: _obsCtrl,
+              focusNode: _obsFocusNode,
+              minLines: 3,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                hintText: 'Ingrese observaciones metrológicas o detalles del servicio...',
                 border: OutlineInputBorder(
-                    borderRadius: const BorderRadius.all(Radius.circular(8)),
-                    borderSide: BorderSide(
-                        color: nombreVacio
-                            ? const Color(0xFFC8102E)
-                            : Colors.grey.shade300)),
-                focusedBorder: const OutlineInputBorder(
-                    borderRadius: BorderRadius.all(Radius.circular(8)),
-                    borderSide:
-                        BorderSide(color: Color(0xFFC8102E), width: 2)),
-                isDense: true,
-                prefixIcon: const Icon(Icons.person_outline,
-                    color: Color(0xFFC8102E), size: 18),
-                suffixIcon: _contactosSugeridos.isNotEmpty
-                    ? PopupMenuButton<String>(
-                        icon: const Icon(Icons.arrow_drop_down, color: Color(0xFFC8102E)),
-                        tooltip: 'Contactos registrados para esta planta',
-                        onSelected: (val) {
-                          setState(() {
-                            _firmaClienteNombreCtrl.text = val;
-                          });
+                  borderRadius: BorderRadius.all(Radius.circular(8)),
+                ),
+                contentPadding: EdgeInsets.all(12),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const Text(
+                  'Dictamen: ',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                    color: Colors.white,
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      value: _dictamen,
+                      items: ['APTO', 'NO APTO', 'CONDICIONADO']
+                          .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontWeight: FontWeight.bold))))
+                          .toList(),
+                      onChanged: (v) => setState(() => _dictamen = v!),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            // Nombre del cliente receptor
+            RawAutocomplete<String>(
+              textEditingController: _firmaClienteNombreCtrl,
+              focusNode: _firmaClienteFocusNode,
+              optionsBuilder: (TextEditingValue textEditingValue) {
+                if (_contactosSugeridos.isEmpty) return const Iterable<String>.empty();
+                if (textEditingValue.text.isEmpty) return _contactosSugeridos;
+                return _contactosSugeridos.where((c) =>
+                    c.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+              },
+              onSelected: (String selection) {
+                setState(() {
+                  _firmaClienteNombreCtrl.text = selection;
+                });
+              },
+              fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+                return TextField(
+                  controller: controller,
+                  focusNode: focusNode,
+                  decoration: InputDecoration(
+                    labelText: 'Nombre de quien recibe / Conforme Cliente *',
+                    labelStyle: const TextStyle(
+                        color: Color(0xFFC8102E), fontWeight: FontWeight.w600),
+                    hintText: 'Nombre completo del receptor (ej. Janeth Lopez)',
+                    border: OutlineInputBorder(
+                        borderRadius: const BorderRadius.all(Radius.circular(8)),
+                        borderSide: BorderSide(
+                            color: nombreVacio
+                                ? const Color(0xFFC8102E)
+                                : Colors.grey.shade300)),
+                    focusedBorder: const OutlineInputBorder(
+                        borderRadius: BorderRadius.all(Radius.circular(8)),
+                        borderSide:
+                            BorderSide(color: Color(0xFFC8102E), width: 2)),
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.person_outline,
+                        color: Color(0xFFC8102E), size: 18),
+                    suffixIcon: _contactosSugeridos.isNotEmpty
+                        ? PopupMenuButton<String>(
+                            icon: const Icon(Icons.arrow_drop_down, color: Color(0xFFC8102E)),
+                            tooltip: 'Contactos registrados para esta planta',
+                            onSelected: (val) {
+                              setState(() {
+                                _firmaClienteNombreCtrl.text = val;
+                              });
+                            },
+                            itemBuilder: (context) => _contactosSugeridos.map((c) => PopupMenuItem(
+                              value: c,
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.history, size: 16, color: Colors.grey),
+                                  const SizedBox(width: 8),
+                                  Text(c, style: const TextStyle(fontSize: 13)),
+                                ],
+                              ),
+                            )).toList(),
+                          )
+                        : null,
+                  ),
+                  maxLines: 1,
+                  onChanged: (_) => setState(() {}),
+                );
+              },
+              optionsViewBuilder: (context, onSelected, options) {
+                return Align(
+                  alignment: Alignment.topLeft,
+                  child: Material(
+                    elevation: 6,
+                    borderRadius: BorderRadius.circular(8),
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 200, maxWidth: 350),
+                      child: ListView.builder(
+                        padding: EdgeInsets.zero,
+                        shrinkWrap: true,
+                        itemCount: options.length,
+                        itemBuilder: (context, i) {
+                          final opt = options.elementAt(i);
+                          return ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.person, size: 16, color: Color(0xFFC8102E)),
+                            title: Text(opt, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                            subtitle: const Text('Contacto registrado en planta', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            onTap: () => onSelected(opt),
+                          );
                         },
-                        itemBuilder: (context) => _contactosSugeridos.map((c) => PopupMenuItem(
-                          value: c,
-                          child: Row(
-                            children: [
-                              const Icon(Icons.history, size: 16, color: Colors.grey),
-                              const SizedBox(width: 8),
-                              Text(c, style: const TextStyle(fontSize: 13)),
-                            ],
-                          ),
-                        )).toList(),
-                      )
-                    : null,
-              ),
-              maxLines: 1,
-              onChanged: (_) => setState(() {}),
-            );
-          },
-          optionsViewBuilder: (context, onSelected, options) {
-            return Align(
-              alignment: Alignment.topLeft,
-              child: Material(
-                elevation: 6,
-                borderRadius: BorderRadius.circular(8),
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxHeight: 200, maxWidth: 350),
-                  child: ListView.builder(
-                    padding: EdgeInsets.zero,
-                    shrinkWrap: true,
-                    itemCount: options.length,
-                    itemBuilder: (context, i) {
-                      final opt = options.elementAt(i);
-                      return ListTile(
-                        dense: true,
-                        leading: const Icon(Icons.person, size: 16, color: Color(0xFFC8102E)),
-                        title: Text(opt, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                        subtitle: const Text('Contacto registrado en planta', style: TextStyle(fontSize: 10, color: Colors.grey)),
-                        onTap: () => onSelected(opt),
-                      );
-                    },
+                      ),
+                    ),
                   ),
-                ),
-              ),
-            );
-          },
-        ),
-        if (_contactosSugeridos.isNotEmpty) ...[
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Icon(Icons.history, size: 14, color: Colors.grey),
-              const SizedBox(width: 4),
-              const Text('Historial planta: ',
-                  style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500)),
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: _contactosSugeridos.map((contacto) {
-                      final isSelected = _firmaClienteNombreCtrl.text.trim().toLowerCase() == contacto.toLowerCase();
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 6),
-                        child: ActionChip(
-                          visualDensity: VisualDensity.compact,
-                          backgroundColor: isSelected ? const Color(0xFFFFEBEE) : Colors.grey.shade100,
-                          side: BorderSide(color: isSelected ? const Color(0xFFC8102E) : Colors.grey.shade300),
-                          avatar: Icon(Icons.person, size: 12, color: isSelected ? const Color(0xFFC8102E) : Colors.grey.shade700),
-                          label: Text(contacto, style: TextStyle(fontSize: 11, color: isSelected ? const Color(0xFFC8102E) : Colors.black87, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
-                          onPressed: () {
-                            setState(() {
-                              _firmaClienteNombreCtrl.text = contacto;
-                            });
-                          },
-                        ),
-                      );
-                    }).toList(),
+                );
+              },
+            ),
+            if (_contactosSugeridos.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  const Icon(Icons.history, size: 14, color: Colors.grey),
+                  const SizedBox(width: 4),
+                  const Text('Historial planta: ',
+                      style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500)),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: _contactosSugeridos.map((contacto) {
+                          final isSelected = _firmaClienteNombreCtrl.text.trim().toLowerCase() == contacto.toLowerCase();
+                          return Padding(
+                            padding: const EdgeInsets.only(right: 6),
+                            child: ActionChip(
+                              visualDensity: VisualDensity.compact,
+                              backgroundColor: isSelected ? const Color(0xFFFFEBEE) : Colors.grey.shade100,
+                              side: BorderSide(color: isSelected ? const Color(0xFFC8102E) : Colors.grey.shade300),
+                              avatar: Icon(Icons.person, size: 12, color: isSelected ? const Color(0xFFC8102E) : Colors.grey.shade700),
+                              label: Text(contacto, style: TextStyle(fontSize: 11, color: isSelected ? const Color(0xFFC8102E) : Colors.black87, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                              onPressed: () {
+                                setState(() {
+                                  _firmaClienteNombreCtrl.text = contacto;
+                                });
+                              },
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ),
                   ),
-                ),
+                ],
               ),
             ],
-          ),
-        ],
-      ]),
-    );
-  }
-
-  // ── Barra de acciones ─────────────────────────────────────────────────────
-  Widget _buildActionBar(String folio) {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(0, -2))],
+            const SizedBox(height: 24),
+            SizedBox(
+              height: 52,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1A7F64),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  elevation: 3,
+                ),
+                icon: _saving
+                    ? const SizedBox(width: 18, height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.draw_outlined),
+                label: const Text('Continuar a Firmas →',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                onPressed: _saving ? null : () => _irAFirma(folio),
+              ),
+            ),
+          ],
+        ),
       ),
-      child: Row(children: [
-        OutlinedButton.icon(
-          icon: const Icon(Icons.save_outlined),
-          label: const Text('Guardar Borrador'),
-          onPressed: () => _guardarBorrador(mostrarSnackbar: true),
-        ),
-        const Spacer(),
-        ElevatedButton.icon(
-          style: ElevatedButton.styleFrom(
-            backgroundColor: const Color(0xFF1A7F64),
-            disabledBackgroundColor: const Color(0xFF1A7F64),
-            foregroundColor: Colors.white,
-            disabledForegroundColor: Colors.white,
-            minimumSize: const Size(180, 48),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
-          icon: _saving
-              ? const SizedBox(width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.draw_outlined),
-          label: const Text('Continuar → Firma',
-              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-          onPressed: _saving ? null : () => _irAFirma(folio),
-        ),
-      ]),
     );
   }
 

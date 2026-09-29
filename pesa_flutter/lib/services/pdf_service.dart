@@ -83,7 +83,7 @@ class PdfService {
     ));
 
     final bytes = await doc.save();
-    return _saveToDisk(_s(osData, 'folio_os', 'OS'), bytes);
+    return _saveToDisk(osData, bytes);
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -123,10 +123,13 @@ class PdfService {
         pw.SizedBox(height: 3),
         // 5. Grid de instrumento
         _buildEquipo(osData),
-        pw.SizedBox(height: 2),
-        // 5.1 Fila JIA (inicial del calibrador)
-        _buildJiaRow(osData),
-        pw.SizedBox(height: 2),
+        if (_debeMostrarJia(osData)) ...[
+          pw.SizedBox(height: 2),
+          // 5.1 Fila JIA (inicial del calibrador)
+          _buildJiaRow(osData),
+          pw.SizedBox(height: 2),
+        ] else
+          pw.SizedBox(height: 4),
         // 6. "PRUEBAS METROLÓGICAS"
         _sectionTitle('PRUEBAS METROLÓGICAS'),
         pw.SizedBox(height: 3),
@@ -277,9 +280,16 @@ class PdfService {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // 5.1 FILA JIA
+  // 5.1 FILA JIA (Solo para Calibración o Inspección — Oculto en Ajuste puro)
   // ══════════════════════════════════════════════════════════════════════════
+  bool _debeMostrarJia(Map<String, dynamic> os) {
+    final tipoSvc = (os['tipo_servicio'] ?? os['tipo_servicio_nombre'] ?? '').toString().toLowerCase();
+    // Si tipo_servicio NO contiene "calibr" ni "inspec" (por ej. es únicamente "Ajuste"), ocultar casillas J-I-A
+    return tipoSvc.contains('calib') || tipoSvc.contains('inspec');
+  }
+
   pw.Widget _buildJiaRow(Map<String, dynamic> os) {
+    if (!_debeMostrarJia(os)) return pw.SizedBox.shrink();
     final j = os['jia_j'] == true || os['inicial_calibrador'] == 'J';
     final i = os['jia_i'] == true || os['inicial_calibrador'] == 'I';
     final a = os['jia_a'] == true || os['inicial_calibrador'] == 'A';
@@ -931,15 +941,31 @@ class PdfService {
   // ══════════════════════════════════════════════════════════════════════════
   // GUARDAR EN DISCO
   // ══════════════════════════════════════════════════════════════════════════
-  Future<String> _saveToDisk(String folio, Uint8List bytes) async {
-    Directory dir;
-    try { dir = await getApplicationDocumentsDirectory(); }
-    catch (_) { dir = await getTemporaryDirectory(); }
-    final d = Directory('${dir.path}/PESA_Tablet/PDF_OS');
-    await d.create(recursive: true);
-    final path = '${d.path}/$folio.pdf';
-    await File(path).writeAsBytes(bytes);
-    return path;
+  Future<String> _saveToDisk(Map<String, dynamic> osData, Uint8List bytes) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final pdfDir = Directory('${dir.path}/Pesa_PDFs');
+    if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
+
+    final folio = _s(osData, 'folio_os', _s(osData, 'folio', 'OS')).trim();
+    final idIndicador = _s(osData, 'id_indicador', _s(osData, 'id_equipo', 'INST')).trim();
+
+    // Sanitizar nombres de archivo para evitar caracteres no permitidos en sistemas de archivos
+    final safeFolio = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final safeId = idIndicador.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final fileName = safeId.isNotEmpty ? '$safeFolio-$safeId.pdf' : '$safeFolio.pdf';
+    final filePath = '${pdfDir.path}/$fileName';
+    final file = File(filePath);
+    await file.writeAsBytes(bytes);
+
+    // Guardar también copia en PESA_Tablet/PDF_OS para compatibilidad con versiones previas
+    try {
+      final legacyDir = Directory('${dir.path}/PESA_Tablet/PDF_OS');
+      if (!await legacyDir.exists()) await legacyDir.create(recursive: true);
+      final legacyFile = File('${legacyDir.path}/$safeFolio.pdf');
+      await legacyFile.writeAsBytes(bytes);
+    } catch (_) {}
+
+    return filePath;
   }
 
   Future<void> abrirPdf(String path) async {

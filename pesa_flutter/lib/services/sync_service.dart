@@ -48,6 +48,19 @@ class SyncService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Actualiza en memoria los datos de una orden específica de forma reactiva
+  void updateLocalOrder(String folio, Map<String, dynamic> updates) {
+    final folioTrim = folio.trim();
+    final idx = _orders.indexWhere((o) =>
+        (o['folio_os']?.toString().trim() == folioTrim) ||
+        (o['folio']?.toString().trim() == folioTrim));
+    if (idx >= 0) {
+      _orders[idx] = {..._orders[idx], ...updates};
+      _updateCounters(_orders);
+      notifyListeners();
+    }
+  }
+
   void _updateCounters(List<Map<String, dynamic>> list) {
     _kpiTotal = list.length;
     int proceso = 0;
@@ -294,10 +307,14 @@ class SyncService extends ChangeNotifier {
             'firma_tecnico': os['firma_tecnico'],
           if ((os['firma_cliente'] as String?)?.isNotEmpty == true)
             'firma_cliente': os['firma_cliente'],
+          if ((os['firma_cliente_nombre'] as String?)?.isNotEmpty == true)
+            'firma_cliente_nombre': os['firma_cliente_nombre'],
           if ((os['nombre_ing'] as String?)?.isNotEmpty == true)
             'nombre_ing': os['nombre_ing'],
           if ((os['puesto_ing'] as String?)?.isNotEmpty == true)
             'puesto_ing': os['puesto_ing'],
+          if ((os['dictamen'] as String?)?.isNotEmpty == true)
+            'dictamen': os['dictamen'],
           'unidad_medida': os['unidad_medida'] ?? 'kg',
         };
 
@@ -324,8 +341,10 @@ class SyncService extends ChangeNotifier {
               'exac_rows': _decodeJson(os['exac_json']),
               'firma_tecnico': os['firma_tecnico'],
               'firma_cliente': os['firma_cliente'],
+              'firma_cliente_nombre': os['firma_cliente_nombre'],
               'nombre_ing': os['nombre_ing'],
               'puesto_ing': os['puesto_ing'],
+              'dictamen': os['dictamen'],
               'unidad_medida': os['unidad_medida'] ?? 'kg',
             },
           );
@@ -357,7 +376,23 @@ class SyncService extends ChangeNotifier {
       }
     }
 
-    // 2. Carpeta Documents / PESA_Tablet / PDF_OS
+    // 2. Carpeta Documents / Pesa_PDFs (Almacenamiento persistente)
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final pdfDir = Directory('${appDocDir.path}/Pesa_PDFs');
+      if (await pdfDir.exists()) {
+        final files = pdfDir.listSync().whereType<File>();
+        final match = files.firstWhere(
+          (f) => f.path.split(Platform.pathSeparator).last.startsWith(folio),
+          orElse: () => File(''),
+        );
+        if (match.path.isNotEmpty && await match.exists() && await match.length() > 500) {
+          return match;
+        }
+      }
+    } catch (_) {}
+
+    // 3. Carpeta Documents / PESA_Tablet / PDF_OS (Legacy)
     try {
       final appDocDir = await getApplicationDocumentsDirectory();
       final cand1 = File('${appDocDir.path}/PESA_Tablet/PDF_OS/$folio.pdf');
@@ -431,8 +466,10 @@ class SyncService extends ChangeNotifier {
             'exac_rows': _decodeJson(os['exac_json']),
             'firma_tecnico': os['firma_tecnico'],
             'firma_cliente': os['firma_cliente'],
+            'firma_cliente_nombre': os['firma_cliente_nombre'],
             'nombre_ing': os['nombre_ing'],
             'puesto_ing': os['puesto_ing'],
+            'dictamen': os['dictamen'],
             'unidad_medida': os['unidad_medida'] ?? 'kg',
           },
         );
@@ -520,12 +557,7 @@ class SyncService extends ChangeNotifier {
             }).toList()
           : osList;
 
-      // ── [ASIGNACIÓN DIRECTA INMEDIATA AL ESTADO DEL DASHBOARD] ──────────
-      setOrdersFromPull(filteredList);
-      debugPrint('[Sync PULL] Dashboard en memoria actualizado: ${filteredList.length} OS '
-          '| Total: $_kpiTotal, Proceso: $_kpiProceso, Cerrados: $_kpiCerrado, Físicos: $_kpiFisico');
-
-      // Persistir también en SQLite de forma segura (sin borrar si falla)
+      // 1. Persistir en SQLite de forma segura (preservando rutas locales existentes)
       int guardadas = 0;
       String? lastErr;
       for (final osData in filteredList) {
@@ -536,6 +568,27 @@ class SyncService extends ChangeNotifier {
           lastErr = db.lastUpsertError;
         }
       }
+
+      // 2. Enriquecer filteredList con rutas locales persistidas para mantenerlas en memoria
+      for (final osData in filteredList) {
+        final folio = (osData['folio_os'] ?? osData['folio'])?.toString().trim();
+        if (folio != null && folio.isNotEmpty) {
+          final localRow = await db.getOsByFolio(folio);
+          if (localRow != null) {
+            if (localRow['pdf_path_local'] != null && localRow['pdf_path_local'].toString().isNotEmpty) {
+              osData['pdf_path_local'] = localRow['pdf_path_local'];
+            }
+            if (localRow['pdf_b64_local'] != null && localRow['pdf_b64_local'].toString().isNotEmpty) {
+              osData['pdf_b64_local'] = localRow['pdf_b64_local'];
+            }
+          }
+        }
+      }
+
+      // 3. [ASIGNACIÓN DIRECTA INMEDIATA AL ESTADO DEL DASHBOARD]
+      setOrdersFromPull(filteredList);
+      debugPrint('[Sync PULL] Dashboard en memoria actualizado: ${filteredList.length} OS '
+          '| Total: $_kpiTotal, Proceso: $_kpiProceso, Cerrados: $_kpiCerrado, Físicos: $_kpiFisico');
 
       await db.setLastSyncTime(DateTime.now().toUtc());
       debugPrint('[Sync PULL] Persistencia SQLite: $guardadas/${filteredList.length} guardadas (lastErr: $lastErr)');

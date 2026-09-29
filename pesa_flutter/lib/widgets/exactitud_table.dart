@@ -12,6 +12,8 @@ class ExactitudTable extends StatefulWidget {
   final ValueChanged<List<Map<String, dynamic>>> onChanged;
   /// División mínima en kg — controla decimales y validación de múltiplos
   final double? divMin;
+  /// Widget opcional al final de la tabla (ej. observaciones + dictamen + botón a firmas)
+  final Widget? footer;
 
   const ExactitudTable({
     super.key,
@@ -19,6 +21,7 @@ class ExactitudTable extends StatefulWidget {
     required this.rows,
     required this.onChanged,
     this.divMin,
+    this.footer,
   });
 
   @override
@@ -180,6 +183,10 @@ class _ExactitudTableState extends State<ExactitudTable> {
               ),
             ),
           ),
+          if (widget.footer != null) ...[
+            const SizedBox(height: 20),
+            widget.footer!,
+          ],
         ],
       ),
     );
