@@ -223,8 +223,8 @@ async def sync_pull(
         nfkd = unicodedata.normalize('NFKD', str(r))
         return "".join(c for c in nfkd if not unicodedata.combining(c)).lower().strip()
 
-    role_raw   = str(current_user.get("role", "")).strip()
-    role_norm  = _norm_role(role_raw)
+    role       = str(current_user.get("role", "")).strip()
+    role_norm  = _norm_role(role)
     id_tecnico = current_user.get("id_tecnico") or current_user.get("id")
 
     # Solo roles expresamente de control y administración ven todas las órdenes
@@ -232,7 +232,7 @@ async def sync_pull(
     is_admin   = any(ar in role_norm for ar in _ADMIN_ROLES)
 
     # [FIX-TZ] asyncpg no puede comparar datetime aware con TIMESTAMP WITHOUT TIME ZONE
-    if since.tzinfo is not None:
+    if since is not None and since.tzinfo is not None:
         since = since.astimezone(timezone.utc).replace(tzinfo=None)
 
     # ── SELECT blindado con COALESCE en todos los campos de texto ─────────────
