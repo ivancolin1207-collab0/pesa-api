@@ -79,6 +79,7 @@ class LocalDbService {
       fecha_apertura_admin   TEXT,
       sync_version           INTEGER DEFAULT 0,
       sync_status            TEXT DEFAULT 'SINCRONIZADO',
+      is_synced              INTEGER DEFAULT 0,
       updated_at             TEXT
     )
   ''';
@@ -191,6 +192,7 @@ class LocalDbService {
             'fecha_apertura_admin': 'TEXT',
             'estatus': "TEXT DEFAULT 'PROCESO'",
             'folio': 'TEXT',
+            'is_synced': 'INTEGER DEFAULT 0',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -391,7 +393,9 @@ class LocalDbService {
       // Sync & Trazabilidad
       'sync_check_status': (data['sync_check_status'] as String?)?.isNotEmpty == true
           ? data['sync_check_status'].toString()
-          : 'RECIBIDA_TABLET',
+          : (data['syncCheckStatus'] as String?)?.isNotEmpty == true
+              ? data['syncCheckStatus'].toString()
+              : 'RECIBIDA_TABLET',
       if (data['fecha_descarga_tablet'] != null)
         'fecha_descarga_tablet': data['fecha_descarga_tablet']?.toString(),
       if (data['fecha_subida_servidor'] != null)
@@ -400,6 +404,7 @@ class LocalDbService {
         'fecha_apertura_admin': data['fecha_apertura_admin']?.toString(),
       'sync_version':      _toInt(data['sync_version'], 0),
       'sync_status':       'SINCRONIZADO',
+      'is_synced':         (data['is_synced'] == 1 || data['is_synced'] == true || data['sync_status'] == 'SINCRONIZADO' || data['sync_check_status'] == 'SUBIDA_SERVIDOR' || data['sync_check_status'] == 'AUDITADA_ADMIN' || data['sync_check_status'] == 'ABIERTO') ? 1 : 0,
       'updated_at':        data['updated_at']?.toString(),
     };
 
@@ -409,7 +414,7 @@ class LocalDbService {
       final existingRows = await db.query(
         'ordenes_servicio',
         columns: [
-          'pdf_path_local', 'pdf_b64_local', 'pdf_subido', 'sync_check_status',
+          'pdf_path_local', 'pdf_b64_local', 'pdf_subido', 'sync_check_status', 'is_synced',
           'firma_tecnico', 'firma_cliente', 'firma_cliente_nombre', 'nombre_ing', 'puesto_ing', 'dictamen'
         ],
         where: 'folio_os = ?',
@@ -428,13 +433,35 @@ class LocalDbService {
           row['pdf_subido'] = ex['pdf_subido'];
         }
         if (ex['sync_check_status'] != null) {
-          final localSt = ex['sync_check_status'].toString();
-          final srvSt   = row['sync_check_status']?.toString();
-          // Si el servidor reporta AUDITADA_ADMIN, gana el servidor.
-          // De lo contrario, si localmente ya se subió (SUBIDA_SERVIDOR), no degradar.
-          if (srvSt != 'AUDITADA_ADMIN' && (localSt == 'SUBIDA_SERVIDOR' || localSt == 'AUDITADA_ADMIN')) {
-            row['sync_check_status'] = localSt;
+          final localSt = ex['sync_check_status'].toString().trim().toUpperCase();
+          final srvSt   = row['sync_check_status']?.toString().trim().toUpperCase();
+          // Jerarquía de estados:
+          // 1. AUDITADA_ADMIN / ABIERTO: Si el servidor lo reporta, siempre gana
+          // 2. SUBIDA_SERVIDOR: Si el servidor lo reporta, o si ya se subió localmente
+          // 3. RECIBIDA_TABLET: Estado base en tablet
+          // 4. ASIGNADA: Asignada inicial
+          if (srvSt == 'AUDITADA_ADMIN' || srvSt == 'ABIERTO') {
+            row['sync_check_status'] = 'AUDITADA_ADMIN';
+            row['is_synced'] = 1;
+            row['sync_status'] = 'SINCRONIZADO';
+          } else if (srvSt == 'SUBIDA_SERVIDOR') {
+            if (localSt == 'AUDITADA_ADMIN' || localSt == 'ABIERTO') {
+              row['sync_check_status'] = 'AUDITADA_ADMIN';
+            } else {
+              row['sync_check_status'] = 'SUBIDA_SERVIDOR';
+            }
+            row['is_synced'] = 1;
+            row['sync_status'] = 'SINCRONIZADO';
+          } else if (localSt == 'AUDITADA_ADMIN' || localSt == 'ABIERTO') {
+            row['sync_check_status'] = 'AUDITADA_ADMIN';
+            row['is_synced'] = 1;
+          } else if (localSt == 'SUBIDA_SERVIDOR') {
+            row['sync_check_status'] = 'SUBIDA_SERVIDOR';
+            row['is_synced'] = 1;
           }
+        }
+        if (ex['is_synced'] != null && (ex['is_synced'] == 1 || ex['is_synced'] == '1')) {
+          row['is_synced'] = 1;
         }
         // Preservar firmas y datos locales si el servidor envió valores vacíos
         if ((row['firma_tecnico'] == null || row['firma_tecnico'].toString().isEmpty) && ex['firma_tecnico'] != null) {
@@ -837,6 +864,7 @@ class LocalDbService {
     final folioKey = (folio ?? '').trim();
     final syncCheck = (isOnline && uploadOk) ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET';
     final syncStatus = (isOnline && uploadOk) ? 'SINCRONIZADO' : 'PENDIENTE_ACTUALIZAR';
+    final isSynced = (isOnline && uploadOk) ? 1 : 0;
     final pdfSubido = (isOnline && uploadOk) ? 1 : 0;
 
     final updateData = <String, dynamic>{
@@ -846,6 +874,7 @@ class LocalDbService {
       'estatus': 'Cerrado',
       'sync_check_status': syncCheck,
       'sync_status': syncStatus,
+      'is_synced': isSynced,
       'pdf_subido': pdfSubido,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     };
@@ -1003,7 +1032,12 @@ class LocalDbService {
     final whereArg = (localId > 0) ? localId : (folio ?? '');
     await db.update(
       'ordenes_servicio',
-      {'sync_status': 'SINCRONIZADO', 'sync_version': newVersion},
+      {
+        'sync_status': 'SINCRONIZADO',
+        'is_synced': 1,
+        'sync_check_status': 'SUBIDA_SERVIDOR',
+        'sync_version': newVersion,
+      },
       where: whereClause, whereArgs: [whereArg],
     );
   }
@@ -1017,12 +1051,88 @@ class LocalDbService {
       'ordenes_servicio',
       {
         'pdf_subido': 1,
+        'is_synced': 1,
+        'sync_status': 'SINCRONIZADO',
         'sync_check_status': 'SUBIDA_SERVIDOR',
         if (folio != null && folio.isNotEmpty) 'pdf_url': '/uploads/$folio.pdf',
       },
       where: whereClause,
       whereArgs: [whereArg],
     );
+  }
+
+  /// Homologa el estado de sincronización y estatus desde Render en cada pull
+  Future<void> updateSyncAndStatus({
+    required String folio,
+    required String syncCheckStatus,
+    required String estatus,
+  }) async {
+    final db = await _ensureInit();
+    final f = folio.trim();
+    if (f.isEmpty) return;
+
+    final normSync = syncCheckStatus.trim().toUpperCase();
+    final isSynced = (normSync == 'SUBIDA_SERVIDOR' || normSync == 'AUDITADA_ADMIN' || normSync == 'ABIERTO') ? 1 : 0;
+
+    try {
+      await db.rawUpdate('''
+        UPDATE ordenes_servicio SET 
+          sync_check_status = ?,
+          estado = ?,
+          estatus = ?,
+          is_synced = CASE WHEN ? = 1 THEN 1 ELSE is_synced END,
+          sync_status = CASE WHEN ? = 1 THEN 'SINCRONIZADO' ELSE sync_status END
+        WHERE folio_os = ? OR folio = ?
+      ''', [syncCheckStatus, estatus, estatus, isSynced, isSynced, f, f]);
+    } catch (e) {
+      debugPrint('[LocalDB] Error en updateSyncAndStatus para $f: $e');
+    }
+  }
+
+  /// Actualiza inmediatamente el estado local tras push exitoso
+  Future<void> updateOsSyncCheckStatus(
+    String folio,
+    String status, {
+    int isSynced = 1,
+    int? pdfSubido,
+    String? estado,
+  }) async {
+    final db = await _ensureInit();
+    final f = folio.trim();
+    if (f.isEmpty) return;
+
+    final updateData = <String, dynamic>{
+      'sync_check_status': status,
+      'is_synced': isSynced,
+      'sync_status': isSynced == 1 ? 'SINCRONIZADO' : 'PENDIENTE_ACTUALIZAR',
+      if (pdfSubido != null) 'pdf_subido': pdfSubido,
+      if (estado != null && estado.isNotEmpty) ...{
+        'estado': estado,
+        'estatus': estado,
+      },
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+      final existingCols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+      final sanitized = <String, dynamic>{};
+      updateData.forEach((k, v) {
+        if (existingCols.contains(k.toLowerCase())) {
+          sanitized[k] = v;
+        }
+      });
+
+      await db.update(
+        'ordenes_servicio',
+        sanitized,
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [f, f],
+      );
+      debugPrint('[LocalDB] updateOsSyncCheckStatus exitoso para $f -> $status');
+    } catch (e) {
+      debugPrint('[LocalDB] Error en updateOsSyncCheckStatus para $f: $e');
+    }
   }
 
   /// Obtiene órdenes completadas/cerradas cuyo PDF aún no se ha confirmado subido al servidor.

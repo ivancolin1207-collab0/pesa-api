@@ -69,13 +69,23 @@ class SyncCheckInfo {
   static SyncCheckInfo fromStatus(String? status) {
     if (status == null) return asignada;
     final s = status.trim().toUpperCase();
-    if (s == 'AUDITADA_ADMIN' || s.contains('AUDIT') || s.contains('ABIERTO') || s.contains('OPEN')) {
+    if (s == 'AUDITADA_ADMIN' || s == 'ABIERTO' || s.contains('AUDIT') || s.contains('ABIERTO') || s.contains('OPEN')) {
       return auditadaAdmin;
     }
-    if (s == 'SUBIDA_SERVIDOR' || s == 'COMPLETADA' || s == 'COMPLETADA_DIGITAL' || s == 'CERRADA' || s == 'CERRADO') {
+    if (s == 'SUBIDA_SERVIDOR' || s == 'ENVIADA' || s == 'ENVIADO') {
       return subidaServidor;
     }
-    if (s == 'RECIBIDA_TABLET' || s == 'EN_CAMPO' || s == 'EN_PROCESO' || s == 'PROCESO' || s == 'PENDIENTE') {
+    if (s == 'RECIBIDA_TABLET' || s == 'EN_TABLET' || s == 'EN TABLET') {
+      return recibidaTablet;
+    }
+    if (s == 'ASIGNADA' || s == 'ASIGNADO') {
+      return asignada;
+    }
+    // Fallbacks si viene un estado de la orden en vez de sync_check_status
+    if (s == 'COMPLETADA' || s == 'COMPLETADA_DIGITAL' || s == 'CERRADA' || s == 'CERRADO') {
+      return subidaServidor;
+    }
+    if (s == 'EN_CAMPO' || s == 'EN_PROCESO' || s == 'PROCESO' || s == 'PENDIENTE') {
       return recibidaTablet;
     }
     return asignada;

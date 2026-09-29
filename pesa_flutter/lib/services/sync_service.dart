@@ -319,22 +319,30 @@ class SyncService extends ChangeNotifier {
         };
 
         final result = await ApiService.instance.syncPush(payload);
+        final folio = (os['folio_os'] ?? os['folio']) as String;
         await db.markOsSincronizada(
           os['local_id'] as int,
           result['sync_version'] as int? ?? 0,
+          folio: folio,
         );
+        await db.updateOsSyncCheckStatus(folio, 'SUBIDA_SERVIDOR', isSynced: 1);
+        updateLocalOrder(folio, {
+          'sync_check_status': 'SUBIDA_SERVIDOR',
+          'is_synced': 1,
+          'sync_status': 'SINCRONIZADO',
+        });
         uploaded++;
 
         // ── Subida obligatoria del binario PDF por Multipart POST ─────────────
         final pdfFile = await _resolveLocalPdfFile(os);
         if (pdfFile != null && await pdfFile.exists()) {
-          debugPrint('[Sync] Subiendo binario PDF multipart para ${os['folio_os']} (${await pdfFile.length()} bytes)...');
+          debugPrint('[Sync] Subiendo binario PDF multipart para $folio (${await pdfFile.length()} bytes)...');
           final uploadOk = await ApiService.instance.uploadPdf(
-            os['folio_os'] as String,
+            folio,
             pdfFile,
             osId: os['local_id'] as int?,
             data: {
-              'folio_os': os['folio_os'],
+              'folio_os': folio,
               'observaciones': os['observaciones'],
               'rep_rows': _decodeJson(os['rep_json']),
               'exc_rows': _decodeJson(os['exc_json']),
@@ -349,10 +357,17 @@ class SyncService extends ChangeNotifier {
             },
           );
           if (uploadOk) {
-            debugPrint('[Sync] ✅ PDF binario subido y confirmado por Render para ${os['folio_os']}');
-            await db.markPdfSubido(os['local_id'] as int, folio: os['folio_os'] as String?);
+            debugPrint('[Sync] ✅ PDF binario subido y confirmado por Render para $folio');
+            await db.markPdfSubido(os['local_id'] as int, folio: folio);
+            await db.updateOsSyncCheckStatus(folio, 'SUBIDA_SERVIDOR', isSynced: 1, pdfSubido: 1);
+            updateLocalOrder(folio, {
+              'sync_check_status': 'SUBIDA_SERVIDOR',
+              'is_synced': 1,
+              'sync_status': 'SINCRONIZADO',
+              'pdf_subido': 1,
+            });
           } else {
-            debugPrint('[Sync] ⚠️ Subida de PDF falló para ${os['folio_os']}, se reintentará');
+            debugPrint('[Sync] ⚠️ Subida de PDF falló para $folio, se reintentará');
           }
         }
       } catch (e) {
@@ -477,6 +492,13 @@ class SyncService extends ChangeNotifier {
         if (uploadOk) {
           debugPrint('[Sync] ✅ PDF binario subido exitosamente a Render para $folio');
           await db.markPdfSubido(osId ?? 0, folio: folio);
+          await db.updateOsSyncCheckStatus(folio, 'SUBIDA_SERVIDOR', isSynced: 1, pdfSubido: 1);
+          updateLocalOrder(folio, {
+            'sync_check_status': 'SUBIDA_SERVIDOR',
+            'is_synced': 1,
+            'sync_status': 'SINCRONIZADO',
+            'pdf_subido': 1,
+          });
           subidos++;
         } else {
           debugPrint('[Sync] ❌ Subida multipart de PDF falló para $folio');
@@ -557,10 +579,22 @@ class SyncService extends ChangeNotifier {
             }).toList()
           : osList;
 
-      // 1. Persistir en SQLite de forma segura (preservando rutas locales existentes)
+      // 1. Homologar estado desde Render en SQLite local para cada orden
       int guardadas = 0;
       String? lastErr;
       for (final osData in filteredList) {
+        final folio = (osData['folio_os'] ?? osData['folio'])?.toString().trim();
+        final srvSyncStatus = (osData['sync_check_status'] ?? osData['syncCheckStatus'])?.toString().trim();
+        final srvEstado = (osData['estado'] ?? osData['estatus'])?.toString().trim();
+
+        if (folio != null && folio.isNotEmpty && srvSyncStatus != null && srvSyncStatus.isNotEmpty) {
+          await db.updateSyncAndStatus(
+            folio: folio,
+            syncCheckStatus: srvSyncStatus,
+            estatus: srvEstado ?? 'PROCESO',
+          );
+        }
+
         final ok = await db.upsertOs(osData);
         if (ok) {
           guardadas++;
@@ -569,7 +603,7 @@ class SyncService extends ChangeNotifier {
         }
       }
 
-      // 2. Enriquecer filteredList con rutas locales persistidas para mantenerlas en memoria
+      // 2. Enriquecer filteredList con rutas locales persistidas y sync_check_status consolidado en SQLite
       for (final osData in filteredList) {
         final folio = (osData['folio_os'] ?? osData['folio'])?.toString().trim();
         if (folio != null && folio.isNotEmpty) {
@@ -580,6 +614,18 @@ class SyncService extends ChangeNotifier {
             }
             if (localRow['pdf_b64_local'] != null && localRow['pdf_b64_local'].toString().isNotEmpty) {
               osData['pdf_b64_local'] = localRow['pdf_b64_local'];
+            }
+            if (localRow['sync_check_status'] != null && localRow['sync_check_status'].toString().isNotEmpty) {
+              osData['sync_check_status'] = localRow['sync_check_status'];
+            }
+            if (localRow['estado'] != null && localRow['estado'].toString().isNotEmpty) {
+              osData['estado'] = localRow['estado'];
+            }
+            if (localRow['estatus'] != null && localRow['estatus'].toString().isNotEmpty) {
+              osData['estatus'] = localRow['estatus'];
+            }
+            if (localRow['is_synced'] != null) {
+              osData['is_synced'] = localRow['is_synced'];
             }
           }
         }

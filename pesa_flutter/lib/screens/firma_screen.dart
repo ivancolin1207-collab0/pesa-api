@@ -927,6 +927,12 @@ class _FirmaScreenState extends State<FirmaScreen>
                 isOnline: true,
                 uploadOk: true,
               );
+              await LocalDbService.instance.updateOsSyncCheckStatus(
+                folio,
+                'SUBIDA_SERVIDOR',
+                isSynced: 1,
+                pdfSubido: 1,
+              );
               await LocalDbService.instance.markOsSincronizada(
                 widget.osId,
                 ((enrichedOs['sync_version'] as int? ?? 0) + 1),
@@ -939,6 +945,7 @@ class _FirmaScreenState extends State<FirmaScreen>
                   'estatus': 'Cerrado',
                   'sync_check_status': 'SUBIDA_SERVIDOR',
                   'sync_status': 'SINCRONIZADO',
+                  'is_synced': 1,
                   'pdf_subido': 1,
                 });
               }

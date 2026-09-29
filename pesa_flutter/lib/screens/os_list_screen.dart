@@ -1164,6 +1164,11 @@ class _OsRow extends StatelessWidget {
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
+        os['is_synced'] == 1 ||
+        os['is_synced'] == '1' ||
+        os['sync_check_status'] == 'SUBIDA_SERVIDOR' ||
+        os['sync_check_status'] == 'AUDITADA_ADMIN' ||
+        os['sync_check_status'] == 'ABIERTO' ||
         (isCerrado && syncSt != 'PENDIENTE_ACTUALIZAR');
 
     final fechaStr = _formatFecha(os['fecha'] as String?);
@@ -1290,7 +1295,9 @@ class _OsRow extends StatelessWidget {
           child: Align(
             alignment: Alignment.centerLeft,
             child: SyncCheckBadge(
-              status: (os['sync_check_status'] as String?) ?? (isSincronizado ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET'),
+              status: (os['sync_check_status'] as String?)?.isNotEmpty == true
+                  ? os['sync_check_status'] as String
+                  : (isSincronizado ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET'),
               showLabel: true,
             ),
           ),
@@ -1819,7 +1826,9 @@ class _LoteRowState extends State<_LoteRow> {
               child: Align(
                 alignment: Alignment.centerLeft,
                 child: SyncCheckBadge(
-                  status: (first['sync_check_status'] as String?) ?? 'RECIBIDA_TABLET',
+                  status: (first['sync_check_status'] as String?)?.isNotEmpty == true
+                      ? first['sync_check_status'] as String
+                      : 'RECIBIDA_TABLET',
                   showLabel: true,
                 ),
               ),
