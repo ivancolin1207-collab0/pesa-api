@@ -26,6 +26,7 @@ class RepetibilidadTable extends StatefulWidget {
 class _RepetibilidadTableState extends State<RepetibilidadTable> {
   late TextEditingController _cargaCtrl;
   late List<_RepRow> _rows;
+  bool _userEditedCarga = false;
 
   @override
   void initState() {
@@ -35,12 +36,12 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
     if (widget.rows.isNotEmpty) {
       final v = widget.rows.first['valor'] ?? widget.rows.first['valor_kg'];
       if (v != null && v.toString().isNotEmpty) {
-        cargaPrevia = v.toString();
+        final dVal = double.tryParse(v.toString().replaceAll(',', '.'));
+        cargaPrevia = (dVal != null) ? formatearCargaSugerida(dVal, divMin: widget.divMin) : v.toString();
       }
     }
 
     _cargaCtrl = TextEditingController(text: cargaPrevia);
-    _cargaCtrl.addListener(_notify);
 
     // 3 repeticiones estándar
     _rows = List.generate(3, (i) {
@@ -52,10 +53,25 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
             text: saved?['lectura_final']?.toString() ?? ''),
       );
     });
+  }
 
-    for (final r in _rows) {
-      r.inicialCtrl.addListener(_notify);
-      r.finalCtrl.addListener(_notify);
+  @override
+  void didUpdateWidget(RepetibilidadTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_userEditedCarga) return;
+
+    if (widget.rows.isNotEmpty) {
+      final v = widget.rows.first['valor'] ?? widget.rows.first['valor_kg'];
+      if (v != null && v.toString().isNotEmpty) {
+        final dVal = double.tryParse(v.toString().replaceAll(',', '.'));
+        if (dVal != null) {
+          final formatted = formatearCargaSugerida(dVal, divMin: widget.divMin);
+          if (_cargaCtrl.text.trim() != formatted &&
+              (_cargaCtrl.text.trim().isEmpty || _cargaCtrl.text == '0' || _cargaCtrl.text == '0.0')) {
+            _cargaCtrl.text = formatted;
+          }
+        }
+      }
     }
   }
 
@@ -72,16 +88,18 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
   void _notify() => widget.onChanged(_serialize());
 
   List<Map<String, dynamic>> _serialize() {
-    final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
+    final cleanCarga = _cargaCtrl.text.trim().replaceAll(',', '.');
+    final carga = double.tryParse(cleanCarga) ?? 0.0;
     final dec = decimalsFromDivMin(widget.divMin);
 
     return _rows.asMap().entries.map((e) {
-      final ini = double.tryParse(e.value.inicialCtrl.text.trim().replaceAll(',', '.'));
-      final fin = double.tryParse(e.value.finalCtrl.text.trim().replaceAll(',', '.'));
+      final iniRaw = e.value.inicialCtrl.text.trim().replaceAll(',', '.');
+      final finRaw = e.value.finalCtrl.text.trim().replaceAll(',', '.');
+      final ini = double.tryParse(iniRaw);
+      final fin = double.tryParse(finRaw);
       double? error;
       if (fin != null) {
-        final iniVal = ini ?? 0.0;
-        error = (fin - iniVal) - carga;
+        error = fin - carga;
       }
       return {
         'posicion_id':    e.key + 1,
@@ -147,8 +165,16 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
                         child: Focus(
                           onFocusChange: (hasFocus) {
                             if (!hasFocus && _cargaCtrl.text.trim().isNotEmpty) {
-                              double? n = double.tryParse(_cargaCtrl.text.replaceAll(',', '.'));
-                              if (n != null) _cargaCtrl.text = n.toStringAsFixed(dec);
+                              final raw = _cargaCtrl.text.trim().replaceAll(',', '.');
+                              final double? n = double.tryParse(raw);
+                              if (n != null) {
+                                final formatted = n.toStringAsFixed(dec);
+                                if (_cargaCtrl.text != formatted) {
+                                  _cargaCtrl.text = formatted;
+                                }
+                              }
+                              _notify();
+                              if (mounted) setState(() {});
                             }
                           },
                           child: TextField(
@@ -159,6 +185,17 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
                               FilteringTextInputFormatter.allow(RegExp(r'[\d.,]'))
                             ],
                             textAlign: TextAlign.center,
+                            onChanged: (val) {
+                              _userEditedCarga = true;
+                              final raw = val.trim().replaceAll(',', '.');
+                              final double? valor = double.tryParse(raw);
+                              if (valor == null) {
+                                // No calcular ni romper, dejar en estado transitorio
+                                return;
+                              }
+                              _notify();
+                              if (mounted) setState(() {});
+                            },
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
@@ -302,13 +339,11 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
   );
 
   TableRow _dataRow(int i, int dec) {
-    final ini = double.tryParse(_rows[i].inicialCtrl.text.trim().replaceAll(',', '.'));
     final fin = double.tryParse(_rows[i].finalCtrl.text.trim().replaceAll(',', '.'));
     final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
     double? err;
     if (fin != null) {
-      final iniVal = ini ?? 0.0;
-      err = (fin - iniVal) - carga;
+      err = fin - carga;
     }
 
     final cargaTxt = _cargaCtrl.text.trim().isNotEmpty ? _cargaCtrl.text.trim() : '—';
@@ -348,7 +383,7 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
                 err.toStringAsFixed(dec),
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: err > (widget.divMin ?? 0.001)
+                  color: err.abs() > (widget.divMin ?? 0.001)
                       ? _kRed
                       : Colors.green.shade700,
                   fontWeight: FontWeight.w700,
@@ -373,9 +408,16 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
       child: Focus(
         onFocusChange: (hasFocus) {
           if (!hasFocus && ctrl.text.trim().isNotEmpty) {
-            double? n = double.tryParse(ctrl.text.replaceAll(',', '.'));
-            if (n != null) ctrl.text = n.toStringAsFixed(dec);
-            setState(() {});
+            final raw = ctrl.text.trim().replaceAll(',', '.');
+            final double? n = double.tryParse(raw);
+            if (n != null) {
+              final formatted = n.toStringAsFixed(dec);
+              if (ctrl.text != formatted) {
+                ctrl.text = formatted;
+              }
+            }
+            _notify();
+            if (mounted) setState(() {});
           }
         },
         child: TextField(
@@ -386,6 +428,16 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
             FilteringTextInputFormatter.allow(RegExp(r'[\d.,\-]'))
           ],
           textAlign: TextAlign.center,
+          onChanged: (val) {
+            final raw = val.trim().replaceAll(',', '.');
+            final double? valor = double.tryParse(raw);
+            if (valor == null) {
+              // No calcular ni romper, dejar en estado transitorio
+              return;
+            }
+            _notify();
+            if (mounted) setState(() {});
+          },
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,

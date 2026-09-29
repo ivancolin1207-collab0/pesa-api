@@ -15,6 +15,7 @@ import '../services/local_db_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
+import '../widgets/sync_check_badge.dart';
 
 // ── Tokens de diseño corporativo ──────────────────────────────────────────
 const _bg         = Color(0xFFF8F9FA);
@@ -328,11 +329,40 @@ class _OsListScreenState extends State<OsListScreen> {
 
   Future<void> _loadLocal() async {
     final sync = context.read<SyncService>();
+    final auth = context.read<AuthService>();
+    final isTecnico = auth.isTecnico;
+    final currentIdTecnico = auth.idTecnico;
+    final currentNombre = auth.displayName;
+
+    // Purga proactiva de órdenes ajenas si es técnico
+    if (isTecnico) {
+      await LocalDbService.instance.purgarOrdenesDeOtrosTecnicos(
+        currentIdTecnico: currentIdTecnico,
+        currentNombre: currentNombre,
+        isAdmin: false,
+      );
+    }
+
+    // Filtrar orders en memoria para que técnicos nunca vean órdenes ajenas
+    List<Map<String, dynamic>> filterMem(List<Map<String, dynamic>> src) {
+      if (!isTecnico) return src;
+      return src.where((o) {
+        final idTec = int.tryParse(o['id_tecnico']?.toString() ?? '');
+        if (idTec != null && currentIdTecnico != null && currentIdTecnico > 0) {
+          return idTec == currentIdTecnico;
+        }
+        final tec = (o['tecnico'] as String? ?? '').toLowerCase();
+        return tec.contains(currentNombre.toLowerCase());
+      }).toList();
+    }
+
+    final memFiltered = filterMem(sync.orders);
+
     // Prioridad 1: si SyncService ya tiene órdenes en memoria del pull, mantenerlas visibles
-    if (sync.orders.isNotEmpty && _all.isEmpty) {
+    if (memFiltered.isNotEmpty && _all.isEmpty) {
       if (mounted) {
         setState(() {
-          _all = List<Map<String, dynamic>>.from(sync.orders);
+          _all = List<Map<String, dynamic>>.from(memFiltered);
           _loading = false;
         });
         await _applyFilters();
@@ -342,13 +372,19 @@ class _OsListScreenState extends State<OsListScreen> {
     }
 
     try {
-      final list = await LocalDbService.instance.getAllOs();
+      final list = isTecnico
+          ? await LocalDbService.instance.getOsForTecnico(
+              nombreTecnico: currentNombre,
+              idTecnico: currentIdTecnico,
+            )
+          : await LocalDbService.instance.getAllOs();
+
       if (mounted) {
         if (list.isNotEmpty) {
           setState(() { _all = list; _loading = false; });
           await _applyFilters();
-        } else if (sync.orders.isNotEmpty) {
-          setState(() { _all = List<Map<String, dynamic>>.from(sync.orders); _loading = false; });
+        } else if (memFiltered.isNotEmpty) {
+          setState(() { _all = List<Map<String, dynamic>>.from(memFiltered); _loading = false; });
           await _applyFilters();
         } else {
           setState(() { _all = []; _loading = false; });
@@ -357,8 +393,8 @@ class _OsListScreenState extends State<OsListScreen> {
     } catch (e) {
       debugPrint('[Dashboard] Error en _loadLocal: $e');
       if (mounted) {
-        if (sync.orders.isNotEmpty) {
-          setState(() { _all = List<Map<String, dynamic>>.from(sync.orders); _loading = false; });
+        if (memFiltered.isNotEmpty) {
+          setState(() { _all = List<Map<String, dynamic>>.from(memFiltered); _loading = false; });
           await _applyFilters();
         } else {
           setState(() { _all = []; _loading = false; });
@@ -1247,14 +1283,15 @@ class _OsRow extends StatelessWidget {
           ),
         ),
 
-        // SYNC (flex 2)
+        // SYNC (flex 2) - Indicador de checks WhatsApp
         Expanded(
           flex: 2,
           child: Align(
             alignment: Alignment.centerLeft,
-            child: isSincronizado
-                ? _Badge(label: 'Sincronizado', fg: Colors.green.shade700, bg: Colors.green.shade50)
-                : _Badge(label: 'Pendiente', fg: Colors.orange.shade700, bg: Colors.orange.shade50),
+            child: SyncCheckBadge(
+              status: (os['sync_check_status'] as String?) ?? (isSincronizado ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET'),
+              showLabel: true,
+            ),
           ),
         ),
 
@@ -1692,15 +1729,14 @@ class _LoteRowState extends State<_LoteRow> {
               ),
             ),
 
-            // SYNC (flex 2)
-            const Expanded(
+            // SYNC (flex 2) - Indicador de checks WhatsApp
+            Expanded(
               flex: 2,
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: _Badge(
-                  label: 'Sincronizado',
-                  fg: Colors.green,
-                  bg: Color(0xFFDCFCE7),
+                child: SyncCheckBadge(
+                  status: (first['sync_check_status'] as String?) ?? 'RECIBIDA_TABLET',
+                  showLabel: true,
                 ),
               ),
             ),

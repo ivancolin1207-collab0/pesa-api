@@ -29,3 +29,119 @@ String divMinErrorMsg(double? d) {
   final dec = decimalsFromDivMin(d);
   return 'El valor debe ser múltiplo de la división mínima (ej. saltos de ${d.toStringAsFixed(dec)})';
 }
+
+/// Asigna los puntos de apoyo por defecto según el tipo de instrumento seleccionado.
+/// Modificable manualmente por el técnico con (-) / (+).
+int getPuntosApoyoPorDefecto(String? tipoInstrumento, {int fallback = 4}) {
+  if (tipoInstrumento == null || tipoInstrumento.trim().isEmpty) return fallback;
+  final t = tipoInstrumento.toLowerCase().trim();
+  if (t.contains('plataforma')) return 4;
+  if (t.contains('camionera') || t.contains('puente')) return 8;
+  if (t.contains('ferrocarril') || t.contains('ferrovi')) return 8;
+  if (t.contains('tolva')) return 3;
+  if (t.contains('colgante') || t.contains('grúa') || t.contains('grua')) return 1;
+  if (t.contains('analítica') || t.contains('analitica')) return 1;
+  if (t.contains('piso')) return 1;
+  if (t.contains('mostrador')) return 1;
+  if (t.contains('tanque') || t.contains('silo')) return 4;
+  return fallback;
+}
+
+/// Sugiere la carga de prueba para Repetibilidad (>= 50% de Capacidad Máxima).
+/// Redondea hacia arriba a un valor comercial/estándar de pesas patrón.
+/// Ejemplos:
+/// - Capacidad = 6.8 kg -> 50% = 3.4 kg -> sugerir 4.000 kg
+/// - Capacidad = 1000 kg -> 50% = 500 kg -> sugerir 500 kg
+double calcularCargaSugeridaRepetibilidad(double capMax, {double? divMin, String unidad = 'kg'}) {
+  if (capMax <= 0) return 0;
+  final double base = capMax * 0.50;
+  return _redondearCargaComercial(base, capMax, unidad: unidad, divMin: divMin, esExcentricidad: false);
+}
+
+/// Sugiere la carga de prueba para Excentricidad (>= 1/3 de Capacidad Máxima).
+/// Redondea hacia arriba a valor entero o múltiplo práctico de pesas comerciales (20 kg).
+/// Ejemplos:
+/// - Capacidad = 6.8 kg -> 1/3 = 2.266 kg -> sugerir 3.000 kg
+/// - Capacidad = 1000 kg -> 1/3 = 333.33 kg -> redondear al múltiplo superior (sugerir 340 kg)
+double calcularCargaSugeridaExcentricidad(double capMax, {double? divMin, String unidad = 'kg'}) {
+  if (capMax <= 0) return 0;
+  final double base = capMax / 3.0;
+  return _redondearCargaComercial(base, capMax, unidad: unidad, divMin: divMin, esExcentricidad: true);
+}
+
+double _redondearCargaComercial(
+  double base,
+  double capMax, {
+  required String unidad,
+  double? divMin,
+  required bool esExcentricidad,
+}) {
+  final u = unidad.toLowerCase().trim();
+  if (u == 'g') {
+    if (capMax >= 1000) {
+      const double step = 50.0;
+      return (base / step).ceil() * step;
+    } else if (capMax >= 100) {
+      const double step = 10.0;
+      return (base / step).ceil() * step;
+    } else if (capMax >= 10) {
+      const double step = 1.0;
+      return (base / step).ceil() * step;
+    } else {
+      final double step = (divMin != null && divMin > 0) ? divMin : 0.1;
+      return (base / step).ceil() * step;
+    }
+  }
+
+  // Unidad en kg:
+  if (capMax >= 500) {
+    // Básculas industriales, camioneras, tolvas, etc.
+    // Pesas patrón comerciales estándar de 20 kg (NOM-010-SCFI / OIML R 111)
+    // 333.33 -> 340 kg; 500 -> 500 kg
+    const double step = 20.0;
+    return (base / step).ceil() * step;
+  } else if (capMax >= 100) {
+    const double step = 10.0;
+    return (base / step).ceil() * step;
+  } else if (capMax >= 20) {
+    const double step = 5.0;
+    return (base / step).ceil() * step;
+  } else if (capMax >= 1) {
+    // Básculas comerciales / mostrador / analíticas (ej. 6.8 kg)
+    // Carga redondeada al entero superior en kg
+    // Repetibilidad: 3.4 -> 4.0 kg; Excentricidad: 2.266 -> 3.0 kg
+    const double step = 1.0;
+    return (base / step).ceil() * step;
+  } else {
+    // Menor a 1 kg en unidad kg
+    final double step = (divMin != null && divMin > 0) ? divMin : 0.05;
+    return (base / step).ceil() * step;
+  }
+}
+
+/// Formatea un valor numérico de carga según los decimales adecuados.
+/// - Si capMax < 20 (ej. 6.8 kg): 3 decimales ("4.000", "3.000")
+/// - Si la carga es entera exacta (ej. 500, 340): sin decimales superfluos ("500", "340")
+String formatearCargaSugerida(double carga, {double? divMin, double? capMax}) {
+  if (carga <= 0) return '';
+  final dec = decimalsFromDivMin(divMin);
+
+  // Básculas de precisión / pequeñas (capMax < 20, ej. 6.8 kg) -> 3 decimales ("4.000", "3.000")
+  if (capMax != null && capMax < 20) {
+    final d = (divMin != null && divMin > 0) ? dec : 3;
+    return carga.toStringAsFixed(d);
+  }
+
+  // Si divMin está definido y tiene decimales (< 1)
+  if (divMin != null && divMin < 1) {
+    return carga.toStringAsFixed(dec);
+  }
+
+  // Si es un entero exacto (ej. 500, 340)
+  if ((carga - carga.roundToDouble()).abs() < 1e-4) {
+    return carga.round().toString();
+  }
+
+  return carga.toStringAsFixed(dec);
+}
+

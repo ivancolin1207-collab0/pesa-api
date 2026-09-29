@@ -57,6 +57,7 @@ class OSCompleta(BaseModel):
     órdenes físicas con columnas NULL en la BD.
     """
     folio_os:              str
+    id_tecnico:            Optional[int]   = None
     estado:                Optional[str]   = 'PROCESO'
     modalidad:             Optional[str]   = 'DIGITAL'
     fecha:                 Optional[str]   = None
@@ -103,6 +104,10 @@ class OSCompleta(BaseModel):
     unidad_medida:         Optional[str]   = 'kg'   # kg / g / t / lb
     id_lote:               Optional[str]   = None   # Identificador del lote
     rango_lote:            Optional[str]   = None   # Rango legible del lote
+    sync_check_status:     Optional[str]   = 'ASIGNADA' # ASIGNADA | RECIBIDA_TABLET | SUBIDA_SERVIDOR | AUDITADA_ADMIN
+    fecha_descarga_tablet: Optional[datetime] = None
+    fecha_subida_servidor: Optional[datetime] = None
+    fecha_apertura_admin:  Optional[datetime] = None
     sync_version:          Optional[int]   = 1
     updated_at:            Optional[datetime] = None
 
@@ -210,13 +215,21 @@ async def sync_pull(
 
     El campo `since` debe ser el `updated_at` del último pull exitoso.
     """
-    id_tecnico = current_user.get("id_tecnico")
-    role       = str(current_user.get("role", "")).lower().strip()
-    # Admin y logística ven todo; técnicos en cualquier variante solo ven sus OS
-    _ADMIN_ROLES = {"admin", "administrador", "logistica", "superadmin", "direccion", "gerencia"}
-    is_admin   = any(ar in role for ar in _ADMIN_ROLES) or (role not in {
-        "tecnico", "tecnico_campo", "tecnico_externo", "servicio", "operativo", "calibrador", "inspector"
-    })
+    import unicodedata
+
+    def _norm_role(r: str) -> str:
+        if not r:
+            return ""
+        nfkd = unicodedata.normalize('NFKD', str(r))
+        return "".join(c for c in nfkd if not unicodedata.combining(c)).lower().strip()
+
+    role_raw   = str(current_user.get("role", "")).strip()
+    role_norm  = _norm_role(role_raw)
+    id_tecnico = current_user.get("id_tecnico") or current_user.get("id")
+
+    # Solo roles expresamente de control y administración ven todas las órdenes
+    _ADMIN_ROLES = {"admin", "administrador", "superadmin", "direccion", "gerencia"}
+    is_admin   = any(ar in role_norm for ar in _ADMIN_ROLES)
 
     # [FIX-TZ] asyncpg no puede comparar datetime aware con TIMESTAMP WITHOUT TIME ZONE
     if since.tzinfo is not None:
@@ -230,6 +243,7 @@ async def sync_pull(
     _SELECT = """
         SELECT DISTINCT ON (os.folio_os)
             os.folio_os,
+            os.id_tecnico,
             COALESCE(os.estado,    'PROCESO') AS estado,
             COALESCE(os.modalidad, 'DIGITAL') AS modalidad,
             os.fecha::text,
@@ -272,6 +286,10 @@ async def sync_pull(
             NULL::text                       AS pdf_b64,
             NULL::text                       AS firma_tecnico_descargada,
             'kg'                             AS unidad_medida,
+            COALESCE(os.sync_check_status, 'ASIGNADA') AS sync_check_status,
+            os.fecha_descarga_tablet,
+            os.fecha_subida_servidor,
+            os.fecha_apertura_admin,
             CASE
                 WHEN UPPER(os.modalidad) = 'FISICO'
                 THEN '/api/v1/os/' || os.folio_os || '/pdf'
@@ -317,125 +335,50 @@ async def sync_pull(
                 current_user.get("username"), role, len(rows),
             )
         else:
-            # Técnico: todas las órdenes asignadas por ID o por nombre
-            # Trae todas las modalidades (FÍSICO, DIGITAL, HÍBRIDO) sin exclusión rígida
-            username_jwt = str(current_user.get("username") or "")
-            # [FIX-SYNC-PULL] Leer 'nombre_completo' (clave correcta del dict get_current_user)
-            # y tambien el alias 'nombre' que ahora incluimos en el JWT y en current_user.
-            nombre_jwt = (
-                str(current_user.get("nombre_completo") or "")
-                or str(current_user.get("nombre") or "")
-                or username_jwt
-            )
+            # Técnico: ÚNICAMENTE sus propias órdenes asignadas por id_tecnico exacto
+            username_jwt = str(current_user.get("username") or "").strip()
+            nombre_jwt   = str(current_user.get("nombre_completo") or current_user.get("nombre") or username_jwt).strip()
 
-            # ── BYPASS DIRECTO DAIKKI19 ──────────────────────────────────────
-            # Si el username es Daikki19 (Alan Guevara), forzar id_tecnico=8
-            # sin depender del JWT ni del lookup en BD. Esto garantiza que la
-            # tablet siempre reciba sus 122 OS independientemente del token.
-            _DAIKKI_USERS = {"daikki19", "alan.guevara", "alanGuevara"}
-            if username_jwt.lower() in _DAIKKI_USERS or "daikki" in username_jwt.lower():
-                id_tecnico  = 8
-                nombre_jwt  = "Alan Guevara"
-                logger.info(
-                    "[SYNC PULL BYPASS] Daikki19 detectado — forzando id_tecnico=8"
-                )
-                print(f"[SYNC PULL BYPASS] username='{username_jwt}' -> forzado id_tecnico=8 nombre='Alan Guevara'")
-
-            # [FIX-DEFENSIVO] Si id_tecnico es None o inválido, buscarlo de la BD por username
+            # [FIX-DEFENSIVO] Si id_tecnico es None o inválido, buscarlo en BD por username
             if not id_tecnico and username_jwt:
                 tec_lookup = await db.fetchrow(
-                    "SELECT id, nombre_completo FROM cat_tecnicos WHERE LOWER(usuario) = LOWER($1)",
+                    "SELECT id, nombre_completo FROM cat_tecnicos WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1))",
                     username_jwt,
                 )
                 if tec_lookup:
                     id_tecnico = int(tec_lookup["id"])
-                    if not nombre_jwt.strip():
+                    if not nombre_jwt:
                         nombre_jwt = str(tec_lookup["nombre_completo"] or "")
-                    logger.info(
-                        "[FIX-DEFENSIVO] id_tecnico resuelto de BD: %s -> id=%s nombre=%s",
-                        username_jwt, id_tecnico, nombre_jwt,
-                    )
 
-            # Si no hay nombre en JWT pero hay id_tecnico, obtenerlo de la BD
-            if not nombre_jwt.strip() and id_tecnico:
-                tec_row = await db.fetchrow(
-                    "SELECT nombre_completo, usuario FROM cat_tecnicos WHERE id = $1",
-                    id_tecnico,
-                )
-                if tec_row:
-                    nombre_jwt = str(tec_row["nombre_completo"] or tec_row["usuario"] or "")
+            if not id_tecnico:
+                logger.warning("[SYNC PULL] Usuario %s no tiene id_tecnico asociado — retornando 0 órdenes.", username_jwt)
+                return []
 
-            # Extraer la primera palabra del nombre para búsqueda flexible
-            nombre_stripped = nombre_jwt.strip().lower()
-            nombre_param_full = f"%{nombre_stripped}%" if nombre_stripped else "%alan%"
-            # Palabra clave: primera palabra del nombre (ej. "alan" de "alan guevara")
-            primera_palabra = nombre_stripped.split()[0] if nombre_stripped.split() else "alan"
-            nombre_param_word = f"%{primera_palabra}%"
-
-            # ── DIAGNÓSTICO DETALLADO ──────────────────────────────────────
-            logger.info(
-                "[SYNC PULL TECNICO] username=%s | nombre_jwt='%s' | id_tecnico=%s\n"
-                "  nombre_param_full='%s' | nombre_param_word='%s' | since=%s",
-                username_jwt, nombre_jwt, id_tecnico,
-                nombre_param_full, nombre_param_word, since,
-            )
-            print(
-                f"[SYNC PULL SQL PARAMS] id_tecnico={id_tecnico} "
-                f"nombre_full='{nombre_param_full}' "
-                f"nombre_word='{nombre_param_word}' "
-                f"since={since}"
-            )
-
-            # [FIX-CORRECTO] WHERE filtra por:
-            #   1. os.id_tecnico = $1 (FK directa — ruta primaria)
-            #   2. EXISTS en cat_tecnicos por nombre_completo o usuario (nombre flexible)
-            # NOTA: os.tecnico NO existe como columna de texto; el nombre viene del JOIN con cat_tecnicos
+            # REGLA DE NEGOCIO ESTRICTA:
+            # Filtrar EXCLUSIVAMENTE por os.id_tecnico = :id_tecnico
+            # Prohibido usar comodines de texto que mezclen técnicos con nombres similares
             where_clauses = [
-                """(
-                    os.id_tecnico = $1
-                    OR EXISTS (
-                        SELECT 1 FROM cat_tecnicos t2
-                        WHERE t2.id = os.id_tecnico
-                          AND (LOWER(t2.nombre_completo) ILIKE $2
-                               OR LOWER(t2.usuario) ILIKE $2
-                               OR LOWER(t2.nombre_completo) ILIKE $3
-                               OR LOWER(t2.usuario) ILIKE $3)
-                    )
-                )""",
-                "(os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')",
+                "os.id_tecnico = $1",
+                "(os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('CANCELADA', 'ELIMINADO', 'ELIMINADA'))",
             ]
-            params = [id_tecnico or -1, nombre_param_full, nombre_param_word]
+            params = [int(id_tecnico)]
 
-            # [FIX-SINCE] Para el técnico Daikki19 (Alan Guevara, id=8) NUNCA aplicar
-            # el filtro de since para garantizar que la tablet reciba siempre el
-            # histórico completo independientemente del timestamp del último sync.
-            # Para los demás técnicos se aplica el filtro normal de since.
-            _es_daikki = (id_tecnico == 8) or username_jwt.lower() in _DAIKKI_USERS or "daikki" in username_jwt.lower()
-            if _es_daikki:
-                logger.info(
-                    "[SYNC PULL BYPASS-SINCE] Daikki19 — omitiendo filtro since=%s "
-                    "para garantizar entrega de historial completo (%d OS esperadas)",
-                    since, 204,
-                )
-                print(f"[SYNC PULL BYPASS-SINCE] id_tecnico=8 — since ignorado, devolviendo historial completo")
-            elif since and since.year > 2000:
+            # Filtro since si aplica
+            if since and since.year > 2000:
                 params.append(since)
                 where_clauses.append(f"os.updated_at >= ${len(params)}::timestamp")
 
             params.append(settings.SYNC_MAX_BATCH_SIZE)
-            # DISTINCT ON en _SELECT + ORDER BY folio_os primero garantiza un solo resultado por folio
             query_sql = _SELECT + f"""
                 WHERE {" AND ".join(where_clauses)}
                 ORDER BY os.folio_os DESC, os.updated_at DESC
                 LIMIT ${len(params)}
             """
 
-            # Loguear la query completa para depuración en Render
             logger.info(
-                "[SYNC PULL SQL QUERY]:\n%s\nPARAMS: %s",
-                query_sql, params,
+                "[SYNC PULL SQL QUERY - STRICT TECNICO %s (id=%s)]:\n%s\nPARAMS: %s",
+                username_jwt, id_tecnico, query_sql, params,
             )
-            print(f"[SYNC PULL SQL PARAMS FINAL] {params}")
 
             rows = await db.fetch(query_sql, *params)
 
@@ -512,7 +455,35 @@ async def sync_pull(
                     f"cat_tecnico={dict(tec_check) if tec_check else 'NO_ENCONTRADO'}"
                 )
 
-        return [OSCompleta(**dict(r)) for r in rows]
+        # ── Trazabilidad Estado 2: Doble palomita gris (Recibida en Tablet) ──────
+        pulled_folios = [r["folio_os"] for r in rows if r.get("folio_os")]
+        if not is_admin and pulled_folios:
+            try:
+                await db.execute(
+                    """
+                    UPDATE ordenes_servicio
+                    SET sync_check_status = 'RECIBIDA_TABLET',
+                        fecha_descarga_tablet = COALESCE(fecha_descarga_tablet, NOW())
+                    WHERE folio_os = ANY($1)
+                      AND (sync_check_status IS NULL OR sync_check_status = 'ASIGNADA')
+                    """,
+                    pulled_folios,
+                )
+                logger.info(
+                    "[SYNC PULL] %d OS marcadas como RECIBIDA_TABLET para usuario %s",
+                    len(pulled_folios), username_jwt,
+                )
+            except Exception as e_pull_tr:
+                logger.warning("[SYNC PULL] Error actualizando trazabilidad RECIBIDA_TABLET: %s", e_pull_tr)
+
+        resultado = []
+        for r in rows:
+            d = dict(r)
+            if not is_admin and d.get("sync_check_status") == "ASIGNADA":
+                d["sync_check_status"] = "RECIBIDA_TABLET"
+            resultado.append(OSCompleta(**d))
+
+        return resultado
 
     except HTTPException:
         raise
@@ -631,6 +602,15 @@ async def sync_push(
                 sync_version          = COALESCE(sync_version, 0) + 1,
                 sync_at               = NOW(),
                 device_id             = $15,
+                sync_check_status     = CASE
+                    WHEN $11 IS NOT NULL OR $1 IN ('COMPLETADA', 'COMPLETADA_DIGITAL') THEN 'SUBIDA_SERVIDOR'
+                    WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN'
+                    ELSE COALESCE(sync_check_status, 'RECIBIDA_TABLET')
+                END,
+                fecha_subida_servidor = CASE
+                    WHEN $11 IS NOT NULL OR $1 IN ('COMPLETADA', 'COMPLETADA_DIGITAL') THEN COALESCE(fecha_subida_servidor, NOW())
+                    ELSE fecha_subida_servidor
+                END,
                 updated_at            = NOW()
             WHERE id = $16
             """,
@@ -694,7 +674,16 @@ async def sync_push(
             with open(p_filepath, "wb") as pf:
                 pf.write(p_bytes)
             await db.execute(
-                "UPDATE ordenes_servicio SET pdf_url = $1, pdf_path = $2 WHERE id = $3",
+                """
+                UPDATE ordenes_servicio 
+                SET pdf_url = $1, pdf_path = $2,
+                    sync_check_status = CASE 
+                        WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN' 
+                        ELSE 'SUBIDA_SERVIDOR' 
+                    END,
+                    fecha_subida_servidor = COALESCE(fecha_subida_servidor, NOW())
+                WHERE id = $3
+                """,
                 f"/uploads/{p_filename}", p_filepath, os_id,
             )
             logger.info("[SYNC PUSH] PDF guardado en disco para %s (%d bytes)", payload.folio_os, len(p_bytes))

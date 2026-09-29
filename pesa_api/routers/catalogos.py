@@ -388,15 +388,17 @@ async def upload_pdf_tablet(
     await db.execute(
         """
         UPDATE ordenes_servicio
-        SET estado         = 'COMPLETADA',
-            pdf_b64        = $1,
-            pdf_url        = $2,
-            pdf_path       = $3,
-            pdf_descargado = FALSE,
-            sync_status    = 'SINCRONIZADO',
-            sync_version   = COALESCE(sync_version, 0) + 1,
-            sync_at        = NOW(),
-            updated_at     = NOW()
+        SET estado            = 'COMPLETADA',
+            pdf_b64           = $1,
+            pdf_url           = $2,
+            pdf_path          = $3,
+            pdf_descargado    = FALSE,
+            sync_check_status = 'SUBIDA_SERVIDOR',
+            fecha_subida_servidor = NOW(),
+            sync_status       = 'SINCRONIZADO',
+            sync_version      = COALESCE(sync_version, 0) + 1,
+            sync_at           = NOW(),
+            updated_at        = NOW()
         WHERE id = $4
         """,
         pdf_b64,

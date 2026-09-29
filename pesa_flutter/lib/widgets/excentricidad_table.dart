@@ -42,6 +42,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
   late TextEditingController _cargaCtrl;
   late List<TextEditingController> _inicialCtrls;
   late List<TextEditingController> _finalCtrls;
+  bool _userEditedCarga = false;
 
   bool get _isCamioneraOrFerro {
     final geo = (widget.geometria ?? '').toLowerCase();
@@ -62,11 +63,15 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
     _determinarPosiciones();
 
     // Carga de Prueba: único campo global
-    final cargaInicial = widget.rows.isNotEmpty
-        ? (widget.rows.first['carga']?.toString() ?? '')
-        : '';
+    String cargaInicial = '';
+    if (widget.rows.isNotEmpty) {
+      final c = widget.rows.first['carga'];
+      if (c != null && c.toString().isNotEmpty) {
+        final dVal = double.tryParse(c.toString().replaceAll(',', '.'));
+        cargaInicial = (dVal != null) ? formatearCargaSugerida(dVal, divMin: widget.divMin) : c.toString();
+      }
+    }
     _cargaCtrl = TextEditingController(text: cargaInicial);
-    _cargaCtrl.addListener(_notify);
 
     // Lecturas iniciales y finales (una por posición)
     _inicialCtrls = List.generate(_numPos, (i) => TextEditingController(
@@ -78,12 +83,26 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
         text: i < widget.rows.length
             ? widget.rows[i]['lectura_final']?.toString() ?? ''
             : ''));
+  }
 
-    for (final c in _inicialCtrls) {
-      c.addListener(_notify);
-    }
-    for (final c in _finalCtrls) {
-      c.addListener(_notify);
+  @override
+  void didUpdateWidget(ExcentricidadTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Si el técnico ya interactuó o editó la carga de prueba, NUNCA sobreescribir ni resetear
+    if (_userEditedCarga) return;
+
+    if (widget.rows.isNotEmpty) {
+      final c = widget.rows.first['carga'];
+      if (c != null && c.toString().isNotEmpty) {
+        final dVal = double.tryParse(c.toString().replaceAll(',', '.'));
+        if (dVal != null) {
+          final formatted = formatearCargaSugerida(dVal, divMin: widget.divMin);
+          if (_cargaCtrl.text.trim() != formatted &&
+              (_cargaCtrl.text.trim().isEmpty || _cargaCtrl.text == '0' || _cargaCtrl.text == '0.0')) {
+            _cargaCtrl.text = formatted;
+          }
+        }
+      }
     }
   }
 
@@ -116,12 +135,8 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
     setState(() {
       _numPos++;
       _posLabels.add('Sección $_numPos');
-      final initC = TextEditingController();
-      initC.addListener(_notify);
-      _inicialCtrls.add(initC);
-      final finC = TextEditingController();
-      finC.addListener(_notify);
-      _finalCtrls.add(finC);
+      _inicialCtrls.add(TextEditingController());
+      _finalCtrls.add(TextEditingController());
     });
     _notify();
   }
@@ -132,10 +147,8 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
       _numPos--;
       _posLabels.removeLast();
       final initC = _inicialCtrls.removeLast();
-      initC.removeListener(_notify);
       initC.dispose();
       final finC = _finalCtrls.removeLast();
-      finC.removeListener(_notify);
       finC.dispose();
     });
     _notify();
@@ -156,16 +169,18 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
   void _notify() => widget.onChanged(_serialize());
 
   List<Map<String, dynamic>> _serialize() {
-    final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
+    final cleanCarga = _cargaCtrl.text.trim().replaceAll(',', '.');
+    final carga = double.tryParse(cleanCarga) ?? 0.0;
     final dec = decimalsFromDivMin(widget.divMin);
 
     return List.generate(_numPos, (i) {
-      final ini = double.tryParse(_inicialCtrls[i].text.trim().replaceAll(',', '.'));
-      final fin = double.tryParse(_finalCtrls[i].text.trim().replaceAll(',', '.'));
+      final iniText = i < _inicialCtrls.length ? _inicialCtrls[i].text.trim().replaceAll(',', '.') : '';
+      final finText = i < _finalCtrls.length ? _finalCtrls[i].text.trim().replaceAll(',', '.') : '';
+      final ini = double.tryParse(iniText);
+      final fin = double.tryParse(finText);
       double? error;
       if (fin != null) {
-        final iniVal = ini ?? 0.0;
-        error = (fin - iniVal) - carga;
+        error = fin - carga;
       }
       return {
         'posicion_id':     i + 1,
@@ -225,8 +240,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
     final cargaVal = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.'));
     final cargaInvalida = cargaVal != null && !isValidDivMin(cargaVal, widget.divMin);
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
+    return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -274,15 +288,33 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
                   Focus(
                     onFocusChange: (hasFocus) {
                       if (!hasFocus && _cargaCtrl.text.trim().isNotEmpty) {
-                        double? n = double.tryParse(_cargaCtrl.text.replaceAll(',', '.'));
-                        if (n != null) _cargaCtrl.text = n.toStringAsFixed(dec);
-                        setState(() {});
+                        final raw = _cargaCtrl.text.trim().replaceAll(',', '.');
+                        final double? n = double.tryParse(raw);
+                        if (n != null) {
+                          final formatted = n.toStringAsFixed(dec);
+                          if (_cargaCtrl.text != formatted) {
+                            _cargaCtrl.text = formatted;
+                          }
+                        }
+                        _notify();
+                        if (mounted) setState(() {});
                       }
                     },
                     child: TextField(
                       controller: _cargaCtrl,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       textAlign: TextAlign.center,
+                      onChanged: (val) {
+                        _userEditedCarga = true;
+                        final raw = val.trim().replaceAll(',', '.');
+                        final double? valor = double.tryParse(raw);
+                        if (valor == null) {
+                          // No calcular ni romper, dejar en estado transitorio
+                          return;
+                        }
+                        _notify();
+                        if (mounted) setState(() {});
+                      },
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
@@ -427,14 +459,12 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
   );
 
   TableRow _row(int i, List<String> posLabels, int dec) {
-    final ini = double.tryParse(_inicialCtrls[i].text.trim().replaceAll(',', '.'));
     final fin = double.tryParse(_finalCtrls[i].text.trim().replaceAll(',', '.'));
     final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
 
     double? err;
     if (fin != null) {
-      final iniVal = ini ?? 0.0;
-      err = (fin - iniVal) - carga;
+      err = fin - carga;
     }
 
     final posLabel = i < posLabels.length ? posLabels[i] : 'Sección ${i + 1}';
@@ -483,9 +513,16 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
       child: Focus(
         onFocusChange: (hasFocus) {
           if (!hasFocus && c.text.trim().isNotEmpty) {
-            double? n = double.tryParse(c.text.replaceAll(',', '.'));
-            if (n != null) c.text = n.toStringAsFixed(dec);
-            setState(() {});
+            final raw = c.text.trim().replaceAll(',', '.');
+            final double? n = double.tryParse(raw);
+            if (n != null) {
+              final formatted = n.toStringAsFixed(dec);
+              if (c.text != formatted) {
+                c.text = formatted;
+              }
+            }
+            _notify();
+            if (mounted) setState(() {});
           }
         },
         child: TextField(
@@ -496,6 +533,16 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
             FilteringTextInputFormatter.allow(RegExp(r'[\d.,\-]'))
           ],
           textAlign: TextAlign.center,
+          onChanged: (val) {
+            final raw = val.trim().replaceAll(',', '.');
+            final double? valor = double.tryParse(raw);
+            if (valor == null) {
+              // No calcular ni romper, dejar en estado transitorio
+              return;
+            }
+            _notify();
+            if (mounted) setState(() {});
+          },
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,

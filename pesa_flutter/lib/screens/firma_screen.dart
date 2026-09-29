@@ -58,6 +58,24 @@ class _FirmaScreenState extends State<FirmaScreen>
       _puestoIngCtrl.text = initialPuesto.toString();
     }
     _cargarFirmaTecnico();
+    _cargarContactosPlanta();
+  }
+
+  List<String> _contactosSugeridos = [];
+
+  Future<void> _cargarContactosPlanta() async {
+    final cli = (widget.capturaData['cliente'] ?? widget.capturaData['cliente_nombre'] ?? '').toString();
+    final pla = (widget.capturaData['direccion'] ?? widget.capturaData['sucursal'] ?? '').toString();
+    if (cli.isEmpty) return;
+    final contacts = await LocalDbService.instance.getContactosPlanta(cliente: cli, planta: pla);
+    if (mounted) {
+      setState(() {
+        _contactosSugeridos = contacts;
+        if (_nombreIngCtrl.text.trim().isEmpty && contacts.isNotEmpty) {
+          _nombreIngCtrl.text = contacts.first;
+        }
+      });
+    }
   }
 
   // ── Estado de firma del técnico ────────────────────────────────────────────
@@ -358,6 +376,42 @@ class _FirmaScreenState extends State<FirmaScreen>
               ),
             ),
           ]),
+          if (_contactosSugeridos.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.history, size: 14, color: Colors.grey),
+                const SizedBox(width: 4),
+                const Text('Contactos registrados en planta: ',
+                    style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500)),
+                Expanded(
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _contactosSugeridos.map((contacto) {
+                        final isSelected = _nombreIngCtrl.text.trim().toLowerCase() == contacto.toLowerCase();
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: ActionChip(
+                            visualDensity: VisualDensity.compact,
+                            backgroundColor: isSelected ? const Color(0xFFFFEBEE) : Colors.grey.shade100,
+                            side: BorderSide(color: isSelected ? _red : Colors.grey.shade300),
+                            avatar: Icon(Icons.person, size: 12, color: isSelected ? _red : Colors.grey.shade700),
+                            label: Text(contacto, style: TextStyle(fontSize: 11, color: isSelected ? _red : Colors.black87, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                            onPressed: () {
+                              setState(() {
+                                _nombreIngCtrl.text = contacto;
+                              });
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
 
           // Canvas
@@ -525,6 +579,72 @@ class _FirmaScreenState extends State<FirmaScreen>
   // ── Logica de finalizacion ────────────────────────────────────────────────
 
   Future<void> _onFinalizar() async {
+    // ── CANDADO METROLÓGICO: 6 CAMPOS OBLIGATORIOS DEL INSTRUMENTO ─────────
+    final d = widget.capturaData;
+    final marca = (d['marca'] ?? d['equipo_marca'] ?? '').toString().trim();
+    final modelo = (d['modelo'] ?? d['equipo_modelo'] ?? '').toString().trim();
+    final idEquipo = (d['id_equipo'] ?? d['id_indicador'] ?? '').toString().trim();
+    final capMax = (d['capacidad_max'] ?? d['cap_max'] ?? d['alcance_max'] ?? '').toString().trim();
+    final divMin = (d['division_minima'] ?? d['div_min'] ?? d['div_minima'] ?? '').toString().trim();
+    final ubic = (d['ubicacion'] ?? d['equipo_ubicacion'] ?? '').toString().trim();
+
+    final List<String> faltantesInst = [];
+    if (marca.isEmpty)    faltantesInst.add('Marca');
+    if (modelo.isEmpty)   faltantesInst.add('Modelo');
+    if (idEquipo.isEmpty) faltantesInst.add('ID Indicador / Equipo');
+    if (capMax.isEmpty)   faltantesInst.add('Capacidad Máxima');
+    if (divMin.isEmpty)   faltantesInst.add('División Mínima (d)');
+    if (ubic.isEmpty)     faltantesInst.add('Ubicación');
+
+    if (faltantesInst.isNotEmpty) {
+      final listaStr = faltantesInst.map((f) => '• $f').join('\n');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Faltan datos del instrumento: ${faltantesInst.join(", ")}'),
+        backgroundColor: Colors.red.shade700,
+        duration: const Duration(seconds: 4),
+      ));
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Color(0xFFC8102E), size: 28),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Datos del Instrumento Incompletos',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
+              ),
+            ],
+          ),
+          content: Text(
+            'Faltan datos obligatorios del instrumento:\n\n'
+            '$listaStr\n\n'
+            'Complétalos en la pestaña \'Instrumento\' para poder firmar y generar el documento.',
+            style: const TextStyle(fontSize: 13, height: 1.4),
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFC8102E),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () {
+                Navigator.of(ctx).pop();
+                Navigator.of(context).pop(); // Regresa a la pantalla de captura
+              },
+              child: const Text('Volver a Instrumento'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     // Validar firma del tecnico:
     // Si está precargada desde perfil → OK. Si no, requiere dibujo en canvas.
     if (!_firmaTecPrecargada && _ctrlTecnico.isEmpty) {
@@ -577,6 +697,17 @@ class _FirmaScreenState extends State<FirmaScreen>
       final folio     = widget.capturaData['folio_os'] as String? ?? '';
       final nombreIng = _nombreIngCtrl.text.trim();
       final puestoIng = _puestoIngCtrl.text.trim();
+
+      // Guardar contacto asociado a la planta/cliente para memoria futura
+      final cli = (widget.capturaData['cliente'] ?? widget.capturaData['cliente_nombre'] ?? '').toString();
+      final pla = (widget.capturaData['direccion'] ?? widget.capturaData['sucursal'] ?? '').toString();
+      if (nombreIng.isNotEmpty) {
+        LocalDbService.instance.saveContactoPlanta(
+          cliente: cli,
+          planta: pla,
+          nombreContacto: nombreIng,
+        );
+      }
 
       // 2. Guardar lecturas en SQLite
       final repRows  = _castList(widget.capturaData['rep_rows']);

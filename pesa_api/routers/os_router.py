@@ -19,7 +19,7 @@ from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from pesa_api.core.database import get_db
-from pesa_api.core.security import get_current_user, require_roles
+from pesa_api.core.security import get_current_user, require_roles, _normalizar_rol
 
 router = APIRouter()
 
@@ -62,14 +62,18 @@ async def list_os(
     - servicio: solo las asignadas al técnico vinculado al usuario
     - recepcion: todas (solo lectura)
     """
-    role       = current_user["role"]
+    role_raw   = current_user.get("role", "")
+    norm_role  = _normalizar_rol(role_raw)
     id_tecnico = current_user.get("id_tecnico")
 
-    # Construir filtro por rol
+    _ADMIN_ROLES = {"admin", "administrador", "superadmin", "direccion", "gerencia", "logistica", "recepcion"}
+    is_admin = norm_role in _ADMIN_ROLES or any(ar in norm_role for ar in {"admin", "superadmin", "gerencia"})
+
+    # Construir filtro por rol: técnicos ÚNICAMENTE ven sus propias órdenes
     extra_filter = ""
     params: list = []
 
-    if role == "servicio":
+    if not is_admin:
         if not id_tecnico:
             return []
         extra_filter = "AND os.id_tecnico = $1"
@@ -125,9 +129,13 @@ async def get_os(
     if row is None:
         raise HTTPException(status_code=404, detail="OS no encontrada")
 
-    # Servicio solo puede ver sus propias OS
-    if (current_user["role"] == "servicio"
-            and row["id_tecnico"] != current_user.get("id_tecnico")):
+    role_raw   = current_user.get("role", "")
+    norm_role  = _normalizar_rol(role_raw)
+    _ADMIN_ROLES = {"admin", "administrador", "superadmin", "direccion", "gerencia", "logistica", "recepcion"}
+    is_admin = norm_role in _ADMIN_ROLES or any(ar in norm_role for ar in {"admin", "superadmin", "gerencia"})
+
+    # Técnicos solo pueden ver sus propias OS
+    if not is_admin and row["id_tecnico"] != current_user.get("id_tecnico"):
         raise HTTPException(status_code=403, detail="Acceso denegado a esta OS")
 
     return dict(row)
@@ -195,6 +203,22 @@ async def download_pdf(
             detail=f"OS '{folio_os}' no encontrada",
         )
 
+    # Marcar Estado 4: Doble palomita verde (Auditada / Abierta en Windows)
+    try:
+        await db.execute(
+            """
+            UPDATE ordenes_servicio
+            SET sync_check_status = 'AUDITADA_ADMIN',
+                fecha_apertura_admin = COALESCE(fecha_apertura_admin, NOW()),
+                pdf_descargado = TRUE,
+                auditoria_digital = 'Recibido'
+            WHERE id = $1
+            """,
+            row["id"],
+        )
+    except Exception as e_audit:
+        logger.warning("[DOWNLOAD PDF] Error actualizando auditoria a AUDITADA_ADMIN: %s", e_audit)
+
     # Estrategia 1: pdf_path absoluto guardado en BD
     bd_path = row.get("pdf_path")
     if bd_path and Path(bd_path).exists():
@@ -255,6 +279,33 @@ async def download_pdf(
 
 
 @router.post(
+    "/{folio_os}/auditar",
+    summary="Marcar orden como auditada/abierta por administracion (Doble check verde)",
+)
+async def auditar_orden_endpoint(
+    folio_os: str,
+    db=Depends(get_db),
+):
+    """
+    Registra que un usuario del ERP en Windows abrió o confirmó la OS / PDF.
+    Actualiza sync_check_status a 'AUDITADA_ADMIN' y fecha_apertura_admin = NOW().
+    """
+    clean_folio = folio_os.strip()
+    res = await db.execute(
+        """
+        UPDATE ordenes_servicio
+        SET sync_check_status = 'AUDITADA_ADMIN',
+            fecha_apertura_admin = COALESCE(fecha_apertura_admin, NOW()),
+            pdf_descargado = TRUE,
+            auditoria_digital = 'Recibido'
+        WHERE folio_os = $1 OR id::text = $1
+        """,
+        clean_folio,
+    )
+    return {"folio_os": clean_folio, "sync_check_status": "AUDITADA_ADMIN", "resultado": res}
+
+
+@router.post(
     "/{folio_os}/upload-pdf",
     summary="Subir PDF generado por la tablet a Render",
 )
@@ -295,15 +346,17 @@ async def upload_pdf_tablet_os(
     await db.execute(
         """
         UPDATE ordenes_servicio
-        SET estado         = 'COMPLETADA',
-            pdf_b64        = $1,
-            pdf_url        = $2,
-            pdf_path       = $3,
-            pdf_descargado = FALSE,
-            sync_status    = 'SINCRONIZADO',
-            sync_version   = COALESCE(sync_version, 0) + 1,
-            sync_at        = NOW(),
-            updated_at     = NOW()
+        SET estado            = 'COMPLETADA',
+            pdf_b64           = $1,
+            pdf_url           = $2,
+            pdf_path          = $3,
+            pdf_descargado    = FALSE,
+            sync_check_status = 'SUBIDA_SERVIDOR',
+            fecha_subida_servidor = NOW(),
+            sync_status       = 'SINCRONIZADO',
+            sync_version      = COALESCE(sync_version, 0) + 1,
+            sync_at           = NOW(),
+            updated_at        = NOW()
         WHERE id = $4
         """,
         pdf_b64,

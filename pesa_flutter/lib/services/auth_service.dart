@@ -76,6 +76,35 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
+  static int? resolveKnownIdTecnico(String username) {
+    final u = username.toLowerCase().trim();
+    switch (u) {
+      case 'daikki19':
+      case 'alan.guevara':
+        return 8;
+      case 'nestor.arias':
+        return 9;
+      case 'alan.terrazas':
+        return 10;
+      case 'ivancolin1207':
+        return 2;
+      case 'jessica.colin':
+        return 1;
+      case 'fernando.arias':
+        return 4;
+      case 'alessandro.segovia':
+        return 7;
+      case 'adriana.arias':
+        return 11;
+      case 'jhonny.jimenez':
+        return 44;
+      case 'jose.landaverde':
+        return 171;
+      default:
+        return null;
+    }
+  }
+
   Future<void> setSession(String username, String role,
       {String? nombreCompleto, bool offline = false, int? idTecnico}) async {
     _username       = username;
@@ -83,7 +112,7 @@ class AuthService extends ChangeNotifier {
     _nombreCompleto = nombreCompleto;
     _authenticated  = true;
     _isOfflineMode  = offline;
-    _idTecnico      = idTecnico ?? (username.toLowerCase() == 'daikki19' ? 8 : null);
+    _idTecnico      = idTecnico ?? resolveKnownIdTecnico(username);
     await _storage.write(key: 'pesa_username',       value: username);
     await _storage.write(key: 'pesa_role',           value: _role!);
     if (nombreCompleto != null) {
@@ -91,6 +120,7 @@ class AuthService extends ChangeNotifier {
     }
     if (_idTecnico != null) {
       await _storage.write(key: 'pesa_id_tecnico', value: _idTecnico.toString());
+      await _storage.write(key: 'offline_id_tecnico_$username', value: _idTecnico.toString());
     }
     notifyListeners();
   }
@@ -164,8 +194,11 @@ class AuthService extends ChangeNotifier {
       } catch (_) {}
     }
 
-    await setSession(username, role, nombreCompleto: nombre, offline: true);
-    debugPrint('[AuthService] Login OFFLINE exitoso: $username | rol=$role');
+    final storedIdTec = await _storage.read(key: 'offline_id_tecnico_$username');
+    final idTec = int.tryParse(storedIdTec ?? '') ?? resolveKnownIdTecnico(username);
+
+    await setSession(username, role, nombreCompleto: nombre, offline: true, idTecnico: idTec);
+    debugPrint('[AuthService] Login OFFLINE exitoso: $username | rol=$role | idTec=$idTec');
     return null;
   }
 
@@ -238,8 +271,8 @@ class AuthService extends ChangeNotifier {
     } catch (e) {
       debugPrint('[AuthService] Error JWT claims: $e');
     }
-    if ((_idTecnico == null || _idTecnico == 0) && _username?.toLowerCase() == 'daikki19') {
-      _idTecnico = 8;
+    if (_idTecnico == null || _idTecnico == 0) {
+      _idTecnico = resolveKnownIdTecnico(_username ?? '');
     }
     debugPrint('[AuthService] Sesión: $_nombreCompleto | $_username | $_role | idTec=$_idTecnico');
   }

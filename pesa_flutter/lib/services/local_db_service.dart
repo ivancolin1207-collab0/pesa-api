@@ -23,6 +23,7 @@ class LocalDbService {
     CREATE TABLE IF NOT EXISTS ordenes_servicio (
       local_id               INTEGER PRIMARY KEY AUTOINCREMENT,
       folio_os               TEXT UNIQUE NOT NULL,
+      id_tecnico             INTEGER,
       estado                 TEXT DEFAULT 'PROCESO',
       modalidad              TEXT DEFAULT 'DIGITAL',
       fecha                  TEXT,
@@ -72,6 +73,10 @@ class LocalDbService {
       rango_lote             TEXT,
       firma_cliente_nombre   TEXT,
       pdf_subido             INTEGER DEFAULT 0,
+      sync_check_status      TEXT DEFAULT 'ASIGNADA',
+      fecha_descarga_tablet  TEXT,
+      fecha_subida_servidor  TEXT,
+      fecha_apertura_admin   TEXT,
       sync_version           INTEGER DEFAULT 0,
       sync_status            TEXT DEFAULT 'SINCRONIZADO',
       updated_at             TEXT
@@ -107,6 +112,19 @@ class LocalDbService {
             sincronizado  INTEGER DEFAULT 0
           )
         ''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS contactos_planta (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            cliente         TEXT NOT NULL,
+            planta          TEXT NOT NULL,
+            nombre_contacto TEXT NOT NULL,
+            updated_at      TEXT NOT NULL,
+            UNIQUE(cliente, planta, nombre_contacto) ON CONFLICT REPLACE
+          )
+        ''');
+        await db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_contactos_planta_cli_pla ON contactos_planta(cliente, planta)
+        ''');
         final devId = _generateUuid();
         await db.insert('meta', {'key': 'device_id', 'value': devId});
       },
@@ -129,6 +147,7 @@ class LocalDbService {
           final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
           final existingCols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
           final requiredCols = {
+            'id_tecnico': 'INTEGER',
             'nombre_ing': 'TEXT',
             'puesto_ing': 'TEXT',
             'pdf_path_local': 'TEXT',
@@ -163,6 +182,10 @@ class LocalDbService {
             'calibrado_por': 'TEXT',
             'cca_aplica': 'INTEGER DEFAULT 0',
             'pdf_subido': 'INTEGER DEFAULT 0',
+            'sync_check_status': "TEXT DEFAULT 'ASIGNADA'",
+            'fecha_descarga_tablet': 'TEXT',
+            'fecha_subida_servidor': 'TEXT',
+            'fecha_apertura_admin': 'TEXT',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -174,8 +197,80 @@ class LocalDbService {
               }
             }
           }
+
+          // Backfill de id_tecnico en ordenes_servicio si está en NULL
+          try {
+            final tecnicosMap = {
+              'alan guevara': 8,
+              'nestor arias': 9,
+              'néstor arias': 9,
+              'alan terrazas': 10,
+              'iván colín': 2,
+              'ivan colin': 2,
+              'fernando arias': 4,
+              'alessandro segovia': 7,
+              'adriana arias': 11,
+              'jhonny jimenez': 44,
+              'jhonny jiménez': 44,
+              'josé landaverde': 171,
+              'jose landaverde': 171,
+            };
+            for (final entry in tecnicosMap.entries) {
+              await db.rawUpdate(
+                'UPDATE ordenes_servicio SET id_tecnico = ? WHERE id_tecnico IS NULL AND LOWER(tecnico) LIKE ?',
+                [entry.value, '%${entry.key}%'],
+              );
+            }
+          } catch (e) {
+            debugPrint('[LocalDB] Backfill id_tecnico error: $e');
+          }
         } catch (e) {
           debugPrint('[LocalDB] onOpen check error: $e');
+        }
+
+        // [CONTACTOS PLANTA] Asegurar tabla e indexar firmantes históricos de ordenes_servicio
+        try {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS contactos_planta (
+              id              INTEGER PRIMARY KEY AUTOINCREMENT,
+              cliente         TEXT NOT NULL,
+              planta          TEXT NOT NULL,
+              nombre_contacto TEXT NOT NULL,
+              updated_at      TEXT NOT NULL,
+              UNIQUE(cliente, planta, nombre_contacto) ON CONFLICT REPLACE
+            )
+          ''');
+          await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_contactos_planta_cli_pla ON contactos_planta(cliente, planta)
+          ''');
+          await db.execute('''
+            INSERT OR IGNORE INTO contactos_planta (cliente, planta, nombre_contacto, updated_at)
+            SELECT DISTINCT 
+              TRIM(cliente), 
+              COALESCE(NULLIF(TRIM(direccion), ''), TRIM(sucursal), ''), 
+              TRIM(firma_cliente_nombre), 
+              COALESCE(updated_at, datetime('now'))
+            FROM ordenes_servicio 
+            WHERE firma_cliente_nombre IS NOT NULL 
+              AND TRIM(firma_cliente_nombre) != ''
+              AND cliente IS NOT NULL 
+              AND TRIM(cliente) != ''
+          ''');
+          await db.execute('''
+            INSERT OR IGNORE INTO contactos_planta (cliente, planta, nombre_contacto, updated_at)
+            SELECT DISTINCT 
+              TRIM(cliente), 
+              COALESCE(NULLIF(TRIM(direccion), ''), TRIM(sucursal), ''), 
+              TRIM(nombre_ing), 
+              COALESCE(updated_at, datetime('now'))
+            FROM ordenes_servicio 
+            WHERE nombre_ing IS NOT NULL 
+              AND TRIM(nombre_ing) != ''
+              AND cliente IS NOT NULL 
+              AND TRIM(cliente) != ''
+          ''');
+        } catch (e) {
+          debugPrint('[LocalDB] contactos_planta setup error: $e');
         }
       },
     );
@@ -215,8 +310,25 @@ class LocalDbService {
     final tipoSvc  = (data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '').toString();
     final direccion = (data['direccion'] ?? data['direccion_cliente'] ?? data['sucursal_direccion'] ?? data['planta'] ?? '').toString();
 
+    final rawIdTec = _toIntOrNull(data['id_tecnico'] ?? data['tecnico_id']);
+    int? idTecnicoFinal = rawIdTec;
+    if (idTecnicoFinal == null || idTecnicoFinal <= 0) {
+      final tecLow = tecnico.toLowerCase();
+      if (tecLow.contains('nestor') || tecLow.contains('néstor')) idTecnicoFinal = 9;
+      else if (tecLow.contains('terrazas')) idTecnicoFinal = 10;
+      else if (tecLow.contains('guevara') || tecLow.contains('daikki')) idTecnicoFinal = 8;
+      else if (tecLow.contains('fernando')) idTecnicoFinal = 4;
+      else if (tecLow.contains('segovia') || tecLow.contains('alessandro')) idTecnicoFinal = 7;
+      else if (tecLow.contains('jimenez') || tecLow.contains('jiménez') || tecLow.contains('jhonny')) idTecnicoFinal = 44;
+      else if (tecLow.contains('landaverde')) idTecnicoFinal = 171;
+      else if (tecLow.contains('adriana')) idTecnicoFinal = 11;
+      else if (tecLow.contains('jessica')) idTecnicoFinal = 1;
+      else if (tecLow.contains('iván') || tecLow.contains('ivan')) idTecnicoFinal = 2;
+    }
+
     final row = <String, dynamic>{
       'folio_os':          folio,
+      'id_tecnico':        idTecnicoFinal,
       'estado':            data['estado']?.toString() ?? 'PROCESO',
       'modalidad':         data['modalidad']?.toString() ?? 'DIGITAL',
       'fecha':             data['fecha']?.toString(),
@@ -254,7 +366,16 @@ class LocalDbService {
       'rango_lote':        data['rango_lote']?.toString() ?? '',
       if (data['firma_tecnico_descargada'] != null)
         'firma_tecnico_descargada': data['firma_tecnico_descargada']?.toString(),
-      // Sync
+      // Sync & Trazabilidad
+      'sync_check_status': (data['sync_check_status'] as String?)?.isNotEmpty == true
+          ? data['sync_check_status'].toString()
+          : 'RECIBIDA_TABLET',
+      if (data['fecha_descarga_tablet'] != null)
+        'fecha_descarga_tablet': data['fecha_descarga_tablet']?.toString(),
+      if (data['fecha_subida_servidor'] != null)
+        'fecha_subida_servidor': data['fecha_subida_servidor']?.toString(),
+      if (data['fecha_apertura_admin'] != null)
+        'fecha_apertura_admin': data['fecha_apertura_admin']?.toString(),
       'sync_version':      _toInt(data['sync_version'], 0),
       'sync_status':       'SINCRONIZADO',
       'updated_at':        data['updated_at']?.toString(),
@@ -265,7 +386,7 @@ class LocalDbService {
       // [FIX-OFFLINE-PDF] Preservar rutas de PDF locales y estado de subida
       final existingRows = await db.query(
         'ordenes_servicio',
-        columns: ['pdf_path_local', 'pdf_b64_local', 'pdf_subido'],
+        columns: ['pdf_path_local', 'pdf_b64_local', 'pdf_subido', 'sync_check_status'],
         where: 'folio_os = ?',
         whereArgs: [folio],
         limit: 1,
@@ -280,6 +401,15 @@ class LocalDbService {
         }
         if (ex['pdf_subido'] != null) {
           row['pdf_subido'] = ex['pdf_subido'];
+        }
+        if (ex['sync_check_status'] != null) {
+          final localSt = ex['sync_check_status'].toString();
+          final srvSt   = row['sync_check_status']?.toString();
+          // Si el servidor reporta AUDITADA_ADMIN, gana el servidor.
+          // De lo contrario, si localmente ya se subió (SUBIDA_SERVIDOR), no degradar.
+          if (srvSt != 'AUDITADA_ADMIN' && (localSt == 'SUBIDA_SERVIDOR' || localSt == 'AUDITADA_ADMIN')) {
+            row['sync_check_status'] = localSt;
+          }
         }
       }
 
@@ -323,6 +453,14 @@ class LocalDbService {
     return (s == 'true' || s == '1' || s == 'yes') ? 1 : 0;
   }
 
+  /// Convierte cualquier valor numérico a int de forma segura o retorna null.
+  static int? _toIntOrNull(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is double) return v.toInt();
+    return int.tryParse(v.toString());
+  }
+
   /// Convierte cualquier valor numérico a int de forma segura.
   static int _toInt(dynamic v, int defaultVal) {
     if (v == null) return defaultVal;
@@ -355,18 +493,42 @@ class LocalDbService {
     );
   }
 
-  /// Devuelve solo las órdenes asignadas al técnico por nombre completo.
-  /// Si el nombre está vacío, devuelve TODAS (caso admin).
-  /// [FIX] Ya no hace fallback a TODAS cuando matched=[] — antes ocultaba el bug.
-  Future<List<Map<String, dynamic>>> getOsForTecnico(String nombreTecnico) async {
+  /// Devuelve solo las órdenes asignadas al técnico por ID y nombre.
+  /// Si es admin (idTecnico == null y nombreTecnico vacío), devuelve TODAS.
+  Future<List<Map<String, dynamic>>> getOsForTecnico({
+    String? nombreTecnico,
+    int? idTecnico,
+  }) async {
     final db = await _ensureInit();
-    final rows = await db.rawQuery(
+    final nombreLow = (nombreTecnico ?? '').toLowerCase().trim();
+
+    // Admin: devuelve todas
+    if ((idTecnico == null || idTecnico <= 0) && nombreLow.isEmpty) {
+      return await db.rawQuery(
+        "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
+      );
+    }
+
+    // Filtrar estrictamente por id_tecnico si está disponible
+    if (idTecnico != null && idTecnico > 0) {
+      final rows = await db.rawQuery(
+        """
+        SELECT * FROM ordenes_servicio 
+        WHERE id_tecnico = ? 
+           OR (id_tecnico IS NULL AND LOWER(tecnico) LIKE ?)
+        ORDER BY local_id DESC, fecha DESC
+        """,
+        [idTecnico, '%$nombreLow%'],
+      );
+      return rows;
+    }
+
+    // Fallback por nombre
+    final all = await db.rawQuery(
       "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
     );
-    final nombreLow = nombreTecnico.toLowerCase().trim();
-    if (nombreLow.isEmpty) return rows;  // Sin nombre = admin, devuelve todo
     final words = nombreLow.split(RegExp(r'\s+')).where((w) => w.length >= 3).toList();
-    final matched = rows.where((r) {
+    return all.where((r) {
       final tec = (r['tecnico'] as String? ?? '').toLowerCase().trim();
       if (tec.isEmpty) return false;
       if (tec.contains(nombreLow) || nombreLow.contains(tec)) return true;
@@ -375,9 +537,62 @@ class LocalDbService {
       }
       return false;
     }).toList();
-    // [FIX] Si matched está vacío, devolver lista vacía (no todas las órdenes).
-    // La vista del dashboard mostrará 0 y el usuario puede sincronizar de nuevo.
-    return matched;
+  }
+
+  /// Purga órdenes locales que pertenezcan a otros técnicos (para garantizar privacidad y filtrado estricto).
+  /// Si el usuario es Administrador (isAdmin == true), NO se borra nada.
+  /// Si el usuario es Técnico, se eliminan todas las órdenes cuyo id_tecnico sea distinto al suyo,
+  /// o cuyo nombre de técnico corresponda a otro usuario.
+  Future<int> purgarOrdenesDeOtrosTecnicos({
+    required int? currentIdTecnico,
+    required String? currentNombre,
+    required bool isAdmin,
+  }) async {
+    if (isAdmin) return 0;
+    if ((currentIdTecnico == null || currentIdTecnico <= 0) &&
+        (currentNombre == null || currentNombre.trim().isEmpty)) {
+      return 0;
+    }
+    final db = await _ensureInit();
+    int totalEliminadas = 0;
+
+    try {
+      // 1. Si tenemos id_tecnico, borrar cualquier orden con id_tecnico != currentIdTecnico
+      if (currentIdTecnico != null && currentIdTecnico > 0) {
+        final count = await db.delete(
+          'ordenes_servicio',
+          where: 'id_tecnico IS NOT NULL AND id_tecnico != ?',
+          whereArgs: [currentIdTecnico],
+        );
+        totalEliminadas += count;
+        if (count > 0) {
+          debugPrint('[LocalDB] Purga id_tecnico != $currentIdTecnico: $count órdenes eliminadas de otros técnicos');
+        }
+      }
+
+      // 2. Para órdenes donde id_tecnico IS NULL, revisar el nombre del técnico
+      if (currentNombre != null && currentNombre.trim().isNotEmpty) {
+        final nombreLow = currentNombre.toLowerCase().trim();
+        final rows = await db.query(
+          'ordenes_servicio',
+          columns: ['local_id', 'folio_os', 'tecnico'],
+          where: 'id_tecnico IS NULL',
+        );
+
+        for (final r in rows) {
+          final tec = (r['tecnico'] as String? ?? '').toLowerCase().trim();
+          final localId = r['local_id'] as int;
+          // Si tiene técnico y NO coincide con el usuario actual, borrar
+          if (tec.isNotEmpty && !tec.contains(nombreLow) && !nombreLow.contains(tec)) {
+            await db.delete('ordenes_servicio', where: 'local_id = ?', whereArgs: [localId]);
+            totalEliminadas++;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[LocalDB] Error purgando órdenes ajenas: $e');
+    }
+    return totalEliminadas;
   }
 
   Future<Map<String, dynamic>?> getOs(int localId) async {
@@ -700,6 +915,7 @@ class LocalDbService {
       'ordenes_servicio',
       {
         'pdf_subido': 1,
+        'sync_check_status': 'SUBIDA_SERVIDOR',
         if (folio != null && folio.isNotEmpty) 'pdf_url': '/uploads/$folio.pdf',
       },
       where: whereClause,
@@ -781,7 +997,128 @@ class LocalDbService {
     return rows.isEmpty ? 'UNKNOWN' : (rows.first['value'] as String? ?? 'UNKNOWN');
   }
 
+  // ── Contactos de Planta / Cliente (Memoria y Autocompletado) ───────────────
 
+  Future<void> _ensureContactosTable(Database db) async {
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS contactos_planta (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        cliente         TEXT NOT NULL,
+        planta          TEXT NOT NULL,
+        nombre_contacto TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        UNIQUE(cliente, planta, nombre_contacto) ON CONFLICT REPLACE
+      )
+    ''');
+    await db.execute('''
+      CREATE INDEX IF NOT EXISTS idx_contactos_planta_cli_pla ON contactos_planta(cliente, planta)
+    ''');
+  }
+
+  /// Guarda o actualiza un contacto asociado a una planta y cliente.
+  /// Se ejecuta automáticamente al ingresar o editar el firmante al finalizar o guardar.
+  Future<void> saveContactoPlanta({
+    required String cliente,
+    required String planta,
+    required String nombreContacto,
+  }) async {
+    final cli = cliente.trim();
+    final pla = planta.trim();
+    final nom = nombreContacto.trim();
+    if (cli.isEmpty || nom.isEmpty) return;
+
+    try {
+      final db = await _ensureInit();
+      await _ensureContactosTable(db);
+      await db.insert(
+        'contactos_planta',
+        {
+          'cliente':         cli,
+          'planta':          pla,
+          'nombre_contacto': nom,
+          'updated_at':      DateTime.now().toUtc().toIso8601String(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      debugPrint('[LocalDB] Contacto guardado para $cli ($pla): $nom');
+    } catch (e) {
+      debugPrint('[LocalDB] Error al guardar contacto de planta: $e');
+    }
+  }
+
+  /// Obtiene los contactos históricos asociados a una planta o cliente,
+  /// ordenados por prioridad (planta exacta > planta parcial > cliente) y fecha reciente.
+  Future<List<String>> getContactosPlanta({
+    required String cliente,
+    String? planta,
+  }) async {
+    final cli = cliente.trim();
+    final pla = (planta ?? '').trim();
+    if (cli.isEmpty) return [];
+
+    try {
+      final db = await _ensureInit();
+      await _ensureContactosTable(db);
+
+      final results = await db.rawQuery('''
+        SELECT DISTINCT nombre_contacto, updated_at,
+          CASE 
+            WHEN ? != '' AND LOWER(TRIM(planta)) = LOWER(?) THEN 1
+            WHEN ? != '' AND (INSTR(LOWER(?), LOWER(TRIM(planta))) > 0 OR INSTR(LOWER(TRIM(planta)), LOWER(?)) > 0) THEN 2
+            ELSE 3
+          END as prioridad
+        FROM contactos_planta
+        WHERE LOWER(TRIM(cliente)) = LOWER(?)
+          AND TRIM(nombre_contacto) != ''
+        ORDER BY prioridad ASC, updated_at DESC
+      ''', [pla, pla, pla, pla, pla, cli]);
+
+      final list = results
+          .map((r) => (r['nombre_contacto'] as String? ?? '').trim())
+          .where((n) => n.isNotEmpty)
+          .toSet()
+          .toList();
+
+      // Si aún no hay en contactos_planta, consultar ordenes_servicio y auto-indexar
+      if (list.isEmpty) {
+        final histRows = await db.rawQuery('''
+          SELECT DISTINCT 
+            COALESCE(NULLIF(TRIM(firma_cliente_nombre), ''), NULLIF(TRIM(nombre_ing), '')) as nom,
+            updated_at
+          FROM ordenes_servicio
+          WHERE LOWER(TRIM(cliente)) = LOWER(?)
+            AND (
+              (firma_cliente_nombre IS NOT NULL AND TRIM(firma_cliente_nombre) != '')
+              OR (nombre_ing IS NOT NULL AND TRIM(nombre_ing) != '')
+            )
+          ORDER BY updated_at DESC
+          LIMIT 10
+        ''', [cli]);
+
+        for (final r in histRows) {
+          final nom = (r['nom'] as String? ?? '').trim();
+          if (nom.isNotEmpty && !list.contains(nom)) {
+            list.add(nom);
+            await saveContactoPlanta(cliente: cli, planta: pla, nombreContacto: nom);
+          }
+        }
+      }
+
+      return list;
+    } catch (e) {
+      debugPrint('[LocalDB] Error consultando contactos de planta: $e');
+      return [];
+    }
+  }
+
+  /// Retorna el contacto más recientemente registrado para esa planta/cliente.
+  Future<String?> getContactoReciente({
+    required String cliente,
+    String? planta,
+  }) async {
+    final list = await getContactosPlanta(cliente: cliente, planta: planta);
+    return list.isNotEmpty ? list.first : null;
+  }
 
   // ── UUID v4 simple ────────────────────────────────────────────────────────
 

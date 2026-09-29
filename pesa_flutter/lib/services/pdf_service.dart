@@ -178,18 +178,9 @@ class PdfService {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.center,
       children: [
+        // Área superior limpia entre el logo y el recuadro rojo
         pw.Expanded(
-          child: pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              pw.Text('TOMA DE DATOS',
-                  style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold,
-                      color: _black)),
-              pw.Text('PESAJE SISTEMAS Y AUTOMATIZACION',
-                  style: pw.TextStyle(fontSize: 8, color: _gray,
-                      letterSpacing: 1.0)),
-            ],
-          ),
+          child: pw.SizedBox(),
         ),
         pw.SizedBox(width: 8),
         // Recuadro folio — rojo
@@ -416,10 +407,9 @@ class PdfService {
     double maxErr = 0;
     for (final r in display) {
       final carga = _toNum(r['valor'] ?? r['valor_kg'] ?? r['carga']);
-      final ini   = _toNum(r['lectura_inicial']);
       final fin   = _toNum(r['lectura_final']);
       if (fin != null && carga != null) {
-        final err = (fin - (ini ?? 0.0)) - carga;
+        final err = fin - carga;
         if (err.abs() > maxErr) maxErr = err.abs();
       }
     }
@@ -445,7 +435,7 @@ class PdfService {
           final fin   = _toNum(r['lectura_final']);
           double? err;
           if (fin != null && carga != null) {
-            err = (fin - (ini ?? 0.0)) - carga;
+            err = fin - carga;
           }
           return _dataRow([
             carga != null ? '${e.key + 1}' : '',
@@ -493,10 +483,9 @@ class PdfService {
     for (final r in display) {
       final nom = _toNum(r['valor_nominal'] ?? r['carga_patron'] ?? r['carga']);
       final fin = _toNum(r['lectura_final'] ?? r['lectura_subida'] ?? r['lectura']);
-      final ini = _toNum(r['lectura_inicial']);
       double? err;
       if (fin != null && nom != null) {
-        err = (fin - (ini ?? 0.0)) - nom;
+        err = fin - nom;
       } else if (r['error'] != null) {
         err = _toNum(r['error']);
       }
@@ -519,7 +508,7 @@ class PdfService {
         final ini = _toNum(r['lectura_inicial']);
         double? err;
         if (fin != null && nom != null) {
-          err = (fin - (ini ?? 0.0)) - nom;
+          err = fin - nom;
         } else if (r['error'] != null) {
           err = _toNum(r['error']);
         }
@@ -528,7 +517,7 @@ class PdfService {
           nom != null ? _fmtInt(nom) : '',
           ini != null ? _fmtDec(ini, dec) : (fin != null || nom != null ? '/' : ''),
           fin != null ? _fmtDec(fin, dec) : '',
-          err != null ? _fmtDec(err.abs(), dec) : '',
+          err != null ? _fmtDec(err, dec) : '',
         ], [0.08, 0.22, 0.245, 0.245, 0.21], e.key % 2 == 1);
       }),
       _errMaxRow('ERROR MÁXIMO ENCONTRADO:', _fmtDec(maxErr, dec)),
@@ -563,13 +552,10 @@ class PdfService {
     double maxErr = 0;
     for (final r in display) {
       final carga = _toNum(r['carga'] ?? r['carga_kg'] ?? os['carga_prueba_excentricidad'] ?? os['carga_excentricidad']);
-      final ini   = _toNum(r['lectura_inicial']);
       final fin   = _toNum(r['lectura_final']);
       double? err;
       if (fin != null && carga != null) {
-        err = (fin - (ini ?? 0.0)) - carga;
-      } else if (ini != null && fin != null) {
-        err = fin - ini;
+        err = fin - carga;
       } else if (r['error'] != null) {
         err = _toNum(r['error']);
       }
@@ -593,9 +579,7 @@ class PdfService {
 
         double? err;
         if (fin != null && carga != null) {
-          err = (fin - (ini ?? 0.0)) - carga;
-        } else if (ini != null && fin != null) {
-          err = fin - ini;
+          err = fin - carga;
         } else if (r['error'] != null) {
           err = _toNum(r['error']);
         }
@@ -604,7 +588,7 @@ class PdfService {
           lbl,
           ini != null ? _fmtDec(ini, dec) : (fin != null || carga != null ? '/' : ''),
           fin != null ? _fmtDec(fin, dec) : '',
-          err != null ? _fmtDec(err.abs(), dec) : '',
+          err != null ? _fmtDec(err, dec) : '',
         ], [0.28, 0.24, 0.24, 0.24], e.key % 2 == 1);
       }),
       _errMaxRow('ERROR MÁXIMO ENCONTRADO:', _fmtDec(maxErr, dec)),

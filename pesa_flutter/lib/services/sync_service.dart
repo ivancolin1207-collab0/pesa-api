@@ -489,23 +489,46 @@ class SyncService extends ChangeNotifier {
       final osList = await ApiService.instance.syncPull(since: since);
       debugPrint('[Sync PULL] RECIBIDAS: ${osList.length} ordenes del servidor');
 
+      final userRole = (ApiService.instance.userRole ?? '').toLowerCase();
+      final isAdmin  = userRole.contains('admin') || userRole.contains('logist') || userRole.contains('recep');
+      final currentNombre = ApiService.instance.lastNombre;
+
+      // [PRIVACIDAD ESTRICTA] Purgar órdenes huérfanas o de otros técnicos en SQLite
+      if (!isAdmin) {
+        await db.purgarOrdenesDeOtrosTecnicos(
+          currentIdTecnico: idTecnico,
+          currentNombre: currentNombre,
+          isAdmin: false,
+        );
+      }
+
       if (osList.isEmpty) {
         debugPrint('[Sync PULL] AVISO: servidor retorno 0 ordenes para id_tecnico=$idTecnico.');
+        if (!isAdmin) {
+          setOrdersFromPull([]);
+        }
         return 0;
       }
 
+      // Si es técnico, filtrar en memoria estrictamente por id_tecnico y nombre
+      final filteredList = (!isAdmin && idTecnico != null && idTecnico > 0)
+          ? osList.where((o) {
+              final oId = int.tryParse(o['id_tecnico']?.toString() ?? '');
+              if (oId != null) return oId == idTecnico;
+              final tec = (o['tecnico'] as String? ?? '').toLowerCase();
+              return tec.contains((currentNombre ?? '').toLowerCase());
+            }).toList()
+          : osList;
+
       // ── [ASIGNACIÓN DIRECTA INMEDIATA AL ESTADO DEL DASHBOARD] ──────────
-      // En cuanto se recibe la lista de órdenes en la respuesta HTTP 200:
-      // Asigna directamente esa lista de órdenes al estado/proveedor que maneja el Dashboard.
-      // Actualiza de inmediato las variables reactivas de los contadores e invoca notifyListeners().
-      setOrdersFromPull(osList);
-      debugPrint('[Sync PULL] Dashboard en memoria actualizado: ${osList.length} OS '
+      setOrdersFromPull(filteredList);
+      debugPrint('[Sync PULL] Dashboard en memoria actualizado: ${filteredList.length} OS '
           '| Total: $_kpiTotal, Proceso: $_kpiProceso, Cerrados: $_kpiCerrado, Físicos: $_kpiFisico');
 
       // Persistir también en SQLite de forma segura (sin borrar si falla)
       int guardadas = 0;
       String? lastErr;
-      for (final osData in osList) {
+      for (final osData in filteredList) {
         final ok = await db.upsertOs(osData);
         if (ok) {
           guardadas++;
@@ -515,8 +538,8 @@ class SyncService extends ChangeNotifier {
       }
 
       await db.setLastSyncTime(DateTime.now().toUtc());
-      debugPrint('[Sync PULL] Persistencia SQLite: $guardadas/${osList.length} guardadas (lastErr: $lastErr)');
-      return osList.length;
+      debugPrint('[Sync PULL] Persistencia SQLite: $guardadas/${filteredList.length} guardadas (lastErr: $lastErr)');
+      return filteredList.length;
     } catch (e, st) {
       debugPrint('[Sync PULL] ERROR GRAVE: $e');
       debugPrint(st.toString());

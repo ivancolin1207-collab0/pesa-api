@@ -74,7 +74,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
       // ERROR = L.Final - Valor Nominal (exactitud)
       double? error;
       if (fin != null && nom != null) {
-        error = (fin - nom).abs();
+        error = fin - nom;
       }
       return {
         'posicion_id':    i + 1,
@@ -206,7 +206,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
     final nom = double.tryParse(_nomCtrls[i].text.trim().replaceAll(',', '.'));
     double? err;
     if (fin != null && nom != null) {
-      err = (fin - nom).abs();
+      err = fin - nom;
     }
 
     return TableRow(
@@ -234,7 +234,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
                   err.toStringAsFixed(dec),
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    color: err > (widget.divMin ?? 0.001)
+                    color: err.abs() > (widget.divMin ?? 0.001)
                         ? _kRed
                         : Colors.green.shade700,
                     fontWeight: FontWeight.w700,

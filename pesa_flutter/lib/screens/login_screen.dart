@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/config_service.dart';
+import '../services/local_db_service.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -269,10 +270,18 @@ class _LoginScreenState extends State<LoginScreen> {
 
         debugPrint('[LOGIN] \u2705 Sesión online — user: $username | rol: $role | idTec: $idTecnico');
 
+        // [PRIVACIDAD ESTRICTA] Purga de órdenes de otros técnicos al iniciar sesión
+        final esTecnico = auth.isTecnico;
+        if (esTecnico) {
+          await LocalDbService.instance.purgarOrdenesDeOtrosTecnicos(
+            currentIdTecnico: idTecnico,
+            currentNombre: nombre,
+            isAdmin: false,
+          );
+        }
+
         // ── BLOQUEO POR FIRMA ────────────────────────────────────────
         // Para roles técnicos: verificar si tienen firma local.
-        final esTecnico = auth.isTecnico;
-
         if (esTecnico && mounted) {
           final tieneFirma = await auth.verificarFirmaEnServidor();
           if (!tieneFirma && mounted) {
@@ -309,6 +318,14 @@ class _LoginScreenState extends State<LoginScreen> {
     final auth = context.read<AuthService>();
     final offlineError = await auth.loginOffline(username, password);
     if (offlineError == null) {
+      // [PRIVACIDAD ESTRICTA] Purga offline de órdenes de otros técnicos
+      if (auth.isTecnico) {
+        await LocalDbService.instance.purgarOrdenesDeOtrosTecnicos(
+          currentIdTecnico: auth.idTecnico,
+          currentNombre: auth.displayName,
+          isAdmin: false,
+        );
+      }
       // Offline login exitoso
       setState(() {
         _loginedOffline = true;
