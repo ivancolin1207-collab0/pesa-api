@@ -171,7 +171,7 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
                               final raw = _cargaCtrl.text.trim().replaceAll(',', '.');
                               final double? n = double.tryParse(raw);
                               if (n != null) {
-                                final formatted = n.toStringAsFixed(dec);
+                                final formatted = formatMetrologicalValue(n, widget.divMin);
                                 if (_cargaCtrl.text != formatted) {
                                   _cargaCtrl.text = formatted;
                                 }

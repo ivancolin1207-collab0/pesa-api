@@ -178,10 +178,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
       final finText = i < _finalCtrls.length ? _finalCtrls[i].text.trim().replaceAll(',', '.') : '';
       final ini = double.tryParse(iniText);
       final fin = double.tryParse(finText);
-      double? error;
-      if (fin != null) {
-        error = fin - carga;
-      }
+      final error = calcularErrorExcentricidad(fin: fin, ini: ini, carga: carga);
       return {
         'posicion_id':     i + 1,
         'posicion_nombre': i < _posLabels.length ? _posLabels[i] : 'Sección ${i + 1}',
@@ -291,7 +288,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
                         final raw = _cargaCtrl.text.trim().replaceAll(',', '.');
                         final double? n = double.tryParse(raw);
                         if (n != null) {
-                          final formatted = n.toStringAsFixed(dec);
+                          final formatted = formatMetrologicalValue(n, widget.divMin);
                           if (_cargaCtrl.text != formatted) {
                             _cargaCtrl.text = formatted;
                           }
@@ -379,7 +376,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
                       ),
                       const Spacer(),
                       Text(
-                        'Error = (L. Final - L. Inicial) - Carga',
+                        'Error = L. Final - Carga',
                         style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
                       ),
                     ],
@@ -459,13 +456,11 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
   );
 
   TableRow _row(int i, List<String> posLabels, int dec) {
+    final ini = double.tryParse(_inicialCtrls[i].text.trim().replaceAll(',', '.'));
     final fin = double.tryParse(_finalCtrls[i].text.trim().replaceAll(',', '.'));
     final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
 
-    double? err;
-    if (fin != null) {
-      err = fin - carga;
-    }
+    final err = calcularErrorExcentricidad(fin: fin, ini: ini, carga: carga);
 
     final posLabel = i < posLabels.length ? posLabels[i] : 'Sección ${i + 1}';
 

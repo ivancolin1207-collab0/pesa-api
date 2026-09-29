@@ -46,6 +46,23 @@ String formatMetrologicalString(dynamic val, double? d) {
 /// Calcula el número de decimales adecuado a partir de la división mínima d.
 int decimalsFromDivMin(double? d) => getDecimalsFromD(d);
 
+/// Calcula el error metrológico en la prueba de Excentricidad.
+/// - Fórmula oficial metrológica: Error = L. FINAL - Carga de Prueba
+/// - Corrección de cero residual: solo si |L. INICIAL| < (Carga * 0.10)
+///   se considera deriva de cero y se resta: Error = (L. FINAL - L. INICIAL) - Carga
+/// - Si L. INICIAL es un valor de carga completo o está vacía: Error = L. FINAL - Carga
+double? calcularErrorExcentricidad({
+  required double? fin,
+  required double? ini,
+  required double? carga,
+}) {
+  if (fin == null || carga == null) return null;
+  if (ini != null && ini != 0 && ini.abs() < (carga * 0.10)) {
+    return (fin - ini) - carga;
+  }
+  return fin - carga;
+}
+
 /// Valida si un valor numérico es un múltiplo exacto de la división mínima d,
 /// considerando tolerancia por redondeo flotante IEEE 754.
 bool isValidDivMin(double? val, double? d) {

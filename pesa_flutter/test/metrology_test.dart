@@ -128,4 +128,24 @@ void main() {
       expect(formatMetrologicalValue(1.0, 0.001), '1.000');
     });
   });
+
+  group('Cálculo Estricto de Error en Excentricidad', () {
+    test('Caso real Foto 1: Carga=22520, L.Ini=22490, L.Fin=22520 -> Error = 0 (NO -22490)', () {
+      final err = calcularErrorExcentricidad(fin: 22520.0, ini: 22490.0, carga: 22520.0);
+      expect(err, 0.0);
+      expect(formatMetrologicalValue(err, 10.0), '0');
+    });
+
+    test('Deriva residual de cero: Carga=22520, L.Ini=10 (< 10% de carga), L.Fin=22520 -> Error = -10', () {
+      final err = calcularErrorExcentricidad(fin: 22520.0, ini: 10.0, carga: 22520.0);
+      expect(err, -10.0);
+      expect(formatMetrologicalValue(err, 10.0), '-10');
+    });
+
+    test('Sin L. Inicial: Carga=22520, L.Ini=null, L.Fin=22520 -> Error = 0', () {
+      final err = calcularErrorExcentricidad(fin: 22520.0, ini: null, carga: 22520.0);
+      expect(err, 0.0);
+      expect(formatMetrologicalValue(err, 10.0), '0');
+    });
+  });
 }

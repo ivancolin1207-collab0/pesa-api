@@ -563,11 +563,10 @@ class PdfService {
     double maxErr = 0;
     for (final r in display) {
       final carga = _toNum(r['carga'] ?? r['carga_kg'] ?? os['carga_prueba_excentricidad'] ?? os['carga_excentricidad']);
+      final ini   = _toNum(r['lectura_inicial']);
       final fin   = _toNum(r['lectura_final']);
-      double? err;
-      if (fin != null && carga != null) {
-        err = fin - carga;
-      } else if (r['error'] != null) {
+      double? err = calcularErrorExcentricidad(fin: fin, ini: ini, carga: carga);
+      if (err == null && r['error'] != null) {
         err = _toNum(r['error']);
       }
       if (err != null && err.abs() > maxErr) maxErr = err.abs();
@@ -588,10 +587,8 @@ class PdfService {
         final carga = _toNum(r['carga'] ?? r['carga_kg'] ?? os['carga_prueba_excentricidad'] ?? os['carga_excentricidad']);
         final lbl   = e.key < labels.length ? labels[e.key] : 'Pos ${e.key + 1}';
 
-        double? err;
-        if (fin != null && carga != null) {
-          err = fin - carga;
-        } else if (r['error'] != null) {
+        double? err = calcularErrorExcentricidad(fin: fin, ini: ini, carga: carga);
+        if (err == null && r['error'] != null) {
           err = _toNum(r['error']);
         }
 
