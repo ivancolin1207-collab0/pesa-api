@@ -108,6 +108,14 @@ class OSCompleta(BaseModel):
     fecha_descarga_tablet: Optional[datetime] = None
     fecha_subida_servidor: Optional[datetime] = None
     fecha_apertura_admin:  Optional[datetime] = None
+    firma_tecnico:         Optional[str]   = None
+    firma_cliente:         Optional[str]   = None
+    firma_tecnico_b64:     Optional[str]   = None
+    firma_cliente_b64:     Optional[str]   = None
+    firma_cliente_nombre:  Optional[str]   = None
+    nombre_ing:            Optional[str]   = None
+    puesto_ing:            Optional[str]   = None
+    dictamen:              Optional[str]   = None
     sync_version:          Optional[int]   = 1
     updated_at:            Optional[datetime] = None
 
@@ -158,6 +166,8 @@ class PushPayload(BaseModel):
     firma_cliente:        Optional[str] = None  # PNG firma cliente en Base64
     nombre_ing:           Optional[str] = None
     puesto_ing:           Optional[str] = None
+    firma_cliente_nombre: Optional[str] = None
+    dictamen:             Optional[str] = None
 
 
 class PushResponse(BaseModel):
@@ -169,12 +179,19 @@ class PushResponse(BaseModel):
 
 
 class FirmasPayload(BaseModel):
-    firma_tecnico_png: str = Field(..., description="PNG codificado en base64")
-    firma_cliente_png: str = Field(..., description="PNG codificado en base64")
+    firma_tecnico_png:    Optional[str] = None
+    firma_cliente_png:    Optional[str] = None
+    firma_tecnico:        Optional[str] = None
+    firma_cliente:        Optional[str] = None
+    nombre_ing:           Optional[str] = None
+    puesto_ing:           Optional[str] = None
+    firma_cliente_nombre: Optional[str] = None
 
-    @field_validator("firma_tecnico_png", "firma_cliente_png")
+    @field_validator("firma_tecnico_png", "firma_cliente_png", "firma_tecnico", "firma_cliente", mode="before")
     @classmethod
-    def validate_base64_size(cls, v: str) -> str:
+    def validate_base64_size(cls, v: Optional[str]) -> Optional[str]:
+        if not v:
+            return v
         raw_size = len(v) * 3 // 4
         if raw_size > settings.FIRMA_MAX_SIZE_BYTES:
             raise ValueError(
@@ -285,6 +302,14 @@ async def sync_pull(
             COALESCE(ti.nombre,          '') AS tipo_instrumento,
             NULL::text                       AS pdf_b64,
             NULL::text                       AS firma_tecnico_descargada,
+            COALESCE(os.firma_tecnico, os.firma_tecnico_b64, '') AS firma_tecnico,
+            COALESCE(os.firma_cliente, os.firma_cliente_b64, '') AS firma_cliente,
+            COALESCE(os.firma_tecnico_b64, os.firma_tecnico, '') AS firma_tecnico_b64,
+            COALESCE(os.firma_cliente_b64, os.firma_cliente, '') AS firma_cliente_b64,
+            COALESCE(os.nombre_ing, os.firma_cliente_nombre, '') AS nombre_ing,
+            COALESCE(os.puesto_ing, '') AS puesto_ing,
+            COALESCE(os.firma_cliente_nombre, os.nombre_ing, '') AS firma_cliente_nombre,
+            COALESCE(os.dictamen, '') AS dictamen,
             'kg'                             AS unidad_medida,
             COALESCE(os.sync_check_status, 'ASIGNADA') AS sync_check_status,
             os.fecha_descarga_tablet,
@@ -596,12 +621,18 @@ async def sync_push(
                 id_equipo             = COALESCE($10, id_equipo),
                 pdf_b64               = COALESCE($11, pdf_b64),
                 unidad_medida         = COALESCE($12, unidad_medida),
+                firma_tecnico         = COALESCE($13, firma_tecnico),
                 firma_tecnico_b64     = COALESCE($13, firma_tecnico_b64),
+                firma_cliente         = COALESCE($14, firma_cliente),
                 firma_cliente_b64     = COALESCE($14, firma_cliente_b64),
+                nombre_ing            = COALESCE($15, nombre_ing),
+                puesto_ing            = COALESCE($16, puesto_ing),
+                firma_cliente_nombre  = COALESCE($17, firma_cliente_nombre),
+                dictamen              = COALESCE($18, dictamen),
                 sync_status           = 'SINCRONIZADO',
                 sync_version          = COALESCE(sync_version, 0) + 1,
                 sync_at               = NOW(),
-                device_id             = $15,
+                device_id             = $19,
                 sync_check_status     = CASE
                     WHEN $11 IS NOT NULL OR $1 IN ('COMPLETADA', 'COMPLETADA_DIGITAL') THEN 'SUBIDA_SERVIDOR'
                     WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN'
@@ -612,7 +643,7 @@ async def sync_push(
                     ELSE fecha_subida_servidor
                 END,
                 updated_at            = NOW()
-            WHERE id = $16
+            WHERE id = $20
             """,
             nuevo_estado,
             payload.observaciones,
@@ -625,8 +656,12 @@ async def sync_push(
             payload.unidad_medida,  # $12
             payload.firma_tecnico,  # $13
             payload.firma_cliente,  # $14
-            payload.device_id,      # $15
-            os_id,                  # $16
+            payload.nombre_ing or payload.firma_cliente_nombre,  # $15
+            payload.puesto_ing,     # $16
+            payload.firma_cliente_nombre or payload.nombre_ing,  # $17
+            payload.dictamen,       # $18
+            payload.device_id,      # $19
+            os_id,                  # $20
         )
     except Exception as e_full:
         logger.warning("UPDATE con sync_version falló (%s) — reintentando sin columnas opcionales", e_full)
@@ -634,19 +669,27 @@ async def sync_push(
         await db.execute(
             """
             UPDATE ordenes_servicio SET
-                estado              = $1,
-                observaciones       = COALESCE($2, observaciones),
-                valor_repetibilidad = COALESCE($3, valor_repetibilidad),
-                valor_excentricidad = COALESCE($4, valor_excentricidad),
-                id_clase_exactitud  = COALESCE($5, id_clase_exactitud),
-                marca               = COALESCE($6, marca),
-                modelo              = COALESCE($7, modelo),
-                ns                  = COALESCE($8, ns),
-                ubicacion           = COALESCE($9, ubicacion),
-                id_equipo           = COALESCE($10, id_equipo),
-                sync_status         = 'SINCRONIZADO',
-                updated_at          = NOW()
-            WHERE id = $11
+                estado               = $1,
+                observaciones        = COALESCE($2, observaciones),
+                valor_repetibilidad  = COALESCE($3, valor_repetibilidad),
+                valor_excentricidad  = COALESCE($4, valor_excentricidad),
+                id_clase_exactitud   = COALESCE($5, id_clase_exactitud),
+                marca                = COALESCE($6, marca),
+                modelo               = COALESCE($7, modelo),
+                ns                   = COALESCE($8, ns),
+                ubicacion            = COALESCE($9, ubicacion),
+                id_equipo            = COALESCE($10, id_equipo),
+                firma_tecnico        = COALESCE($11, firma_tecnico),
+                firma_tecnico_b64    = COALESCE($11, firma_tecnico_b64),
+                firma_cliente        = COALESCE($12, firma_cliente),
+                firma_cliente_b64    = COALESCE($12, firma_cliente_b64),
+                nombre_ing           = COALESCE($13, nombre_ing),
+                puesto_ing           = COALESCE($14, puesto_ing),
+                firma_cliente_nombre = COALESCE($15, firma_cliente_nombre),
+                dictamen             = COALESCE($16, dictamen),
+                sync_status          = 'SINCRONIZADO',
+                updated_at           = NOW()
+            WHERE id = $17
             """,
             nuevo_estado,
             payload.observaciones,
@@ -655,6 +698,12 @@ async def sync_push(
             id_clase,
             payload.marca, payload.modelo, payload.ns, payload.ubicacion,
             payload.id_equipo,
+            payload.firma_tecnico,
+            payload.firma_cliente,
+            payload.nombre_ing or payload.firma_cliente_nombre,
+            payload.puesto_ing,
+            payload.firma_cliente_nombre or payload.nombre_ing,
+            payload.dictamen,
             os_id,
         )
 
@@ -829,21 +878,33 @@ async def upload_firmas(
     if row["estado"] in ("CANCELADA", "COMPLETADA"):
         raise HTTPException(status_code=400, detail=f"OS en estado {row['estado']!r}, no se pueden añadir firmas")
 
+    f_tec = payload.firma_tecnico or payload.firma_tecnico_png
+    f_cli = payload.firma_cliente or payload.firma_cliente_png
+    nom_ing = payload.nombre_ing or payload.firma_cliente_nombre
+    puesto_ing = payload.puesto_ing
+
     # [FIX] Intenta con sync_version y sync_at; si no existen, usa fallback
     try:
         await db.execute(
             """
             UPDATE ordenes_servicio SET
-                firma_tecnico_png = $1,
-                firma_cliente_png = $2,
-                estado            = 'FIRMADA',
-                sync_version      = COALESCE(sync_version, 0) + 1,
-                sync_at           = NOW(),
-                updated_at        = NOW()
-            WHERE id = $3
+                firma_tecnico        = COALESCE($1, firma_tecnico),
+                firma_tecnico_b64    = COALESCE($1, firma_tecnico_b64),
+                firma_cliente        = COALESCE($2, firma_cliente),
+                firma_cliente_b64    = COALESCE($2, firma_cliente_b64),
+                nombre_ing           = COALESCE($3, nombre_ing),
+                puesto_ing           = COALESCE($4, puesto_ing),
+                firma_cliente_nombre = COALESCE($3, firma_cliente_nombre),
+                estado               = 'FIRMADA',
+                sync_version         = COALESCE(sync_version, 0) + 1,
+                sync_at              = NOW(),
+                updated_at           = NOW()
+            WHERE id = $5
             """,
-            payload.firma_tecnico_png,
-            payload.firma_cliente_png,
+            f_tec,
+            f_cli,
+            nom_ing,
+            puesto_ing,
             row["id"],
         )
     except Exception as e_firmas:
@@ -851,14 +912,21 @@ async def upload_firmas(
         await db.execute(
             """
             UPDATE ordenes_servicio SET
-                firma_tecnico_png = $1,
-                firma_cliente_png = $2,
-                estado            = 'FIRMADA',
-                updated_at        = NOW()
-            WHERE id = $3
+                firma_tecnico        = COALESCE($1, firma_tecnico),
+                firma_tecnico_b64    = COALESCE($1, firma_tecnico_b64),
+                firma_cliente        = COALESCE($2, firma_cliente),
+                firma_cliente_b64    = COALESCE($2, firma_cliente_b64),
+                nombre_ing           = COALESCE($3, nombre_ing),
+                puesto_ing           = COALESCE($4, puesto_ing),
+                firma_cliente_nombre = COALESCE($3, firma_cliente_nombre),
+                estado               = 'FIRMADA',
+                updated_at           = NOW()
+            WHERE id = $5
             """,
-            payload.firma_tecnico_png,
-            payload.firma_cliente_png,
+            f_tec,
+            f_cli,
+            nom_ing,
+            puesto_ing,
             row["id"],
         )
 

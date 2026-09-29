@@ -413,18 +413,21 @@ async def upload_pdf_tablet(
             await db.execute(
                 """
                 UPDATE ordenes_servicio SET
-                    observaciones     = COALESCE($1, observaciones),
-                    dictamen          = COALESCE($2, dictamen),
-                    firma_tecnico_b64 = COALESCE($3, firma_tecnico_b64),
-                    firma_cliente_b64 = COALESCE($4, firma_cliente_b64),
-                    nombre_ing        = COALESCE($5, nombre_ing),
-                    puesto_ing        = COALESCE($6, puesto_ing),
-                    unidad_medida     = COALESCE($7, unidad_medida)
+                    observaciones        = COALESCE($1, observaciones),
+                    dictamen             = COALESCE($2, dictamen),
+                    firma_tecnico        = COALESCE($3, firma_tecnico),
+                    firma_tecnico_b64    = COALESCE($3, firma_tecnico_b64),
+                    firma_cliente        = COALESCE($4, firma_cliente),
+                    firma_cliente_b64    = COALESCE($4, firma_cliente_b64),
+                    nombre_ing           = COALESCE($5, nombre_ing),
+                    puesto_ing           = COALESCE($6, puesto_ing),
+                    firma_cliente_nombre = COALESCE($5, firma_cliente_nombre),
+                    unidad_medida        = COALESCE($7, unidad_medida)
                 WHERE id = $8
                 """,
                 p.get("observaciones"), p.get("dictamen"),
                 p.get("firma_tecnico"), p.get("firma_cliente"),
-                p.get("nombre_ing"), p.get("puesto_ing"),
+                p.get("nombre_ing") or p.get("firma_cliente_nombre"), p.get("puesto_ing"),
                 p.get("unidad_medida"), actual_id,
             )
             for idx, r in enumerate(p.get("rep_rows", [])):
