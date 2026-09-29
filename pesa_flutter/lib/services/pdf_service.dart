@@ -11,6 +11,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
+import 'metrology_helper.dart';
 
 class PdfService {
   static final PdfService instance = PdfService._();
@@ -524,7 +525,7 @@ class PdfService {
         }
         return _dataRow([
           nom != null || fin != null ? '${e.key + 1}' : '',
-          nom != null ? _fmtInt(nom) : '',
+          nom != null ? _fmtDec(nom, dec) : '',
           ini != null ? _fmtDec(ini, dec) : (fin != null || nom != null ? '/' : ''),
           fin != null ? _fmtDec(fin, dec) : '',
           err != null ? _fmtDec(err, dec) : '',
@@ -986,13 +987,9 @@ class PdfService {
 
   int _parseDivMin(Map<String, dynamic> os) {
     final raw = _s(os, 'div_minima', _s(os, 'division_minima', ''));
-    if (raw.isEmpty) return 3;
+    if (raw.isEmpty) return 0;
     final d = double.tryParse(raw.replaceAll(',', '.'));
-    if (d == null || d <= 0) return 3;
-    if (d >= 1) return 0;
-    final s = d.toStringAsFixed(10).replaceAll(RegExp(r'0+$'), '');
-    final dotIdx = s.indexOf('.');
-    return dotIdx < 0 ? 0 : s.length - dotIdx - 1;
+    return getDecimalsFromD(d);
   }
 
   String _fmtDec(dynamic v, int dec) {
@@ -1001,11 +998,6 @@ class PdfService {
     return d == null ? v.toString() : d.toStringAsFixed(dec);
   }
 
-  String _fmtInt(dynamic v) {
-    if (v == null) return '';
-    final d = v is num ? v.toDouble() : double.tryParse(v.toString());
-    return d == null ? v.toString() : d.truncate().toString();
-  }
 
   double? _toNum(dynamic v) {
     if (v == null) return null;

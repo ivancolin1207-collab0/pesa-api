@@ -39,23 +39,40 @@ class _ExactitudTableState extends State<ExactitudTable> {
         n,
         (i) => TextEditingController(
             text: i < widget.rows.length
-                ? widget.rows[i]['valor_nominal']?.toString() ?? ''
+                ? formatMetrologicalString(widget.rows[i]['valor_nominal'], widget.divMin)
                 : ''));
     _initCtrls = List.generate(
         n,
         (i) => TextEditingController(
             text: i < widget.rows.length
-                ? widget.rows[i]['lectura_inicial']?.toString() ?? ''
+                ? formatMetrologicalString(widget.rows[i]['lectura_inicial'], widget.divMin)
                 : ''));
     _finalCtrls = List.generate(
         n,
         (i) => TextEditingController(
             text: i < widget.rows.length
-                ? widget.rows[i]['lectura_final']?.toString() ?? ''
+                ? formatMetrologicalString(widget.rows[i]['lectura_final'], widget.divMin)
                 : ''));
     for (final c in [..._nomCtrls, ..._initCtrls, ..._finalCtrls]) {
       c.addListener(_notify);
     }
+  }
+
+  @override
+  void didUpdateWidget(ExactitudTable oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.divMin != widget.divMin) {
+      _reformatAllControllers();
+    }
+  }
+
+  void _reformatAllControllers() {
+    for (final c in [..._nomCtrls, ..._initCtrls, ..._finalCtrls]) {
+      if (c.text.trim().isNotEmpty) {
+        c.text = formatMetrologicalString(c.text, widget.divMin);
+      }
+    }
+    if (mounted) setState(() {});
   }
 
   @override
@@ -69,7 +86,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
   void _notify() => widget.onChanged(_serialize());
 
   List<Map<String, dynamic>> _serialize() {
-    final dec = decimalsFromDivMin(widget.divMin);
+    final dec = getDecimalsFromD(widget.divMin);
     return List.generate(widget.numPuntos.clamp(1, 20), (i) {
       final nom = double.tryParse(_nomCtrls[i].text.trim().replaceAll(',', '.'));
       final ini = double.tryParse(_initCtrls[i].text.trim().replaceAll(',', '.'));
@@ -96,7 +113,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
 
   @override
   Widget build(BuildContext context) {
-    final dec = decimalsFromDivMin(widget.divMin);
+    final dec = getDecimalsFromD(widget.divMin);
 
     // Revisar si hay campos inválidos
     bool hayCamposInvalidos = false;
@@ -157,7 +174,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
                       ),
                       const Spacer(),
                       Text(
-                        'd = ${widget.divMin ?? '?'}\n($dec decimales)',
+                        'd = ${widget.divMin != null ? formatMetrologicalValue(widget.divMin, widget.divMin) : '?'}\n($dec decimales)',
                         style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
                         textAlign: TextAlign.right,
                       ),
@@ -238,7 +255,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
               ? const Center(
                   child: Text('—', style: TextStyle(color: Colors.grey, fontSize: 13)))
               : Text(
-                  err.toStringAsFixed(dec),
+                  formatMetrologicalValue(err, widget.divMin),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: err.abs() > (widget.divMin ?? 0.001)
@@ -263,7 +280,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
         onFocusChange: (hasFocus) {
           if (!hasFocus && c.text.trim().isNotEmpty) {
             double? n = double.tryParse(c.text.replaceAll(',', '.'));
-            if (n != null) c.text = n.toStringAsFixed(dec);
+            if (n != null) c.text = formatMetrologicalValue(n, widget.divMin);
             setState(() {});
           }
         },
@@ -282,7 +299,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
           ),
           decoration: InputDecoration(
             isDense: true,
-            hintText: hint ?? '0.${'0' * dec}',
+            hintText: hint ?? (dec == 0 ? '0' : '0.${'0' * dec}'),
             hintStyle: TextStyle(color: Colors.grey.shade300, fontSize: 11),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),

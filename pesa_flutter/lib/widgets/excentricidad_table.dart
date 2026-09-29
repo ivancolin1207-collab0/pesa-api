@@ -76,12 +76,12 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
     // Lecturas iniciales y finales (una por posición)
     _inicialCtrls = List.generate(_numPos, (i) => TextEditingController(
         text: i < widget.rows.length
-            ? widget.rows[i]['lectura_inicial']?.toString() ?? ''
+            ? formatMetrologicalString(widget.rows[i]['lectura_inicial'], widget.divMin)
             : ''));
 
     _finalCtrls = List.generate(_numPos, (i) => TextEditingController(
         text: i < widget.rows.length
-            ? widget.rows[i]['lectura_final']?.toString() ?? ''
+            ? formatMetrologicalString(widget.rows[i]['lectura_final'], widget.divMin)
             : ''));
   }
 
@@ -489,7 +489,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
               ? const Center(
                   child: Text('—', style: TextStyle(color: Colors.grey, fontSize: 12)))
               : Text(
-                  err.toStringAsFixed(dec),
+                  formatMetrologicalValue(err, widget.divMin),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: err.abs() > (widget.divMin ?? 0.001)
@@ -516,7 +516,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
             final raw = c.text.trim().replaceAll(',', '.');
             final double? n = double.tryParse(raw);
             if (n != null) {
-              final formatted = n.toStringAsFixed(dec);
+              final formatted = formatMetrologicalValue(n, widget.divMin);
               if (c.text != formatted) {
                 c.text = formatted;
               }
@@ -550,7 +550,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
           ),
           decoration: InputDecoration(
             isDense: true,
-            hintText: '0.${'0' * dec}',
+            hintText: dec == 0 ? '0' : '0.${'0' * dec}',
             hintStyle: TextStyle(color: Colors.grey.shade300, fontSize: 11),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),

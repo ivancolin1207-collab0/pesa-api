@@ -51,9 +51,9 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
       final saved = i < widget.rows.length ? widget.rows[i] : null;
       return _RepRow(
         inicialCtrl: TextEditingController(
-            text: saved?['lectura_inicial']?.toString() ?? ''),
+            text: formatMetrologicalString(saved?['lectura_inicial'], widget.divMin)),
         finalCtrl: TextEditingController(
-            text: saved?['lectura_final']?.toString() ?? ''),
+            text: formatMetrologicalString(saved?['lectura_final'], widget.divMin)),
       );
     });
   }
@@ -381,13 +381,13 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
             ),
           ),
         ),
-        _cellInput(_rows[i].inicialCtrl, dec, hint: '0.${'0' * dec}'),
-        _cellInput(_rows[i].finalCtrl, dec, hint: '0.${'0' * dec}'),
+        _cellInput(_rows[i].inicialCtrl, dec, hint: dec == 0 ? '0' : '0.${'0' * dec}'),
+        _cellInput(_rows[i].finalCtrl, dec, hint: dec == 0 ? '0' : '0.${'0' * dec}'),
         _cell(err == null
             ? const Center(
                 child: Text('—', style: TextStyle(color: Colors.grey, fontSize: 13)))
             : Text(
-                err.toStringAsFixed(dec),
+                formatMetrologicalValue(err, widget.divMin),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: err.abs() > (widget.divMin ?? 0.001)
@@ -418,7 +418,7 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
             final raw = ctrl.text.trim().replaceAll(',', '.');
             final double? n = double.tryParse(raw);
             if (n != null) {
-              final formatted = n.toStringAsFixed(dec);
+              final formatted = formatMetrologicalValue(n, widget.divMin);
               if (ctrl.text != formatted) {
                 ctrl.text = formatted;
               }

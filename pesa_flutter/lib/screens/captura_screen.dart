@@ -110,6 +110,9 @@ class _CapturaScreenState extends State<CapturaScreen>
     super.initState();
     _tabCtrl = TabController(length: 4, vsync: this);
     _os = Map<String, dynamic>.from(widget.osData);
+    _divMinCtrl.addListener(() {
+      if (mounted) setState(() {});
+    });
     _precargaCampos();
     _loadLocalData();
   }
@@ -972,7 +975,7 @@ class _CapturaScreenState extends State<CapturaScreen>
   // ── Tab 1: Repetibilidad ──────────────────────────────────────────────────
   Widget _buildRepetibilidadTab() {
     return RepetibilidadTable(
-      key: ValueKey('rep_$_dataVersion'),
+      key: ValueKey('rep_${_dataVersion}_$_dValue'),
       rows: _repRows,
       divMin: _dValue,
       onChanged: (r) => _repRows = r,
@@ -1034,7 +1037,7 @@ class _CapturaScreenState extends State<CapturaScreen>
             ]),
           ),
           ExcentricidadTable(
-            key: ValueKey('exc_${_dataVersion}_$_tipoInstrumento'),
+            key: ValueKey('exc_${_dataVersion}_${_tipoInstrumento}_$_dValue'),
             numCeldas: nCeldas,
             numSecciones: nSec,
             rows: _excRows,
@@ -1076,7 +1079,7 @@ class _CapturaScreenState extends State<CapturaScreen>
   // ── Tab 3: Exactitud (Fin de las pruebas) ──────────────────────────────────
   Widget _buildExactitudTab(int nPuntos, String folio) {
     return ExactitudTable(
-      key: ValueKey('exac_$_dataVersion'),
+      key: ValueKey('exac_${_dataVersion}_$_dValue'),
       numPuntos: nPuntos,
       rows: _exacRows,
       divMin: _dValue,

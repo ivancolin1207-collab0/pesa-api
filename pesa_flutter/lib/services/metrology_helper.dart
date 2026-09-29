@@ -1,18 +1,50 @@
 // lib/services/metrology_helper.dart
 // Funciones auxiliares de cálculo y validación metrológica (OIML R 76 / NOM-010-SCFI)
 
-/// Calcula el número de decimales adecuado a partir de la división mínima d.
-int decimalsFromDivMin(double? d) {
-  if (d == null || d <= 0) return 3;
-  if (d >= 1) return 0;
-  int dec = 0;
-  double v = d;
-  while (v < 1.0 && dec < 10) {
-    v *= 10;
-    dec++;
+/// Retorna el número de decimales adecuado a partir de la división mínima d (OIML R 76).
+/// - Si d es entero o >= 1 (ej. d = 1, 2, 5, 10, 20, 50 kg) -> 0 decimales (ej. 1000, 2000, 5990)
+/// - Si d tiene decimales (ej. d = 0.1, 0.2, 0.5 kg) -> 1 decimal (ej. 1000.0)
+/// - Si d = 0.01 kg -> 2 decimales (ej. 1000.00)
+/// - Si d = 0.001 kg -> 3 decimales (ej. 1.000)
+int getDecimalsFromD(double? d) {
+  if (d == null || d <= 0) return 0;
+  if (d >= 1.0) return 0;
+  final str = d.toString();
+  if (str.contains('e-') || str.contains('E-')) {
+    final exp = int.tryParse(str.split(RegExp(r'[eE]-'))[1]);
+    if (exp != null) return exp;
   }
-  return dec;
+  if (str.contains('.')) {
+    return str.split('.')[1].length;
+  }
+  return 0;
 }
+
+/// Formatea un valor numérico metrológico (Valor Nominal, Lectura Inicial,
+/// Lectura Final, Error) dinámicamente según la división mínima d.
+String formatMetrologicalValue(double? val, double? d) {
+  if (val == null) return '';
+  if (d == null || d <= 0) {
+    if ((val - val.roundToDouble()).abs() < 1e-6) return val.round().toString();
+    return val.toString();
+  }
+  final decimals = getDecimalsFromD(d);
+  return val.toStringAsFixed(decimals);
+}
+
+/// Convierte y formatea dinámicamente cualquier entrada (String, double, num)
+/// según la división mínima d.
+String formatMetrologicalString(dynamic val, double? d) {
+  if (val == null) return '';
+  final str = val.toString().trim();
+  if (str.isEmpty) return '';
+  final dVal = double.tryParse(str.replaceAll(',', '.'));
+  if (dVal == null) return str;
+  return formatMetrologicalValue(dVal, d);
+}
+
+/// Calcula el número de decimales adecuado a partir de la división mínima d.
+int decimalsFromDivMin(double? d) => getDecimalsFromD(d);
 
 /// Valida si un valor numérico es un múltiplo exacto de la división mínima d,
 /// considerando tolerancia por redondeo flotante IEEE 754.
@@ -26,7 +58,7 @@ bool isValidDivMin(double? val, double? d) {
 /// Mensaje estándar de error cuando un valor no cumple con los saltos de división mínima.
 String divMinErrorMsg(double? d) {
   if (d == null || d <= 0) return 'El valor debe ser múltiplo de la división mínima';
-  final dec = decimalsFromDivMin(d);
+  final dec = getDecimalsFromD(d);
   return 'El valor debe ser múltiplo de la división mínima (ej. saltos de ${d.toStringAsFixed(dec)})';
 }
 
@@ -124,17 +156,17 @@ double _redondearCargaComercial(
 /// - Si la carga es entera exacta (ej. 500, 340): sin decimales superfluos ("500", "340")
 String formatearCargaSugerida(double carga, {double? divMin, double? capMax}) {
   if (carga <= 0) return '';
-  final dec = decimalsFromDivMin(divMin);
+  final dec = getDecimalsFromD(divMin);
 
-  // Básculas de precisión / pequeñas (capMax < 20, ej. 6.8 kg) -> 3 decimales ("4.000", "3.000")
-  if (capMax != null && capMax < 20) {
+  // Básculas de precisión / pequeñas (capMax < 20, ej. 6.8 kg) y con d con decimales
+  if (capMax != null && capMax < 20 && (divMin == null || divMin < 1)) {
     final d = (divMin != null && divMin > 0) ? dec : 3;
     return carga.toStringAsFixed(d);
   }
 
-  // Si divMin está definido y tiene decimales (< 1)
-  if (divMin != null && divMin < 1) {
-    return carga.toStringAsFixed(dec);
+  // Si divMin está definido (>= 1 o < 1), usar regla estricta metrológica
+  if (divMin != null && divMin > 0) {
+    return formatMetrologicalValue(carga, divMin);
   }
 
   // Si es un entero exacto (ej. 500, 340)
