@@ -24,6 +24,7 @@ class PdfService {
   static const _redBg    = PdfColor.fromInt(0xFFFFEEEE);
   static const _dark     = PdfColor.fromInt(0xFF1C1C1C); // Encabezados sección (negro)
   static const _gray     = PdfColor.fromInt(0xFF777777);
+  static const _grayD    = PdfColor.fromInt(0xFF555555);
   static const _grayL    = PdfColor.fromInt(0xFFCCCCCC);
   static const _grayBg   = PdfColor.fromInt(0xFFF2F2F2);
   static const _white    = PdfColors.white;
@@ -105,7 +106,12 @@ class PdfService {
     final leyenda  = _s(osData, 'leyenda_excentricidad',
         'El tipo de instrumento no es apto para realizar prueba de excentricidad.');
     final divMin   = _parseDivMin(osData);
-    final geo      = _s(osData, 'geometria_plataforma', 'cuadrada').toLowerCase();
+    final rawGeo   = (_s(osData, 'geometria_excentricidad', '').isNotEmpty)
+        ? _s(osData, 'geometria_excentricidad', '')
+        : _s(osData, 'geometria_plataforma', '');
+    final geo      = (rawGeo.isNotEmpty)
+        ? rawGeo.toLowerCase().trim()
+        : getGeometriaPorDefecto(_s(osData, 'tipo_instrumento', '')).toLowerCase();
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
@@ -414,10 +420,12 @@ class PdfService {
     final u = (os['unidad_medida'] ?? 'kg').toString().trim().isNotEmpty
         ? (os['unidad_medida'] ?? 'kg').toString().trim() : 'kg';
 
-    // Calcular error máximo tolerante: Error = (L. Final - (L. Inicial ?? 0)) - Carga
+    final double? cargaGlobal = _toNum(os['valor_repetibilidad'] ?? os['carga_repetibilidad']);
+
+    // Calcular error máximo: Error = L. Final - Carga
     double maxErr = 0;
     for (final r in display) {
-      final carga = _toNum(r['valor'] ?? r['valor_kg'] ?? r['carga']);
+      final carga = _toNum(r['valor'] ?? r['valor_kg'] ?? r['carga']) ?? cargaGlobal;
       final fin   = _toNum(r['lectura_final']);
       if (fin != null && carga != null) {
         final err = fin - carga;
@@ -441,7 +449,7 @@ class PdfService {
         // Filas de datos
         ...display.asMap().entries.map((e) {
           final r     = e.value;
-          final carga = _toNum(r['valor'] ?? r['valor_kg'] ?? r['carga']);
+          final carga = _toNum(r['valor'] ?? r['valor_kg'] ?? r['carga']) ?? cargaGlobal;
           final ini   = _toNum(r['lectura_inicial']);
           final fin   = _toNum(r['lectura_final']);
           double? err;
@@ -540,17 +548,32 @@ class PdfService {
   // ══════════════════════════════════════════════════════════════════════════
   pw.Widget _buildExcentricidadTable(
       List<Map<String, dynamic>> rows, Map<String, dynamic> os, int dec) {
-    final geo = _s(os, 'geometria_plataforma', 'cuadrada').toLowerCase();
+    final rawGeo = (_s(os, 'geometria_excentricidad', '').isNotEmpty)
+        ? _s(os, 'geometria_excentricidad', '')
+        : _s(os, 'geometria_plataforma', '');
     final tipo = _s(os, 'tipo_instrumento', '').toLowerCase();
-    final bool isCam = geo.contains('camionera') || tipo.contains('camionera') || tipo.contains('puente');
-    final bool isCirc = geo.contains('circular') || tipo.contains('circular');
+    final effectiveGeo = rawGeo.isNotEmpty
+        ? rawGeo.toLowerCase().trim()
+        : getGeometriaPorDefecto(tipo).toLowerCase();
+
+    final bool isCam = effectiveGeo.contains('camion') ||
+        effectiveGeo.contains('ferro') ||
+        tipo.contains('camion') ||
+        tipo.contains('puente') ||
+        tipo.contains('ferro');
+    final bool isCirc = !isCam && (effectiveGeo.contains('circ') || tipo.contains('circ'));
+
+    int nSec = int.tryParse(os['num_secciones']?.toString() ?? '') ??
+               int.tryParse(os['secciones_camionera']?.toString() ?? '') ??
+               int.tryParse(os['filas_excentricidad']?.toString() ?? '') ??
+               (rows.length >= 2 ? rows.length : 4);
+    if (nSec <= 0) nSec = 4;
 
     List<String> labels;
     if (isCam) {
-      final nSec = int.tryParse(os['num_secciones']?.toString() ?? '') ?? 4;
       labels = List.generate(nSec, (i) => 'Sección ${i + 1}');
     } else if (isCirc) {
-      labels = const ['Centro', 'Norte', 'Sur', 'Este', 'Oeste'];
+      labels = const ['Centro', 'Norte', 'Este', 'Sur', 'Oeste'];
     } else {
       labels = const ['Centro', 'Esquina 1', 'Esquina 2', 'Esquina 3', 'Esquina 4'];
     }
@@ -560,13 +583,26 @@ class PdfService {
     final u = (os['unidad_medida'] ?? 'kg').toString().trim().isNotEmpty
         ? (os['unidad_medida'] ?? 'kg').toString().trim() : 'kg';
 
+    final double? cargaGlobal = _toNum(
+      os['valor_excentricidad'] ??
+      os['carga_prueba_excentricidad'] ??
+      os['carga_excentricidad']
+    );
+
     double maxErr = 0;
     for (final r in display) {
-      final carga = _toNum(r['carga'] ?? r['carga_kg'] ?? os['carga_prueba_excentricidad'] ?? os['carga_excentricidad']);
+      final carga = _toNum(r['carga'] ?? r['carga_kg']) ?? cargaGlobal;
       final ini   = _toNum(r['lectura_inicial']);
       final fin   = _toNum(r['lectura_final']);
-      double? err = calcularErrorExcentricidad(fin: fin, ini: ini, carga: carga);
-      if (err == null && r['error'] != null) {
+      double? err = calcularErrorExcentricidad(
+        fin: fin,
+        ini: ini,
+        carga: carga,
+        isCamionera: isCam,
+      );
+      if (err == null && isCam && fin != null && carga != null) {
+        err = fin - carga;
+      } else if (err == null && !isCam && r['error'] != null) {
         err = _toNum(r['error']);
       }
       if (err != null && err.abs() > maxErr) maxErr = err.abs();
@@ -584,11 +620,18 @@ class PdfService {
         final r     = e.value;
         final ini   = _toNum(r['lectura_inicial']);
         final fin   = _toNum(r['lectura_final']);
-        final carga = _toNum(r['carga'] ?? r['carga_kg'] ?? os['carga_prueba_excentricidad'] ?? os['carga_excentricidad']);
+        final carga = _toNum(r['carga'] ?? r['carga_kg']) ?? cargaGlobal;
         final lbl   = e.key < labels.length ? labels[e.key] : 'Pos ${e.key + 1}';
 
-        double? err = calcularErrorExcentricidad(fin: fin, ini: ini, carga: carga);
-        if (err == null && r['error'] != null) {
+        double? err = calcularErrorExcentricidad(
+          fin: fin,
+          ini: ini,
+          carga: carga,
+          isCamionera: isCam,
+        );
+        if (err == null && isCam && fin != null && carga != null) {
+          err = fin - carga;
+        } else if (err == null && !isCam && r['error'] != null) {
           err = _toNum(r['error']);
         }
 
@@ -645,26 +688,43 @@ class PdfService {
   // DIAGRAMA 3-PANELES (Plataforma / Circular / Camionera) — fiel a imagen
   // ══════════════════════════════════════════════════════════════════════════
   pw.Widget _buildDiagrama3Paneles(Map<String, dynamic> os, String geo) {
-    final isPlat = geo.contains('cuadrada') || geo.contains('plataforma') || geo.isEmpty;
-    final isCirc = geo.contains('circular');
-    final isCam  = geo.contains('camionera');
-    final nSec   = int.tryParse(os['num_secciones']?.toString() ?? '') ?? 4;
+    final tipo = _s(os, 'tipo_instrumento', '').toLowerCase();
+    final rawGeo = (_s(os, 'geometria_excentricidad', '').isNotEmpty)
+        ? _s(os, 'geometria_excentricidad', '')
+        : (_s(os, 'geometria_plataforma', '').isNotEmpty
+            ? _s(os, 'geometria_plataforma', '')
+            : geo);
+    final g = rawGeo.toLowerCase().trim();
+
+    // Regla de detección estricta y mutuamente excluyente
+    final bool isCam = g.contains('camion') ||
+        g.contains('ferro') ||
+        tipo.contains('camion') ||
+        tipo.contains('puente') ||
+        tipo.contains('ferro');
+    final bool isCirc = !isCam && (g.contains('circ') || tipo.contains('circ'));
+    final bool isPlat = !isCam && !isCirc;
+
+    int nSec = int.tryParse(os['num_secciones']?.toString() ?? '') ??
+               int.tryParse(os['secciones_camionera']?.toString() ?? '') ??
+               int.tryParse(os['filas_excentricidad']?.toString() ?? '') ??
+               (os['exc_rows'] is List && (os['exc_rows'] as List).isNotEmpty ? (os['exc_rows'] as List).length : 4);
+    if (nSec <= 0) nSec = 4;
 
     // Posiciones de puntos como fracciones de ancho/alto (para Stack overlay)
-    // Panel Plataforma: 1=TL, 4=TR, 2=BL, 3=BR, 5=Center
-    // Panel Circular:   1=T,  2=R,  3=B,  4=L,  5=Center
-    // Panel Camionera:  letras + números como columnas de texto
+    // Panel Plataforma: 1 Centro, 2 Sup-Izq, 3 Sup-Der, 4 Inf-Der, 5 Inf-Izq
+    // Panel Circular:   1 Centro, 2 Norte, 3 Este, 4 Sur, 5 Oeste
+    // Panel Camionera:  secciones longitudinales numeradas
 
     pw.Widget panelPlataforma() => pw.Stack(
       children: [
         pw.Positioned.fill(child: pw.CustomPaint(painter: _dibujarPlataforma)),
         // REGLA METROLÓGICA (5 PUNTOS EXACTOS):
-        // 1 Centro, 2 Sup-Izq, 3 Sup-Der, 4 Inf-Der, 5 Inf-Izq
-        pw.Positioned.fill(child: pw.Center(child: _dotLabel('1'))),
-        pw.Positioned(left: 1,  top: 1,     child: _dotLabel('2')),
-        pw.Positioned(right: 1, top: 1,     child: _dotLabel('3')),
-        pw.Positioned(right: 1, bottom: 1,  child: _dotLabel('4')),
-        pw.Positioned(left: 1,  bottom: 1,  child: _dotLabel('5')),
+        pw.Positioned.fill(child: pw.Center(child: _dotLabel('1', active: isPlat))),
+        pw.Positioned(left: 1,  top: 1,     child: _dotLabel('2', active: isPlat)),
+        pw.Positioned(right: 1, top: 1,     child: _dotLabel('3', active: isPlat)),
+        pw.Positioned(right: 1, bottom: 1,  child: _dotLabel('4', active: isPlat)),
+        pw.Positioned(left: 1,  bottom: 1,  child: _dotLabel('5', active: isPlat)),
       ],
     );
 
@@ -672,53 +732,82 @@ class PdfService {
       children: [
         pw.Positioned.fill(child: pw.CustomPaint(painter: _dibujarCircular)),
         // REGLA METROLÓGICA (5 PUNTOS EXACTOS):
-        // 1 Centro, 2 Norte (12h), 3 Este (3h), 4 Sur (6h), 5 Oeste (9h)
-        pw.Positioned.fill(child: pw.Center(child: _dotLabel('1'))),
-        pw.Positioned(top: 1,    left: 0, right: 0, child: pw.Center(child: _dotLabel('2'))),
-        pw.Positioned(right: 1,  top: 0, bottom: 0, child: pw.Center(child: _dotLabel('3'))),
-        pw.Positioned(bottom: 1, left: 0, right: 0, child: pw.Center(child: _dotLabel('4'))),
-        pw.Positioned(left: 1,   top: 0, bottom: 0, child: pw.Center(child: _dotLabel('5'))),
+        pw.Positioned.fill(child: pw.Center(child: _dotLabel('1', active: isCirc))),
+        pw.Positioned(top: 1,    left: 0, right: 0, child: pw.Center(child: _dotLabel('2', active: isCirc))),
+        pw.Positioned(right: 1,  top: 0, bottom: 0, child: pw.Center(child: _dotLabel('3', active: isCirc))),
+        pw.Positioned(bottom: 1, left: 0, right: 0, child: pw.Center(child: _dotLabel('4', active: isCirc))),
+        pw.Positioned(left: 1,   top: 0, bottom: 0, child: pw.Center(child: _dotLabel('5', active: isCirc))),
       ],
     );
 
-    // Panel Camionera — 3 secciones representativas (1, 2, N)
+    // Panel Camionera — Secciones longitudinales numeradas
     pw.Widget panelCamionera() {
-      const topLbls = ['a', 'c', 'e'];
-      const botLbls = ['b', 'd', 'f'];
-      const secLbls = ['1', '2', 'N'];
+      final int count = (nSec >= 2 && nSec <= 6) ? nSec : 4;
+      const topLetters = ['a', 'c', 'e', 'g', 'i', 'k'];
+      const botLetters = ['b', 'd', 'f', 'h', 'j', 'l'];
+
       return pw.Column(
         mainAxisAlignment: pw.MainAxisAlignment.center,
         children: [
           // Letras superiores
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
-            children: List.generate(3, (i) => pw.Text(
-              topLbls[i],
-              style: pw.TextStyle(fontSize: 5, fontWeight: pw.FontWeight.bold))),
+            children: List.generate(count, (i) => pw.Text(
+              i < topLetters.length ? topLetters[i] : '',
+              style: pw.TextStyle(
+                fontSize: 4.5,
+                fontWeight: pw.FontWeight.bold,
+                color: isCam ? _black : _grayD,
+              ),
+            )),
           ),
-          // Celdas con números: 3 rectángulos representativos
+          pw.SizedBox(height: 1),
+          // Celdas con números de sección
           pw.Container(
             height: 22,
+            margin: const pw.EdgeInsets.symmetric(horizontal: 2),
             child: pw.Row(
-              children: List.generate(3, (i) {
-                return pw.Expanded(child: pw.Container(
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(color: const PdfColor.fromInt(0xFFAAAAAA), width: 0.4),
-                    color: const PdfColor.fromInt(0xFFF8F8F8),
+              children: List.generate(count, (i) {
+                final String label = (count == nSec)
+                    ? '${i + 1}'
+                    : (i == count - 1 ? 'N' : '${i + 1}');
+                return pw.Expanded(
+                  child: pw.Container(
+                    margin: const pw.EdgeInsets.symmetric(horizontal: 0.5),
+                    decoration: pw.BoxDecoration(
+                      border: pw.Border.all(
+                        color: isCam ? const PdfColor.fromInt(0xFFB22222) : const PdfColor.fromInt(0xFFAAAAAA),
+                        width: isCam ? 0.7 : 0.4,
+                      ),
+                      color: isCam ? const PdfColor.fromInt(0xFFFFF0F2) : const PdfColor.fromInt(0xFFF8F8F8),
+                    ),
+                    child: pw.Center(
+                      child: pw.Text(
+                        label,
+                        style: pw.TextStyle(
+                          fontSize: 6,
+                          fontWeight: pw.FontWeight.bold,
+                          color: isCam ? const PdfColor.fromInt(0xFFB22222) : const PdfColor.fromInt(0xFF666666),
+                        ),
+                      ),
+                    ),
                   ),
-                  child: pw.Center(child: pw.Text(secLbls[i],
-                      style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold,
-                          color: const PdfColor.fromInt(0xFFB22222)))),
-                ));
+                );
               }),
             ),
           ),
+          pw.SizedBox(height: 1),
           // Letras inferiores
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
-            children: List.generate(3, (i) => pw.Text(
-              botLbls[i],
-              style: pw.TextStyle(fontSize: 5, fontWeight: pw.FontWeight.bold))),
+            children: List.generate(count, (i) => pw.Text(
+              i < botLetters.length ? botLetters[i] : '',
+              style: pw.TextStyle(
+                fontSize: 4.5,
+                fontWeight: pw.FontWeight.bold,
+                color: isCam ? _black : _grayD,
+              ),
+            )),
           ),
         ],
       );
@@ -742,10 +831,10 @@ class PdfService {
             _checkboxRow('Circular', isCirc),
           ])),
           pw.Container(width: 0.4, color: _grayL),
-          // Panel 3: Camionera (3 secciones representativas)
+          // Panel 3: Camionera (secciones)
           pw.Expanded(child: pw.Column(children: [
             pw.Expanded(child: panelCamionera()),
-            _checkboxRow('Camionera (${nSec > 0 ? nSec : 4} Sec.)', isCam),
+            _checkboxRow('Camionera ($nSec Sec.)', isCam),
           ])),
         ]),
       ),
@@ -753,11 +842,11 @@ class PdfService {
   }
 
   /// Punto numerado para overlay en diagrama
-  pw.Widget _dotLabel(String n) => pw.Container(
+  pw.Widget _dotLabel(String n, {bool active = true}) => pw.Container(
     width: 10, height: 10,
     decoration: pw.BoxDecoration(
       shape: pw.BoxShape.circle,
-      color: const PdfColor.fromInt(0xFFB22222),
+      color: active ? const PdfColor.fromInt(0xFFB22222) : const PdfColor.fromInt(0xFFAAAAAA),
     ),
     child: pw.Center(child: pw.Text(n,
         style: pw.TextStyle(fontSize: 5, fontWeight: pw.FontWeight.bold,

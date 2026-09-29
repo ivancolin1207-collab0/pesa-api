@@ -19,6 +19,10 @@ class ExcentricidadTable extends StatefulWidget {
   final String? tipoInstrumento;
   /// Si Logística definió que aplica o no excentricidad
   final bool aplicaExcentricidad;
+  /// Callback cuando el técnico cambia la geometría
+  final ValueChanged<String>? onGeometriaChanged;
+  /// Callback cuando el técnico cambia el número de secciones (camionera)
+  final ValueChanged<int>? onNumSeccionesChanged;
 
   const ExcentricidadTable({
     super.key,
@@ -30,6 +34,8 @@ class ExcentricidadTable extends StatefulWidget {
     this.geometria,
     this.tipoInstrumento,
     this.aplicaExcentricidad = true,
+    this.onGeometriaChanged,
+    this.onNumSeccionesChanged,
   });
 
   @override
@@ -37,6 +43,7 @@ class ExcentricidadTable extends StatefulWidget {
 }
 
 class _ExcentricidadTableState extends State<ExcentricidadTable> {
+  late String _geometriaActual;
   late int _numPos;
   late List<String> _posLabels;
   late TextEditingController _cargaCtrl;
@@ -44,22 +51,22 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
   late List<TextEditingController> _finalCtrls;
   bool _userEditedCarga = false;
 
-  bool get _isCamioneraOrFerro {
-    final geo = (widget.geometria ?? '').toLowerCase();
-    final tipo = (widget.tipoInstrumento ?? '').toLowerCase();
-    return geo.contains('camionera') ||
-        tipo.contains('camionera') ||
-        geo.contains('ferrocarril') ||
-        tipo.contains('ferrocarril') ||
-        geo.contains('puente') ||
-        tipo.contains('puente') ||
-        geo.contains('ferrovi') ||
-        tipo.contains('ferrovi');
+  static String _normalizarGeometria(String? geo, String? tipo) {
+    if (geo != null && geo.trim().isNotEmpty) {
+      final g = geo.toLowerCase().trim();
+      if (g.contains('camion') || g.contains('ferro') || g.contains('puente')) return 'Camionera';
+      if (g.contains('circ')) return 'Circular';
+      if (g.contains('plat') || g.contains('cuad')) return 'Plataforma';
+    }
+    return getGeometriaPorDefecto(tipo);
   }
+
+  bool get _isCamioneraOrFerro => _geometriaActual == 'Camionera';
 
   @override
   void initState() {
     super.initState();
+    _geometriaActual = _normalizarGeometria(widget.geometria, widget.tipoInstrumento);
     _determinarPosiciones();
 
     // Carga de Prueba: único campo global
@@ -88,6 +95,16 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
   @override
   void didUpdateWidget(ExcentricidadTable oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // Si la geometría del padre cambió explícitamente y es distinta a la actual
+    if (widget.geometria != null && widget.geometria != oldWidget.geometria) {
+      final norm = _normalizarGeometria(widget.geometria, widget.tipoInstrumento);
+      if (norm != _geometriaActual) {
+        _geometriaActual = norm;
+        _determinarPosiciones();
+        _ajustarControladores();
+      }
+    }
+
     // Si el técnico ya interactuó o editó la carga de prueba, NUNCA sobreescribir ni resetear
     if (_userEditedCarga) return;
 
@@ -106,24 +123,55 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
     }
   }
 
-  void _determinarPosiciones() {
-    final geo = (widget.geometria ?? '').toLowerCase();
-    final tipo = (widget.tipoInstrumento ?? '').toLowerCase();
-    final bool isCam = _isCamioneraOrFerro;
-    final bool isCircular = geo.contains('circular') || tipo.contains('circular');
+  void _onGeometriaSelected(String nuevaGeo) {
+    if (_geometriaActual == nuevaGeo) return;
+    setState(() {
+      _geometriaActual = nuevaGeo;
+      _determinarPosiciones();
+      _ajustarControladores();
+    });
+    widget.onGeometriaChanged?.call(_geometriaActual);
+    if (_isCamioneraOrFerro) {
+      widget.onNumSeccionesChanged?.call(_numPos);
+    }
+    _notify();
+  }
 
-    if (isCam) {
-      int sec = widget.rows.length;
-      if (sec < 2) {
-        sec = widget.numSecciones ?? 0;
-        if (sec <= 0 && widget.numCeldas > 0) sec = widget.numCeldas ~/ 2;
-        if (sec < 4) sec = 4; // Por defecto exactamente 4 secciones (Sección 1 a 4)
-      }
+  void _setNumSecciones(int n) {
+    if (n == _numPos || n < 2 || n > 50) return;
+    setState(() {
+      _numPos = n;
+      _posLabels = List.generate(_numPos, (i) => 'Sección ${i + 1}');
+      _ajustarControladores();
+    });
+    widget.onNumSeccionesChanged?.call(_numPos);
+    _notify();
+  }
+
+  void _ajustarControladores() {
+    while (_inicialCtrls.length < _numPos) {
+      _inicialCtrls.add(TextEditingController());
+      _finalCtrls.add(TextEditingController());
+    }
+    while (_inicialCtrls.length > _numPos) {
+      final initC = _inicialCtrls.removeLast();
+      initC.dispose();
+      final finC = _finalCtrls.removeLast();
+      finC.dispose();
+    }
+  }
+
+  void _determinarPosiciones() {
+    if (_isCamioneraOrFerro) {
+      int sec = widget.numSecciones ?? 0;
+      if (sec <= 0 && widget.rows.length >= 2) sec = widget.rows.length;
+      if (sec <= 0 && widget.numCeldas > 0) sec = widget.numCeldas ~/ 2;
+      if (sec < 4) sec = 4; // Por defecto exactamente 4 secciones
       _numPos = sec.clamp(2, 50);
       _posLabels = List.generate(_numPos, (i) => 'Sección ${i + 1}');
-    } else if (isCircular) {
+    } else if (_geometriaActual == 'Circular') {
       _numPos = 5;
-      _posLabels = const ['Centro', 'Lado 1', 'Lado 2', 'Lado 3', 'Lado 4'];
+      _posLabels = const ['Centro', 'Norte', 'Este', 'Sur', 'Oeste'];
     } else {
       // Plataforma Cuadrada / Rectangular
       _numPos = 5;
@@ -138,6 +186,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
       _inicialCtrls.add(TextEditingController());
       _finalCtrls.add(TextEditingController());
     });
+    widget.onNumSeccionesChanged?.call(_numPos);
     _notify();
   }
 
@@ -151,6 +200,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
       final finC = _finalCtrls.removeLast();
       finC.dispose();
     });
+    widget.onNumSeccionesChanged?.call(_numPos);
     _notify();
   }
 
@@ -178,7 +228,12 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
       final finText = i < _finalCtrls.length ? _finalCtrls[i].text.trim().replaceAll(',', '.') : '';
       final ini = double.tryParse(iniText);
       final fin = double.tryParse(finText);
-      final error = calcularErrorExcentricidad(fin: fin, ini: ini, carga: carga);
+      final error = calcularErrorExcentricidad(
+        fin: fin,
+        ini: ini,
+        carga: carga,
+        isCamionera: _isCamioneraOrFerro,
+      );
       return {
         'posicion_id':     i + 1,
         'posicion_nombre': i < _posLabels.length ? _posLabels[i] : 'Sección ${i + 1}',
@@ -187,6 +242,8 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
         'lectura_final':   fin,
         'error':           error,
         'decimales':       dec,
+        'geometria':       _geometriaActual,
+        'num_secciones':   _numPos,
         'valido_d':        isValidDivMin(carga, widget.divMin) &&
                            (ini == null || isValidDivMin(ini, widget.divMin)) &&
                            isValidDivMin(fin, widget.divMin),
@@ -242,6 +299,128 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          // ── Selector de Geometría de Excentricidad (Tablet) ───────────────
+          Card(
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: Colors.grey.shade200),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.architecture_outlined, color: _kRed, size: 20),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Geometría de Excentricidad:',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF1D1D1F),
+                        ),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: _isCamioneraOrFerro
+                              ? Colors.amber.shade50
+                              : Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: _isCamioneraOrFerro
+                                ? Colors.amber.shade300
+                                : Colors.blue.shade200,
+                          ),
+                        ),
+                        child: Text(
+                          _isCamioneraOrFerro
+                              ? '$_numPos Secciones'
+                              : '5 Puntos Metrológicos',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: _isCamioneraOrFerro
+                                ? Colors.amber.shade900
+                                : Colors.blue.shade900,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<String>(
+                      segments: const [
+                        ButtonSegment<String>(
+                          value: 'Plataforma',
+                          icon: Icon(Icons.crop_square, size: 16),
+                          label: Text('Plataforma\n(Cuadrada)', textAlign: TextAlign.center, style: TextStyle(fontSize: 11)),
+                        ),
+                        ButtonSegment<String>(
+                          value: 'Circular',
+                          icon: Icon(Icons.circle_outlined, size: 16),
+                          label: Text('Circular', textAlign: TextAlign.center, style: TextStyle(fontSize: 11)),
+                        ),
+                        ButtonSegment<String>(
+                          value: 'Camionera',
+                          icon: Icon(Icons.view_column_outlined, size: 16),
+                          label: Text('Camionera\n(Secciones)', textAlign: TextAlign.center, style: TextStyle(fontSize: 11)),
+                        ),
+                      ],
+                      selected: {_geometriaActual},
+                      onSelectionChanged: (Set<String> newSelection) {
+                        if (newSelection.isNotEmpty) {
+                          _onGeometriaSelected(newSelection.first);
+                        }
+                      },
+                      style: const ButtonStyle(
+                        visualDensity: VisualDensity.compact,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
+                  ),
+                  if (_isCamioneraOrFerro) ...[
+                    const SizedBox(height: 12),
+                    Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        const Text(
+                          'Número de Secciones:',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF424242)),
+                        ),
+                        for (final n in [3, 4, 5, 6])
+                          ChoiceChip(
+                            label: Text('$n sec', style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: _numPos == n ? FontWeight.bold : FontWeight.normal,
+                              color: _numPos == n ? Colors.white : Colors.black87,
+                            )),
+                            selected: _numPos == n,
+                            selectedColor: _kRed,
+                            backgroundColor: Colors.grey.shade100,
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            visualDensity: VisualDensity.compact,
+                            onSelected: (selected) {
+                              if (selected) _setNumSecciones(n);
+                            },
+                          ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
           // ── Campo Único: Carga de Prueba (kg) ─────────────────────────────
           Card(
             elevation: 0,
@@ -459,8 +638,12 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
     final ini = double.tryParse(_inicialCtrls[i].text.trim().replaceAll(',', '.'));
     final fin = double.tryParse(_finalCtrls[i].text.trim().replaceAll(',', '.'));
     final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
-
-    final err = calcularErrorExcentricidad(fin: fin, ini: ini, carga: carga);
+    final err = calcularErrorExcentricidad(
+      fin: fin,
+      ini: ini,
+      carga: carga,
+      isCamionera: _isCamioneraOrFerro,
+    );
 
     final posLabel = i < posLabels.length ? posLabels[i] : 'Sección ${i + 1}';
 

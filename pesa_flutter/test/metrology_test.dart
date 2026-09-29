@@ -147,5 +147,40 @@ void main() {
       expect(err, 0.0);
       expect(formatMetrologicalValue(err, 10.0), '0');
     });
+
+    test('Báscula Camionera (OS-26-689): Carga=22520, L.Ini=22490, L.Fin=22520, isCamionera=true -> Error = 0 (Estricto fin - carga)', () {
+      final err = calcularErrorExcentricidad(fin: 22520.0, ini: 22490.0, carga: 22520.0, isCamionera: true);
+      expect(err, 0.0);
+      expect(formatMetrologicalValue(err, 10.0), '0');
+    });
+
+    test('Báscula Camionera (OS-26-689): Carga=22520, L.Ini=22490, L.Fin=22490, isCamionera=true -> Error = -30', () {
+      final err = calcularErrorExcentricidad(fin: 22490.0, ini: 22490.0, carga: 22520.0, isCamionera: true);
+      expect(err, -30.0);
+      expect(formatMetrologicalValue(err, 10.0), '-30');
+    });
+  });
+
+  group('Geometría de Excentricidad Automática', () {
+    test('Camionera y Ferrocarril -> Camionera', () {
+      expect(getGeometriaPorDefecto('Báscula camionera'), 'Camionera');
+      expect(getGeometriaPorDefecto('Báscula de ferrocarril'), 'Camionera');
+      expect(getGeometriaPorDefecto('Báscula puente de pesaje'), 'Camionera');
+      expect(getGeometriaPorDefecto('Báscula Electrónica Camionera'), 'Camionera');
+      expect(getGeometriaPorDefecto('Báscula Electrónica de FFCC'), 'Camionera');
+    });
+
+    test('Circular -> Circular', () {
+      expect(getGeometriaPorDefecto('Báscula circular'), 'Circular');
+    });
+
+    test('Otras básculas -> Plataforma', () {
+      expect(getGeometriaPorDefecto('Báscula de plataforma'), 'Plataforma');
+      expect(getGeometriaPorDefecto('Báscula de piso'), 'Plataforma');
+      expect(getGeometriaPorDefecto('Báscula de mostrador'), 'Plataforma');
+      expect(getGeometriaPorDefecto('Báscula tolva'), 'Plataforma');
+      expect(getGeometriaPorDefecto(null), 'Plataforma');
+      expect(getGeometriaPorDefecto(''), 'Plataforma');
+    });
   });
 }

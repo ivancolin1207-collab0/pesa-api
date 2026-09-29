@@ -173,6 +173,8 @@ class LocalDbService {
             'instrumento_division': 'TEXT',
             'secciones_camionera': 'INTEGER DEFAULT 0',
             'num_secciones': 'INTEGER DEFAULT 0',
+            'geometria_plataforma': 'TEXT',
+            'geometria_excentricidad': 'TEXT',
             'unidad_medida': "TEXT DEFAULT 'kg'",
             'firma_tecnico_descargada': 'TEXT',
             'pdf_b64_local': 'TEXT',
@@ -801,7 +803,8 @@ class LocalDbService {
       for (final field in [
         'marca', 'modelo', 'ns', 'id_equipo', 'ubicacion',
         'tipo_instrumento', 'numero_cca', 'holograma_anterior', 'holograma_actualizado',
-        'funcionamiento', 'puntos_apoyo', 'cliente', 'sucursal', 'direccion', 'fecha', 'tecnico'
+        'funcionamiento', 'puntos_apoyo', 'cliente', 'sucursal', 'direccion', 'fecha', 'tecnico',
+        'geometria_plataforma', 'geometria_excentricidad'
       ]) {
         if (instrumentData[field] != null) {
           updateMap[field] = instrumentData[field].toString();
@@ -818,6 +821,12 @@ class LocalDbService {
       }
       if (instrumentData['aplica_excentricidad'] != null) {
         updateMap['aplica_excentricidad'] = _toBoolInt(instrumentData['aplica_excentricidad']);
+      }
+      if (instrumentData['num_secciones'] != null) {
+        updateMap['num_secciones'] = _toIntOrNull(instrumentData['num_secciones']);
+      }
+      if (instrumentData['secciones_camionera'] != null) {
+        updateMap['secciones_camionera'] = _toIntOrNull(instrumentData['secciones_camionera']);
       }
     }
 

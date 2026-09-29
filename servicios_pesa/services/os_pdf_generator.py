@@ -393,14 +393,8 @@ class OsPdfGenerator:
         # sep_y eliminado para un encabezado más limpio
         section_y = top - LOGO_H - 6
 
-        # Titulo TOMA DE DATOS — fuente reducida (22pt) para balance y compactidad
+        # Encabezado central limpio (area superior entre logo y folio despejada)
         titulo_y = section_y - 8
-        c.setFillColor(_BLACK)
-        c.setFont("Helvetica-Bold", 22)
-        c.drawCentredString(self.ML + self.CW / 2, titulo_y - 22, "TOMA DE DATOS")
-        c.setFont("Helvetica-Bold", 8)
-        c.setFillColor(_GRAY_DARK)
-        c.drawCentredString(self.ML + self.CW / 2, titulo_y - 32, "PESAJE SISTEMAS Y AUTOMATIZACION")
 
         # Caja de Folio (derecha) — simétrica y alineada con el título
         # Anclada verticalmente al mismo punto que el título para alineación limpia
@@ -901,8 +895,18 @@ class OsPdfGenerator:
         _CHK_ON  = HexColor("#C8102E")
         _CHK_OFF = HexColor("#AAAAAA")
 
-        geo_key  = (geo or "").strip().lower()
-        n_sec    = int(os_data.get("num_secciones") or 4)
+        geo_raw = str(geo or (os_data or {}).get("geometria_excentricidad") or (os_data or {}).get("geometria_plataforma") or "").strip().lower()
+        _tipo_raw = str((os_data or {}).get("tipo_instrumento") or "").lower()
+        if not geo_raw:
+            if "camion" in _tipo_raw or "ferro" in _tipo_raw or "puente" in _tipo_raw:
+                geo_key = "camionera"
+            elif "circ" in _tipo_raw:
+                geo_key = "circular"
+            else:
+                geo_key = "cuadrada"
+        else:
+            geo_key = geo_raw
+        n_sec    = int((os_data or {}).get("num_secciones") or (os_data or {}).get("secciones_camionera") or 4)
 
         # ── Contenedor exterior ───────────────────────────────────────────────
         c.setFillColor(_BG)
@@ -1004,12 +1008,10 @@ class OsPdfGenerator:
 
         sep_line(p1_x + panel_w)
         # Camionera detectada por geo O por tipo_instrumento
-        _tipo_raw = str((os_data or {}).get("tipo_instrumento") or "").lower()
-        _es_camionera = ("camionera" in geo_key or "camionera" in _tipo_raw
-                         or "puente" in _tipo_raw)
-        # Plataforma: cuadrada/rectangular, o geo vacía Y NO es camionera
-        _is_plataforma = ("cuadrada" in geo_key or "plataforma" in geo_key or
-                          (not geo_key and not _es_camionera))
+        _es_camionera = ("camionera" in geo_key or "ferro" in geo_key or "camionera" in _tipo_raw
+                         or "puente" in _tipo_raw or "ferro" in _tipo_raw)
+        _is_circular = not _es_camionera and ("circular" in geo_key or "circular" in _tipo_raw)
+        _is_plataforma = not _es_camionera and not _is_circular
         checkbox_row(p1_cx, body_top - body_h + 1,
                      "Plataforma", _is_plataforma)
 
@@ -1051,7 +1053,7 @@ class OsPdfGenerator:
 
         sep_line(p2_x + panel_w)
         checkbox_row(p2_cx, body_top - body_h + 1,
-                     "Circular", "circular" in geo_key)
+                     "Circular", _is_circular)
 
         # ── PANEL 3: CAMIONERA / SECCIONES (tabla de celdas) ─────────────────
         p3_x  = x + 2 * panel_w
@@ -1170,12 +1172,7 @@ class OsPdfGenerator:
             fin   = row.get("lectura_final")
             error_val = None
             _sf = self._seguro_float
-            if fin is not None and ini is not None:
-                try:
-                    error_val = _sf(fin) - _sf(ini)
-                except Exception:
-                    pass
-            elif fin is not None and carga is not None:
+            if fin is not None and carga is not None:
                 try:
                     error_val = _sf(fin) - _sf(carga)
                 except Exception:
@@ -1230,11 +1227,8 @@ class OsPdfGenerator:
             lf    = _validar_num(r.get("lectura_final"))
             li    = _validar_num(r.get("lectura_inicial"))
             cargo = _validar_num(r.get("valor_kg"))
-            if lf is not None:
-                if li is not None:
-                    errors.append(abs(lf - li))
-                elif cargo is not None:
-                    errors.append(abs(lf - cargo))
+            if lf is not None and cargo is not None:
+                errors.append(abs(lf - cargo))
         # REGLA FÍSICA: cuando modalidad no es DIGITAL, pie en blanco (incluye acentos).
         _is_fisico_rep = not self._es_digital(os_data)   # blanco a menos que sea DIGITAL explícito
         if errors:
@@ -1606,8 +1600,8 @@ class OsPdfGenerator:
             error_val = None
             if fin_val is not None and str(fin_val).strip() and \
                carga_row is not None and str(carga_row).strip():
-                error_val = abs(_sf(fin_val) - _sf(carga_row))
-                errors_all.append(error_val)
+                error_val = _sf(fin_val) - _sf(carga_row)
+                errors_all.append(abs(error_val))
 
             c.setFillColor(_BLACK)
             c.setFont("Helvetica", data_font_size)
@@ -1642,9 +1636,8 @@ class OsPdfGenerator:
                                     self._fmt(fin_val, d_dec))
             cx += col_widths[2]
 
-            # Col 3: ERROR — Negro si = 0, Rojo si > 0 (nunca verde)
             if error_val is not None:
-                c.setFillColor(_RED if error_val > 0 else _BLACK)
+                c.setFillColor(_RED if abs(error_val) > 0 else _BLACK)
                 c.setFont("Helvetica-Bold", data_font_size)
                 c.drawCentredString(cx + col_widths[3] / 2,
                                     y - row_h + max(2.5, row_h * 0.28),

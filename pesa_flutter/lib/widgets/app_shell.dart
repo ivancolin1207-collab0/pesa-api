@@ -161,7 +161,7 @@ class _AppShellState extends State<AppShell> {
           // Sidebar permanente
           Container(
             width: _sidebarW,
-            color: Colors.white,
+            color: _sidebarBg,
             decoration: const BoxDecoration(
               border: Border(right: BorderSide(color: _divider)),
             ),
@@ -211,7 +211,7 @@ class _SidebarContent extends StatelessWidget {
               Text('Servicios PESA',
                   style: TextStyle(color: Color(0xFF111827),
                       fontWeight: FontWeight.w800, fontSize: 14)),
-              Text('v3.1.6+20',
+              Text('v3.1.19+33',
                   style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 10)),
             ]),
           ]),

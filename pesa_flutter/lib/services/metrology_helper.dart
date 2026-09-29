@@ -47,20 +47,44 @@ String formatMetrologicalString(dynamic val, double? d) {
 int decimalsFromDivMin(double? d) => getDecimalsFromD(d);
 
 /// Calcula el error metrológico en la prueba de Excentricidad.
-/// - Fórmula oficial metrológica: Error = L. FINAL - Carga de Prueba
-/// - Corrección de cero residual: solo si |L. INICIAL| < (Carga * 0.10)
-///   se considera deriva de cero y se resta: Error = (L. FINAL - L. INICIAL) - Carga
-/// - Si L. INICIAL es un valor de carga completo o está vacía: Error = L. FINAL - Carga
+/// - Si es camionera o rectangular por secciones: estrictamente Error = L. FINAL - Carga de Prueba.
+/// - En general: Error = L. FINAL - Carga de Prueba
+/// - Corrección de cero residual: solo si |L. INICIAL| < (Carga * 0.10) y no es camionera:
+///   Error = (L. FINAL - L. INICIAL) - Carga
 double? calcularErrorExcentricidad({
   required double? fin,
   required double? ini,
   required double? carga,
+  bool isCamionera = false,
 }) {
   if (fin == null || carga == null) return null;
+  if (isCamionera) {
+    return fin - carga;
+  }
   if (ini != null && ini != 0 && ini.abs() < (carga * 0.10)) {
     return (fin - ini) - carga;
   }
   return fin - carga;
+}
+
+/// Determina la geometría de excentricidad por defecto a partir del tipo de instrumento.
+/// - "Camionera": si contiene camionera, ferrocarril, puente, ffcc, ferrovi
+/// - "Circular": si contiene circular
+/// - "Plataforma": para el resto (plataforma, piso, mostrador, colgante, tolva, etc.)
+String getGeometriaPorDefecto(String? tipoInstrumento) {
+  if (tipoInstrumento == null || tipoInstrumento.trim().isEmpty) return 'Plataforma';
+  final t = tipoInstrumento.toLowerCase().trim();
+  if (t.contains('camionera') ||
+      t.contains('ferrocarril') ||
+      t.contains('puente') ||
+      t.contains('ffcc') ||
+      t.contains('ferrovi')) {
+    return 'Camionera';
+  }
+  if (t.contains('circular')) {
+    return 'Circular';
+  }
+  return 'Plataforma';
 }
 
 /// Valida si un valor numérico es un múltiplo exacto de la división mínima d,

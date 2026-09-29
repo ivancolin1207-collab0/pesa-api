@@ -66,6 +66,8 @@ class _CapturaScreenState extends State<CapturaScreen>
   String  _funcionamiento = 'Electrónico'; // nuevo campo
   int     _puntosApoyo    = 4;               // nuevo campo
   String  _unidadMedida   = 'kg';            // selector 'kg' o 'g'
+  String  _geometriaExcentricidad = 'Plataforma'; // Plataforma | Circular | Camionera
+  int     _numSeccionesExc = 4;              // para Camionera (3, 4, 5, 6...)
   bool    _jChecked = false, _iChecked = false, _aChecked = false;
   bool    _usaSustitucion = false;
   bool?   _aplExcOverride;  // null = auto-determinar por instrumento
@@ -181,8 +183,33 @@ class _CapturaScreenState extends State<CapturaScreen>
       _puntosApoyo = getPuntosApoyoPorDefecto(_tipoInstrumento, fallback: 4);
     }
 
-    // Secciones para camionera — guardadas en SQLite, disponibles vía _os map
-    // No hay una variable _nSecciones local; la consumen los widgets hijos.
+    // Geometría de excentricidad y secciones
+    final rawGeo = _str('geometria_excentricidad').isNotEmpty
+        ? _str('geometria_excentricidad')
+        : _str('geometria_plataforma');
+    if (rawGeo.isNotEmpty) {
+      final g = rawGeo.toLowerCase().trim();
+      if (g.contains('camion') || g.contains('ferro') || g.contains('puente')) {
+        _geometriaExcentricidad = 'Camionera';
+      } else if (g.contains('circ')) {
+        _geometriaExcentricidad = 'Circular';
+      } else {
+        _geometriaExcentricidad = 'Plataforma';
+      }
+    } else {
+      _geometriaExcentricidad = getGeometriaPorDefecto(_tipoInstrumento);
+    }
+
+    final nSec = _os['num_secciones'] ?? _os['secciones_camionera'];
+    if (nSec != null) {
+      _numSeccionesExc = (nSec is int) ? nSec : int.tryParse(nSec.toString()) ?? 4;
+    } else if (_geometriaExcentricidad == 'Camionera') {
+      _numSeccionesExc = 4;
+    }
+    _os['geometria_excentricidad'] = _geometriaExcentricidad;
+    _os['geometria_plataforma']    = _geometriaExcentricidad;
+    _os['num_secciones']           = _numSeccionesExc;
+    _os['secciones_camionera']     = _numSeccionesExc;
 
     // JIA — pueden venir como bool o int (SQLite)
     _jChecked = _asBool(_os['jia_j']);
@@ -346,6 +373,26 @@ class _CapturaScreenState extends State<CapturaScreen>
           }
           if (draft['dictamen'] != null) {
             _dictamen = draft['dictamen'].toString();
+          }
+          if (draft['geometria_excentricidad'] != null || draft['geometria_plataforma'] != null) {
+            final geo = (draft['geometria_excentricidad'] ?? draft['geometria_plataforma']).toString();
+            if (geo.isNotEmpty) {
+              final g = geo.toLowerCase();
+              if (g.contains('camion') || g.contains('ferro') || g.contains('puente')) {
+                _geometriaExcentricidad = 'Camionera';
+              } else if (g.contains('circ')) {
+                _geometriaExcentricidad = 'Circular';
+              } else {
+                _geometriaExcentricidad = 'Plataforma';
+              }
+              _os['geometria_excentricidad'] = _geometriaExcentricidad;
+              _os['geometria_plataforma'] = _geometriaExcentricidad;
+            }
+          }
+          if (draft['num_secciones'] != null || draft['secciones_camionera'] != null) {
+            _numSeccionesExc = int.tryParse((draft['num_secciones'] ?? draft['secciones_camionera']).toString()) ?? _numSeccionesExc;
+            _os['num_secciones'] = _numSeccionesExc;
+            _os['secciones_camionera'] = _numSeccionesExc;
           }
 
           if (draft['rep_rows'] is List && (draft['rep_rows'] as List).isNotEmpty) {
@@ -677,6 +724,14 @@ class _CapturaScreenState extends State<CapturaScreen>
             _os['tipo_instrumento'] = v;
             _puntosApoyo = getPuntosApoyoPorDefecto(v, fallback: _puntosApoyo);
             _os['puntos_apoyo'] = _puntosApoyo;
+            _geometriaExcentricidad = getGeometriaPorDefecto(v);
+            _os['geometria_excentricidad'] = _geometriaExcentricidad;
+            _os['geometria_plataforma']    = _geometriaExcentricidad;
+            if (_geometriaExcentricidad == 'Camionera' && _numSeccionesExc < 2) {
+              _numSeccionesExc = 4;
+            }
+            _os['num_secciones']       = _numSeccionesExc;
+            _os['secciones_camionera'] = _numSeccionesExc;
             _dataVersion++;
             // Recalcular excentricidad si no hay override manual
             if (_aplExcOverride == null) setState(() {});
@@ -1011,8 +1066,6 @@ class _CapturaScreenState extends State<CapturaScreen>
 
   // ── Tab 2: Excentricidad ──────────────────────────────────────────────────
   Widget _buildExcentricidadTab(int nCeldas) {
-    final nSecRaw = _os['num_secciones'] ?? _os['secciones'] ?? _os['num_secciones_camionera'];
-    final nSec = (nSecRaw is int) ? nSecRaw : int.tryParse(nSecRaw?.toString() ?? '');
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       child: Column(
@@ -1037,14 +1090,28 @@ class _CapturaScreenState extends State<CapturaScreen>
             ]),
           ),
           ExcentricidadTable(
-            key: ValueKey('exc_${_dataVersion}_${_tipoInstrumento}_$_dValue'),
+            key: ValueKey('exc_${_dataVersion}_${_tipoInstrumento}_${_geometriaExcentricidad}_$_dValue'),
             numCeldas: nCeldas,
-            numSecciones: nSec,
+            numSecciones: _numSeccionesExc,
             rows: _excRows,
             divMin: _dValue,
-            geometria: _os['geometria_plataforma'] as String?,
+            geometria: _geometriaExcentricidad,
             tipoInstrumento: _tipoInstrumento,
             aplicaExcentricidad: _aplExc,
+            onGeometriaChanged: (geo) {
+              setState(() {
+                _geometriaExcentricidad = geo;
+                _os['geometria_excentricidad'] = geo;
+                _os['geometria_plataforma']    = geo;
+              });
+            },
+            onNumSeccionesChanged: (sec) {
+              setState(() {
+                _numSeccionesExc = sec;
+                _os['num_secciones']       = sec;
+                _os['secciones_camionera'] = sec;
+              });
+            },
             onChanged: (r) => _excRows = r,
           ),
           Padding(
@@ -1326,6 +1393,10 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['usa_sustitucion']       = _usaSustitucion;
     _os['funcionamiento']        = _funcionamiento;
     _os['puntos_apoyo']          = _puntosApoyo;
+    _os['geometria_excentricidad'] = _geometriaExcentricidad;
+    _os['geometria_plataforma']    = _geometriaExcentricidad;
+    _os['num_secciones']           = _numSeccionesExc;
+    _os['secciones_camionera']     = _numSeccionesExc;
     _os['unidad_medida']         = _unidadMedida;
     _os['capacidad_max']         = _capMaxCtrl.text.trim();
     _os['division_minima']       = _divMinCtrl.text.trim();
@@ -1447,6 +1518,10 @@ class _CapturaScreenState extends State<CapturaScreen>
         'tipo_instrumento':      _tipoInstrumento,
         'funcionamiento':        _funcionamiento,
         'puntos_apoyo':          _puntosApoyo,
+        'geometria_excentricidad': _geometriaExcentricidad,
+        'geometria_plataforma':    _geometriaExcentricidad,
+        'num_secciones':           _numSeccionesExc,
+        'secciones_camionera':     _numSeccionesExc,
         'unidad_medida':         _unidadMedida,
         'jia_j':                 _jChecked,
         'jia_i':                 _iChecked,
@@ -1656,6 +1731,10 @@ class _CapturaScreenState extends State<CapturaScreen>
         'tipo_servicio':         _os['tipo_servicio'] ?? '',
         'funcionamiento':        _funcionamiento,
         'puntos_apoyo':          _puntosApoyo,
+        'geometria_excentricidad': _geometriaExcentricidad,
+        'geometria_plataforma':    _geometriaExcentricidad,
+        'num_secciones':           _numSeccionesExc,
+        'secciones_camionera':     _numSeccionesExc,
         'aplica_excentricidad':  _aplExc,
       });
     }
