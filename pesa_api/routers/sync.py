@@ -25,7 +25,7 @@ import json
 import logging
 import traceback
 from datetime import datetime, timezone
-from typing   import Optional
+from typing   import Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
@@ -209,16 +209,21 @@ class FolioLockResponse(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+@router.get("", response_model=list[OSCompleta], summary="Sincronización de OS (alias de /pull)", tags=["Sincronización Offline"])
+@router.get("/", response_model=list[OSCompleta], include_in_schema=False)
 @router.get(
     "/pull",
     response_model = list[OSCompleta],
     summary        = "Descargar OS asignadas al técnico (Tablet → Servidor)",
 )
 async def sync_pull(
-    since: datetime = Query(
-        default = datetime(2000, 1, 1, tzinfo=timezone.utc),
+    since: Optional[Union[datetime, str]] = Query(
+        default = None,
         description = "Timestamp del último sync exitoso (ISO 8601). Se retornan solo OS modificadas después de este tiempo.",
     ),
+    tecnico_id: Optional[str] = Query(None, description="ID numérico del técnico (opcional)"),
+    tecnico_nombre: Optional[str] = Query(None, description="Nombre o filtro de técnico (opcional)"),
+    updated_after: Optional[str] = Query(None, description="Alias de since (opcional)"),
     db          = Depends(get_db),
     current_user: dict = Depends(require_roles(
         "servicio", "tecnico", "tecnico_campo", "admin", "administrador",
@@ -231,6 +236,7 @@ async def sync_pull(
     que hayan sido modificadas después del timestamp `since`.
 
     El campo `since` debe ser el `updated_at` del último pull exitoso.
+    Acepta parámetros opcionales tecnico_id, tecnico_nombre, updated_after sin romper con 422.
     """
     import unicodedata
 
@@ -248,9 +254,26 @@ async def sync_pull(
     _ADMIN_ROLES = {"admin", "administrador", "superadmin", "direccion", "gerencia"}
     is_admin   = any(ar in role_norm for ar in _ADMIN_ROLES)
 
-    # [FIX-TZ] asyncpg no puede comparar datetime aware con TIMESTAMP WITHOUT TIME ZONE
-    if since is not None and since.tzinfo is not None:
-        since = since.astimezone(timezone.utc).replace(tzinfo=None)
+    # [FIX-422] Parseo tolerante de since / updated_after (evita HTTP 422 si el formato difiere)
+    raw_date = updated_after or since
+    since_dt: Optional[datetime] = None
+    if raw_date is not None:
+        if isinstance(raw_date, datetime):
+            since_dt = raw_date
+        elif isinstance(raw_date, str) and raw_date.strip():
+            try:
+                clean_s = raw_date.strip().replace("Z", "+00:00")
+                since_dt = datetime.fromisoformat(clean_s)
+            except Exception:
+                try:
+                    from email.utils import parsedate_to_datetime
+                    since_dt = parsedate_to_datetime(raw_date.strip())
+                except Exception:
+                    logger.warning("[SYNC PULL] Fecha since no reconocible '%s', ignorando filtro temporal", raw_date)
+                    since_dt = None
+
+    if since_dt is not None and since_dt.tzinfo is not None:
+        since_dt = since_dt.astimezone(timezone.utc).replace(tzinfo=None)
 
     # ── SELECT blindado con COALESCE en todos los campos de texto ─────────────
     # Garantiza que ningún NULL en órdenes físicas rompa la validación Pydantic.
@@ -344,19 +367,43 @@ async def sync_pull(
         f"role={role} id_tecnico={id_tecnico} is_admin={is_admin}"
     )
 
+    # Parametros opcionales procesados de forma flexible
+    param_tecnico_id: Optional[int] = None
+    if tecnico_id is not None and str(tecnico_id).strip().isdigit():
+        param_tecnico_id = int(str(tecnico_id).strip())
+
+    param_tecnico_nombre: Optional[str] = None
+    if tecnico_nombre is not None and str(tecnico_nombre).strip():
+        param_tecnico_nombre = str(tecnico_nombre).strip()
+
     try:
         if is_admin:
-            # Admin: TODAS las OS activas — DISTINCT ON ya en _SELECT elimina duplicados
-            rows = await db.fetch(
-                _SELECT + """
-                WHERE (os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')
+            where_admin = ["(os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')"]
+            params_admin = []
+
+            if param_tecnico_nombre:
+                params_admin.append(f"%{param_tecnico_nombre.lower()}%")
+                idx = len(params_admin)
+                where_admin.append(f"(LOWER(tc.nombre_completo) LIKE ${idx} OR LOWER(tc.usuario) LIKE ${idx} OR LOWER(COALESCE(os.cliente, '')) LIKE ${idx})")
+            elif param_tecnico_id:
+                params_admin.append(param_tecnico_id)
+                idx = len(params_admin)
+                where_admin.append(f"os.id_tecnico = ${idx}")
+
+            if since_dt and since_dt.year > 2000:
+                params_admin.append(since_dt)
+                idx = len(params_admin)
+                where_admin.append(f"os.updated_at >= ${idx}::timestamp")
+
+            params_admin.append(settings.SYNC_MAX_BATCH_SIZE)
+            query_sql = _SELECT + f"""
+                WHERE {" AND ".join(where_admin)}
                 ORDER BY os.folio_os DESC, os.updated_at DESC
-                LIMIT $1
-                """,
-                settings.SYNC_MAX_BATCH_SIZE,
-            )
+                LIMIT ${len(params_admin)}
+            """
+            rows = await db.fetch(query_sql, *params_admin)
             logger.info(
-                "Sync PULL [ADMIN %s (rol=%s)]: %d OS DISTINTAS (sin duplicados)",
+                "Sync PULL [ADMIN %s (rol=%s)]: %d OS DISTINTAS",
                 current_user.get("username"), role, len(rows),
             )
         else:
@@ -364,11 +411,16 @@ async def sync_pull(
             username_jwt = str(current_user.get("username") or "").strip()
             nombre_jwt   = str(current_user.get("nombre_completo") or current_user.get("nombre") or username_jwt).strip()
 
-            # [FIX-DEFENSIVO] Si id_tecnico es None o inválido, buscarlo en BD por username
-            if not id_tecnico and username_jwt:
+            if param_tecnico_id:
+                if not id_tecnico or id_tecnico == param_tecnico_id:
+                    id_tecnico = param_tecnico_id
+
+            # [FIX-DEFENSIVO] Si id_tecnico es None o inválido, buscarlo en BD por username o param_tecnico_nombre
+            if not id_tecnico and (username_jwt or param_tecnico_nombre):
+                busq = param_tecnico_nombre or username_jwt
                 tec_lookup = await db.fetchrow(
-                    "SELECT id, nombre_completo FROM cat_tecnicos WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1))",
-                    username_jwt,
+                    "SELECT id, nombre_completo FROM cat_tecnicos WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1)) OR LOWER(TRIM(nombre_completo)) LIKE LOWER(TRIM($2))",
+                    username_jwt, f"%{busq}%",
                 )
                 if tec_lookup:
                     id_tecnico = int(tec_lookup["id"])
@@ -381,7 +433,6 @@ async def sync_pull(
 
             # REGLA DE NEGOCIO ESTRICTA:
             # Filtrar EXCLUSIVAMENTE por os.id_tecnico = :id_tecnico
-            # Prohibido usar comodines de texto que mezclen técnicos con nombres similares
             where_clauses = [
                 "os.id_tecnico = $1",
                 "(os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('CANCELADA', 'ELIMINADO', 'ELIMINADA'))",
@@ -389,8 +440,8 @@ async def sync_pull(
             params = [int(id_tecnico)]
 
             # Filtro since si aplica
-            if since and since.year > 2000:
-                params.append(since)
+            if since_dt and since_dt.year > 2000:
+                params.append(since_dt)
                 where_clauses.append(f"os.updated_at >= ${len(params)}::timestamp")
 
             params.append(settings.SYNC_MAX_BATCH_SIZE)

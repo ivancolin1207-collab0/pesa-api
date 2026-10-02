@@ -17,7 +17,7 @@ import uuid
 import base64
 import logging
 from datetime import date
-from typing import Optional
+from typing import Optional, Union
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
@@ -32,10 +32,13 @@ router = APIRouter()
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class ClienteOut(BaseModel):
-    id:     int
-    nombre: str
-    rfc:    Optional[str] = None
-    telefono: Optional[str] = None
+    id:           int
+    nombre:       str        # alias de razon_social
+    razon_social: str
+    rfc:          Optional[str] = None
+    telefono:     Optional[str] = None
+    direccion:    Optional[str] = None
+    activo:       bool = True
 
 
 class TecnicoOut(BaseModel):
@@ -78,21 +81,61 @@ class CrearOrdenBody(BaseModel):
     tags=["Catálogos"],
 )
 async def listar_clientes(
+    activo: Optional[bool] = None,
     db=Depends(get_db),
     _=Depends(get_current_user),
 ):
-    """Retorna todos los clientes registrados."""
-    rows = await db.fetch(
-        """
-        SELECT id,
-               COALESCE(razon_social, nombre, 'Sin nombre') AS nombre,
-               rfc,
-               telefono
-        FROM cat_clientes
-        ORDER BY nombre ASC
-        """
-    )
-    return [dict(r) for r in rows]
+    """
+    Retorna clientes registrados.
+    - activo=true  → solo clientes activos (default)
+    - activo=false → solo dados de baja
+    - sin parámetro → todos
+    """
+    try:
+        # CORRECCIÓN: cat_clientes NO tiene columna 'nombre', solo 'razon_social'
+        where_clause = "WHERE activo = TRUE" if activo is not False else (
+            "WHERE activo = FALSE" if activo is False else ""
+        )
+        if activo is None:
+            where_clause = ""   # devolver todos (activos e inactivos)
+        else:
+            where_clause = f"WHERE activo = {'TRUE' if activo else 'FALSE'}"
+
+        rows = await db.fetch(
+            f"""
+            SELECT id,
+                   razon_social,
+                   razon_social                           AS nombre,
+                   COALESCE(rfc, '')                      AS rfc,
+                   COALESCE(telefono, '')                 AS telefono,
+                   COALESCE(direccion, '')                AS direccion,
+                   activo
+            FROM cat_clientes
+            {where_clause}
+            ORDER BY razon_social ASC
+            """
+        )
+        return [dict(r) for r in rows]
+
+    except Exception as exc:
+        logger.error("[GET /clientes] Error al consultar cat_clientes: %s", exc)
+        # Fallback defensivo: intentar la consulta mínima sin columnas opcionales
+        try:
+            rows_fallback = await db.fetch(
+                "SELECT id, razon_social, razon_social AS nombre, activo FROM cat_clientes ORDER BY razon_social ASC"
+            )
+            logger.warning("[GET /clientes] Usando fallback mínimo: %d registros", len(rows_fallback))
+            return [
+                {"id": r["id"], "nombre": r["razon_social"], "razon_social": r["razon_social"],
+                 "rfc": None, "telefono": None, "direccion": None, "activo": r["activo"]}
+                for r in rows_fallback
+            ]
+        except Exception as exc2:
+            logger.error("[GET /clientes] Fallback también falló: %s", exc2)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Error al consultar catálogo de clientes: {exc2}"
+            )
 
 
 @router.get(
@@ -173,6 +216,81 @@ async def listar_tipos_instrumento(
             ORDER BY nombre ASC
             """
         )
+    return [dict(r) for r in rows]
+
+
+# ── Listar Órdenes de Servicio ──────────────────────────────────────────────────
+
+@router.get(
+    "/ordenes",
+    summary="Listar órdenes de servicio con parámetros opcionales tolerantes",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+async def get_ordenes(
+    tecnico_id: Optional[str] = None,
+    tecnico_nombre: Optional[str] = None,
+    updated_after: Optional[str] = None,
+    since: Optional[str] = None,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Retorna órdenes de servicio con filtros opcionales tolerantes.
+    Filtro flexible y tolerante a mayúsculas/minúsculas y espacios.
+    """
+    query = """
+        SELECT DISTINCT ON (os.folio_os)
+            os.folio_os,
+            os.id_tecnico,
+            COALESCE(os.estado, 'PROCESO') AS estado,
+            COALESCE(os.modalidad, 'DIGITAL') AS modalidad,
+            os.fecha::text,
+            os.observaciones,
+            COALESCE(os.marca, '') AS marca,
+            COALESCE(os.modelo, '') AS modelo,
+            COALESCE(os.ns, '') AS ns,
+            COALESCE(os.ns, '') AS serie,
+            COALESCE(os.ubicacion, '') AS ubicacion,
+            os.alcance_max,
+            os.div_minima,
+            os.div_verificacion,
+            COALESCE(os.id_equipo::text, '') AS id_equipo,
+            COALESCE(os.sync_version, 1) AS sync_version,
+            COALESCE(os.updated_at, NOW()) AS updated_at,
+            COALESCE(cl.razon_social, os.cliente, '') AS cliente,
+            COALESCE(cl.razon_social, os.cliente, '') AS cliente_nombre,
+            COALESCE(tc.nombre_completo, '') AS tecnico,
+            COALESCE(tc.nombre_completo, '') AS tecnico_nombre
+        FROM ordenes_servicio os
+        LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
+        LEFT JOIN cat_tecnicos tc ON os.id_tecnico = tc.id
+        WHERE (os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')
+    """
+    params = []
+
+    # Filtro flexible y tolerante a mayúsculas/minúsculas y espacios:
+    if tecnico_nombre and str(tecnico_nombre).strip():
+        nombre_limpio = f"%{str(tecnico_nombre).strip().lower()}%"
+        params.append(nombre_limpio)
+        query += f" AND (LOWER(tc.nombre_completo) LIKE ${len(params)} OR LOWER(tc.usuario) LIKE ${len(params)} OR LOWER(COALESCE(os.cliente, '')) LIKE ${len(params)})"
+    elif tecnico_id and str(tecnico_id).strip().isdigit():
+        params.append(int(str(tecnico_id).strip()))
+        query += f" AND os.id_tecnico = ${len(params)}"
+
+    raw_date = updated_after or since
+    if raw_date and str(raw_date).strip():
+        try:
+            from datetime import datetime
+            clean_s = str(raw_date).strip().replace("Z", "+00:00")
+            dt = datetime.fromisoformat(clean_s)
+            params.append(dt)
+            query += f" AND os.updated_at >= ${len(params)}::timestamp"
+        except Exception:
+            pass
+
+    query += " ORDER BY os.folio_os DESC, os.updated_at DESC LIMIT 200"
+
+    rows = await db.fetch(query, *params)
     return [dict(r) for r in rows]
 
 
@@ -388,11 +506,13 @@ async def upload_pdf_tablet(
     await db.execute(
         """
         UPDATE ordenes_servicio
-        SET estado            = 'COMPLETADA',
+        SET estado            = 'Cerrado',
+            estatus           = 'Cerrado',
             pdf_b64           = $1,
             pdf_url           = $2,
             pdf_path          = $3,
             pdf_descargado    = FALSE,
+            pdf_generado      = TRUE,
             sync_check_status = 'SUBIDA_SERVIDOR',
             fecha_subida_servidor = NOW(),
             sync_status       = 'SINCRONIZADO',
@@ -485,4 +605,78 @@ async def upload_pdf_tablet(
         "size_bytes": len(content),
         "sync_status": "SINCRONIZADO",
     }
+
+
+# ── Catálogo Marcas y Modelos Dinámico ─────────────────────────────────────────
+
+class MarcaModeloItem(BaseModel):
+    marca:  str
+    modelo: str
+
+class MarcaModeloOut(BaseModel):
+    id:     int
+    marca:  str
+    modelo: str
+
+@router.get(
+    "/marcas-modelos",
+    response_model=list[MarcaModeloOut],
+    summary="Listar marcas y modelos consolidados",
+    tags=["Catálogos"],
+)
+async def listar_marcas_modelos(
+    db=Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Retorna todas las marcas y modelos consolidados en Render."""
+    rows = await db.fetch(
+        """
+        SELECT id, marca, modelo
+        FROM catalogo_marcas_modelos
+        ORDER BY marca ASC, modelo ASC
+        """
+    )
+    return [dict(r) for r in rows]
+
+
+@router.post(
+    "/marcas-modelos",
+    summary="Registrar nuevas marcas y modelos",
+    tags=["Catálogos"],
+)
+async def registrar_marcas_modelos(
+    items: Union[list[MarcaModeloItem], MarcaModeloItem],
+    db=Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Registra nuevas combinaciones de marca y modelo.
+    Usa ON CONFLICT (marca, modelo) DO NOTHING para idempotencia.
+    """
+    if isinstance(items, MarcaModeloItem):
+        item_list = [items]
+    else:
+        item_list = items
+
+    inserted = 0
+    for it in item_list:
+        m = it.marca.strip()
+        mod = it.modelo.strip()
+        if not m or not mod:
+            continue
+        try:
+            res = await db.execute(
+                """
+                INSERT INTO catalogo_marcas_modelos (marca, modelo)
+                VALUES ($1, $2)
+                ON CONFLICT (marca, modelo) DO NOTHING
+                """,
+                m, mod,
+            )
+            if res and "INSERT 0 1" in res:
+                inserted += 1
+        except Exception as e:
+            logger.warning("[MARCAS-MODELOS] Error insertando (%s, %s): %s", m, mod, e)
+
+    return {"ok": True, "recibidos": len(item_list), "insertados": inserted}
 

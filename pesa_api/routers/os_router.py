@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import json
 import base64
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -43,16 +44,21 @@ class OSEstadoUpdate(BaseModel):
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
+@router.get("", response_model=list[OSListItem], include_in_schema=False)
 @router.get(
     "/",
     response_model = list[OSListItem],
     summary        = "Listar OS con filtrado por rol",
 )
 async def list_os(
-    estado:    Optional[str] = Query(None),
-    modalidad: Optional[str] = Query(None),
-    limit:     int           = Query(50, le=200),
-    offset:    int           = Query(0),
+    estado:         Optional[str] = Query(None),
+    modalidad:      Optional[str] = Query(None),
+    tecnico_id:     Optional[str] = Query(None),
+    tecnico_nombre: Optional[str] = Query(None),
+    updated_after:  Optional[str] = Query(None),
+    since:          Optional[str] = Query(None),
+    limit:          int           = Query(50, le=200),
+    offset:         int           = Query(0),
     db = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
@@ -61,6 +67,7 @@ async def list_os(
     - admin/logistica: todas las OS
     - servicio: solo las asignadas al técnico vinculado al usuario
     - recepcion: todas (solo lectura)
+    Acepta parámetros opcionales tecnico_id, tecnico_nombre, updated_after sin romper con 422.
     """
     role_raw   = current_user.get("role", "")
     norm_role  = _normalizar_rol(role_raw)
@@ -91,6 +98,27 @@ async def list_os(
         extra_filter += f" AND os.modalidad = ${idx}"
         params.append(modalidad)
         idx += 1
+    if tecnico_nombre and tecnico_nombre.strip():
+        nombre_limpio = f"%{tecnico_nombre.strip().lower()}%"
+        extra_filter += f" AND (LOWER(tc.nombre_completo) LIKE ${idx} OR LOWER(COALESCE(os.cliente, '')) LIKE ${idx})"
+        params.append(nombre_limpio)
+        idx += 1
+    elif tecnico_id and str(tecnico_id).strip().isdigit():
+        extra_filter += f" AND os.id_tecnico = ${idx}"
+        params.append(int(str(tecnico_id).strip()))
+        idx += 1
+
+    # Fecha opcional since / updated_after
+    raw_date = updated_after or since
+    if raw_date and str(raw_date).strip():
+        try:
+            clean_s = str(raw_date).strip().replace("Z", "+00:00")
+            parsed_dt = datetime.fromisoformat(clean_s)
+            extra_filter += f" AND os.updated_at >= ${idx}::timestamp"
+            params.append(parsed_dt)
+            idx += 1
+        except Exception:
+            pass
 
     params.extend([limit, offset])
     lim_idx = idx; off_idx = idx + 1
@@ -193,9 +221,10 @@ async def download_pdf(
     Busca el PDF de la OS en el directorio UPLOAD_DIR o lo reconstruye desde pdf_b64 en PostgreSQL.
     Permite descarga directa tanto para la app de Windows como para navegadores.
     """
+    clean_folio = folio_os.strip()
     row = await db.fetchrow(
-        "SELECT pdf_path, pdf_url, pdf_b64 FROM ordenes_servicio WHERE folio_os = $1",
-        folio_os.strip(),
+        "SELECT id, folio_os, pdf_path, pdf_url, pdf_b64 FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        clean_folio,
     )
     if row is None:
         raise HTTPException(
@@ -226,6 +255,7 @@ async def download_pdf(
             path=bd_path,
             media_type="application/pdf",
             filename=f"{folio_os}.pdf",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"},
         )
 
     # Estrategia 2: buscar en UPLOAD_DIR por nombre de folio
@@ -236,6 +266,7 @@ async def download_pdf(
             path=str(candidate),
             media_type="application/pdf",
             filename=f"{folio_os}.pdf",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"},
         )
 
     # Estrategia 3: pdf_url es una ruta relativa local
@@ -247,6 +278,7 @@ async def download_pdf(
                 path=str(local_path),
                 media_type="application/pdf",
                 filename=f"{folio_os}.pdf",
+                headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"},
             )
 
     # Estrategia 4: Reconstruir desde pdf_b64 almacenado en PostgreSQL
@@ -265,7 +297,8 @@ async def download_pdf(
                 content=pdf_bytes,
                 media_type="application/pdf",
                 headers={
-                    "Content-Disposition": f'inline; filename="{folio_os}.pdf"'
+                    "Content-Disposition": f'inline; filename="{folio_os}.pdf"',
+                    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
                 },
             )
         except Exception as e:
@@ -343,27 +376,54 @@ async def upload_pdf_tablet_os(
 
     pdf_b64 = base64.b64encode(content).decode("ascii")
 
-    await db.execute(
-        """
-        UPDATE ordenes_servicio
-        SET estado            = 'COMPLETADA',
-            pdf_b64           = $1,
-            pdf_url           = $2,
-            pdf_path          = $3,
-            pdf_descargado    = FALSE,
-            sync_check_status = 'SUBIDA_SERVIDOR',
-            fecha_subida_servidor = NOW(),
-            sync_status       = 'SINCRONIZADO',
-            sync_version      = COALESCE(sync_version, 0) + 1,
-            sync_at           = NOW(),
-            updated_at        = NOW()
-        WHERE id = $4
-        """,
-        pdf_b64,
-        f"/uploads/{filename}",
-        filepath,
-        actual_id,
-    )
+    try:
+        await db.execute(
+            """
+            UPDATE ordenes_servicio
+            SET estado            = 'Cerrado',
+                estatus           = 'Cerrado',
+                pdf_b64           = $1,
+                pdf_url           = $2,
+                pdf_path          = $3,
+                pdf_descargado    = FALSE,
+                pdf_generado      = TRUE,
+                sync_check_status = 'SUBIDA_SERVIDOR',
+                fecha_subida_servidor = NOW(),
+                sync_status       = 'SINCRONIZADO',
+                sync_version      = COALESCE(sync_version, 0) + 1,
+                sync_at           = NOW(),
+                updated_at        = NOW()
+            WHERE id = $4
+            """,
+            pdf_b64,
+            f"/uploads/{filename}",
+            filepath,
+            actual_id,
+        )
+    except Exception:
+        await db.execute(
+            """
+            UPDATE ordenes_servicio
+            SET estado            = 'Cerrado',
+                estatus           = 'Cerrado',
+                pdf_b64           = $1,
+                pdf_url           = $2,
+                pdf_path          = $3,
+                pdf_descargado    = FALSE,
+                pdf_generado      = TRUE,
+                sync_check_status = 'SUBIDA_SERVIDOR',
+                fecha_subida_servidor = NOW(),
+                sync_status       = 'SINCRONIZADO',
+                sync_version      = COALESCE(sync_version, 0) + 1,
+                sync_at           = NOW(),
+                updated_at        = NOW()
+            WHERE id = $4
+            """,
+            pdf_b64,
+            f"/uploads/{filename}",
+            filepath,
+            actual_id,
+        )
 
     if data:
         try:
@@ -440,6 +500,114 @@ async def upload_pdf_tablet_os(
         "folio_os": actual_folio,
         "id": actual_id,
         "size_bytes": len(content),
+        "sync_status": "SINCRONIZADO",
+    }
+
+
+@router.post(
+    "/{folio_os}/sync-data",
+    summary="Subir payload JSON con mediciones y firmas a Render",
+)
+async def sync_data_os(
+    folio_os: str,
+    payload: dict,
+    db=Depends(get_db),
+):
+    clean_folio = folio_os.strip()
+    row = await db.fetchrow(
+        "SELECT id, folio_os FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        clean_folio,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"OS '{clean_folio}' no encontrada")
+
+    actual_id = row["id"]
+    actual_folio = row["folio_os"]
+
+    estado_final = payload.get("nuevo_estado") or payload.get("estado") or "COMPLETADA"
+
+    await db.execute(
+        """
+        UPDATE ordenes_servicio SET
+            estado               = $1,
+            observaciones        = COALESCE($2, observaciones),
+            dictamen             = COALESCE($3, dictamen),
+            firma_tecnico        = COALESCE($4, firma_tecnico),
+            firma_tecnico_b64    = COALESCE($4, firma_tecnico_b64),
+            firma_cliente        = COALESCE($5, firma_cliente),
+            firma_cliente_b64    = COALESCE($5, firma_cliente_b64),
+            nombre_ing           = COALESCE($6, nombre_ing),
+            puesto_ing           = COALESCE($7, puesto_ing),
+            firma_cliente_nombre = COALESCE($6, firma_cliente_nombre),
+            unidad_medida        = COALESCE($8, unidad_medida),
+            sync_check_status    = 'SUBIDA_SERVIDOR',
+            fecha_subida_servidor = NOW(),
+            sync_status          = 'SINCRONIZADO',
+            sync_version         = COALESCE(sync_version, 0) + 1,
+            updated_at           = NOW()
+        WHERE id = $9
+        """,
+        estado_final,
+        payload.get("observaciones"),
+        payload.get("dictamen"),
+        payload.get("firma_tecnico"),
+        payload.get("firma_cliente"),
+        payload.get("nombre_ing") or payload.get("firma_cliente_nombre"),
+        payload.get("puesto_ing"),
+        payload.get("unidad_medida"),
+        actual_id,
+    )
+
+    # Detalle de mediciones
+    for idx, r in enumerate(payload.get("repetibilidad", []) or payload.get("rep_rows", [])):
+        pid = r.get("posicion_id") or (idx + 1)
+        await db.execute(
+            """
+            INSERT INTO det_repetibilidad (id_os, posicion_id, lectura_inicial, lectura_final)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (id_os, posicion_id) DO UPDATE SET
+                lectura_inicial = EXCLUDED.lectura_inicial,
+                lectura_final   = EXCLUDED.lectura_final
+            """,
+            actual_id, int(pid),
+            float(r["lectura_inicial"]) if r.get("lectura_inicial") is not None else None,
+            float(r["lectura_final"]) if r.get("lectura_final") is not None else None,
+        )
+    for idx, r in enumerate(payload.get("excentricidad", []) or payload.get("exc_rows", [])):
+        pid = r.get("posicion_id") or (idx + 1)
+        await db.execute(
+            """
+            INSERT INTO det_excentricidad (id_os, posicion_id, lectura_inicial, lectura_final)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (id_os, posicion_id) DO UPDATE SET
+                lectura_inicial = EXCLUDED.lectura_inicial,
+                lectura_final   = EXCLUDED.lectura_final
+            """,
+            actual_id, int(pid),
+            float(r["lectura_inicial"]) if r.get("lectura_inicial") is not None else None,
+            float(r["lectura_final"]) if r.get("lectura_final") is not None else None,
+        )
+    for idx, r in enumerate(payload.get("exactitud", []) or payload.get("exac_rows", [])):
+        pid = r.get("punto_id") or r.get("posicion_id") or (idx + 1)
+        await db.execute(
+            """
+            INSERT INTO det_exactitud (id_os, punto_id, valor_nominal, lectura_inicial, lectura_final)
+            VALUES ($1, $2, $3, $4, $5)
+            ON CONFLICT (id_os, punto_id) DO UPDATE SET
+                valor_nominal   = EXCLUDED.valor_nominal,
+                lectura_inicial = EXCLUDED.lectura_inicial,
+                lectura_final   = EXCLUDED.lectura_final
+            """,
+            actual_id, int(pid),
+            float(r["valor_nominal"]) if r.get("valor_nominal") is not None else None,
+            float(r["lectura_inicial"]) if r.get("lectura_inicial") is not None else None,
+            float(r["lectura_final"]) if r.get("lectura_final") is not None else None,
+        )
+
+    return {
+        "ok": True,
+        "folio_os": actual_folio,
+        "sync_check_status": "SUBIDA_SERVIDOR",
         "sync_status": "SINCRONIZADO",
     }
 

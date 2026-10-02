@@ -50,6 +50,18 @@ async def guardar_firma_tecnico(
             "UPDATE cat_tecnicos SET firma_digital = $1 WHERE id = $2 RETURNING id",
             firma_b64, id_tecnico,
         )
+        
+        # REGLA DE NEGOCIO: Actualizar la firma del técnico en todas sus órdenes ya realizadas/cerradas
+        await db.execute("""
+            UPDATE ordenes_servicio 
+            SET firma_tecnico_b64 = $1,
+                firma_tecnico = $1,
+                updated_at = NOW()
+            WHERE id_tecnico = $2 
+            AND (estado IN ('CERRADA', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'FIRMADA') 
+                 OR estatus IN ('Cerrado', 'CERRADO'))
+        """, firma_b64, id_tecnico)
+        
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

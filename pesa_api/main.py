@@ -46,9 +46,20 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sync_version  INTEGER DEFAULT 1",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sync_at       TIMESTAMPTZ",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS device_id     TEXT",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS estatus       TEXT DEFAULT 'Proceso'",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_generado  BOOLEAN DEFAULT FALSE",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_path      TEXT",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_url       TEXT",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_b64       TEXT",
+                """CREATE TABLE IF NOT EXISTS catalogo_marcas_modelos (
+                    id SERIAL PRIMARY KEY,
+                    marca VARCHAR(100) NOT NULL,
+                    modelo VARCHAR(100) NOT NULL,
+                    CONSTRAINT uq_marca_modelo UNIQUE (marca, modelo)
+                )""",
             ]:
                 await conn.execute(ddl)
-        logger.info("✅ Migración de columnas de sync completada")
+        logger.info("✅ Migración de columnas de sync y catálogo marcas/modelos completada")
     except Exception as e:
         logger.warning("⚠️  Migración automática no pudo completarse: %s", e)
     yield

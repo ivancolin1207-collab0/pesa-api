@@ -2,10 +2,10 @@
 pesa_api/routers/__init__.py
 """
 from . import auth, sync, os_router, equipos, entrega_semanal, catalogos
-from . import usuarios_router, errores_router, admin_router
+from . import usuarios_router, errores_router, admin_router, ordenes
 
 __all__ = [
     "auth", "sync", "os_router", "equipos", "entrega_semanal", "catalogos",
-    "usuarios_router", "errores_router", "admin_router",
+    "usuarios_router", "errores_router", "admin_router", "ordenes",
 ]
 
