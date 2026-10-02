@@ -860,7 +860,10 @@ class LocalDbService {
 
       // 2. Para órdenes restantes, verificar que el nombre del técnico coincida
       if (currentNombre != null && currentNombre.trim().isNotEmpty) {
-        final nombreLow = currentNombre.toLowerCase().trim();
+        String _norm(String s) => s
+            .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
+            .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ü','u');
+        final nombreLow = _norm(currentNombre.toLowerCase().trim());
         final rows = await db.query(
           'ordenes_servicio',
           columns: ['local_id', 'folio_os', 'tecnico', 'is_dirty', 'id_tecnico'],
@@ -868,7 +871,8 @@ class LocalDbService {
         );
 
         for (final r in rows) {
-          final tec = (r['tecnico'] as String? ?? '').toLowerCase().trim();
+          final tecRaw = (r['tecnico'] as String? ?? '').toLowerCase().trim();
+          final tecNorm = _norm(tecRaw);
           final rId = int.tryParse(r['id_tecnico']?.toString() ?? '');
           final localId = r['local_id'] as int;
 
@@ -876,15 +880,31 @@ class LocalDbService {
           if (currentIdTecnico != null && currentIdTecnico > 0 && rId == currentIdTecnico) {
             continue;
           }
-          // Si coincide por nombre con el usuario actual, conservar
-          if (tec.isNotEmpty && (tec == nombreLow || tec.contains(nombreLow) || nombreLow.contains(tec))) {
+          // Si coincide por nombre completo exacto, conservar
+          if (tecNorm.isNotEmpty && tecNorm == nombreLow) continue;
+
+          // Verificación con apellido: si primer nombre igual pero apellido distinto → purgar
+          final tecParts = tecNorm.split(RegExp(r'\s+'));
+          final myParts  = nombreLow.split(RegExp(r'\s+'));
+          if (tecParts.length >= 2 && myParts.length >= 2 &&
+              tecParts[0] == myParts[0] && tecParts[1] != myParts[1]) {
+            // Mismo primer nombre, apellido distinto → es otro técnico → purgar
+            await db.delete('ordenes_servicio', where: 'local_id = ?', whereArgs: [localId]);
+            totalEliminadas++;
             continue;
           }
-          // De lo contrario, pertenece a otro técnico -> purgar de SQLite local
+
+          // Coincidencia parcial de nombre completo
+          if (tecNorm.isNotEmpty && (tecNorm.contains(nombreLow) || nombreLow.contains(tecNorm))) {
+            continue; // conservar
+          }
+
+          // No coincide → pertenece a otro técnico → purgar de SQLite local
           await db.delete('ordenes_servicio', where: 'local_id = ?', whereArgs: [localId]);
           totalEliminadas++;
         }
       }
+
     } catch (e) {
       debugPrint('[LocalDB] Error purgando órdenes ajenas: $e');
     }

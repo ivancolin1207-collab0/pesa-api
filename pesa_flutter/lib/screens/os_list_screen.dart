@@ -224,15 +224,24 @@ class _OsListScreenState extends State<OsListScreen> {
     if (sync.orders.isNotEmpty && mounted) {
       final ordersToShow = isTecnico
           ? sync.orders.where((o) {
+              String _norm(String s) => s
+                  .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
+                  .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ü','u');
               final idTec = int.tryParse(o['id_tecnico']?.toString() ?? '');
-              if (idTec != null && idTec > 0 && currentIdTecnico != null && currentIdTecnico > 0) {
-                if (idTec == currentIdTecnico) return true;
+              // ID match takes priority (authoritative)
+              if (idTec != null && idTec > 0) {
+                if (currentIdTecnico != null && currentIdTecnico > 0) {
+                  return idTec == currentIdTecnico;
+                }
               }
-              final tec = (o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '').toLowerCase().trim();
-              if (currentNombre.isNotEmpty) {
-                return tec == currentNombre || tec.contains(currentNombre) || currentNombre.contains(tec);
-              }
-              return false;
+              // Name-based fallback with apellido protection
+              final tec = _norm((o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '').toLowerCase().trim());
+              final myN = _norm(currentNombre);
+              if (tec.isEmpty || myN.isEmpty) return false;
+              if (tec == myN) return true;
+              final tp = tec.split(RegExp(r'\s+')); final mp = myN.split(RegExp(r'\s+'));
+              if (tp.length >= 2 && mp.length >= 2 && tp[0] == mp[0] && tp[1] != mp[1]) return false;
+              return tec.contains(myN) || myN.contains(tec);
             }).toList()
           : sync.orders;
 
@@ -264,17 +273,23 @@ class _OsListScreenState extends State<OsListScreen> {
 
     List<Map<String, dynamic>> filterMem(List<Map<String, dynamic>> src) {
       if (!isTecnico) return src;
-      final myNom = currentNombre.toLowerCase().trim();
+      String _norm(String s) => s
+          .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
+          .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ü','u');
+      final myN = _norm(currentNombre.toLowerCase().trim());
       return src.where((o) {
         final idTec = int.tryParse(o['id_tecnico']?.toString() ?? '');
+        // ID match takes priority
         if (idTec != null && idTec > 0 && currentIdTecnico != null && currentIdTecnico > 0) {
-          if (idTec == currentIdTecnico) return true;
+          return idTec == currentIdTecnico;
         }
-        final tec = (o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '').toLowerCase().trim();
-        if (tec.isNotEmpty && myNom.isNotEmpty) {
-          return tec == myNom || tec.contains(myNom) || myNom.contains(tec);
-        }
-        return false;
+        // Name fallback with apellido protection
+        final tec = _norm((o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '').toLowerCase().trim());
+        if (tec.isEmpty || myN.isEmpty) return false;
+        if (tec == myN) return true;
+        final tp = tec.split(RegExp(r'\s+')); final mp = myN.split(RegExp(r'\s+'));
+        if (tp.length >= 2 && mp.length >= 2 && tp[0] == mp[0] && tp[1] != mp[1]) return false;
+        return tec.contains(myN) || myN.contains(tec);
       }).toList();
     }
 
@@ -959,14 +974,46 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
     // 1. REGLA ESTRICTA DE AISLAMIENTO POR TÉCNICO:
     // No mostrar bajo ninguna circunstancia órdenes de otros técnicos en la vista del técnico
     if (p.isTecnico) {
+      // Helper: normaliza acentos para comparación tolerante de strings
+      String _norm(String s) => s
+          .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
+          .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ü','u');
+
       final idTec = int.tryParse(os['id_tecnico']?.toString() ?? '');
-      if (idTec != null && idTec > 0 && p.currentTecnicoId != null && p.currentTecnicoId! > 0) {
-        if (idTec != p.currentTecnicoId) return false;
-      } else if (p.currentTecnicoNombre.isNotEmpty) {
-        final tec = (os['tecnico'] as String? ?? os['tecnico_nombre'] as String? ?? '').toLowerCase().trim();
-        final myNom = p.currentTecnicoNombre.toLowerCase().trim();
-        if (tec.isNotEmpty && !(tec == myNom || tec.contains(myNom) || myNom.contains(tec))) {
-          return false;
+      final myId  = p.currentTecnicoId;
+      final myNom = _norm(p.currentTecnicoNombre.toLowerCase().trim());
+
+      // ── Caso A: La orden tiene id_tecnico válido ──────────────────────────
+      if (idTec != null && idTec > 0) {
+        if (myId != null && myId > 0) {
+          // Ambos IDs conocidos: comparación directa, SIN fallback a nombre.
+          // Si los IDs difieren → excluir siempre.
+          if (idTec != myId) return false;
+          // IDs iguales → incluir; ir directo a los demás filtros.
+        } else if (myNom.isNotEmpty) {
+          // No tenemos ID de usuario en sesión → comparar por nombre completo
+          final tecNorm = _norm((os['tecnico'] as String? ?? os['tecnico_nombre'] as String? ?? '').toLowerCase().trim());
+          if (tecNorm.isEmpty) return true;
+          final tecParts = tecNorm.split(RegExp(r'\s+'));
+          final myParts  = myNom.split(RegExp(r'\s+'));
+          // Mismo primer nombre pero apellido diferente → personas distintas
+          if (tecParts.length >= 2 && myParts.length >= 2 &&
+              tecParts[0] == myParts[0] && tecParts[1] != myParts[1]) return false;
+          if (tecNorm != myNom && !tecNorm.contains(myNom) && !myNom.contains(tecNorm)) return false;
+        }
+      } else {
+        // ── Caso B: Orden sin id_tecnico (formatos físicos o legacy) ─────────
+        if (myNom.isNotEmpty) {
+          final tecNorm = _norm((os['tecnico'] as String? ?? os['tecnico_nombre'] as String? ?? '').toLowerCase().trim());
+          // Sin técnico asignado → excluir para evitar fugas entre técnicos
+          if (tecNorm.isEmpty) return false;
+          final tecParts = tecNorm.split(RegExp(r'\s+'));
+          final myParts  = myNom.split(RegExp(r'\s+'));
+          // Mismo primer nombre pero apellido diferente → personas distintas → excluir
+          if (tecParts.length >= 2 && myParts.length >= 2 &&
+              tecParts[0] == myParts[0] && tecParts[1] != myParts[1]) return false;
+          // Verificación por nombre completo (no solo primer nombre)
+          if (tecNorm != myNom && !tecNorm.contains(myNom) && !myNom.contains(tecNorm)) return false;
         }
       }
     }
