@@ -167,6 +167,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final isMobile = media.size.width < 768 && media.orientation != Orientation.landscape;
+
     return AppShell(
       currentRoute: '/nuevo-doc',
       child: Scaffold(
@@ -182,12 +185,13 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 border: Border(bottom: BorderSide(color: _border)),
               ),
               child: Row(children: [
-                IconButton(
-                  icon: const Icon(Icons.menu_rounded, color: Color(0xFF111827), size: 24),
-                  tooltip: 'Menú principal',
-                  onPressed: () => AppShell.toggleMenu(context),
-                ),
-                const SizedBox(width: 4),
+                if (isMobile)
+                  IconButton(
+                    icon: const Icon(Icons.menu_rounded, color: Color(0xFF111827), size: 24),
+                    tooltip: 'Menú principal',
+                    onPressed: () => AppShell.toggleMenu(context),
+                  ),
+                if (isMobile) const SizedBox(width: 4),
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(

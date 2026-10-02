@@ -40,6 +40,9 @@ class _CatalogosScreenState extends State<CatalogosScreen>
 
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final isMobile = media.size.width < 768 && media.orientation != Orientation.landscape;
+
     return AppShell(
       currentRoute: '/catalogos',
       child: Scaffold(
@@ -56,12 +59,13 @@ class _CatalogosScreenState extends State<CatalogosScreen>
               ),
               child: Column(children: [
                 Row(children: [
-                  IconButton(
-                    icon: const Icon(Icons.menu_rounded, color: Color(0xFF111827), size: 24),
-                    tooltip: 'Menú principal',
-                    onPressed: () => AppShell.toggleMenu(context),
-                  ),
-                  const SizedBox(width: 4),
+                  if (isMobile)
+                    IconButton(
+                      icon: const Icon(Icons.menu_rounded, color: Color(0xFF111827), size: 24),
+                      tooltip: 'Menú principal',
+                      onPressed: () => AppShell.toggleMenu(context),
+                    ),
+                  if (isMobile) const SizedBox(width: 4),
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(

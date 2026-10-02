@@ -1973,15 +1973,35 @@ class _TabletDesktopDashboard extends StatelessWidget {
           onSearch:    (v) { state.setState(() => state._query = v); state._applyFilters(); },
           onClear:     ()  { state._searchCtrl.clear(); state.setState(() => state._query = ''); state._applyFilters(); },
         ),
-        // Table Header
-        _TableHeader(hideTecnico: hideTecnico),
-        // Table Rows
+        // Table Header & Rows with Horizontal Scroll & MinWidth Protection
         Expanded(
-          child: state._loading
-              ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
-              : state._filtered.isEmpty
-                  ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
-                  : _buildTabletGroupedList(context),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final double minTableWidth = hideTecnico ? 1050.0 : 1160.0;
+              final double tableWidth = constraints.maxWidth > minTableWidth
+                  ? constraints.maxWidth
+                  : minTableWidth;
+
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: tableWidth,
+                  child: Column(
+                    children: [
+                      _TableHeader(hideTecnico: hideTecnico),
+                      Expanded(
+                        child: state._loading
+                            ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
+                            : state._filtered.isEmpty
+                                ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
+                                : _buildTabletGroupedList(context),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
         ),
         SizedBox(height: bottom > 0 ? bottom : 8),
       ],
@@ -2043,12 +2063,6 @@ class _Header extends StatelessWidget {
       ),
       child: Row(
         children: [
-          IconButton(
-            icon: const Icon(Icons.menu_rounded, color: _kTextPrim, size: 24),
-            tooltip: 'Menú principal',
-            onPressed: () => AppShell.toggleMenu(context),
-          ),
-          const SizedBox(width: 4),
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(color: _kCarmineRed, borderRadius: BorderRadius.circular(8)),
@@ -2500,14 +2514,19 @@ class _TableHeader extends StatelessWidget {
       child: Row(
         children: [
           const SizedBox(width: 130, child: _TH('FOLIO OS')),
-          const SizedBox(width: 90, child: _TH('FECHA')),
-          const Expanded(flex: 3, child: _TH('CLIENTE / SUCURSAL')),
+          const SizedBox(width: 100, child: _TH('FECHA')),
+          const Expanded(
+            flex: 3,
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minWidth: 180),
+              child: _TH('CLIENTE / SUCURSAL'),
+            ),
+          ),
           if (!hideTecnico)
-            const Expanded(flex: 2, child: _TH('TÉCNICO')),
-          const Expanded(flex: 2, child: _TH('TIPO SERVICIO')),
-          const SizedBox(width: 90, child: _TH('MODALIDAD')),
-          const SizedBox(width: 95, child: _TH('ESTATUS')),
-          const SizedBox(width: 85, child: _TH('SYNC')),
+            const SizedBox(width: 110, child: _TH('TÉCNICO')),
+          const SizedBox(width: 100, child: _TH('MODALIDAD')),
+          const SizedBox(width: 90, child: _TH('ESTATUS')),
+          const SizedBox(width: 90, child: _TH('SYNC')),
           const SizedBox(width: 360, child: _TH('ACCIONES')),
         ],
       ),
@@ -2613,78 +2632,76 @@ class _OsRow extends StatelessWidget {
               ),
             ),
           ),
-          // FECHA (90px)
+          // FECHA (100px)
           SizedBox(
-            width: 90,
+            width: 100,
             child: Text(
               fechaStr,
               style: const TextStyle(fontSize: 11, color: _kTextPrim),
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          // CLIENTE / SUCURSAL (Flex 3)
+          // CLIENTE / SUCURSAL (Flex 3, minWidth: 180)
           Expanded(
             flex: 3,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  os['cliente'] ?? '—',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _kTextPrim),
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                ),
-                if ((os['sucursal'] ?? '').toString().isNotEmpty)
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 180),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    os['sucursal']!.toString(),
-                    style: const TextStyle(fontSize: 10, color: _kTextSec),
+                    os['cliente'] ?? '—',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _kTextPrim),
                     overflow: TextOverflow.ellipsis,
-                    maxLines: 1,
+                    maxLines: 2,
+                    softWrap: true,
                   ),
-              ],
+                  if ((os['sucursal'] ?? '').toString().isNotEmpty || (os['tipo_servicio'] ?? '').toString().isNotEmpty)
+                    Text(
+                      [
+                        if ((os['sucursal'] ?? '').toString().isNotEmpty) os['sucursal']!.toString(),
+                        if ((os['tipo_servicio'] ?? '').toString().isNotEmpty) os['tipo_servicio']!.toString(),
+                      ].join(' · '),
+                      style: const TextStyle(fontSize: 10, color: _kTextSec),
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 1,
+                    ),
+                ],
+              ),
             ),
           ),
-          // TÉCNICO (Flex 2)
+          // TÉCNICO (110px)
           if (!hideTecnico)
-            Expanded(
-              flex: 2,
+            SizedBox(
+              width: 110,
               child: Text(
                 os['tecnico'] ?? '—',
                 style: const TextStyle(fontSize: 11, color: _kTextPrim),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-          // SERVICIO (Flex 2)
-          Expanded(
-            flex: 2,
-            child: Text(
-              os['tipo_servicio'] ?? '—',
-              style: const TextStyle(fontSize: 11, color: _kTextSec),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          // MODALIDAD (90px)
+          // MODALIDAD (100px)
           SizedBox(
-            width: 90,
+            width: 100,
             child: _Badge(
               label: isFisico ? 'Físico' : 'Digital',
               fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
               bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
             ),
           ),
-          // ESTATUS (95px)
+          // ESTATUS (90px)
           SizedBox(
-            width: 95,
+            width: 90,
             child: _Badge(
               label: estatusLabel,
               fg: estatusFg,
               bg: estatusBg,
             ),
           ),
-          // SYNC (85px)
+          // SYNC (90px)
           SizedBox(
-            width: 85,
+            width: 90,
             child: SyncCheckBadge(
               status: (os['sync_check_status'] as String?)?.isNotEmpty == true
                   ? os['sync_check_status'] as String
@@ -2910,14 +2927,31 @@ class _LoteRowState extends State<_LoteRow> {
                     ],
                   ),
                 ),
-                SizedBox(width: 90, child: Text((first['fecha'] as String? ?? '').split('T').first, style: const TextStyle(fontSize: 11))),
-                Expanded(flex: 3, child: Text(first['cliente'] ?? '—', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold))),
+                SizedBox(
+                  width: 100,
+                  child: Text(
+                    (first['fecha'] as String? ?? '').split('T').first,
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                ),
+                Expanded(
+                  flex: 3,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(minWidth: 180),
+                    child: Text(
+                      first['cliente'] ?? '—',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: true,
+                    ),
+                  ),
+                ),
                 if (!widget.hideTecnico)
-                  Expanded(flex: 2, child: Text(first['tecnico'] ?? '—', style: const TextStyle(fontSize: 11))),
-                Expanded(flex: 2, child: Text(first['tipo_servicio'] ?? '—', style: const TextStyle(fontSize: 11))),
-                const SizedBox(width: 90, child: Text('Lote', style: TextStyle(fontSize: 11))),
-                const SizedBox(width: 95, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
-                const SizedBox(width: 85),
+                  const SizedBox(width: 110, child: Text('—', style: TextStyle(fontSize: 11))),
+                const SizedBox(width: 100, child: Text('Lote', style: TextStyle(fontSize: 11))),
+                const SizedBox(width: 90, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
+                const SizedBox(width: 90),
                 const SizedBox(width: 360),
               ],
             ),

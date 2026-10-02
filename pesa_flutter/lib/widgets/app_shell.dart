@@ -79,7 +79,7 @@ class _NavItem {
   const _NavItem({required this.icon, required this.label, required this.route});
 }
 
-enum _SidebarMode { expanded, collapsed, hidden }
+enum _SidebarMode { expanded, collapsed }
 
 /// Shell principal — sidebar permanente/colapsable/ocultable en landscape/tablet, Drawer nativo en móvil
 class AppShell extends StatefulWidget {
@@ -114,17 +114,9 @@ class _AppShellState extends State<AppShell> {
 
   void _cycleSidebarMode() {
     setState(() {
-      switch (_sidebarMode) {
-        case _SidebarMode.expanded:
-          _sidebarMode = _SidebarMode.collapsed;
-          break;
-        case _SidebarMode.collapsed:
-          _sidebarMode = _SidebarMode.hidden;
-          break;
-        case _SidebarMode.hidden:
-          _sidebarMode = _SidebarMode.expanded;
-          break;
-      }
+      _sidebarMode = (_sidebarMode == _SidebarMode.expanded)
+          ? _SidebarMode.collapsed
+          : _SidebarMode.expanded;
     });
   }
 
@@ -191,44 +183,32 @@ class _AppShellState extends State<AppShell> {
     final isTabletOrDesktop = media.size.width >= 768 || media.orientation == Orientation.landscape;
 
     if (isTabletOrDesktop) {
-      final double width = switch (_sidebarMode) {
-        _SidebarMode.expanded  => _sidebarW,
-        _SidebarMode.collapsed => 64.0,
-        _SidebarMode.hidden    => 0.0,
-      };
+      final double width = _sidebarMode == _SidebarMode.expanded ? _sidebarW : 64.0;
 
       return Scaffold(
         backgroundColor: _bgGeneral,
-        drawer: Drawer(
-          backgroundColor: Colors.white,
-          child: _SidebarContent(
-            currentRoute: widget.currentRoute,
-            collapsed: false,
-          ),
-        ),
         body: Row(children: [
-          if (_sidebarMode != _SidebarMode.hidden)
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              curve: Curves.easeInOut,
-              width: width,
-              color: _sidebarBg,
-              decoration: const BoxDecoration(
-                border: Border(right: BorderSide(color: _divider)),
-              ),
-              child: ClipRect(
-                child: OverflowBox(
-                  maxWidth: _sidebarW,
-                  minWidth: _sidebarW,
-                  alignment: Alignment.topLeft,
-                  child: _SidebarContent(
-                    currentRoute: widget.currentRoute,
-                    collapsed: _sidebarMode == _SidebarMode.collapsed,
-                    onToggle: _cycleSidebarMode,
-                  ),
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            curve: Curves.easeInOut,
+            width: width,
+            color: _sidebarBg,
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: _divider)),
+            ),
+            child: ClipRect(
+              child: OverflowBox(
+                maxWidth: _sidebarW,
+                minWidth: _sidebarW,
+                alignment: Alignment.topLeft,
+                child: _SidebarContent(
+                  currentRoute: widget.currentRoute,
+                  collapsed: _sidebarMode == _SidebarMode.collapsed,
+                  onToggle: _cycleSidebarMode,
                 ),
               ),
             ),
+          ),
           Expanded(
             child: Container(color: _bgGeneral, child: widget.child),
           ),
