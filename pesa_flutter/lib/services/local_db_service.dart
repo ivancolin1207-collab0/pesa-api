@@ -1,8 +1,10 @@
 // lib/services/local_db_service.dart — SQLite offline-first
 // Replica el esquema de PostgreSQL en el dispositivo Android.
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
 
@@ -80,6 +82,7 @@ class LocalDbService {
       sync_version           INTEGER DEFAULT 0,
       sync_status            TEXT DEFAULT 'SINCRONIZADO',
       is_synced              INTEGER DEFAULT 0,
+      is_dirty               INTEGER DEFAULT 0,
       updated_at             TEXT
     )
   ''';
@@ -125,6 +128,17 @@ class LocalDbService {
         ''');
         await db.execute('''
           CREATE INDEX IF NOT EXISTS idx_contactos_planta_cli_pla ON contactos_planta(cliente, planta)
+        ''');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS catalogo_marcas_modelos (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            marca  TEXT NOT NULL,
+            modelo TEXT NOT NULL,
+            UNIQUE(marca, modelo) ON CONFLICT IGNORE
+          )
+        ''');
+        await db.execute('''
+          CREATE INDEX IF NOT EXISTS idx_marcas_modelos_marca ON catalogo_marcas_modelos(marca)
         ''');
         final devId = _generateUuid();
         await db.insert('meta', {'key': 'device_id', 'value': devId});
@@ -195,6 +209,7 @@ class LocalDbService {
             'estatus': "TEXT DEFAULT 'PROCESO'",
             'folio': 'TEXT',
             'is_synced': 'INTEGER DEFAULT 0',
+            'is_dirty': 'INTEGER DEFAULT 0',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -286,6 +301,36 @@ class LocalDbService {
         } catch (e) {
           debugPrint('[LocalDB] contactos_planta setup error: $e');
         }
+
+        // [CATALOGO MARCAS Y MODELOS] Tabla offline-first con soporte para autocompletado
+        try {
+          await db.execute('''
+            CREATE TABLE IF NOT EXISTS catalogo_marcas_modelos (
+              id     INTEGER PRIMARY KEY AUTOINCREMENT,
+              marca  TEXT NOT NULL,
+              modelo TEXT NOT NULL,
+              UNIQUE(marca, modelo) ON CONFLICT IGNORE
+            )
+          ''');
+          await db.execute('''
+            CREATE INDEX IF NOT EXISTS idx_marcas_modelos_marca ON catalogo_marcas_modelos(marca)
+          ''');
+          final count = Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM catalogo_marcas_modelos')
+          ) ?? 0;
+          if (count == 0) {
+            await db.execute('''
+              INSERT OR IGNORE INTO catalogo_marcas_modelos (marca, modelo)
+              SELECT DISTINCT TRIM(marca), TRIM(modelo)
+              FROM ordenes_servicio
+              WHERE marca IS NOT NULL AND TRIM(marca) != ''
+                AND modelo IS NOT NULL AND TRIM(modelo) != ''
+            ''');
+            debugPrint('[LocalDB] catalogo_marcas_modelos inicializado desde ordenes locales');
+          }
+        } catch (e) {
+          debugPrint('[LocalDB] catalogo_marcas_modelos setup error: $e');
+        }
       },
     );
   }
@@ -309,10 +354,124 @@ class LocalDbService {
     return _db!;
   }
 
+  static String? appDocDirPath;
+
+  /// Verifica asíncronamente si el archivo PDF de un folio existe físicamente en el almacenamiento de la tablet.
+  Future<bool> checkPdfExistsOnDisk(String folio, [String? pdfPathLocal]) async {
+    final f = folio.trim();
+    if (f.isEmpty) return false;
+
+    if (pdfPathLocal != null && pdfPathLocal.trim().isNotEmpty) {
+      try {
+        final file = File(pdfPathLocal.trim());
+        if (await file.exists() && await file.length() > 500) return true;
+      } catch (_) {}
+    }
+
+    final safeFolio = f.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      appDocDirPath = appDocDir.path;
+
+      final cand1 = File('${appDocDir.path}/Pesa_PDFs/$safeFolio.pdf');
+      if (await cand1.exists() && await cand1.length() > 500) return true;
+
+      final cand2 = File('${appDocDir.path}/PESA_Tablet/PDF_OS/$safeFolio.pdf');
+      if (await cand2.exists() && await cand2.length() > 500) return true;
+
+      final pdfDir = Directory('${appDocDir.path}/Pesa_PDFs');
+      if (await pdfDir.exists()) {
+        final files = pdfDir.listSync().whereType<File>();
+        if (files.any((file) => file.path.split(Platform.pathSeparator).last.startsWith(safeFolio) && file.lengthSync() > 500)) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  /// Verifica síncronamente si el archivo PDF de un folio existe en el disco usando la ruta base de documentos.
+  bool checkPdfExistsOnDiskSync(String folio, [String? pdfPathLocal]) {
+    final f = folio.trim();
+    if (f.isEmpty) return false;
+
+    if (pdfPathLocal != null && pdfPathLocal.trim().isNotEmpty) {
+      try {
+        final file = File(pdfPathLocal.trim());
+        if (file.existsSync() && file.lengthSync() > 500) return true;
+      } catch (_) {}
+    }
+
+    final safeFolio = f.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    if (appDocDirPath != null && appDocDirPath!.isNotEmpty) {
+      final p1 = '$appDocDirPath/Pesa_PDFs/$safeFolio.pdf';
+      try {
+        final f1 = File(p1);
+        if (f1.existsSync() && f1.lengthSync() > 500) return true;
+      } catch (_) {}
+
+      final p2 = '$appDocDirPath/PESA_Tablet/PDF_OS/$safeFolio.pdf';
+      try {
+        final f2 = File(p2);
+        if (f2.existsSync() && f2.lengthSync() > 500) return true;
+      } catch (_) {}
+    }
+    return false;
+  }
+
+  /// Reconstruye la ruta absoluta válida del archivo PDF local en disco para un folio dado.
+  Future<String?> resolvePdfPathFromDisk(String folio) async {
+    final f = folio.trim();
+    if (f.isEmpty) return null;
+    final safeFolio = f.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      appDocDirPath = appDocDir.path;
+
+      final cand1 = File('${appDocDir.path}/Pesa_PDFs/$safeFolio.pdf');
+      if (await cand1.exists() && await cand1.length() > 500) return cand1.path;
+
+      final cand2 = File('${appDocDir.path}/PESA_Tablet/PDF_OS/$safeFolio.pdf');
+      if (await cand2.exists() && await cand2.length() > 500) return cand2.path;
+
+      final pdfDir = Directory('${appDocDir.path}/Pesa_PDFs');
+      if (await pdfDir.exists()) {
+        final files = pdfDir.listSync().whereType<File>();
+        for (final file in files) {
+          final name = file.path.split(Platform.pathSeparator).last;
+          if (name.startsWith(safeFolio) && file.lengthSync() > 500) {
+            return file.path;
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+
+
+  // ── Fallback catálogos: derivar datos desde órdenes locales ──────────────
+
+  /// Retorna clientes únicos derivados de las órdenes guardadas localmente.
+  /// Se usa como fallback cuando /api/v1/clientes devuelve error HTTP.
+  Future<List<Map<String, dynamic>>> getClientesFromLocalOrders() async {
+    final db = await _ensureInit();
+    final rows = await db.rawQuery(
+      '''SELECT DISTINCT cliente AS nombre, cliente AS razon_social,
+                '' AS rfc, '' AS telefono
+         FROM ordenes_servicio
+         WHERE cliente IS NOT NULL AND TRIM(cliente) != ''
+         ORDER BY cliente ASC''',
+    );
+    return rows;
+  }
+
   // ── CRUD OS ───────────────────────────────────────────────────────────────
 
+
   Future<bool> upsertOs(Map<String, dynamic> data) async {
-    final folio = (data['folio_os'] as String? ?? '').trim();
+    final folio = (data['folio_os'] as String? ?? data['folio'] as String? ?? '').trim();
     if (folio.isEmpty) {
       debugPrint('[LocalDB] upsertOs: folio_os vacío, saltando registro');
       return false;
@@ -365,9 +524,10 @@ class LocalDbService {
       'id_equipo':         data['id_equipo']?.toString(),
       'alcance_max':       _toDouble(data['alcance_max'] ?? data['capacidad_maxima']),
       'div_minima':        _toDouble(data['div_minima'] ?? data['division_minima']),
-      'div_verificacion':  _toDouble(data['div_verificacion']),
-      'numero_cca':        data['numero_cca']?.toString(),
+      'div_verificacion':  (data['div_verificacion'] ?? data['folio_dve'] ?? data['numero_dve'] ?? data['div_ver'])?.toString(),
+      'numero_cca':        (data['numero_cca'] ?? data['cca'])?.toString(),
       'holograma_anterior': data['holograma_anterior']?.toString(),
+      'holograma_actualizado': (data['holograma_actualizado'] ?? data['holograma_nuevo'])?.toString(),
       'pdf_url':           data['pdf_url']?.toString(),
       // ── Campos precargados por logística ───────────────────────────────────
       'instrumento_capacidad': data['instrumento_capacidad']?.toString(),
@@ -412,21 +572,99 @@ class LocalDbService {
 
     try {
       final db = await _ensureInit();
-      // [FIX-OFFLINE-PDF] Preservar rutas de PDF locales, estado de subida y firmas
+      // [PULL PROTEGIDO] Verificación exhaustiva de registro local antes de actualizar
       final existingRows = await db.query(
         'ordenes_servicio',
-        columns: [
-          'pdf_path_local', 'pdf_b64_local', 'pdf_subido', 'sync_check_status', 'is_synced',
-          'firma_tecnico', 'firma_cliente', 'firma_cliente_nombre', 'nombre_ing', 'puesto_ing', 'dictamen'
-        ],
-        where: 'folio_os = ?',
-        whereArgs: [folio],
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [folio, folio],
         limit: 1,
       );
       if (existingRows.isNotEmpty) {
         final ex = existingRows.first;
+        final int localIsDirty = _toInt(ex['is_dirty'], 0);
+        final String? pdfPath = ex['pdf_path_local'] as String?;
+        final String? pdfB64 = ex['pdf_b64_local'] as String?;
+        final int pdfSubido = _toInt(ex['pdf_subido'], 0);
+        final String syncCheckSt = (ex['sync_check_status'] as String? ?? '').toUpperCase().trim();
+        final String exEstatus = (ex['estatus'] as String? ?? '').toUpperCase().trim();
+        final String exEstado = (ex['estado'] as String? ?? '').toUpperCase().trim();
+
+        final bool statusIsClosed = exEstatus == 'CERRADO' ||
+            exEstatus == 'CERRADA' ||
+            exEstatus == 'COMPLETADA' ||
+            {'CERRADO', 'CERRADA', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'FIRMADA'}.contains(exEstado);
+
+        final bool hasPdfPath = pdfPath != null && pdfPath.isNotEmpty;
+        final bool hasPdfB64 = pdfB64 != null && pdfB64.isNotEmpty;
+        final bool pdfDiskExists = await checkPdfExistsOnDisk(folio, pdfPath);
+        final bool hasLocalChanges = localIsDirty == 1 || (syncCheckSt != 'SUBIDA_SERVIDOR' && syncCheckSt != 'AUDITADA_ADMIN' && syncCheckSt != 'ABIERTO');
+
+        final bool localIsClosed = statusIsClosed || hasPdfPath || hasPdfB64 || pdfDiskExists || hasLocalChanges;
+
+        // REGLA 1 (REGLA DE ORO): CANDADO ESTRICTO CONTRA SOBRESCRITURA
+        // SI la orden local ya está cerrada o fue trabajada localmente (tiene cambios pendientes o PDF):
+        // ¡PROHIBIDO SOBREESCRIBIR CON EL ESTATUS 'PROCESO' DEL SERVIDOR!
+        if (localIsClosed) {
+          debugPrint('[LocalDB] 🛡 CANDADO PULL (REGLA 1): Inmunidad de orden cerrada/trabajada para $folio (estatus=$exEstatus, estado=$exEstado, dirty=$localIsDirty, changes=$hasLocalChanges, pdfDisk=$pdfDiskExists)');
+
+          String? validPdfPath = pdfPath;
+          if ((validPdfPath == null || validPdfPath.isEmpty) && pdfDiskExists) {
+            validPdfPath = await resolvePdfPathFromDisk(folio);
+          }
+
+          final safeUpdate = <String, dynamic>{
+            'cliente': cliente.isNotEmpty ? cliente : ex['cliente'],
+            'sucursal': sucursal.isNotEmpty ? sucursal : ex['sucursal'],
+            'direccion': direccion.isNotEmpty ? direccion : ex['direccion'],
+            'tecnico': tecnico.isNotEmpty ? tecnico : ex['tecnico'],
+            'tipo_servicio': tipoSvc.isNotEmpty ? tipoSvc : ex['tipo_servicio'],
+            if (idTecnicoFinal != null && idTecnicoFinal > 0) 'id_tecnico': idTecnicoFinal,
+
+            // Mantener intactos: estatus 'Cerrado', estado local, mediciones, firmas y pdf_path_local
+            'estado': (ex['estado'] != null && ex['estado'].toString().isNotEmpty && ex['estado'] != 'PROCESO')
+                ? ex['estado']
+                : 'COMPLETADA_DIGITAL',
+            'estatus': 'Cerrado',
+            if (validPdfPath != null && validPdfPath.isNotEmpty) 'pdf_path_local': validPdfPath,
+            if (ex['pdf_b64_local'] != null) 'pdf_b64_local': ex['pdf_b64_local'],
+            if (ex['pdf_subido'] != null) 'pdf_subido': ex['pdf_subido'],
+            if (ex['is_dirty'] != null) 'is_dirty': ex['is_dirty'],
+            if (ex['firma_tecnico'] != null) 'firma_tecnico': ex['firma_tecnico'],
+            if (ex['firma_cliente'] != null) 'firma_cliente': ex['firma_cliente'],
+            if (ex['firma_cliente_nombre'] != null) 'firma_cliente_nombre': ex['firma_cliente_nombre'],
+            if (ex['nombre_ing'] != null) 'nombre_ing': ex['nombre_ing'],
+            if (ex['puesto_ing'] != null) 'puesto_ing': ex['puesto_ing'],
+            if (ex['dictamen'] != null) 'dictamen': ex['dictamen'],
+            if (ex['observaciones'] != null) 'observaciones': ex['observaciones'],
+            if (ex['rep_json'] != null) 'rep_json': ex['rep_json'],
+            if (ex['exc_json'] != null) 'exc_json': ex['exc_json'],
+            if (ex['exac_json'] != null) 'exac_json': ex['exac_json'],
+          };
+
+          // Solo actualizar metadatos externos si el servidor confirma SUBIDA_SERVIDOR o AUDITADA_ADMIN
+          final srvSt = row['sync_check_status']?.toString().trim().toUpperCase();
+          if (srvSt == 'SUBIDA_SERVIDOR' || srvSt == 'AUDITADA_ADMIN' || srvSt == 'ABIERTO') {
+            safeUpdate['sync_check_status'] = srvSt == 'AUDITADA_ADMIN' ? 'AUDITADA_ADMIN' : 'SUBIDA_SERVIDOR';
+            safeUpdate['is_synced'] = 1;
+            safeUpdate['sync_status'] = 'SINCRONIZADO';
+          }
+
+          await db.update(
+            'ordenes_servicio',
+            safeUpdate,
+            where: 'folio_os = ? OR folio = ?',
+            whereArgs: [folio, folio],
+          );
+          lastUpsertError = null;
+          return true;
+        }
+
+        // Si la orden local no está cerrada ni tiene trabajo pendiente, fusionar de forma segura
         if (row['pdf_path_local'] == null && ex['pdf_path_local'] != null) {
-          row['pdf_path_local'] = ex['pdf_path_local'];
+          final f = File(ex['pdf_path_local'].toString());
+          if (f.existsSync()) {
+            row['pdf_path_local'] = ex['pdf_path_local'];
+          }
         }
         if (row['pdf_b64_local'] == null && ex['pdf_b64_local'] != null) {
           row['pdf_b64_local'] = ex['pdf_b64_local'];
@@ -434,62 +672,27 @@ class LocalDbService {
         if (ex['pdf_subido'] != null) {
           row['pdf_subido'] = ex['pdf_subido'];
         }
-        if (ex['sync_check_status'] != null) {
-          final localSt = ex['sync_check_status'].toString().trim().toUpperCase();
-          final srvSt   = row['sync_check_status']?.toString().trim().toUpperCase();
-          // Jerarquía de estados:
-          // 1. AUDITADA_ADMIN / ABIERTO: Si el servidor lo reporta, siempre gana
-          // 2. SUBIDA_SERVIDOR: Si el servidor lo reporta, o si ya se subió localmente
-          // 3. RECIBIDA_TABLET: Estado base en tablet
-          // 4. ASIGNADA: Asignada inicial
-          if (srvSt == 'AUDITADA_ADMIN' || srvSt == 'ABIERTO') {
-            row['sync_check_status'] = 'AUDITADA_ADMIN';
-            row['is_synced'] = 1;
-            row['sync_status'] = 'SINCRONIZADO';
-          } else if (srvSt == 'SUBIDA_SERVIDOR') {
-            if (localSt == 'AUDITADA_ADMIN' || localSt == 'ABIERTO') {
-              row['sync_check_status'] = 'AUDITADA_ADMIN';
-            } else {
-              row['sync_check_status'] = 'SUBIDA_SERVIDOR';
-            }
-            row['is_synced'] = 1;
-            row['sync_status'] = 'SINCRONIZADO';
-          } else if (localSt == 'AUDITADA_ADMIN' || localSt == 'ABIERTO') {
-            row['sync_check_status'] = 'AUDITADA_ADMIN';
-            row['is_synced'] = 1;
-          } else if (localSt == 'SUBIDA_SERVIDOR') {
-            row['sync_check_status'] = 'SUBIDA_SERVIDOR';
-            row['is_synced'] = 1;
-          }
-        }
-        if (ex['is_synced'] != null && (ex['is_synced'] == 1 || ex['is_synced'] == '1')) {
-          row['is_synced'] = 1;
-        }
-        // Preservar firmas y datos locales si el servidor envió valores vacíos
-        if ((row['firma_tecnico'] == null || row['firma_tecnico'].toString().isEmpty) && ex['firma_tecnico'] != null) {
-          row['firma_tecnico'] = ex['firma_tecnico'];
-        }
-        if ((row['firma_cliente'] == null || row['firma_cliente'].toString().isEmpty) && ex['firma_cliente'] != null) {
-          row['firma_cliente'] = ex['firma_cliente'];
-        }
-        if ((row['firma_cliente_nombre'] == null || row['firma_cliente_nombre'].toString().isEmpty) && ex['firma_cliente_nombre'] != null) {
-          row['firma_cliente_nombre'] = ex['firma_cliente_nombre'];
-        }
-        if ((row['nombre_ing'] == null || row['nombre_ing'].toString().isEmpty) && ex['nombre_ing'] != null) {
-          row['nombre_ing'] = ex['nombre_ing'];
-        }
-        if ((row['puesto_ing'] == null || row['puesto_ing'].toString().isEmpty) && ex['puesto_ing'] != null) {
-          row['puesto_ing'] = ex['puesto_ing'];
-        }
-        if ((row['dictamen'] == null || row['dictamen'].toString().isEmpty) && ex['dictamen'] != null) {
-          row['dictamen'] = ex['dictamen'];
-        }
+        if (ex['firma_tecnico'] != null) row['firma_tecnico'] = ex['firma_tecnico'];
+        if (ex['firma_cliente'] != null) row['firma_cliente'] = ex['firma_cliente'];
+        if (ex['firma_cliente_nombre'] != null) row['firma_cliente_nombre'] = ex['firma_cliente_nombre'];
+        if (ex['nombre_ing'] != null) row['nombre_ing'] = ex['nombre_ing'];
+        if (ex['puesto_ing'] != null) row['puesto_ing'] = ex['puesto_ing'];
+        if (ex['dictamen'] != null) row['dictamen'] = ex['dictamen'];
+
+        await db.update(
+          'ordenes_servicio',
+          row,
+          where: 'folio_os = ? OR folio = ?',
+          whereArgs: [folio, folio],
+        );
+        lastUpsertError = null;
+        return true;
       }
 
       await db.insert(
         'ordenes_servicio',
         row,
-        conflictAlgorithm: ConflictAlgorithm.replace,
+        conflictAlgorithm: ConflictAlgorithm.ignore,
       );
       lastUpsertError = null;
       return true;
@@ -505,7 +708,7 @@ class LocalDbService {
           ..remove('div_minima')
           ..remove('div_verificacion');
         await db.insert('ordenes_servicio', safeRow,
-            conflictAlgorithm: ConflictAlgorithm.replace);
+            conflictAlgorithm: ConflictAlgorithm.ignore);
         debugPrint('[LocalDB] Fallback safe-insert OK para $folio');
         lastUpsertError = null;
         return true;
@@ -575,41 +778,53 @@ class LocalDbService {
     final db = await _ensureInit();
     final nombreLow = (nombreTecnico ?? '').toLowerCase().trim();
 
-    // Admin: devuelve todas
+    // Admin: (idTecnico null o <= 0 Y nombreTecnico vacío) -> devuelve todas
     if ((idTecnico == null || idTecnico <= 0) && nombreLow.isEmpty) {
       return await db.rawQuery(
         "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
       );
     }
 
-    // Filtrar estrictamente por id_tecnico si está disponible
-    if (idTecnico != null && idTecnico > 0) {
-      final rows = await db.rawQuery(
-        """
-        SELECT * FROM ordenes_servicio 
-        WHERE id_tecnico = ? 
-           OR (id_tecnico IS NULL AND LOWER(tecnico) LIKE ?)
-        ORDER BY local_id DESC, fecha DESC
-        """,
-        [idTecnico, '%$nombreLow%'],
-      );
-      return rows;
+    // Regla estricta de aislamiento por técnico:
+    // La consulta base SIEMPRE debe incluir WHERE LOWER(tecnico) = LOWER('${usuario.nombre}')
+    if (nombreLow.isNotEmpty) {
+      final likePattern = '%$nombreLow%';
+      if (idTecnico != null && idTecnico > 0) {
+        return await db.rawQuery(
+          """
+          SELECT * FROM ordenes_servicio 
+          WHERE LOWER(TRIM(COALESCE(tecnico, ''))) = LOWER(?) 
+             OR LOWER(TRIM(COALESCE(tecnico, ''))) LIKE LOWER(?)
+             OR id_tecnico = ?
+          ORDER BY local_id DESC, fecha DESC
+          """,
+          [nombreLow, likePattern, idTecnico],
+        );
+      } else {
+        return await db.rawQuery(
+          """
+          SELECT * FROM ordenes_servicio 
+          WHERE LOWER(TRIM(COALESCE(tecnico, ''))) = LOWER(?)
+             OR LOWER(TRIM(COALESCE(tecnico, ''))) LIKE LOWER(?)
+          ORDER BY local_id DESC, fecha DESC
+          """,
+          [nombreLow, likePattern],
+        );
+      }
     }
 
-    // Fallback por nombre
-    final all = await db.rawQuery(
-      "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
-    );
-    final words = nombreLow.split(RegExp(r'\s+')).where((w) => w.length >= 3).toList();
-    return all.where((r) {
-      final tec = (r['tecnico'] as String? ?? '').toLowerCase().trim();
-      if (tec.isEmpty) return false;
-      if (tec.contains(nombreLow) || nombreLow.contains(tec)) return true;
-      for (final w in words) {
-        if (tec.contains(w)) return true;
-      }
-      return false;
-    }).toList();
+    if (idTecnico != null && idTecnico > 0) {
+      return await db.rawQuery(
+        """
+        SELECT * FROM ordenes_servicio 
+        WHERE id_tecnico = ?
+        ORDER BY local_id DESC, fecha DESC
+        """,
+        [idTecnico],
+      );
+    }
+
+    return [];
   }
 
   /// Purga órdenes locales que pertenezcan a otros técnicos (para garantizar privacidad y filtrado estricto).
@@ -630,11 +845,11 @@ class LocalDbService {
     int totalEliminadas = 0;
 
     try {
-      // 1. Si tenemos id_tecnico, borrar cualquier orden con id_tecnico != currentIdTecnico
+      // 1. Si tenemos id_tecnico, borrar cualquier orden limpia de otro técnico
       if (currentIdTecnico != null && currentIdTecnico > 0) {
         final count = await db.delete(
           'ordenes_servicio',
-          where: 'id_tecnico IS NOT NULL AND id_tecnico != ?',
+          where: 'id_tecnico IS NOT NULL AND id_tecnico != ? AND is_dirty = 0',
           whereArgs: [currentIdTecnico],
         );
         totalEliminadas += count;
@@ -643,23 +858,31 @@ class LocalDbService {
         }
       }
 
-      // 2. Para órdenes donde id_tecnico IS NULL, revisar el nombre del técnico
+      // 2. Para órdenes restantes, verificar que el nombre del técnico coincida
       if (currentNombre != null && currentNombre.trim().isNotEmpty) {
         final nombreLow = currentNombre.toLowerCase().trim();
         final rows = await db.query(
           'ordenes_servicio',
-          columns: ['local_id', 'folio_os', 'tecnico'],
-          where: 'id_tecnico IS NULL',
+          columns: ['local_id', 'folio_os', 'tecnico', 'is_dirty', 'id_tecnico'],
+          where: 'is_dirty = 0',
         );
 
         for (final r in rows) {
           final tec = (r['tecnico'] as String? ?? '').toLowerCase().trim();
+          final rId = int.tryParse(r['id_tecnico']?.toString() ?? '');
           final localId = r['local_id'] as int;
-          // Si tiene técnico y NO coincide con el usuario actual, borrar
-          if (tec.isNotEmpty && !tec.contains(nombreLow) && !nombreLow.contains(tec)) {
-            await db.delete('ordenes_servicio', where: 'local_id = ?', whereArgs: [localId]);
-            totalEliminadas++;
+
+          // Si coincide por id_tecnico con el usuario actual, conservar
+          if (currentIdTecnico != null && currentIdTecnico > 0 && rId == currentIdTecnico) {
+            continue;
           }
+          // Si coincide por nombre con el usuario actual, conservar
+          if (tec.isNotEmpty && (tec == nombreLow || tec.contains(nombreLow) || nombreLow.contains(tec))) {
+            continue;
+          }
+          // De lo contrario, pertenece a otro técnico -> purgar de SQLite local
+          await db.delete('ordenes_servicio', where: 'local_id = ?', whereArgs: [localId]);
+          totalEliminadas++;
         }
       }
     } catch (e) {
@@ -772,6 +995,127 @@ class LocalDbService {
     }
   }
 
+  Future<void> resetOsCaptura(String folio) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return;
+    try {
+      final db = await _ensureInit();
+      await deleteDraft(folioKey);
+      await db.update(
+        'ordenes_servicio',
+        {
+          'rep_json': null,
+          'exc_json': null,
+          'exac_json': null,
+          'observaciones': null,
+          'dictamen': null,
+          'firma_tecnico_b64': null,
+          'firma_cliente_b64': null,
+          'firma_cliente_nombre': null,
+          'puesto_ing': null,
+          'nombre_ing': null,
+          'estado': 'Proceso',
+          'sync_status': 'PENDIENTE_ACTUALIZAR',
+          'is_dirty': 1,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'folio_os = ?',
+        whereArgs: [folioKey],
+      );
+      debugPrint('[LocalDB] Toma reseteada para $folioKey');
+    } catch (e) {
+      debugPrint('[LocalDB] Error reseteando toma para $folioKey: $e');
+    }
+  }
+
+  /// Elimina de disco físico cualquier PDF generado o guardado para este folio.
+  Future<void> deletePdfFromDisk(String folio) async {
+    final path = await resolvePdfPathFromDisk(folio);
+    if (path != null) {
+      try {
+        final f = File(path);
+        if (await f.exists()) {
+          await f.delete();
+          debugPrint('[LocalDB] PDF eliminado de disco: $path');
+        }
+      } catch (e) {
+        debugPrint('[LocalDB] Error eliminando PDF de disco ($path): $e');
+      }
+    }
+  }
+
+  /// Reset completo de toma metrológica desde cero (Lecturas, dictamen, firmas y PDF local).
+  Future<void> resetTomaDesdeCero(String folio, {int? localId}) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty && localId == null) return;
+    try {
+      final db = await _ensureInit();
+      if (folioKey.isNotEmpty) {
+        await deleteDraft(folioKey);
+        await deletePdfFromDisk(folioKey);
+      }
+
+      final Map<String, dynamic> updateMap = {
+        'rep_json': null,
+        'exc_json': null,
+        'exac_json': null,
+        'observaciones': null,
+        'dictamen': null,
+        'firma_tecnico': null,
+        'firma_tecnico_b64': null,
+        'firma_cliente': null,
+        'firma_cliente_b64': null,
+        'firma_cliente_nombre': null,
+        'puesto_ing': null,
+        'nombre_ing': null,
+        'pdf_path_local': null,
+        'pdf_b64_local': null,
+        'pdf_url': null,
+        'pdf_subido': 0,
+        'estado': 'PROCESO',
+        'sync_status': 'PENDIENTE',
+        'sync_check_status': 'BORRADOR_LOCAL',
+        'is_dirty': 1,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+
+      if (localId != null && localId > 0) {
+        await db.update('ordenes_servicio', updateMap, where: 'local_id = ?', whereArgs: [localId]);
+      }
+      if (folioKey.isNotEmpty) {
+        await db.update('ordenes_servicio', updateMap, where: 'folio_os = ?', whereArgs: [folioKey]);
+      }
+      debugPrint('[LocalDB] resetTomaDesdeCero exitoso para $folioKey (localId: $localId)');
+    } catch (e) {
+      debugPrint('[LocalDB] Error en resetTomaDesdeCero: $e');
+      rethrow;
+    }
+  }
+
+  /// Guarda la ruta y base64 de un PDF manual cargado por el usuario, marcando la orden como pendiente de subida.
+  Future<void> saveManualPdf(String folio, String path, {String? pdfB64}) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return;
+    try {
+      final db = await _ensureInit();
+      final Map<String, dynamic> updateMap = {
+        'pdf_path_local': path,
+        if (pdfB64 != null) 'pdf_b64_local': pdfB64,
+        'pdf_subido': 0,
+        'estado': 'Cerrado',
+        'sync_status': 'PENDIENTE',
+        'sync_check_status': 'PENDIENTE_SUBIDA',
+        'is_dirty': 1,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+      await db.update('ordenes_servicio', updateMap, where: 'folio_os = ?', whereArgs: [folioKey]);
+      debugPrint('[LocalDB] saveManualPdf exitoso para $folioKey -> $path');
+    } catch (e) {
+      debugPrint('[LocalDB] Error en saveManualPdf: $e');
+      rethrow;
+    }
+  }
+
   Future<void> saveLecturas({
     required int localId,
     required List repRows,
@@ -794,6 +1138,7 @@ class LocalDbService {
       if (!isDraft)            'estado': 'COMPLETADA_DIGITAL',
       'unidad_medida':         unidadMedida ?? 'kg',
       'sync_status':           'PENDIENTE_ACTUALIZAR',
+      'is_dirty':              1,
       'updated_at':            DateTime.now().toUtc().toIso8601String(),
       if (firmaClienteNombre != null && firmaClienteNombre.isNotEmpty)
         'firma_cliente_nombre': firmaClienteNombre,
@@ -802,7 +1147,8 @@ class LocalDbService {
     if (instrumentData != null) {
       for (final field in [
         'marca', 'modelo', 'ns', 'id_equipo', 'ubicacion',
-        'tipo_instrumento', 'numero_cca', 'holograma_anterior', 'holograma_actualizado',
+        'tipo_instrumento', 'numero_cca', 'cca', 'holograma_anterior', 'holograma_actualizado', 'holograma_nuevo',
+        'div_verificacion', 'folio_dve', 'numero_dve', 'div_ver',
         'funcionamiento', 'puntos_apoyo', 'cliente', 'sucursal', 'direccion', 'fecha', 'tecnico',
         'geometria_plataforma', 'geometria_excentricidad'
       ]) {
@@ -815,9 +1161,6 @@ class LocalDbService {
       }
       if (instrumentData['div_minima'] != null) {
         updateMap['div_minima'] = _toDouble(instrumentData['div_minima']);
-      }
-      if (instrumentData['div_verificacion'] != null) {
-        updateMap['div_verificacion'] = _toDouble(instrumentData['div_verificacion']);
       }
       if (instrumentData['aplica_excentricidad'] != null) {
         updateMap['aplica_excentricidad'] = _toBoolInt(instrumentData['aplica_excentricidad']);
@@ -871,10 +1214,11 @@ class LocalDbService {
   }) async {
     final db = await _ensureInit();
     final folioKey = (folio ?? '').trim();
-    final syncCheck = (isOnline && uploadOk) ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET';
-    final syncStatus = (isOnline && uploadOk) ? 'SINCRONIZADO' : 'PENDIENTE_ACTUALIZAR';
+    final syncCheck = (isOnline && uploadOk) ? 'SUBIDA_SERVIDOR' : 'PENDIENTE_SUBIDA';
+    final syncStatus = (isOnline && uploadOk) ? 'SINCRONIZADO' : 'PENDIENTE';
     final isSynced = (isOnline && uploadOk) ? 1 : 0;
     final pdfSubido = (isOnline && uploadOk) ? 1 : 0;
+    final isDirty = (isOnline && uploadOk) ? 0 : 1;
 
     final updateData = <String, dynamic>{
       'pdf_path_local': path,
@@ -885,6 +1229,7 @@ class LocalDbService {
       'sync_status': syncStatus,
       'is_synced': isSynced,
       'pdf_subido': pdfSubido,
+      'is_dirty': isDirty,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     };
 
@@ -962,8 +1307,9 @@ class LocalDbService {
         if (nombreIng != null)    'nombre_ing':     nombreIng,
         if (puestoIng != null)    'puesto_ing':     puestoIng,
         'estado':        'COMPLETADA_DIGITAL',
-        'sync_status':   'PENDIENTE_ACTUALIZAR',
+        'sync_status':   'PENDIENTE',
         'pdf_subido':    0,
+        'is_dirty':      1,
         'updated_at':    DateTime.now().toUtc().toIso8601String(),
       },
       where: 'local_id = ?',
@@ -1022,6 +1368,7 @@ class LocalDbService {
         'firma_cliente': firmaCliBase64,
         'nombre_ing':    nombreIng,
         'puesto_ing':    puestoIng,
+        'is_dirty':      1,
       },
       where: whereClause, whereArgs: [whereArg],
     );
@@ -1044,6 +1391,7 @@ class LocalDbService {
       {
         'sync_status': 'SINCRONIZADO',
         'is_synced': 1,
+        'is_dirty': 0,
         'sync_check_status': 'SUBIDA_SERVIDOR',
         'sync_version': newVersion,
       },
@@ -1061,6 +1409,7 @@ class LocalDbService {
       {
         'pdf_subido': 1,
         'is_synced': 1,
+        'is_dirty': 0,
         'sync_status': 'SINCRONIZADO',
         'sync_check_status': 'SUBIDA_SERVIDOR',
         if (folio != null && folio.isNotEmpty) 'pdf_url': '/uploads/$folio.pdf',
@@ -1068,6 +1417,30 @@ class LocalDbService {
       where: whereClause,
       whereArgs: [whereArg],
     );
+  }
+
+  /// Limpia la bandera is_dirty una vez que PUSH fue confirmado HTTP 200/201 por Render.
+  Future<void> clearDirty(String folio) async {
+    final f = folio.trim();
+    if (f.isEmpty) return;
+    try {
+      final db = await _ensureInit();
+      await db.update(
+        'ordenes_servicio',
+        {
+          'is_dirty': 0,
+          'sync_status': 'SINCRONIZADO',
+          'is_synced': 1,
+          'sync_check_status': 'SUBIDA_SERVIDOR',
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        },
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [f, f],
+      );
+      debugPrint('[LocalDB] clearDirty exitoso para $f');
+    } catch (e) {
+      debugPrint('[LocalDB] Error en clearDirty para $f: $e');
+    }
   }
 
   /// Homologa el estado de sincronización y estatus desde Render en cada pull
@@ -1084,15 +1457,53 @@ class LocalDbService {
     final isSynced = (normSync == 'SUBIDA_SERVIDOR' || normSync == 'AUDITADA_ADMIN' || normSync == 'ABIERTO') ? 1 : 0;
 
     try {
+      final existing = await db.query(
+        'ordenes_servicio',
+        columns: ['estado', 'estatus', 'is_dirty', 'pdf_path_local'],
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [f, f],
+        limit: 1,
+      );
+
+      if (existing.isNotEmpty) {
+        final ex = existing.first;
+        final String exEstado = (ex['estado'] as String? ?? '').toUpperCase().trim();
+        final String exEstatus = (ex['estatus'] as String? ?? '').toUpperCase().trim();
+        final bool statusIsClosed = exEstatus == 'CERRADO' ||
+            exEstatus == 'CERRADA' ||
+            exEstatus == 'COMPLETADA' ||
+            {'CERRADO', 'CERRADA', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'FIRMADA'}.contains(exEstado);
+        final int localIsDirty = _toInt(ex['is_dirty'], 0);
+        final String? pdfPath = ex['pdf_path_local'] as String?;
+        final bool pdfDiskExists = await checkPdfExistsOnDisk(f, pdfPath);
+        final bool hasLocalPdf = (pdfPath != null && pdfPath.isNotEmpty) || pdfDiskExists;
+
+        if (statusIsClosed || localIsDirty == 1 || hasLocalPdf) {
+          debugPrint('[LocalDB] 🛡 updateSyncAndStatus: Preservando estatus cerrado/dirty local para $f');
+          await db.rawUpdate('''
+            UPDATE ordenes_servicio SET 
+              sync_check_status = ?,
+              estatus = 'Cerrado',
+              estado = CASE WHEN estado IS NULL OR estado = '' OR estado = 'PROCESO' THEN 'COMPLETADA_DIGITAL' ELSE estado END,
+              is_synced = CASE WHEN ? = 1 THEN 1 ELSE is_synced END,
+              is_dirty = CASE WHEN ? = 1 THEN 0 ELSE is_dirty END,
+              sync_status = CASE WHEN ? = 1 THEN 'SINCRONIZADO' ELSE sync_status END
+            WHERE folio_os = ? OR folio = ?
+          ''', [syncCheckStatus, isSynced, isSynced, isSynced, f, f]);
+          return;
+        }
+      }
+
       await db.rawUpdate('''
         UPDATE ordenes_servicio SET 
           sync_check_status = ?,
           estado = ?,
           estatus = ?,
           is_synced = CASE WHEN ? = 1 THEN 1 ELSE is_synced END,
+          is_dirty = CASE WHEN ? = 1 THEN 0 ELSE is_dirty END,
           sync_status = CASE WHEN ? = 1 THEN 'SINCRONIZADO' ELSE sync_status END
         WHERE folio_os = ? OR folio = ?
-      ''', [syncCheckStatus, estatus, estatus, isSynced, isSynced, f, f]);
+      ''', [syncCheckStatus, estatus, estatus, isSynced, isSynced, isSynced, f, f]);
     } catch (e) {
       debugPrint('[LocalDB] Error en updateSyncAndStatus para $f: $e');
     }
@@ -1110,9 +1521,11 @@ class LocalDbService {
     final f = folio.trim();
     if (f.isEmpty) return;
 
+    final isDirty = (status == 'SUBIDA_SERVIDOR' || status == 'AUDITADA_ADMIN' || isSynced == 1) ? 0 : 1;
     final updateData = <String, dynamic>{
       'sync_check_status': status,
       'is_synced': isSynced,
+      'is_dirty': isDirty,
       'sync_status': isSynced == 1 ? 'SINCRONIZADO' : 'PENDIENTE_ACTUALIZAR',
       if (pdfSubido != null) 'pdf_subido': pdfSubido,
       if (estado != null && estado.isNotEmpty) ...{
@@ -1167,11 +1580,15 @@ class LocalDbService {
 
   Future<List<Map<String, dynamic>>> getOsPendientes() async {
     final db = await _ensureInit();
-    return await db.query(
-      'ordenes_servicio',
-      where: 'sync_status = ?',
-      whereArgs: ['PENDIENTE_ACTUALIZAR'],
-    );
+    return await db.rawQuery('''
+      SELECT * FROM ordenes_servicio 
+      WHERE is_dirty = 1 
+         OR sync_status = 'PENDIENTE'
+         OR sync_status = 'PENDIENTE_ACTUALIZAR'
+         OR (pdf_path_local IS NOT NULL AND (pdf_subido = 0 OR pdf_subido IS NULL) AND (estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA') OR estatus = 'Cerrado'))
+         OR (sync_check_status IN ('RECIBIDA_TABLET', 'PENDIENTE_SUBIDA', 'ASIGNADA') 
+             AND (estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA') OR estatus = 'Cerrado'))
+    ''');
   }
 
   Future<List<Map<String, dynamic>>> getFirmasPendientes() async {
@@ -1184,9 +1601,13 @@ class LocalDbService {
 
   Future<int> getPendingCount() async {
     final db = await _ensureInit();
-    final r = await db.rawQuery(
-      "SELECT COUNT(*) as c FROM ordenes_servicio WHERE sync_status = 'PENDIENTE_ACTUALIZAR'"
-    );
+    final r = await db.rawQuery('''
+      SELECT COUNT(*) as c FROM ordenes_servicio 
+      WHERE is_dirty = 1 
+         OR sync_status = 'PENDIENTE'
+         OR sync_status = 'PENDIENTE_ACTUALIZAR'
+         OR (pdf_path_local IS NOT NULL AND (pdf_subido = 0 OR pdf_subido IS NULL) AND (estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA') OR estatus = 'Cerrado'))
+    ''');
     return (r.first['c'] as int?) ?? 0;
   }
 
@@ -1209,6 +1630,25 @@ class LocalDbService {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
+  Future<DateTime?> getLastCatalogSyncTime() async {
+    final db = await _ensureInit();
+    try {
+      final rows = await db.query('meta', where: "key = 'last_catalog_sync'", limit: 1);
+      if (rows.isEmpty) return null;
+      return DateTime.tryParse(rows.first['value'] as String? ?? '');
+    } catch (_) { return null; }
+  }
+
+  Future<void> setLastCatalogSyncTime(DateTime dt) async {
+    final db = await _ensureInit();
+    try {
+      await db.insert('meta', {'key': 'last_catalog_sync', 'value': dt.toIso8601String()},
+          conflictAlgorithm: ConflictAlgorithm.replace);
+    } catch (e) {
+      debugPrint('[LocalDB] setLastCatalogSyncTime error: $e');
+    }
+  }
+
 
   Future<String> getDeviceId() async {
     final db = await _ensureInit();
@@ -1339,6 +1779,115 @@ class LocalDbService {
   }) async {
     final list = await getContactosPlanta(cliente: cliente, planta: planta);
     return list.isNotEmpty ? list.first : null;
+  }
+
+  // ── Catálogo Marcas y Modelos (Offline-First) ─────────────────────────────
+
+  /// Guarda una combinación de marca y modelo en la base de datos local SQLite.
+  /// No hace nada si alguno de los dos está vacío.
+  Future<void> saveMarcaModelo(String marca, String modelo) async {
+    final m = marca.trim();
+    final mod = modelo.trim();
+    if (m.isEmpty || mod.isEmpty) return;
+    try {
+      final db = await _ensureInit();
+      await db.insert(
+        'catalogo_marcas_modelos',
+        {'marca': m, 'modelo': mod},
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+      debugPrint('[LocalDB] Marca/Modelo guardado: ($m, $mod)');
+    } catch (e) {
+      debugPrint('[LocalDB] Error saveMarcaModelo ($m, $mod): $e');
+    }
+  }
+
+  /// Retorna la lista única de marcas disponibles ordenadas alfabéticamente.
+  Future<List<String>> getMarcas() async {
+    try {
+      final db = await _ensureInit();
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT marca FROM catalogo_marcas_modelos ORDER BY marca COLLATE NOCASE ASC'
+      );
+      return rows
+          .map((r) => (r['marca'] as String? ?? '').trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('[LocalDB] Error getMarcas: $e');
+      return [];
+    }
+  }
+
+  /// Retorna la lista de modelos. Si [marca] se especifica y no está vacía,
+  /// retorna únicamente los modelos asociados a esa marca.
+  Future<List<String>> getModelos({String? marca}) async {
+    try {
+      final db = await _ensureInit();
+      final m = marca?.trim();
+      List<Map<String, dynamic>> rows;
+      if (m != null && m.isNotEmpty) {
+        rows = await db.rawQuery(
+          'SELECT DISTINCT modelo FROM catalogo_marcas_modelos WHERE LOWER(marca) = LOWER(?) ORDER BY modelo COLLATE NOCASE ASC',
+          [m],
+        );
+      } else {
+        rows = await db.rawQuery(
+          'SELECT DISTINCT modelo FROM catalogo_marcas_modelos ORDER BY modelo COLLATE NOCASE ASC'
+        );
+      }
+      return rows
+          .map((r) => (r['modelo'] as String? ?? '').trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+    } catch (e) {
+      debugPrint('[LocalDB] Error getModelos: $e');
+      return [];
+    }
+  }
+
+  /// Retorna todas las combinaciones de (marca, modelo) registradas localmente.
+  Future<List<Map<String, String>>> getAllMarcasModelos() async {
+    try {
+      final db = await _ensureInit();
+      final rows = await db.rawQuery(
+        'SELECT DISTINCT marca, modelo FROM catalogo_marcas_modelos ORDER BY marca COLLATE NOCASE ASC, modelo COLLATE NOCASE ASC'
+      );
+      return rows.map((r) => {
+        'marca': (r['marca'] as String? ?? '').trim(),
+        'modelo': (r['modelo'] as String? ?? '').trim(),
+      }).where((m) => m['marca']!.isNotEmpty && m['modelo']!.isNotEmpty).toList();
+    } catch (e) {
+      debugPrint('[LocalDB] Error getAllMarcasModelos: $e');
+      return [];
+    }
+  }
+
+  /// Inserta en lote una lista de marcas/modelos recibidas del servidor o archivo.
+  Future<int> insertMarcasModelosBatch(List<Map<String, dynamic>> items) async {
+    if (items.isEmpty) return 0;
+    try {
+      final db = await _ensureInit();
+      final batch = db.batch();
+      int count = 0;
+      for (final it in items) {
+        final m = (it['marca'] as String? ?? '').trim();
+        final mod = (it['modelo'] as String? ?? '').trim();
+        if (m.isNotEmpty && mod.isNotEmpty) {
+          batch.insert(
+            'catalogo_marcas_modelos',
+            {'marca': m, 'modelo': mod},
+            conflictAlgorithm: ConflictAlgorithm.ignore,
+          );
+          count++;
+        }
+      }
+      await batch.commit(noResult: true);
+      return count;
+    } catch (e) {
+      debugPrint('[LocalDB] Error insertMarcasModelosBatch: $e');
+      return 0;
+    }
   }
 
   // ── UUID v4 simple ────────────────────────────────────────────────────────

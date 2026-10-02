@@ -40,6 +40,24 @@ class ApiService {
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
+  /// Ping al servidor para despertarlo (Cold Start en Render)
+  /// Retorna true si responde 200 OK
+  Future<bool> pingServer() async {
+    try {
+      debugPrint('[API] Enviando ping a $_baseUrl/health ...');
+      // Intentamos con un timeout de 60s para cold start
+      var resp = await http.get(Uri.parse('$_baseUrl/health')).timeout(const Duration(seconds: 60));
+      if (resp.statusCode == 200) return true;
+      
+      debugPrint('[API] /health fallo. Intentando /api/v1/ping ...');
+      resp = await http.get(Uri.parse('$_baseUrl/api/v1/ping')).timeout(const Duration(seconds: 60));
+      return resp.statusCode == 200;
+    } catch (e) {
+      debugPrint('[API] Falló el ping al servidor: $e');
+      return false;
+    }
+  }
+
   /// Intenta autenticarse contra el servidor.
   /// Devuelve null si el login fue exitoso.
   /// Devuelve un String descriptivo si hubo error (para mostrarlo en la UI).
@@ -78,6 +96,16 @@ class ApiService {
           if (_lastNombre != null) {
             await _storage.write(
                 key: 'pesa_nombre_completo', value: _lastNombre);
+          }
+
+          // Si el payload contiene la firma en base64/url, guardarla temporalmente
+          String? firmaCloud = data['firma_base64'] as String? ??
+              data['firma_digital'] as String? ??
+              data['firma_url'] as String? ??
+              data['firma'] as String?;
+          if (firmaCloud != null && firmaCloud.trim().length > 50) {
+            final clean = firmaCloud.contains(',') ? firmaCloud.split(',').last : firmaCloud;
+            await _storage.write(key: 'firma_cloud_login', value: clean.trim());
           }
 
           // Extraer role e id_tecnico del JWT payload
@@ -370,10 +398,20 @@ class ApiService {
 
   // ── Sync Pull ─────────────────────────────────────────────────────────────
 
-  Future<List<Map<String, dynamic>>> syncPull({DateTime? since}) async {
+  Future<List<Map<String, dynamic>>> syncPull({
+    DateTime? since,
+    int? tecnicoId,
+    String? tecnicoNombre,
+  }) async {
     final sinceStr = (since ?? DateTime(2000)).toUtc().toIso8601String();
-    final uri = Uri.parse(
-        '$_baseUrl/api/v1/sync/pull?since=${Uri.encodeComponent(sinceStr)}');
+    var query = 'since=${Uri.encodeComponent(sinceStr)}';
+    if (tecnicoId != null && tecnicoId > 0) {
+      query += '&tecnico_id=$tecnicoId';
+    }
+    if (tecnicoNombre != null && tecnicoNombre.trim().isNotEmpty) {
+      query += '&tecnico_nombre=${Uri.encodeComponent(tecnicoNombre.trim())}';
+    }
+    final uri = Uri.parse('$_baseUrl/api/v1/sync/pull?$query');
 
     debugPrint('[SyncPull] → URL: $uri');
     debugPrint('[SyncPull] → Token presente: ${_token != null}');
@@ -392,16 +430,11 @@ class ApiService {
         final list = jsonDecode(resp.body) as List;
         debugPrint('[SyncPull] ✅ ${list.length} OS recibidas');
         return list.cast<Map<String, dynamic>>();
+      } else {
+        final msg = "Error ${resp.statusCode}: ${resp.body}";
+        debugPrint("[SYNC ERROR] $msg");
+        throw HttpException(msg);
       }
-
-      if (resp.statusCode == 401) {
-        // _getWithRetry ya intentó refresh una vez — si sigue 401 es fallo real
-        debugPrint('[SyncPull] ❌ 401 persistente tras refresh');
-        throw HttpException('Pull failed: 401 {"detail":"Sesión expirada — inicia sesión nuevamente"}');
-      }
-
-      debugPrint('[SyncPull] ❌ ERROR ${resp.statusCode} — Body: ${resp.body}');
-      throw HttpException('Pull failed: ${resp.statusCode} ${resp.body}');
 
     } on TimeoutException catch (e) {
       debugPrint('[SyncPull] ⏱ TIMEOUT (${_syncTimeout.inSeconds}s): $e');
@@ -609,6 +642,39 @@ class ApiService {
     return false;
   }
 
+  /// Elimina en el backend (PostgreSQL en Render) las lecturas metrológicas, dictamen y firmas guardadas.
+  Future<bool> resetTomaEnServidor(String folio) async {
+    final cleanFolio = folio.trim();
+    if (cleanFolio.isEmpty) return false;
+    final uri = Uri.parse('$_baseUrl/api/v1/ordenes/$cleanFolio/toma');
+    debugPrint('[API] resetTomaEnServidor → DELETE $uri');
+    try {
+      var response = await http.delete(uri, headers: _authHeaders).timeout(const Duration(seconds: 15));
+      if (response.statusCode == 401) {
+        final ok = await silentRefresh();
+        if (ok) {
+          response = await http.delete(uri, headers: _authHeaders).timeout(const Duration(seconds: 15));
+        }
+      }
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        debugPrint('[API] ✅ Toma metrológica reseteada en servidor para $cleanFolio');
+        return true;
+      }
+      // Fallback a POST /api/v1/ordenes/$cleanFolio/reset-toma
+      final fbUri = Uri.parse('$_baseUrl/api/v1/ordenes/$cleanFolio/reset-toma');
+      final fbRes = await http.post(fbUri, headers: _authHeaders).timeout(const Duration(seconds: 15));
+      if (fbRes.statusCode == 200 || fbRes.statusCode == 204) {
+        debugPrint('[API] ✅ Toma metrológica reseteada en servidor (vía POST) para $cleanFolio');
+        return true;
+      }
+      debugPrint('[API] ⚠️ Error al resetear toma en servidor: HTTP ${response.statusCode} - ${response.body}');
+    } catch (e) {
+      debugPrint('[API] Excepción al resetear toma en servidor: $e');
+    }
+    return false;
+  }
+
+
   // ── Catálogos ────────────────────────────────────────────────────────────
 
   /// Obtiene una lista de registros de un endpoint de catálogo.
@@ -630,6 +696,50 @@ class ApiService {
     }
     throw HttpException(
         'getCatalogo($endpoint) failed: HTTP ${resp.statusCode}');
+  }
+
+  // ── Catálogo Marcas y Modelos ────────────────────────────────────────────
+
+  /// Obtiene la lista completa de marcas y modelos consolidados desde Render.
+  Future<List<Map<String, dynamic>>> getMarcasModelos() async {
+    try {
+      final uri = Uri.parse('$_baseUrl/api/v1/marcas-modelos');
+      debugPrint('[API] getMarcasModelos → $uri');
+      final resp = await _getWithRetry(uri, timeout: _connTimeout);
+      if (resp.statusCode == 200) {
+        final body = jsonDecode(resp.body);
+        if (body is List) return body.cast<Map<String, dynamic>>();
+        if (body is Map && body.containsKey('items')) {
+          return (body['items'] as List).cast<Map<String, dynamic>>();
+        }
+      }
+      debugPrint('[API] getMarcasModelos falló con status: ${resp.statusCode}');
+    } catch (e) {
+      debugPrint('[API] Error getMarcasModelos: $e');
+    }
+    return [];
+  }
+
+  /// Envía marcas y modelos locales a Render para consolidación.
+  Future<bool> pushMarcasModelos(List<Map<String, String>> items) async {
+    if (items.isEmpty) return true;
+    try {
+      final uri = Uri.parse('$_baseUrl/api/v1/marcas-modelos');
+      debugPrint('[API] pushMarcasModelos (${items.length} items) → $uri');
+      final resp = await _postWithRetry(
+        uri,
+        jsonEncode(items),
+        timeout: _connTimeout,
+      );
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        debugPrint('[API] ✅ Marcas y modelos consolidados en Render exitosamente');
+        return true;
+      }
+      debugPrint('[API] ⚠️ pushMarcasModelos HTTP ${resp.statusCode}: ${resp.body}');
+    } catch (e) {
+      debugPrint('[API] Error pushMarcasModelos: $e');
+    }
+    return false;
   }
 
   // ── Crear Orden de Servicio ───────────────────────────────────────────────
@@ -666,19 +776,32 @@ class ApiService {
   Future<bool> guardarFirmaPerfil(int idTecnico, String firmaBase64) async {
     debugPrint('[API] guardarFirmaPerfil → /api/v1/usuarios/$idTecnico/firma');
     final uri = Uri.parse('$_baseUrl/api/v1/usuarios/$idTecnico/firma');
-    final body = jsonEncode({'firma_digital': firmaBase64});
+    final body = jsonEncode({
+      'firma_digital': firmaBase64,
+      'firma_base64':  firmaBase64,
+      'firma':         firmaBase64,
+    });
 
-    Future<http.Response> doRequest() =>
-        http.put(uri, headers: _authHeaders, body: body)
-            .timeout(_connTimeout);
+    Future<http.Response> doPost() =>
+        http.post(uri, headers: _authHeaders, body: body).timeout(_connTimeout);
+    Future<http.Response> doPut() =>
+        http.put(uri, headers: _authHeaders, body: body).timeout(_connTimeout);
 
-    var resp = await doRequest();
-    if (resp.statusCode == 401) {
+    var resp = await doPost();
+    if (resp.statusCode == 405 || resp.statusCode == 404) {
+      debugPrint('[API] POST retornó ${resp.statusCode}, intentando PUT...');
+      resp = await doPut();
+    } else if (resp.statusCode == 401) {
       final ok = await silentRefresh();
-      if (ok) resp = await doRequest();
+      if (ok) {
+        resp = await doPost();
+        if (resp.statusCode == 405 || resp.statusCode == 404) {
+          resp = await doPut();
+        }
+      }
     }
 
-    if (resp.statusCode == 200) {
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
       debugPrint('[API] ✅ Firma de perfil guardada para técnico $idTecnico');
       return true;
     }
@@ -694,7 +817,9 @@ class ApiService {
       final resp = await _getWithRetry(uri, timeout: _connTimeout);
       if (resp.statusCode == 200) {
         final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        final tiene = data['tiene_firma'] == true;
+        final tiene = data['tiene_firma'] == true ||
+            (data['firma_digital'] != null && data['firma_digital'].toString().length > 50) ||
+            (data['firma_base64'] != null && data['firma_base64'].toString().length > 50);
         debugPrint('[API] verificarFirmaPerfil id=$idTecnico → tiene_firma: $tiene');
         return tiene;
       }
@@ -703,6 +828,31 @@ class ApiService {
       debugPrint('[API] verificarFirmaPerfil error: $e');
     }
     return false;
+  }
+
+  /// Obtiene la firma de perfil guardada del técnico en el servidor.
+  Future<String?> obtenerFirmaPerfil(int idTecnico) async {
+    if (idTecnico <= 0) return null;
+    final uri = Uri.parse('$_baseUrl/api/v1/usuarios/$idTecnico/firma');
+    debugPrint('[API] obtenerFirmaPerfil → $uri');
+    try {
+      final resp = await _getWithRetry(uri, timeout: _connTimeout);
+      if (resp.statusCode == 200) {
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        String? b64 = data['firma_digital'] as String? ??
+            data['firma_base64'] as String? ??
+            data['firma_url'] as String? ??
+            data['firma'] as String?;
+        if (b64 != null && b64.trim().isNotEmpty) {
+          final clean = b64.trim();
+          final pure = clean.contains(',') ? clean.split(',').last : clean;
+          return pure.trim();
+        }
+      }
+    } catch (e) {
+      debugPrint('[API] Error en obtenerFirmaPerfil id=$idTecnico: $e');
+    }
+    return null;
   }
 
   // ── Registro de errores técnicos en campo (v3.1) ─────────────────────────
