@@ -141,6 +141,8 @@ class _OsListScreenState extends State<OsListScreen> {
 
         if (!mounted) return;
 
+        final sync = context.read<SyncService>();
+
         // ── SnackBar flotante: éxito ─────────────────────────────────────
         if (sync.state == SyncState.success) {
           final totalOS = _all.length;
