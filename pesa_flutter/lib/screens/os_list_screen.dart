@@ -759,10 +759,13 @@ class _OsListScreenState extends State<OsListScreen> {
 
     if (context.mounted) {
       if (ok) {
+        // Recargar la lista local de órdenes para refrescar la pantalla y contadores
+        await _loadLocal();
+
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFF2E7D32),
-            content: Text('✅ Orden $folio reseteada a estado inicial correctamente.'),
+          const SnackBar(
+            backgroundColor: Color(0xFF2E7D32),
+            content: Text('✓ Orden reiniciada correctamente. Lista para nueva captura.'),
           ),
         );
       } else {

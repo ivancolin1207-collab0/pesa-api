@@ -670,11 +670,12 @@ class SyncService extends ChangeNotifier {
     if (folioKey.isEmpty) return false;
     try {
       final db = LocalDbService.instance;
-      // 1. Reset en SQLite local
-      await db.resetTomaDesdeCero(folioKey, localId: os['local_id'] as int?);
+      // 1. Reset atómico Offline-First en SQLite local
+      final ok = await db.resetearOrdenLocal(folioKey, localId: os['local_id'] as int?);
 
       // 2. Notificar actualización reactiva en memoria / Provider
       updateLocalOrder(folioKey, {
+        'metrologia_data': null,
         'rep_json': null,
         'exc_json': null,
         'exac_json': null,
@@ -687,26 +688,33 @@ class SyncService extends ChangeNotifier {
         'firma_cliente_nombre': null,
         'puesto_ing': null,
         'nombre_ing': null,
+        'pdf_path': null,
         'pdf_path_local': null,
         'pdf_b64_local': null,
         'pdf_url': null,
+        'has_pdf': 0,
         'pdf_subido': 0,
         'estado': 'PROCESO',
         'estatus': 'Proceso',
-        'sync_status': 'PENDIENTE',
-        'sync_check_status': 'BORRADOR_LOCAL',
+        'sync_status': 'PENDIENTE_RESET',
+        'sync_check_status': 'ASIGNADA',
         'is_dirty': 1,
       });
 
-      // 3. Reset en Backend si hay red
-      try {
-        await ApiService.instance.resetTomaEnServidor(folioKey).timeout(const Duration(seconds: 10));
-      } catch (e) {
-        debugPrint('[SYNC] Reset en servidor falló o sin red (se enviará en PUSH): $e');
-      }
+      // 3. Reset en Backend si hay red en segundo plano (no bloqueante)
+      unawaited(
+        Future(() async {
+          try {
+            await ApiService.instance.resetTomaEnServidor(folioKey).timeout(const Duration(seconds: 10));
+            debugPrint('[SYNC BG] Reset en servidor exitoso para $folioKey');
+          } catch (e) {
+            debugPrint('[SYNC BG] Reset en servidor falló o sin red (se enviará en PUSH): $e');
+          }
+        }),
+      );
 
       notifyListeners();
-      return true;
+      return ok;
     } catch (e) {
       debugPrint('[SYNC] Error al resetear orden $folioKey desde cero: $e');
       return false;

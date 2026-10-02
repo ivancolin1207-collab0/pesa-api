@@ -211,6 +211,9 @@ class LocalDbService {
             'fecha_apertura_admin': 'TEXT',
             'estatus': "TEXT DEFAULT 'PROCESO'",
             'folio': 'TEXT',
+            'has_pdf': 'INTEGER DEFAULT 0',
+            'pdf_path': 'TEXT',
+            'metrologia_data': 'TEXT',
             'is_synced': 'INTEGER DEFAULT 0',
             'is_dirty': 'INTEGER DEFAULT 0',
           };
@@ -1233,52 +1236,104 @@ class LocalDbService {
     }
   }
 
-  /// Reset completo de toma metrológica desde cero (Lecturas, dictamen, firmas y PDF local).
-  Future<void> resetTomaDesdeCero(String folio, {int? localId}) async {
+  /// Reset atómico y tolerante a fallos en SQLite local (Offline-First).
+  Future<bool> resetearOrdenLocal(String folio, {int? localId}) async {
     final folioKey = folio.trim();
-    if (folioKey.isEmpty && localId == null) return;
+    if (folioKey.isEmpty && localId == null) return false;
+
     try {
       final db = await _ensureInit();
-      if (folioKey.isNotEmpty) {
-        await deleteDraft(folioKey);
-        await deletePdfFromDisk(folioKey);
-      }
 
-      final Map<String, dynamic> updateMap = {
+      // 1. Obtener columnas válidas existentes en ordenes_servicio
+      final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+      final validCols = info.map((r) => r['name'] as String).toSet();
+
+      final fullUpdate = <String, dynamic>{
+        'metrologia_data': null,
         'rep_json': null,
         'exc_json': null,
         'exac_json': null,
         'observaciones': null,
         'dictamen': null,
-        'firma_tecnico': null,
-        'firma_tecnico_b64': null,
         'firma_cliente': null,
         'firma_cliente_b64': null,
         'firma_cliente_nombre': null,
         'puesto_ing': null,
         'nombre_ing': null,
+        'firma_tecnico': null,
+        'firma_tecnico_b64': null,
+        'pdf_path': null,
         'pdf_path_local': null,
         'pdf_b64_local': null,
         'pdf_url': null,
+        'has_pdf': 0,
         'pdf_subido': 0,
         'estado': 'PROCESO',
-        'sync_status': 'PENDIENTE',
-        'sync_check_status': 'BORRADOR_LOCAL',
-        'is_dirty': 1,
+        'estatus': 'Proceso',
+        'is_dirty': 1, // Marcar para que la próxima sync limpie el servidor
+        'sync_status': 'PENDIENTE_RESET',
+        'sync_check_status': 'ASIGNADA',
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       };
 
+      final safeUpdate = <String, dynamic>{};
+      for (final entry in fullUpdate.entries) {
+        if (validCols.contains(entry.key)) {
+          safeUpdate[entry.key] = entry.value;
+        }
+      }
+
+      // Aplicar actualización atómica
       if (localId != null && localId > 0) {
-        await db.update('ordenes_servicio', updateMap, where: 'local_id = ?', whereArgs: [localId]);
+        await db.update('ordenes_servicio', safeUpdate, where: 'local_id = ?', whereArgs: [localId]);
       }
       if (folioKey.isNotEmpty) {
-        await db.update('ordenes_servicio', updateMap, where: 'folio_os = ?', whereArgs: [folioKey]);
+        await db.update(
+          'ordenes_servicio',
+          safeUpdate,
+          where: 'folio_os = ? OR folio = ?',
+          whereArgs: [folioKey, folioKey],
+        );
+        // Borrar borrador local si existía
+        try {
+          await deleteDraft(folioKey);
+        } catch (_) {}
       }
-      debugPrint('[LocalDB] resetTomaDesdeCero exitoso para $folioKey (localId: $localId)');
+
+      // 2. Eliminar archivos PDF físicos locales de forma segura
+      try {
+        final dir = await getApplicationDocumentsDirectory();
+        final safeFolio = folioKey.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+        final candidates = [
+          '${dir.path}/pdfs/$safeFolio.pdf',
+          '${dir.path}/pdfs/OS-$safeFolio.pdf',
+          '${dir.path}/Pesa_PDFs/$safeFolio.pdf',
+          '${dir.path}/Pesa_PDFs/OS-$safeFolio.pdf',
+          '${dir.path}/PESA_Tablet/PDF_OS/$safeFolio.pdf',
+        ];
+        for (final p in candidates) {
+          try {
+            final file = File(p);
+            if (await file.exists()) {
+              await file.delete();
+            }
+          } catch (_) {}
+        }
+      } catch (e) {
+        debugPrint('[RESET] Advertencia al borrar archivo PDF físico: $e');
+      }
+
+      debugPrint('[RESET LOCAL] ✅ Orden $folioKey (localId: $localId) reseteada exitosamente en SQLite');
+      return true;
     } catch (e) {
-      debugPrint('[LocalDB] Error en resetTomaDesdeCero: $e');
-      rethrow;
+      debugPrint('[RESET ERROR LOCAL] Error reseteando orden $folio: $e');
+      return false;
     }
+  }
+
+  /// Reset completo de toma metrológica desde cero (Lecturas, dictamen, firmas y PDF local).
+  Future<void> resetTomaDesdeCero(String folio, {int? localId}) async {
+    await resetearOrdenLocal(folio, localId: localId);
   }
 
   /// Guarda la ruta y base64 de un PDF manual cargado por el usuario, marcando la orden como pendiente de subida.
