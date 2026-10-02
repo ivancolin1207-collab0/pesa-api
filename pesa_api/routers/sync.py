@@ -781,17 +781,19 @@ async def sync_push(
             await db.execute(
                 """
                 UPDATE ordenes_servicio 
-                SET pdf_url = $1, pdf_path = $2,
+                SET pdf_url = $1, pdf_path = $2, pdf_b64 = $4,
+                    pdf_generado = TRUE,
                     sync_check_status = CASE 
                         WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN' 
                         ELSE 'SUBIDA_SERVIDOR' 
                     END,
-                    fecha_subida_servidor = COALESCE(fecha_subida_servidor, NOW())
+                    fecha_subida_servidor = COALESCE(fecha_subida_servidor, NOW()),
+                    updated_at = NOW()
                 WHERE id = $3
                 """,
-                f"/uploads/{p_filename}", p_filepath, os_id,
+                f"/uploads/{p_filename}", p_filepath, os_id, payload.pdf_b64,
             )
-            logger.info("[SYNC PUSH] PDF guardado en disco para %s (%d bytes)", payload.folio_os, len(p_bytes))
+            logger.info("[SYNC PUSH] PDF guardado en disco y PostgreSQL para %s (%d bytes)", payload.folio_os, len(p_bytes))
         except Exception as e_pdf_disk:
             logger.warning("[SYNC PUSH] Error guardando PDF en disco: %s", e_pdf_disk)
 

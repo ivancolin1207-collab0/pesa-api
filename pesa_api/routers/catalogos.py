@@ -607,6 +607,89 @@ async def upload_pdf_tablet(
     }
 
 
+# ── Reset / Eliminar toma metrológica desde cero ──────────────────────────────
+
+@router.delete(
+    "/ordenes/{folio}/toma",
+    summary="Eliminar lecturas metrológicas, dictamen y firmas para reiniciar orden",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+@router.post(
+    "/ordenes/{folio}/reset-toma",
+    summary="Alias POST para reiniciar orden metrológica desde cero",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+async def reset_toma_orden(
+    folio: str,
+    db=Depends(get_db),
+):
+    clean_folio = folio.strip()
+    row = await db.fetchrow(
+        "SELECT id, folio_os, estado FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        clean_folio,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"OS '{clean_folio}' no encontrada")
+
+    actual_folio = row["folio_os"]
+    actual_id = row["id"]
+
+    # 1. Purgar tablas de detalle de lecturas
+    await db.execute("DELETE FROM det_repetibilidad WHERE id_os = $1", actual_id)
+    await db.execute("DELETE FROM det_excentricidad WHERE id_os = $1", actual_id)
+    await db.execute("DELETE FROM det_exactitud WHERE id_os = $1", actual_id)
+
+    # 2. Resetear ordenes_servicio a estado inicial 'PROCESO'
+    await db.execute(
+        """
+        UPDATE ordenes_servicio
+        SET estado               = 'PROCESO',
+            estatus              = 'Proceso',
+            dictamen             = NULL,
+            observaciones        = NULL,
+            valor_repetibilidad  = NULL,
+            valor_excentricidad  = NULL,
+            firma_tecnico        = NULL,
+            firma_tecnico_b64    = NULL,
+            firma_cliente        = NULL,
+            firma_cliente_b64    = NULL,
+            nombre_ing           = NULL,
+            puesto_ing           = NULL,
+            firma_cliente_nombre = NULL,
+            pdf_b64              = NULL,
+            pdf_url              = NULL,
+            pdf_path             = NULL,
+            pdf_generado         = FALSE,
+            pdf_descargado       = FALSE,
+            sync_check_status    = 'BORRADOR_LOCAL',
+            fecha_cierre         = NULL,
+            sync_status          = 'PENDIENTE',
+            sync_version         = COALESCE(sync_version, 0) + 1,
+            updated_at           = NOW()
+        WHERE id = $1
+        """,
+        actual_id,
+    )
+
+    # 3. Eliminar archivo PDF de disco en uploads si existía
+    try:
+        upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+        filepath = os.path.join(upload_dir, f"{actual_folio}.pdf")
+        if os.path.exists(filepath):
+            os.remove(filepath)
+    except Exception as e_rm:
+        logger.warning("[RESET TOMA] Error al eliminar PDF de disco: %s", e_rm)
+
+    logger.info("[RESET TOMA] Orden %s (ID %s) reiniciada desde cero exitosamente", actual_folio, actual_id)
+    return {
+        "ok": True,
+        "folio_os": actual_folio,
+        "id": actual_id,
+        "estado": "PROCESO",
+        "detail": "Lecturas, dictamen y firmas eliminadas. Orden reseteada a estado inicial.",
+    }
+
+
 # ── Catálogo Marcas y Modelos Dinámico ─────────────────────────────────────────
 
 class MarcaModeloItem(BaseModel):

@@ -611,3 +611,14 @@ async def sync_data_os(
         "sync_status": "SINCRONIZADO",
     }
 
+
+@router.delete("/{folio_os}/toma", summary="Eliminar toma metrológica desde cero")
+@router.post("/{folio_os}/reset-toma", summary="Alias POST para reiniciar toma metrológica")
+async def reset_toma_endpoint(
+    folio_os: str,
+    db=Depends(get_db),
+):
+    from pesa_api.routers.catalogos import reset_toma_orden
+    return await reset_toma_orden(folio=folio_os, db=db)
+
+
