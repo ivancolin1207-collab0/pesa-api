@@ -105,6 +105,9 @@ class LocalDbService {
           )
         ''');
         await db.execute(_createTableOrdenesSql);
+        try {
+          await db.execute('CREATE VIEW IF NOT EXISTS ordenes AS SELECT *, folio_os AS folio, estado AS estatus FROM ordenes_servicio');
+        } catch (_) {}
         await db.execute('''
           CREATE TABLE IF NOT EXISTS firmas_pendientes (
             local_id      INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -352,6 +355,132 @@ class LocalDbService {
       _initializing = false;
     }
     return _db!;
+  }
+
+  /// Getter público para la instancia de Database SQLite
+  Future<Database> get database => _ensureInit();
+
+  /// Devuelve el total de órdenes en la base local (revisa vista 'ordenes' y tabla 'ordenes_servicio')
+  Future<int> getConteoTotal() async {
+    try {
+      final db = await _ensureInit();
+      try {
+        final c = Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM ordenes')
+        );
+        if (c != null) return c;
+      } catch (_) {}
+      final c2 = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM ordenes_servicio')
+      );
+      return c2 ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Inserta o actualiza un lote de órdenes JSON desde Render en una única transacción atómica
+  Future<int> insertOrdenesBatch(List<Map<String, dynamic>> listaJson) async {
+    if (listaJson.isEmpty) return 0;
+    final db = await _ensureInit();
+    final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+    final validCols = info.map((r) => r['name'] as String).toSet();
+
+    int count = 0;
+    await db.transaction((txn) async {
+      final batch = txn.batch();
+      for (final raw in listaJson) {
+        final folio = (raw['folio_os'] ?? raw['folio'])?.toString().trim();
+        if (folio == null || folio.isEmpty) continue;
+
+        final cliente   = (raw['cliente'] ?? raw['cliente_nombre'] ?? '').toString();
+        final sucursal  = (raw['sucursal'] ?? raw['sucursal_nombre'] ?? '').toString();
+        final tecnico   = (raw['tecnico'] ?? raw['tecnico_nombre'] ?? '').toString();
+        final tipoSvc   = (raw['tipo_servicio'] ?? raw['tipo_servicio_nombre'] ?? '').toString();
+        final direccion = (raw['direccion'] ?? raw['direccion_cliente'] ?? raw['sucursal_direccion'] ?? raw['planta'] ?? '').toString();
+
+        final rawIdTec = _toIntOrNull(raw['id_tecnico'] ?? raw['tecnico_id']);
+        int? idTecnicoFinal = rawIdTec;
+        if (idTecnicoFinal == null || idTecnicoFinal <= 0) {
+          final tecLow = tecnico.toLowerCase();
+          if (tecLow.contains('nestor') || tecLow.contains('néstor')) idTecnicoFinal = 9;
+          else if (tecLow.contains('terrazas')) idTecnicoFinal = 10;
+          else if (tecLow.contains('guevara') || tecLow.contains('daikki')) idTecnicoFinal = 8;
+          else if (tecLow.contains('fernando')) idTecnicoFinal = 4;
+          else if (tecLow.contains('segovia') || tecLow.contains('alessandro')) idTecnicoFinal = 7;
+          else if (tecLow.contains('jimenez') || tecLow.contains('jiménez') || tecLow.contains('jhonny')) idTecnicoFinal = 44;
+          else if (tecLow.contains('landaverde')) idTecnicoFinal = 171;
+          else if (tecLow.contains('adriana')) idTecnicoFinal = 11;
+          else if (tecLow.contains('jessica')) idTecnicoFinal = 1;
+          else if (tecLow.contains('iván') || tecLow.contains('ivan')) idTecnicoFinal = 2;
+        }
+
+        final mapped = <String, dynamic>{
+          'folio_os':          folio,
+          'folio':             folio,
+          'id_tecnico':        idTecnicoFinal,
+          'estado':            (raw['estado'] ?? raw['estatus'] ?? 'PROCESO').toString(),
+          'estatus':           (raw['estado'] ?? raw['estatus'] ?? 'PROCESO').toString(),
+          'modalidad':         (raw['modalidad'] ?? 'DIGITAL').toString(),
+          'fecha':             raw['fecha']?.toString(),
+          'cliente':           cliente,
+          'sucursal':          sucursal,
+          'direccion':         direccion,
+          'tecnico':           tecnico,
+          'tipo_servicio':     tipoSvc,
+          'tipo_instrumento':  raw['tipo_instrumento']?.toString(),
+          'aplica_excentricidad': _toBoolInt(raw['aplica_excentricidad']),
+          'num_celdas_camionera': _toInt(raw['num_celdas_camionera'], 0),
+          'clase_exactitud':   (raw['clase_exactitud'] ?? raw['clase_exactitud_codigo'])?.toString(),
+          'observaciones':     raw['observaciones']?.toString(),
+          'marca':             raw['marca']?.toString(),
+          'modelo':            raw['modelo']?.toString(),
+          'ns':                (raw['ns'] ?? raw['serie'])?.toString(),
+          'ubicacion':         raw['ubicacion']?.toString(),
+          'id_equipo':         raw['id_equipo']?.toString(),
+          'alcance_max':       _toDouble(raw['alcance_max'] ?? raw['capacidad_maxima']),
+          'div_minima':        _toDouble(raw['div_minima'] ?? raw['division_minima']),
+          'div_verificacion':  (raw['div_verificacion'] ?? raw['folio_dve'] ?? raw['numero_dve'] ?? raw['div_ver'])?.toString(),
+          'numero_cca':        (raw['numero_cca'] ?? raw['cca'])?.toString(),
+          'holograma_anterior': raw['holograma_anterior']?.toString(),
+          'holograma_actualizado': (raw['holograma_actualizado'] ?? raw['holograma_nuevo'])?.toString(),
+          'pdf_url':           raw['pdf_url']?.toString(),
+          'instrumento_capacidad': raw['instrumento_capacidad']?.toString(),
+          'instrumento_division':  raw['instrumento_division']?.toString(),
+          'secciones_camionera':   _toInt(raw['secciones_camionera'] ?? raw['num_celdas_camionera'], 0),
+          'num_secciones':         _toInt(raw['num_secciones'], 0),
+          'unidad_medida':     raw['unidad_medida']?.toString() ?? 'kg',
+          'id_lote':           (raw['id_lote'] ?? raw['lote'])?.toString() ?? '',
+          'rango_lote':        raw['rango_lote']?.toString() ?? '',
+          'dictamen':          raw['dictamen']?.toString(),
+          'nombre_ing':        (raw['nombre_ing'] ?? raw['firma_cliente_nombre'])?.toString(),
+          'puesto_ing':        raw['puesto_ing']?.toString(),
+          'firma_cliente_nombre': (raw['firma_cliente_nombre'] ?? raw['nombre_ing'])?.toString(),
+          'firma_tecnico':     (raw['firma_tecnico'] ?? raw['firma_tecnico_b64'])?.toString(),
+          'firma_cliente':     (raw['firma_cliente'] ?? raw['firma_cliente_b64'])?.toString(),
+          'pdf_path_local':    raw['pdf_path_local']?.toString(),
+          'pdf_b64_local':     (raw['pdf_b64_local'] ?? raw['pdf_b64'])?.toString(),
+          'sync_check_status': raw['sync_check_status']?.toString() ?? 'ASIGNADA',
+          'sync_status':       raw['sync_status']?.toString() ?? 'SINCRONIZADO',
+          'is_synced':         1,
+          'is_dirty':          0,
+          'updated_at':        raw['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
+        };
+
+        final safeRow = <String, dynamic>{};
+        for (final entry in mapped.entries) {
+          if (validCols.contains(entry.key)) {
+            safeRow[entry.key] = entry.value;
+          }
+        }
+
+        batch.insert('ordenes_servicio', safeRow,
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        count++;
+      }
+      await batch.commit(noResult: true);
+    });
+    return count;
   }
 
   static String? appDocDirPath;

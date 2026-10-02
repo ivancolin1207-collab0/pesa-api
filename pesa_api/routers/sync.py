@@ -251,8 +251,9 @@ async def sync_pull(
     id_tecnico = current_user.get("id_tecnico") or current_user.get("id")
 
     # Solo roles expresamente de control y administración ven todas las órdenes
+    username_clean = str(current_user.get("username", "")).strip().lower()
     _ADMIN_ROLES = {"admin", "administrador", "superadmin", "direccion", "gerencia"}
-    is_admin   = any(ar in role_norm for ar in _ADMIN_ROLES)
+    is_admin   = any(ar in role_norm for ar in _ADMIN_ROLES) or username_clean == "ivancolin1207"
 
     # [FIX-422] Parseo tolerante de since / updated_after (evita HTTP 422 si el formato difiere)
     raw_date = updated_after or since

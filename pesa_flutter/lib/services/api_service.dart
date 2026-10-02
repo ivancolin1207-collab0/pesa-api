@@ -400,28 +400,40 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> syncPull({
     DateTime? since,
+    String? updatedAfter,
     int? tecnicoId,
     String? tecnicoNombre,
   }) async {
-    final sinceStr = (since ?? DateTime(2000)).toUtc().toIso8601String();
-    var query = 'since=${Uri.encodeComponent(sinceStr)}';
+    final queryParams = <String, String>{};
+
+    final dateParam = updatedAfter ?? (since != null ? since.toUtc().toIso8601String() : null);
+    if (dateParam != null && dateParam.trim().isNotEmpty) {
+      queryParams['since'] = dateParam.trim();
+      queryParams['updated_after'] = dateParam.trim();
+    }
+
     if (tecnicoId != null && tecnicoId > 0) {
-      query += '&tecnico_id=$tecnicoId';
+      queryParams['tecnico_id'] = tecnicoId.toString();
     }
     if (tecnicoNombre != null && tecnicoNombre.trim().isNotEmpty) {
-      query += '&tecnico_nombre=${Uri.encodeComponent(tecnicoNombre.trim())}';
+      queryParams['tecnico_nombre'] = tecnicoNombre.trim();
     }
-    final uri = Uri.parse('$_baseUrl/api/v1/sync/pull?$query');
+
+    // Si updatedAfter == null y no hay fecha: consultar directamente GET /api/v1/ordenes sin filtros de fecha
+    final endpointPath = (dateParam == null || dateParam.trim().isEmpty)
+        ? '/api/v1/ordenes'
+        : '/api/v1/sync/pull';
+
+    final baseUri = Uri.parse('$_baseUrl$endpointPath');
+    final uri = queryParams.isNotEmpty
+        ? baseUri.replace(queryParameters: queryParams)
+        : baseUri;
 
     debugPrint('[SyncPull] → URL: $uri');
     debugPrint('[SyncPull] → Token presente: ${_token != null}');
     debugPrint('[SyncPull] → Timeout: ${_syncTimeout.inSeconds}s');
 
     try {
-      // [FIX] NO llamar silentRefresh() aquí — causa cuelgue de 90s.
-      // Si el token es inválido, el servidor responderá 401 y _getWithRetry
-      // ejecutará silentRefresh con timeout adecuado en ese momento.
-
       final resp = await _getWithRetry(uri, timeout: _syncTimeout);
 
       debugPrint('[SyncPull] ← HTTP ${resp.statusCode}');
@@ -446,6 +458,19 @@ class ApiService {
       debugPrint('[SyncPull] 💥 EXCEPCIÓN INESPERADA: $e\n$st');
       rethrow;
     }
+  }
+
+  /// Consulta directa a GET /api/v1/ordenes para descarga completa o con filtros
+  Future<List<Map<String, dynamic>>> getOrdenes({
+    String? updatedAfter,
+    int? tecnicoId,
+    String? tecnicoNombre,
+  }) async {
+    return syncPull(
+      updatedAfter: updatedAfter,
+      tecnicoId: tecnicoId,
+      tecnicoNombre: tecnicoNombre,
+    );
   }
 
   // ── Sync Push ─────────────────────────────────────────────────────────────

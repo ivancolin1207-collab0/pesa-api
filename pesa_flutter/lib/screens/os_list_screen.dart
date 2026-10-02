@@ -135,16 +135,9 @@ class _OsListScreenState extends State<OsListScreen> {
 
         if (!mounted) return;
 
-        final sync = context.read<SyncService>();
-        if (sync.orders.isNotEmpty) {
-          setState(() {
-            _all     = List<Map<String, dynamic>>.from(sync.orders);
-            _loading = false;
-          });
-          await _applyFilters();
-        } else {
-          await _loadLocal();
-        }
+        // Refrescar dashboard incondicionalmente leyendo directo de SQLite
+        await context.read<SyncService>().cargarOrdenes();
+        await _loadLocal();
 
         if (!mounted) return;
 

@@ -9,6 +9,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 import 'api_service.dart';
 import 'auth_service.dart';
 import 'local_db_service.dart';
@@ -48,9 +49,11 @@ class SyncService extends ChangeNotifier {
   int get kpiCerrado => _kpiCerrado;
   int get kpiFisico  => _kpiFisico;
 
-  /// Resguardo de base local: si la red falla o retorna error,
-  /// muestra de inmediato los datos locales de SQLite para que nunca quede en ceros.
-  Future<void> _fallbackCargarLocal() async {
+  /// Alias de conveniencia para sincronizar todo
+  Future<void> sincronizarTodo() => performSync();
+
+  /// Recarga incondicionalmente las órdenes desde SQLite hacia la memoria del servicio y actualiza contadores
+  Future<void> cargarOrdenes() async {
     try {
       final db = LocalDbService.instance;
       final usuario = AuthService.usuarioActual;
@@ -59,15 +62,16 @@ class SyncService extends ChangeNotifier {
           (userRole.contains('tec') || userRole.contains('serv') || userRole.contains('oper'));
       final idTecnico = usuario?.id ?? ApiService.instance.lastIdTecnico;
       final currentNombre = usuario?.nombre ?? ApiService.instance.lastNombre;
+      final isAdmin = !isTecnicoUser && (userRole.contains('admin') || userRole.contains('logist') || userRole.contains('recep') || (usuario?.username.toLowerCase() == 'ivancolin1207'));
 
-      var localDbOrders = isTecnicoUser
-          ? await db.getOsForTecnico(
+      var localDbOrders = (isAdmin || !isTecnicoUser)
+          ? await db.getAllOs()
+          : await db.getOsForTecnico(
               nombreTecnico: currentNombre,
               idTecnico: idTecnico,
-            )
-          : await db.getAllOs();
+            );
 
-      if (localDbOrders.isEmpty && isTecnicoUser) {
+      if (localDbOrders.isEmpty && isTecnicoUser && !isAdmin) {
         final all = await db.getAllOs();
         if (all.isNotEmpty) {
           final myNom = (currentNombre ?? '').toLowerCase().trim();
@@ -83,13 +87,17 @@ class SyncService extends ChangeNotifier {
         }
       }
 
-      if (localDbOrders.isNotEmpty) {
-        setOrdersFromPull(localDbOrders);
-      }
+      setOrdersFromPull(localDbOrders);
+      debugPrint('[Sync] Dashboard recargado incondicionalmente desde SQLite: ${localDbOrders.length} OS');
+      notifyListeners();
     } catch (e) {
-      debugPrint('[Sync Fallback Local] Error: $e');
+      debugPrint('[Sync cargarOrdenes] Error: $e');
     }
   }
+
+  /// Resguardo de base local: si la red falla o retorna error,
+  /// muestra de inmediato los datos locales de SQLite para que nunca quede en ceros.
+  Future<void> _fallbackCargarLocal() => cargarOrdenes();
 
   /// Asigna directamente la lista de órdenes recibidas en memoria
   /// y actualiza de inmediato las variables reactivas de los contadores.
@@ -345,19 +353,41 @@ class SyncService extends ChangeNotifier {
         debugPrint('[Sync PUSH Firmas] Error ignorado: $e');
       }
 
-      // ── Fase 2: PULL diferencial — timeout estricto 20s, manejo de 401 ───
-      // Usa el timestamp de SharedPreferences (lectura en RAM, sin abrir SQLite)
+      // ── Fase 2: PULL diferencial — verificación de conteo local y reset si vacía ───
+      final db = await LocalDbService.instance.database;
+      final prefs = await SharedPreferences.getInstance();
+
+      int conteoLocal = 0;
+      try {
+        conteoLocal = Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM ordenes')
+        ) ?? 0;
+      } catch (_) {
+        conteoLocal = Sqflite.firstIntValue(
+          await db.rawQuery('SELECT COUNT(*) FROM ordenes_servicio')
+        ) ?? 0;
+      }
+
+      String? updatedAfter;
+      if (conteoLocal > 0) {
+        updatedAfter = prefs.getString('last_sync_timestamp');
+      } else {
+        // SI LOCAL ESTÁ EN 0, OBLIGAR CARGA COMPLETA
+        debugPrint("[SYNC] Base local vacía (0 registros). Forzando PULL completo sin updated_after.");
+        await prefs.remove('last_sync_timestamp');
+        await LocalDbService.instance.resetLastSyncTime();
+        updatedAfter = null;
+      }
+
       _message = 'Descargando órdenes...';
       notifyListeners();
 
       try {
-        final pullCount = await _pullNuevos().timeout(
-          const Duration(seconds: 18),
+        final pullCount = await _pullNuevos(updatedAfter: updatedAfter).timeout(
+          const Duration(seconds: 25),
           onTimeout: () {
-            // Timeout silencioso: Render puede tardar hasta 15s en cold start.
-            // Sirve los datos locales inmediatamente para no dejar el dashboard en ceros.
-            debugPrint('[Sync PULL] ⏱ TIMEOUT 18s — sirviendo datos locales inmediatamente');
-            _fallbackCargarLocal(); // ← CLAVE: restaurar desde SQLite
+            debugPrint('[Sync PULL] ⏱ TIMEOUT 25s — sirviendo datos locales inmediatamente');
+            _fallbackCargarLocal();
             return 0;
           },
         );
@@ -476,12 +506,15 @@ class SyncService extends ChangeNotifier {
         _message = _errorMessage ?? 'Sincronización interrumpida. Toca para reintentar.';
       }
       notifyListeners();
-      // Persistir timestamp en SharedPreferences (lectura ultrarápida en RAM)
-      // para que el próximo ciclo evite abrir SQLite solo para leer last_sync.
+      // Persistir timestamp en SharedPreferences SOLO si el sync fue exitoso Y SQLite tiene registros
+      // (evita guardar timestamp si la base local quedó vacía).
       if (_state == SyncState.success) {
         try {
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('last_sync_timestamp', DateTime.now().toIso8601String());
+          final countNow = await LocalDbService.instance.getConteoTotal();
+          if (countNow > 0) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('last_sync_timestamp', DateTime.now().toIso8601String());
+          }
         } catch (_) {}
       }
       notifyListeners();
@@ -842,24 +875,9 @@ class SyncService extends ChangeNotifier {
   //   Si lastSync existe → ?since=timestamp → backend retorna 2-3 OS en vez de 235.
   //   Si es primera vez → since=null → pull completo.
 
-  Future<int> _pullNuevos() async {
+  Future<int> _pullNuevos({String? updatedAfter}) async {
     final db = LocalDbService.instance;
-
-    // ── SINCRONIZACIÓN DIFERENCIAL ULTRA RÁPIDA ──────────────────────────────
-    // 1. Leer primero de SharedPreferences (en RAM, sin abrir SQLite)
-    // 2. Fallback a SQLite si no hay valor en cache
-    DateTime? lastSyncTs;
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final cachedTs = prefs.getString('last_sync_timestamp');
-      if (cachedTs != null && cachedTs.isNotEmpty) {
-        lastSyncTs = DateTime.tryParse(cachedTs);
-        debugPrint('[Sync PULL] timestamp desde SharedPreferences (RAM): $lastSyncTs');
-      }
-    } catch (_) {}
-
-    // Fallback: leer de SQLite si SharedPreferences no tiene valor
-    lastSyncTs ??= await db.getLastSyncTime();
+    final prefs = await SharedPreferences.getInstance();
 
     final usuario       = AuthService.usuarioActual;
     final userRole      = (usuario?.rol ?? ApiService.instance.userRole ?? '').toLowerCase();
@@ -867,31 +885,46 @@ class SyncService extends ChangeNotifier {
         (userRole.contains('tec') || userRole.contains('serv') || userRole.contains('oper'));
     final idTecnico     = usuario?.id ?? ApiService.instance.lastIdTecnico;
     final currentNombre = usuario?.nombre ?? ApiService.instance.lastNombre;
-    final isAdmin       = !isTecnicoUser && (userRole.contains('admin') || userRole.contains('logist') || userRole.contains('recep'));
+    final isAdmin       = !isTecnicoUser && (userRole.contains('admin') || userRole.contains('logist') || userRole.contains('recep') || (usuario?.username.toLowerCase() == 'ivancolin1207'));
 
-    final isFirstSync = lastSyncTs == null;
+    // Si no se proporcionó updatedAfter, verificar conteo local en SQLite
+    String? effectiveUpdatedAfter = updatedAfter;
+    if (effectiveUpdatedAfter == null) {
+      final conteoLocal = await db.getConteoTotal();
+      if (conteoLocal > 0) {
+        effectiveUpdatedAfter = prefs.getString('last_sync_timestamp');
+      } else {
+        debugPrint("[SYNC] Base local vacía (0 registros). Forzando PULL completo sin updated_after.");
+        await prefs.remove('last_sync_timestamp');
+        await db.resetLastSyncTime();
+        effectiveUpdatedAfter = null;
+      }
+    }
 
-    debugPrint('[Sync PULL] ${isFirstSync ? "CARGA INICIAL COMPLETA" : "INCREMENTAL desde $lastSyncTs"}');
-    debugPrint('[Sync PULL] URL: ${ApiService.instance.baseUrl}/api/v1/sync/pull');
-    debugPrint('[Sync PULL] id_tecnico=$idTecnico | role=$userRole | isTecnicoUser=$isTecnicoUser | nombre=$currentNombre');
+    final isFirstSync = effectiveUpdatedAfter == null;
+
+    debugPrint('[Sync PULL] ${isFirstSync ? "CARGA INICIAL COMPLETA" : "INCREMENTAL desde $effectiveUpdatedAfter"}');
+    debugPrint('[Sync PULL] isAdmin=$isAdmin | isTecnicoUser=$isTecnicoUser | id_tecnico=$idTecnico | nombre=$currentNombre');
 
     try {
-      // En pull incremental enviamos el timestamp y forzosamente filtro de técnico si rol == TECNICO
+      // Para Administrador (Iván Colín): NO enviar ningún parámetro tecnico en el query string. Traer todo el lote.
+      // Si updatedAfter == null: Traer sin parámetros de fecha.
       final osList = await ApiService.instance.syncPull(
-        since: lastSyncTs,
-        tecnicoId: isTecnicoUser ? idTecnico : null,
-        tecnicoNombre: isTecnicoUser ? currentNombre : null,
+        updatedAfter: effectiveUpdatedAfter,
+        since: effectiveUpdatedAfter != null ? DateTime.tryParse(effectiveUpdatedAfter) : null,
+        tecnicoId: (isAdmin || !isTecnicoUser) ? null : idTecnico,
+        tecnicoNombre: (isAdmin || !isTecnicoUser) ? null : currentNombre,
       ).timeout(
-        const Duration(seconds: 20),
+        const Duration(seconds: 25),
         onTimeout: () {
-          debugPrint('[Sync PULL] ⏱ TIMEOUT 20s — abortando pull');
-          throw TimeoutException('PULL timeout 20s');
+          debugPrint('[Sync PULL] ⏱ TIMEOUT 25s — abortando pull');
+          throw TimeoutException('PULL timeout 25s');
         },
       );
       debugPrint('[Sync PULL] RECIBIDAS: ${osList.length} OS del servidor');
 
       // ── Privacidad estricta: purgar órdenes de otros técnicos si no es admin ──
-      if (isTecnicoUser) {
+      if (isTecnicoUser && !isAdmin) {
         await db.purgarOrdenesDeOtrosTecnicos(
           currentIdTecnico: idTecnico,
           currentNombre: currentNombre,
@@ -899,35 +932,21 @@ class SyncService extends ChangeNotifier {
         );
       }
 
-      // Si el servidor retorna 0 en pull incremental:
-      // - Si ya tenemos órdenes en memoria (→ sin cambios nuevos, OK)
-      // - Si _orders está vacío (primera carga real o sección después de reinstalación)
-      //   → FORZAR carga completa desde SQLite local independientemente del timestamp
+      // Si el servidor retorna 0 en pull:
       if (osList.isEmpty) {
-        debugPrint('[Sync PULL] Sin cambios nuevos desde $lastSyncTs');
-        if (_orders.isEmpty) {
-          debugPrint('[Sync PULL] _orders está vacío — forzando recarga COMPLETA desde SQLite');
-          // Resetear timestamp para que el próximo pull sea completo (force full pull)
-          final prefs = await SharedPreferences.getInstance();
+        debugPrint('[Sync PULL] Sin cambios nuevos desde $effectiveUpdatedAfter');
+        final conteoLocal = await db.getConteoTotal();
+        if (conteoLocal == 0) {
+          debugPrint('[Sync PULL] Base local vacía (0 registros) pero server retornó 0. Removiendo timestamp.');
           await prefs.remove('last_sync_timestamp');
           await db.resetLastSyncTime();
-          // Cargar de SQLite
-          final localDbOrders = isTecnicoUser
-              ? await db.getOsForTecnico(
-                  nombreTecnico: currentNombre,
-                  idTecnico: idTecnico,
-                )
-              : await db.getAllOs();
-          setOrdersFromPull(localDbOrders);
-          debugPrint('[Sync PULL] Cargadas ${localDbOrders.length} OS desde SQLite local (recuperación)');
-        } else {
-          debugPrint('[Sync PULL] Manteniendo ${_orders.length} OS en memoria — sin cambios del servidor');
         }
+        await cargarOrdenes();
         return 0;
       }
 
-      // Filtrar por técnico en memoria (solo si es técnico)
-      final filteredList = (isTecnicoUser)
+      // Filtrar por técnico en memoria (solo si es técnico y no admin)
+      final filteredList = (isTecnicoUser && !isAdmin)
           ? osList.where((o) {
               final oId = int.tryParse(o['id_tecnico']?.toString() ?? '');
               if (oId != null && oId > 0 && idTecnico != null && idTecnico > 0) {
@@ -942,112 +961,23 @@ class SyncService extends ChangeNotifier {
             }).toList()
           : osList;
 
-      // ── Guardar en SQLite con lógica de inmunidad local ──────────────────
-      int guardadas = 0;
-      String? lastErr;
+      // ── Inserción en bloque con transacción atómica en SQLite ──────────────
+      final insertedCount = await db.insertOrdenesBatch(filteredList);
+      debugPrint('[Sync PULL] ✅ Guardadas $insertedCount órdenes en bloque atómico en SQLite');
 
-      for (final remoteOrder in filteredList) {
-        final folio = (remoteOrder['folio_os'] ?? remoteOrder['folio'])?.toString().trim();
-        if (folio == null || folio.isEmpty) continue;
-
-        final localOrder    = await db.getOsByFolio(folio);
-        final pdfDiskExists = await db.checkPdfExistsOnDisk(folio, localOrder?['pdf_path_local']?.toString());
-
-        bool isLocalClosed   = false;
-        bool hasLocalChanges = false;
-
-        if (localOrder != null) {
-          final localEstado  = (localOrder['estado']  as String? ?? '').toUpperCase().trim();
-          final localEstatus = (localOrder['estatus'] as String? ?? '').toUpperCase().trim();
-          final syncCheckSt  = (localOrder['sync_check_status'] as String? ?? '').toUpperCase().trim();
-          final pdfPath      = localOrder['pdf_path_local']?.toString().trim();
-          final pdfB64       = localOrder['pdf_b64_local']?.toString().trim();
-          final isDirty      = (localOrder['is_dirty'] as int? ?? 0);
-          final hasPdf       = (pdfPath != null && pdfPath.isNotEmpty) || (pdfB64 != null && pdfB64.isNotEmpty) || pdfDiskExists;
-
-          isLocalClosed = localEstatus == 'CERRADO' || localEstatus == 'CERRADA' ||
-              {'CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA'}.contains(localEstado) || hasPdf;
-          hasLocalChanges = isDirty == 1 ||
-              (syncCheckSt != 'SUBIDA_SERVIDOR' && syncCheckSt != 'AUDITADA_ADMIN' && syncCheckSt != 'ABIERTO');
-        } else if (pdfDiskExists) {
-          isLocalClosed = true;
-        }
-
-        if (isLocalClosed || hasLocalChanges) {
-          debugPrint('[Sync PULL] 🛡 INMUNIDAD: preservando $folio (closed=$isLocalClosed, dirty=$hasLocalChanges)');
-          final mergedLocal = localOrder != null
-              ? Map<String, dynamic>.from(localOrder)
-              : Map<String, dynamic>.from(remoteOrder);
-          String? validPath = mergedLocal['pdf_path_local']?.toString();
-          if ((validPath == null || validPath.isEmpty) && pdfDiskExists) {
-            validPath = await db.resolvePdfPathFromDisk(folio);
-          }
-          if (validPath != null && validPath.isNotEmpty) mergedLocal['pdf_path_local'] = validPath;
-          if (isLocalClosed || pdfDiskExists) {
-            mergedLocal['estatus'] = 'Cerrado';
-            mergedLocal['estado']  = (mergedLocal['estado'] != null && mergedLocal['estado'].toString().isNotEmpty && mergedLocal['estado'] != 'PROCESO')
-                ? mergedLocal['estado']
-                : 'COMPLETADA_DIGITAL';
-          }
-          await db.upsertOs(mergedLocal);
-          guardadas++;
-        } else {
-          final ok = await db.upsertOs(remoteOrder);
-          if (ok) guardadas++; else lastErr = db.lastUpsertError;
-        }
+      // Solo DESPUÉS de confirmar que se insertaron registros con éxito, actualizar:
+      if (insertedCount > 0) {
+        await prefs.setString('last_sync_timestamp', DateTime.now().toIso8601String());
+        await db.setLastSyncTime(DateTime.now());
       }
 
-      // ── Actualizar dashboard: merge incremental (no reemplazar todo) ──────
-      if (isFirstSync || _orders.isEmpty) {
-        // Carga inicial O _orders vacío (reinstalación, logout/login): leer todo de SQLite
-        final allLocal = isTecnicoUser
-            ? await db.getOsForTecnico(
-                nombreTecnico: currentNombre,
-                idTecnico: idTecnico,
-              )
-            : await db.getAllOs();
-        setOrdersFromPull(allLocal);
-        debugPrint('[Sync PULL] Dashboard recargado desde SQLite: ${allLocal.length} OS');
-      } else {
-        // Pull incremental: parchear SOLO las órdenes que llegaron
-        for (final o in filteredList) {
-          final folio = (o['folio_os'] ?? o['folio'])?.toString().trim();
-          if (folio == null || folio.isEmpty) continue;
-          final idx = _orders.indexWhere((r) =>
-              (r['folio_os']?.toString().trim() == folio) ||
-              (r['folio']?.toString().trim() == folio));
-          if (idx >= 0) {
-            _orders[idx] = {..._orders[idx], ...o};  // parchear fila existente
-          } else {
-            _orders.add(o);  // nueva orden asignada
-          }
-        }
-        // Si es técnico, depurar _orders para que NUNCA contenga órdenes de otros técnicos
-        if (isTecnicoUser) {
-          final myNom = (currentNombre ?? '').toLowerCase().trim();
-          _orders.removeWhere((o) {
-            final oId = int.tryParse(o['id_tecnico']?.toString() ?? '');
-            if (oId != null && oId > 0 && idTecnico != null && idTecnico > 0) {
-              if (oId != idTecnico) return true;
-            }
-            final tec = (o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '').toLowerCase().trim();
-            if (myNom.isNotEmpty) {
-              return !(tec == myNom || tec.contains(myNom) || myNom.contains(tec));
-            }
-            return false;
-          });
-        }
-        _updateCounters(_orders);
-        notifyListeners();
-      }
+      // ── Refrescar dashboard incondicionalmente desde SQLite ──────────────
+      await cargarOrdenes();
 
-      await db.setLastSyncTime(DateTime.now().toUtc());
-      debugPrint('[Sync PULL] Persistencia SQLite: $guardadas/${filteredList.length} guardadas (lastErr: $lastErr)');
-      return filteredList.length;
+      return insertedCount;
 
     } catch (e, st) {
-      debugPrint('[Sync PULL] ERROR GRAVE: $e');
-      debugPrint(st.toString());
+      debugPrint('[Sync PULL] ERROR: $e\n$st');
       rethrow;
     }
   }
