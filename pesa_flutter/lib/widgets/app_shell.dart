@@ -12,7 +12,7 @@ import '../services/sync_service.dart';
 const _red         = Color(0xFFB81D24);
 const _redLight    = Color(0xFFFEE2E2); // fondo ítem activo
 const _sidebarBg   = Colors.white;
-const _sidebarW    = 220.0;
+const _sidebarW    = 240.0;
 const _textActive  = Color(0xFFB81D24);
 const _textInact   = Color(0xFF4B5563);
 const _divider     = Color(0xFFE5E7EB);
@@ -79,9 +79,6 @@ class _NavItem {
   const _NavItem({required this.icon, required this.label, required this.route});
 }
 
-enum _SidebarMode { expanded, collapsed }
-
-/// Shell principal — sidebar permanente/colapsable/ocultable en landscape/tablet, Drawer nativo en móvil
 class AppShell extends StatefulWidget {
   final Widget child;
   final String currentRoute;
@@ -99,7 +96,7 @@ class AppShell extends StatefulWidget {
     } else {
       final state = context.findAncestorStateOfType<_AppShellState>();
       if (state != null) {
-        state._cycleSidebarMode();
+        state.toggleSidebar();
       }
     }
   }
@@ -110,13 +107,11 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   StreamSubscription? _sessionSub;
-  _SidebarMode _sidebarMode = _SidebarMode.expanded;
+  bool _isSidebarOpen = true;
 
-  void _cycleSidebarMode() {
+  void toggleSidebar() {
     setState(() {
-      _sidebarMode = (_sidebarMode == _SidebarMode.expanded)
-          ? _SidebarMode.collapsed
-          : _SidebarMode.expanded;
+      _isSidebarOpen = !_isSidebarOpen;
     });
   }
 
@@ -183,28 +178,30 @@ class _AppShellState extends State<AppShell> {
     final isTabletOrDesktop = media.size.width >= 768 || media.orientation == Orientation.landscape;
 
     if (isTabletOrDesktop) {
-      final double width = _sidebarMode == _SidebarMode.expanded ? _sidebarW : 64.0;
-
       return Scaffold(
         backgroundColor: _bgGeneral,
         body: Row(children: [
           AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
+            duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
-            width: width,
+            width: _isSidebarOpen ? _sidebarW : 0.0,
             color: _sidebarBg,
             decoration: const BoxDecoration(
               border: Border(right: BorderSide(color: _divider)),
             ),
-            child: ClipRect(
-              child: OverflowBox(
-                maxWidth: _sidebarW,
-                minWidth: _sidebarW,
-                alignment: Alignment.topLeft,
-                child: _SidebarContent(
-                  currentRoute: widget.currentRoute,
-                  collapsed: _sidebarMode == _SidebarMode.collapsed,
-                  onToggle: _cycleSidebarMode,
+            child: Visibility(
+              visible: _isSidebarOpen,
+              maintainState: true,
+              child: ClipRect(
+                child: OverflowBox(
+                  maxWidth: _sidebarW,
+                  minWidth: _sidebarW,
+                  alignment: Alignment.topLeft,
+                  child: _SidebarContent(
+                    currentRoute: widget.currentRoute,
+                    collapsed: false,
+                    onToggle: toggleSidebar,
+                  ),
                 ),
               ),
             ),
@@ -254,8 +251,8 @@ class _SidebarContent extends StatelessWidget {
             children: [
               if (onToggle != null)
                 IconButton(
-                  icon: const Icon(Icons.menu_rounded, color: Color(0xFF374151), size: 22),
-                  tooltip: collapsed ? 'Expandir menú' : 'Contraer menú',
+                  icon: const Icon(Icons.menu_open_rounded, color: Color(0xFF374151), size: 22),
+                  tooltip: 'Cerrar menú lateral',
                   onPressed: onToggle,
                 ),
               if (!collapsed) ...[

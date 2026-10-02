@@ -380,39 +380,45 @@ class _OsListScreenState extends State<OsListScreen> {
   }
 
   // ── Helpers de Estado de Ordenes ──────────────────────────────────────────
-  static bool tienePdfReal(Map<String, dynamic> orden) {
-    final folioStr = (orden['folio_os'] as String? ?? orden['folio'] as String? ?? '').trim();
-    final localPdfPath = (orden['pdf_path_local'] as String? ?? '').trim();
-    final bool hasPdfOnDisk = (localPdfPath.isNotEmpty && File(localPdfPath).existsSync()) ||
-        LocalDbService.instance.checkPdfExistsOnDiskSync(folioStr, localPdfPath);
+  static bool tieneDocumento(Map<String, dynamic> o) {
+    final folioStr = (o['folio_os'] as String? ?? o['folio'] as String? ?? '').trim();
+    final String? pdfPath = (o['pdf_path'] ?? o['pdf_path_local'])?.toString().trim();
+    final String? pdfUrl = o['pdf_url']?.toString().trim();
+    final bool hasPdfFlag = (o['has_pdf'] == 1 || o['has_pdf'] == '1' || o['has_pdf'] == true || o['pdf_subido'] == 1);
 
-    final rawEstatus = (orden['estatus'] ?? orden['estado'] ?? '').toString().trim().toUpperCase();
-    final isCerrado = rawEstatus == 'CERRADO' ||
-        rawEstatus == 'CERRADA' ||
-        rawEstatus == 'COMPLETADO' ||
-        rawEstatus == 'COMPLETADA' ||
-        rawEstatus == 'FIRMADA' ||
-        rawEstatus == 'COMPLETADA_DIGITAL' ||
-        rawEstatus == 'COMPLETADA_FISICA';
+    final metro = o['metrologia_data'] ?? o['rep_json'] ?? o['exac_json'];
+    final bool tieneMetrologia = metro != null &&
+        metro.toString().trim().isNotEmpty &&
+        metro.toString().trim() != '{}' &&
+        metro.toString().trim() != '[]' &&
+        metro.toString().trim() != 'null';
 
-    final hasPdfField = orden['has_pdf'] == 1 ||
-        orden['has_pdf'] == '1' ||
-        orden['has_pdf'] == true ||
-        (orden['pdf_path'] != null && orden['pdf_path'].toString().trim().isNotEmpty) ||
-        (orden['pdf_url'] != null && orden['pdf_url'].toString().trim().isNotEmpty) ||
-        (orden['pdf_b64_local'] != null && orden['pdf_b64_local'].toString().trim().isNotEmpty) ||
-        hasPdfOnDisk;
+    // Verificar si el archivo existe físicamente en el almacenamiento local:
+    bool fileExiste = false;
+    final String? localPath = o['pdf_path_local']?.toString().trim();
+    if (localPath != null && localPath.isNotEmpty) {
+      try {
+        fileExiste = File(localPath).existsSync();
+      } catch (_) {}
+    }
+    if (!fileExiste && pdfPath != null && pdfPath.isNotEmpty) {
+      try {
+        fileExiste = File(pdfPath).existsSync();
+      } catch (_) {}
+    }
+    if (!fileExiste && folioStr.isNotEmpty) {
+      fileExiste = LocalDbService.instance.checkPdfExistsOnDiskSync(folioStr, localPath ?? pdfPath);
+    }
 
-    return hasPdfField && (isCerrado || hasPdfOnDisk);
+    final bool hasB64 = (o['pdf_b64_local']?.toString().length ?? 0) > 100;
+
+    return hasPdfFlag || (pdfUrl != null && pdfUrl.isNotEmpty) || tieneMetrologia || fileExiste || hasB64;
   }
 
-  static bool sinIniciar(Map<String, dynamic> orden) {
-    if (tienePdfReal(orden)) return false;
-    final metro = orden['metrologia_data'] ?? orden['rep_json'] ?? orden['exac_json'];
-    if (metro == null) return true;
-    final s = metro.toString().trim();
-    return s.isEmpty || s == '{}' || s == '[]';
-  }
+  /// Alias para retrocompatibilidad
+  static bool tienePdfReal(Map<String, dynamic> orden) => tieneDocumento(orden);
+
+  static bool sinIniciar(Map<String, dynamic> orden) => !tieneDocumento(orden);
 
   // ── KPIs ─────────────────────────────────────────────────────────────────
   int get _kpiTotal => _filtered.length;
@@ -1973,34 +1979,19 @@ class _TabletDesktopDashboard extends StatelessWidget {
           onSearch:    (v) { state.setState(() => state._query = v); state._applyFilters(); },
           onClear:     ()  { state._searchCtrl.clear(); state.setState(() => state._query = ''); state._applyFilters(); },
         ),
-        // Table Header & Rows with Horizontal Scroll & MinWidth Protection
+        // Table Header & Rows (CERO SCROLL HORIZONTAL - 2 Niveles)
         Expanded(
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final double minTableWidth = hideTecnico ? 1050.0 : 1160.0;
-              final double tableWidth = constraints.maxWidth > minTableWidth
-                  ? constraints.maxWidth
-                  : minTableWidth;
-
-              return SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: tableWidth,
-                  child: Column(
-                    children: [
-                      _TableHeader(hideTecnico: hideTecnico),
-                      Expanded(
-                        child: state._loading
-                            ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
-                            : state._filtered.isEmpty
-                                ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
-                                : _buildTabletGroupedList(context),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
+          child: Column(
+            children: [
+              _TableHeader(hideTecnico: hideTecnico),
+              Expanded(
+                child: state._loading
+                    ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
+                    : state._filtered.isEmpty
+                        ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
+                        : _buildTabletGroupedList(context),
+              ),
+            ],
           ),
         ),
         SizedBox(height: bottom > 0 ? bottom : 8),
@@ -2063,6 +2054,12 @@ class _Header extends StatelessWidget {
       ),
       child: Row(
         children: [
+          IconButton(
+            icon: const Icon(Icons.menu_rounded, color: _kTextPrim, size: 24),
+            tooltip: 'Alternar menú lateral',
+            onPressed: () => AppShell.toggleMenu(context),
+          ),
+          const SizedBox(width: 4),
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(color: _kCarmineRed, borderRadius: BorderRadius.circular(8)),
@@ -2499,6 +2496,7 @@ class _DropdownFilter extends StatelessWidget {
 }
 
 // ── Table Header (Tablet / Desktop - Weighted Auto-Stretch Columns) ───────
+// ── Table Header (Tablet / Desktop - 6 Columnas Nivel 1) ─────────────────
 class _TableHeader extends StatelessWidget {
   final bool hideTecnico;
   const _TableHeader({this.hideTecnico = false});
@@ -2511,23 +2509,17 @@ class _TableHeader extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
-      child: Row(
+      child: const Row(
         children: [
-          const SizedBox(width: 130, child: _TH('FOLIO OS')),
-          const SizedBox(width: 100, child: _TH('FECHA')),
+          SizedBox(width: 130, child: _TH('FOLIO OS')),
+          SizedBox(width: 95, child: _TH('FECHA')),
           Expanded(
             flex: 3,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 180),
-              child: const _TH('CLIENTE / SUCURSAL'),
-            ),
+            child: _TH('CLIENTE / SUCURSAL'),
           ),
-          if (!hideTecnico)
-            const SizedBox(width: 110, child: _TH('TÉCNICO')),
-          const SizedBox(width: 100, child: _TH('MODALIDAD')),
-          const SizedBox(width: 90, child: _TH('ESTATUS')),
-          const SizedBox(width: 90, child: _TH('SYNC')),
-          const SizedBox(width: 360, child: _TH('ACCIONES')),
+          SizedBox(width: 90, child: _TH('MODALIDAD')),
+          SizedBox(width: 100, child: _TH('ESTATUS')),
+          SizedBox(width: 90, child: _TH('SYNC')),
         ],
       ),
     );
@@ -2549,7 +2541,7 @@ class _TH extends StatelessWidget {
       );
 }
 
-// ── Table Row (Tablet / Desktop) ──────────────────────────────────────────
+// ── Table Row (Tablet / Desktop - Layout 2 Niveles) ────────────────────────
 class _OsRow extends StatelessWidget {
   final Map<String, dynamic> os;
   final int index;
@@ -2583,23 +2575,14 @@ class _OsRow extends StatelessWidget {
     final isFisico  = modalidad.contains('FISIC') || modalidad.contains('FÍSIC');
     final isEven    = index % 2 == 0;
 
-    final bool pdfReal = _OsListScreenState.tienePdfReal(os);
-    final bool noIniciada = _OsListScreenState.sinIniciar(os);
+    final bool hasDoc = _OsListScreenState.tieneDocumento(os);
 
-    // Estatus Pill:
-    // A) SI TIENE PDF GENERADO O ADJUNTADO:
-    //    Píldora de estatus verde: [ ✓ PDF Listo ]
-    // B) SI NO SE HA HECHO PARA NADA / SIN PDF:
-    //    Píldora de estatus en gris / ámbar: [ ⚠️ Sin Formato ] o [ Pendiente ]
-    final String estatusLabel = pdfReal
-        ? '✓ PDF Listo'
-        : (noIniciada ? '⚠️ Sin Formato' : 'Pendiente');
-    final Color estatusFg = pdfReal
-        ? const Color(0xFF2E7D32)
-        : (noIniciada ? const Color(0xFFD97706) : const Color(0xFF2563EB));
-    final Color estatusBg = pdfReal
-        ? const Color(0xFFE8F5E9)
-        : (noIniciada ? const Color(0xFFFFFBEB) : const Color(0xFFEFF6FF));
+    // Estatus badge:
+    // Si tieneDocumento(o) == true: [ ✓ PDF Listo ] (Verde).
+    // Si tieneDocumento(o) == false: [ ⚠️ Sin Formato ] (Ámbar).
+    final String estatusLabel = hasDoc ? '✓ PDF Listo' : '⚠️ Sin Formato';
+    final Color estatusFg = hasDoc ? const Color(0xFF2E7D32) : const Color(0xFFD97706);
+    final Color estatusBg = hasDoc ? const Color(0xFFE8F5E9) : const Color(0xFFFFFBEB);
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
@@ -2608,7 +2591,25 @@ class _OsRow extends StatelessWidget {
         os['sync_check_status'] == 'SUBIDA_SERVIDOR' ||
         os['sync_check_status'] == 'AUDITADA_ADMIN' ||
         os['sync_check_status'] == 'ABIERTO' ||
-        (pdfReal && syncSt != 'PENDIENTE_ACTUALIZAR');
+        (hasDoc && syncSt != 'PENDIENTE_ACTUALIZAR');
+
+    // Sync badge:
+    // Si tieneDocumento(o) == false: NUNCA mostrar "✓ Enviada". Debe mostrar [ Abierto ] o [ Asignada ].
+    String effectiveSyncStatus;
+    final rawSync = (os['sync_check_status'] as String? ?? '').trim().toUpperCase();
+    if (!hasDoc) {
+      if (rawSync == 'AUDITADA_ADMIN' || rawSync == 'ABIERTO') {
+        effectiveSyncStatus = 'AUDITADA_ADMIN';
+      } else {
+        effectiveSyncStatus = 'ASIGNADA';
+      }
+    } else {
+      if (rawSync == 'SUBIDA_SERVIDOR' || rawSync == 'ENVIADA' || rawSync == 'AUDITADA_ADMIN' || rawSync == 'ABIERTO') {
+        effectiveSyncStatus = rawSync;
+      } else {
+        effectiveSyncStatus = isSincronizado ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET';
+      }
+    }
 
     final fechaStr = (os['fecha'] as String? ?? '').split('T').first.split(' ').first;
 
@@ -2618,252 +2619,208 @@ class _OsRow extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          // FOLIO OS (130px)
-          SizedBox(
-            width: 130,
-            child: Padding(
-              padding: EdgeInsets.only(left: indent ? 12.0 : 0.0),
-              child: Text(
-                os['folio_os'] ?? '—',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _kCarmineRed),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ),
-          // FECHA (100px)
-          SizedBox(
-            width: 100,
-            child: Text(
-              fechaStr,
-              style: const TextStyle(fontSize: 11, color: _kTextPrim),
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          // CLIENTE / SUCURSAL (Flex 3, minWidth: 180)
-          Expanded(
-            flex: 3,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 180),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    os['cliente'] ?? '—',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _kTextPrim),
+          // ── NIVEL 1 (Superior): Datos esenciales al 100% del ancho ────────
+          Row(
+            children: [
+              // [FOLIO OS] (130px)
+              SizedBox(
+                width: 130,
+                child: Padding(
+                  padding: EdgeInsets.only(left: indent ? 12.0 : 0.0),
+                  child: Text(
+                    folioStr.isNotEmpty ? folioStr : '—',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _kCarmineRed),
                     overflow: TextOverflow.ellipsis,
-                    maxLines: 2,
-                    softWrap: true,
                   ),
-                  if ((os['sucursal'] ?? '').toString().isNotEmpty || (os['tipo_servicio'] ?? '').toString().isNotEmpty)
+                ),
+              ),
+              // [FECHA] (95px)
+              SizedBox(
+                width: 95,
+                child: Text(
+                  fechaStr,
+                  style: const TextStyle(fontSize: 11, color: _kTextPrim),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              // [CLIENTE / SUCURSAL] (Expanded, flex: 3)
+              Expanded(
+                flex: 3,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
                     Text(
-                      [
-                        if ((os['sucursal'] ?? '').toString().isNotEmpty) os['sucursal']!.toString(),
-                        if ((os['tipo_servicio'] ?? '').toString().isNotEmpty) os['tipo_servicio']!.toString(),
-                      ].join(' · '),
-                      style: const TextStyle(fontSize: 10, color: _kTextSec),
+                      os['cliente'] ?? '—',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _kTextPrim),
                       overflow: TextOverflow.ellipsis,
                       maxLines: 1,
                     ),
-                ],
+                    if ((os['sucursal'] ?? '').toString().isNotEmpty || (os['tipo_servicio'] ?? '').toString().isNotEmpty)
+                      Text(
+                        [
+                          if ((os['sucursal'] ?? '').toString().isNotEmpty) os['sucursal']!.toString(),
+                          if ((os['tipo_servicio'] ?? '').toString().isNotEmpty) os['tipo_servicio']!.toString(),
+                        ].join(' · '),
+                        style: const TextStyle(fontSize: 10, color: _kTextSec),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                      ),
+                  ],
+                ),
               ),
-            ),
-          ),
-          // TÉCNICO (110px)
-          if (!hideTecnico)
-            SizedBox(
-              width: 110,
-              child: Text(
-                os['tecnico'] ?? '—',
-                style: const TextStyle(fontSize: 11, color: _kTextPrim),
-                overflow: TextOverflow.ellipsis,
+              // [MODALIDAD] (90px)
+              SizedBox(
+                width: 90,
+                child: _Badge(
+                  label: isFisico ? 'Físico' : 'Digital',
+                  fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+                  bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
+                ),
               ),
-            ),
-          // MODALIDAD (100px)
-          SizedBox(
-            width: 100,
-            child: _Badge(
-              label: isFisico ? 'Físico' : 'Digital',
-              fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-              bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
-            ),
+              // [ESTATUS] (100px)
+              SizedBox(
+                width: 100,
+                child: _Badge(
+                  label: estatusLabel,
+                  fg: estatusFg,
+                  bg: estatusBg,
+                ),
+              ),
+              // [SYNC] (90px)
+              SizedBox(
+                width: 90,
+                child: SyncCheckBadge(
+                  status: effectiveSyncStatus,
+                  showLabel: true,
+                ),
+              ),
+            ],
           ),
-          // ESTATUS (90px)
-          SizedBox(
-            width: 90,
-            child: _Badge(
-              label: estatusLabel,
-              fg: estatusFg,
-              bg: estatusBg,
-            ),
-          ),
-          // SYNC (90px)
-          SizedBox(
-            width: 90,
-            child: SyncCheckBadge(
-              status: (os['sync_check_status'] as String?)?.isNotEmpty == true
-                  ? os['sync_check_status'] as String
-                  : (isSincronizado ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET'),
-              showLabel: true,
-            ),
-          ),
-          // ACCIONES (360px fijo con espacio suficiente)
-          SizedBox(
-            width: 360,
+
+          // ── NIVEL 2 (Inferior): Fila de acciones alineada a la derecha con margen de 6px ───
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (pdfReal) ...[
-                  // A) SI TIENE PDF GENERADO O ADJUNTADO
+                if (hasDoc) ...[
+                  // Si tiene PDF / formato:
+                  // [ 📄 Ver PDF ]  [ 📥 Descargar ]  [ 🔄 Rehacer ]  [ 📤 Subir PDF ]  [ 🗑️ Reset ]
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF1976D2),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      minimumSize: const Size(60, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      minimumSize: const Size(60, 30),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
                     icon: const Icon(Icons.picture_as_pdf, size: 14),
                     label: const Text('📄 Ver PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                     onPressed: () => onAbrirPdf(context, os),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2E7D32),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      minimumSize: const Size(65, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      minimumSize: const Size(65, 30),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
                     icon: const Icon(Icons.download, size: 14),
                     label: const Text('📥 Descargar', style: TextStyle(fontSize: 11)),
                     onPressed: () => onDescargarPdf(context, os),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFF57C00),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                      minimumSize: const Size(60, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      minimumSize: const Size(60, 30),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
-                    icon: const Icon(Icons.edit_note, size: 14),
-                    label: const Text('Rehacer', style: TextStyle(fontSize: 11)),
+                    icon: const Icon(Icons.replay_rounded, size: 14),
+                    label: const Text('🔄 Rehacer', style: TextStyle(fontSize: 11)),
                     onPressed: () => onRehacer(context, os),
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF4338CA),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                      minimumSize: const Size(55, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      minimumSize: const Size(55, 30),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
                     icon: const Icon(Icons.upload_file, size: 14),
-                    label: const Text('Subir', style: TextStyle(fontSize: 11)),
+                    label: const Text('📤 Subir PDF', style: TextStyle(fontSize: 11)),
                     onPressed: () => onSubirPdfManual(context, os),
                   ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    tooltip: 'Eliminar datos desde 0',
-                    style: IconButton.styleFrom(
-                      backgroundColor: const Color(0xFFFFEBEE),
-                      foregroundColor: const Color(0xFFC62828),
-                      padding: const EdgeInsets.all(6),
-                      minimumSize: const Size(32, 32),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6),
-                        side: const BorderSide(color: Color(0xFFFFCDD2)),
-                      ),
+                  const SizedBox(width: 6),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFC62828),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      minimumSize: const Size(55, 30),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
-                    icon: const Icon(Icons.delete_forever, size: 16),
+                    icon: const Icon(Icons.delete_forever, size: 14),
+                    label: const Text('🗑️ Reset', style: TextStyle(fontSize: 11)),
                     onPressed: () => onEliminarDatos(context, os),
                   ),
                 ] else ...[
-                  // B) SI NO SE HA HECHO PARA NADA / SIN PDF
+                  // Si no tiene formato:
+                  // [ ✍️ Iniciar Captura ]  [ 📤 Subir PDF manual ]
                   if (isFisico) ...[
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFF7C3AED),
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                        minimumSize: const Size(110, 32),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: const Size(110, 30),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                       ),
-                      icon: const Icon(Icons.document_scanner_outlined, size: 15),
+                      icon: const Icon(Icons.document_scanner_outlined, size: 14),
                       label: const Text('📤 Adjuntar PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                       onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
                     ),
                   ] else ...[
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: noIniciada ? const Color(0xFFE65100) : _kCarmineRed,
+                        backgroundColor: const Color(0xFFE65100),
                         foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                        minimumSize: const Size(115, 32),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        minimumSize: const Size(115, 30),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                       ),
-                      icon: Icon(noIniciada ? Icons.edit : Icons.edit_note_outlined, size: 15),
-                      label: Text(
-                        noIniciada ? '✍️ Iniciar Captura' : '📝 Continuar',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                      icon: const Icon(Icons.edit, size: 14),
+                      label: const Text(
+                        '✍️ Iniciar Captura',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                       onPressed: onCaptura,
                     ),
                   ],
-                  const SizedBox(width: 4),
+                  const SizedBox(width: 6),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF4338CA),
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                      minimumSize: const Size(55, 32),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      minimumSize: const Size(55, 30),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
                     icon: const Icon(Icons.upload_file, size: 14),
-                    label: const Text('Subir', style: TextStyle(fontSize: 11)),
+                    label: const Text('📤 Subir PDF manual', style: TextStyle(fontSize: 11)),
                     onPressed: () => onSubirPdfManual(context, os),
                   ),
-                  const SizedBox(width: 4),
-                  // Botones atenuados para Descargar
-                  Opacity(
-                    opacity: 0.35,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.grey.shade300,
-                        foregroundColor: Colors.grey.shade700,
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                        minimumSize: const Size(60, 32),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        elevation: 0,
-                      ),
-                      icon: const Icon(Icons.download, size: 14),
-                      label: const Text('Descargar', style: TextStyle(fontSize: 10)),
-                      onPressed: null,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  if (!noIniciada)
-                    IconButton(
-                      tooltip: 'Eliminar datos desde 0',
-                      style: IconButton.styleFrom(
-                        backgroundColor: const Color(0xFFFFEBEE),
-                        foregroundColor: const Color(0xFFC62828),
-                        padding: const EdgeInsets.all(6),
-                        minimumSize: const Size(32, 32),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: Color(0xFFFFCDD2)),
-                        ),
-                      ),
-                      icon: const Icon(Icons.delete_forever, size: 16),
-                      onPressed: () => onEliminarDatos(context, os),
-                    ),
                 ],
               ],
             ),
@@ -2928,7 +2885,7 @@ class _LoteRowState extends State<_LoteRow> {
                   ),
                 ),
                 SizedBox(
-                  width: 100,
+                  width: 95,
                   child: Text(
                     (first['fecha'] as String? ?? '').split('T').first,
                     style: const TextStyle(fontSize: 11),
@@ -2936,23 +2893,17 @@ class _LoteRowState extends State<_LoteRow> {
                 ),
                 Expanded(
                   flex: 3,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(minWidth: 180),
-                    child: Text(
-                      first['cliente'] ?? '—',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      softWrap: true,
-                    ),
+                  child: Text(
+                    first['cliente'] ?? '—',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    softWrap: true,
                   ),
                 ),
-                if (!widget.hideTecnico)
-                  const SizedBox(width: 110, child: Text('—', style: TextStyle(fontSize: 11))),
-                const SizedBox(width: 100, child: Text('Lote', style: TextStyle(fontSize: 11))),
-                const SizedBox(width: 90, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
+                const SizedBox(width: 90, child: Text('Lote', style: TextStyle(fontSize: 11))),
+                const SizedBox(width: 100, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
                 const SizedBox(width: 90),
-                const SizedBox(width: 360),
               ],
             ),
           ),
@@ -2994,34 +2945,6 @@ class _Badge extends StatelessWidget {
       );
 }
 
-class _ActionBtn extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color fg, bg;
-  final VoidCallback onTap;
-  const _ActionBtn({
-    required this.label,
-    required this.icon,
-    required this.fg,
-    required this.bg,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) => ElevatedButton.icon(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: bg,
-          foregroundColor: fg,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          minimumSize: const Size(110, 32),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-          elevation: 0,
-        ),
-        onPressed: onTap,
-        icon: Icon(icon, size: 14),
-        label: Text(label, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-      );
-}
 
 class _EmptyState extends StatelessWidget {
   final VoidCallback onSync;

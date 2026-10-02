@@ -519,6 +519,36 @@ class LocalDbService {
     return false;
   }
 
+  /// Lógica unificada para determinar si una orden cuenta con documento generado/adjunto o metrología
+  bool tieneDocumento(Map<String, dynamic> o) {
+    final String? pdfPath = o['pdf_path']?.toString() ?? o['pdf_path_local']?.toString();
+    final String? pdfUrl = o['pdf_url']?.toString();
+    final bool hasPdfFlag = (o['has_pdf'] == 1 || o['has_pdf'] == '1' || o['has_pdf'] == true || o['pdf_subido'] == 1);
+    final metro = o['metrologia_data'] ?? o['rep_json'] ?? o['exac_json'];
+    final bool tieneMetrologia = metro != null && 
+                                 metro.toString().trim().isNotEmpty && 
+                                 metro.toString().trim() != '{}' &&
+                                 metro.toString().trim() != '[]' &&
+                                 metro.toString().trim() != 'null';
+    
+    // Verificar si el archivo existe físicamente en el almacenamiento local:
+    bool fileExiste = false;
+    if (pdfPath != null && pdfPath.isNotEmpty) {
+      try {
+        fileExiste = File(pdfPath).existsSync();
+      } catch (_) {}
+    }
+
+    final folioStr = (o['folio_os'] as String? ?? o['folio'] as String? ?? '').trim();
+    if (!fileExiste && folioStr.isNotEmpty) {
+      fileExiste = checkPdfExistsOnDiskSync(folioStr, pdfPath);
+    }
+    
+    final bool hasB64 = (o['pdf_b64_local']?.toString().length ?? 0) > 100;
+    
+    return hasPdfFlag || (pdfUrl != null && pdfUrl.isNotEmpty) || tieneMetrologia || fileExiste || hasB64;
+  }
+
   /// Verifica síncronamente si el archivo PDF de un folio existe en el disco usando la ruta base de documentos.
   bool checkPdfExistsOnDiskSync(String folio, [String? pdfPathLocal]) {
     final f = folio.trim();
