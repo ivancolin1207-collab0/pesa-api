@@ -1650,6 +1650,17 @@ class LocalDbService {
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
   }
+
+  /// Elimina el timestamp de última sincronización para forzar un pull completo en el próximo ciclo.
+  Future<void> resetLastSyncTime() async {
+    try {
+      final db = await _ensureInit();
+      await db.delete('meta', where: "key = 'last_sync'");
+      debugPrint('[LocalDB] resetLastSyncTime: timestamp eliminado — próximo pull será completo');
+    } catch (e) {
+      debugPrint('[LocalDB] resetLastSyncTime error: $e');
+    }
+  }
   Future<DateTime?> getLastCatalogSyncTime() async {
     final db = await _ensureInit();
     try {

@@ -352,11 +352,12 @@ class SyncService extends ChangeNotifier {
 
       try {
         final pullCount = await _pullNuevos().timeout(
-          const Duration(seconds: 3),
+          const Duration(seconds: 18),
           onTimeout: () {
-            // Timeout silencioso: no lanzar excepción, simplemente retornar 0
-            // y dejar que el código de "0 resultados" sirva los datos locales.
-            debugPrint('[Sync PULL] ⏱ TIMEOUT 3s — sirviendo datos locales inmediatamente');
+            // Timeout silencioso: Render puede tardar hasta 15s en cold start.
+            // Sirve los datos locales inmediatamente para no dejar el dashboard en ceros.
+            debugPrint('[Sync PULL] ⏱ TIMEOUT 18s — sirviendo datos locales inmediatamente');
+            _fallbackCargarLocal(); // ← CLAVE: restaurar desde SQLite
             return 0;
           },
         );
@@ -898,17 +899,30 @@ class SyncService extends ChangeNotifier {
         );
       }
 
-      // Si el servidor retorna 0 en pull incremental → sin cambios nuevos
+      // Si el servidor retorna 0 en pull incremental:
+      // - Si ya tenemos órdenes en memoria (→ sin cambios nuevos, OK)
+      // - Si _orders está vacío (primera carga real o sección después de reinstalación)
+      //   → FORZAR carga completa desde SQLite local independientemente del timestamp
       if (osList.isEmpty) {
-        debugPrint('[Sync PULL] Sin cambios nuevos desde $lastSyncTs — usando estado local');
-        // Refrescar en memoria desde SQLite local con filtro estricto
-        final localDbOrders = isTecnicoUser
-            ? await db.getOsForTecnico(
-                nombreTecnico: currentNombre,
-                idTecnico: idTecnico,
-              )
-            : await db.getAllOs();
-        setOrdersFromPull(localDbOrders);
+        debugPrint('[Sync PULL] Sin cambios nuevos desde $lastSyncTs');
+        if (_orders.isEmpty) {
+          debugPrint('[Sync PULL] _orders está vacío — forzando recarga COMPLETA desde SQLite');
+          // Resetear timestamp para que el próximo pull sea completo (force full pull)
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.remove('last_sync_timestamp');
+          await db.resetLastSyncTime();
+          // Cargar de SQLite
+          final localDbOrders = isTecnicoUser
+              ? await db.getOsForTecnico(
+                  nombreTecnico: currentNombre,
+                  idTecnico: idTecnico,
+                )
+              : await db.getAllOs();
+          setOrdersFromPull(localDbOrders);
+          debugPrint('[Sync PULL] Cargadas ${localDbOrders.length} OS desde SQLite local (recuperación)');
+        } else {
+          debugPrint('[Sync PULL] Manteniendo ${_orders.length} OS en memoria — sin cambios del servidor');
+        }
         return 0;
       }
 
@@ -984,8 +998,8 @@ class SyncService extends ChangeNotifier {
       }
 
       // ── Actualizar dashboard: merge incremental (no reemplazar todo) ──────
-      if (isFirstSync) {
-        // Carga inicial: leer órdenes autorizadas desde SQLite
+      if (isFirstSync || _orders.isEmpty) {
+        // Carga inicial O _orders vacío (reinstalación, logout/login): leer todo de SQLite
         final allLocal = isTecnicoUser
             ? await db.getOsForTecnico(
                 nombreTecnico: currentNombre,
@@ -993,6 +1007,7 @@ class SyncService extends ChangeNotifier {
               )
             : await db.getAllOs();
         setOrdersFromPull(allLocal);
+        debugPrint('[Sync PULL] Dashboard recargado desde SQLite: ${allLocal.length} OS');
       } else {
         // Pull incremental: parchear SOLO las órdenes que llegaron
         for (final o in filteredList) {
