@@ -1465,6 +1465,7 @@ class _MobileOsCard extends StatelessWidget {
 
     final bool pdfReal = _OsListScreenState.tienePdfReal(os);
     final bool noIniciada = _OsListScreenState.sinIniciar(os);
+    final bool isFisico = modalidad == 'FISICA' || modalidad == 'FISICO';
 
     final String estatusLabel = pdfReal
         ? '✓ PDF Listo'

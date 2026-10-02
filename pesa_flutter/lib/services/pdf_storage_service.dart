@@ -177,7 +177,7 @@ class PdfStorageService {
         if (!await targetDir.exists()) await targetDir.create(recursive: true);
       }
 
-      final targetFile = File('${targetDir.path}/$fileName');
+      File targetFile = File('${targetDir.path}/$fileName');
 
       try {
         // 1. Si se proveyeron bytes directamente
@@ -196,7 +196,7 @@ class PdfStorageService {
         } else if (sourcePdfPath != null && sourcePdfPath.isNotEmpty && File(sourcePdfPath).existsSync()) {
           await File(sourcePdfPath).copy(fallbackFile.path);
         }
-        finalTargetFile = fallbackFile;
+        targetFile = fallbackFile;
       }
       
       // 3. Buscar en SQLite y disco local
