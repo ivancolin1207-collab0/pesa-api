@@ -2515,11 +2515,11 @@ class _TableHeader extends StatelessWidget {
         children: [
           const SizedBox(width: 130, child: _TH('FOLIO OS')),
           const SizedBox(width: 100, child: _TH('FECHA')),
-          const Expanded(
+          Expanded(
             flex: 3,
             child: ConstrainedBox(
-              constraints: BoxConstraints(minWidth: 180),
-              child: _TH('CLIENTE / SUCURSAL'),
+              constraints: const BoxConstraints(minWidth: 180),
+              child: const _TH('CLIENTE / SUCURSAL'),
             ),
           ),
           if (!hideTecnico)
