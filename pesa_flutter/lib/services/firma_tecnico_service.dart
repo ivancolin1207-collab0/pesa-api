@@ -1,14 +1,10 @@
-// lib/services/firma_tecnico_service.dart
-// Servicio de firma persistente del técnico por sesión/usuario.
-// La firma se captura UNA vez al iniciar sesión y queda guardada
-// en SecureStorage local Y en archivo PNG físico en Documents.
-// Cada OS reutiliza la firma almacenada sin volver a pedirla.
+// lib/services/firma_tecnico_service.dart — Servicio de firma persistente del técnico
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
-import 'api_service.dart';   // Para saveAndSyncFirma → guardarFirmaPerfil
+import 'api_service.dart';
 
 class FirmaTecnicoService {
   FirmaTecnicoService._();
@@ -18,110 +14,206 @@ class FirmaTecnicoService {
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
 
-  // ── Clave de almacenamiento ───────────────────────────────────────────────
   String _keyFor(String username) => 'firma_tecnico_$username';
 
-  /// Ruta del archivo PNG de firma persistente (sobrevive reinstalaciones)
   Future<File> _firmaFile(String username) async {
     final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/pesa_firma_${username.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_')}.png');
+    final cleanUser = username.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '_');
+    return File('${dir.path}/pesa_firma_$cleanUser.png');
+  }
+
+  Future<File> _firmaFileById(int idTecnico) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final folder = Directory('${dir.path}/firmas_tecnicos');
+    if (!await folder.exists()) {
+      await folder.create(recursive: true);
+    }
+    return File('${folder.path}/firma_$idTecnico.png');
+  }
+
+  Future<File> _firmaFileInFirmasFolder(int idTecnico) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final folder = Directory('${dir.path}/firmas');
+    if (!await folder.exists()) {
+      await folder.create(recursive: true);
+    }
+    return File('${folder.path}/firma_$idTecnico.png');
   }
 
   // ── Leer firma guardada ───────────────────────────────────────────────────
-  /// Devuelve la firma en base64 del técnico [username], o null si no existe.
-  /// Busca primero en SecureStorage, luego en archivo físico (migración).
-  Future<String?> getFirma(String username) async {
-    if (username.isEmpty) return null;
-    // 1. Intentar SecureStorage
-    try {
-      final stored = await _storage.read(key: _keyFor(username));
-      if (stored != null && stored.isNotEmpty) return stored;
-    } catch (e) {
-      debugPrint('[FirmaTecnico] SecureStorage error al leer: $e');
-    }
-    // 2. Fallback: leer desde archivo PNG físico
-    try {
-      final file = await _firmaFile(username);
-      if (await file.exists()) {
-        final bytes = await file.readAsBytes();
-        final b64 = base64Encode(bytes);
-        // Restaurar en SecureStorage para la próxima vez
-        try { await _storage.write(key: _keyFor(username), value: b64); } catch (_) {}
-        debugPrint('[FirmaTecnico] Firma restaurada desde archivo físico para: $username');
-        return b64;
+  Future<String?> getFirma(String username, {int idTecnico = 0}) async {
+    if (username.isEmpty && idTecnico <= 0) return null;
+
+    // 1. Intentar SecureStorage por username
+    if (username.isNotEmpty) {
+      try {
+        final stored = await _storage.read(key: _keyFor(username));
+        if (stored != null && stored.trim().length > 50) return stored.trim();
+      } catch (e) {
+        debugPrint('[FirmaTecnico] SecureStorage error: $e');
       }
-    } catch (e) {
-      debugPrint('[FirmaTecnico] Error leyendo archivo firma: $e');
     }
+
+    // 2. Intentar SecureStorage por clave genérica
+    try {
+      final genStored = await _storage.read(key: 'tecnico_firma_base64');
+      if (genStored != null && genStored.trim().length > 50) return genStored.trim();
+    } catch (_) {}
+
+    // 3. Fallback: leer desde archivo PNG físico de idTecnico
+    if (idTecnico > 0) {
+      try {
+        final file = await _firmaFileById(idTecnico);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          final b64 = base64Encode(bytes);
+          if (username.isNotEmpty) {
+            try { await _storage.write(key: _keyFor(username), value: b64); } catch (_) {}
+          }
+          return b64;
+        }
+      } catch (e) {
+        debugPrint('[FirmaTecnico] Error leyendo archivo por ID: $e');
+      }
+
+      try {
+        final fileAlt = await _firmaFileInFirmasFolder(idTecnico);
+        if (await fileAlt.exists()) {
+          final bytes = await fileAlt.readAsBytes();
+          final b64 = base64Encode(bytes);
+          if (username.isNotEmpty) {
+            try { await _storage.write(key: _keyFor(username), value: b64); } catch (_) {}
+          }
+          return b64;
+        }
+      } catch (_) {}
+    }
+
+    // 4. Fallback: leer desde archivo PNG por username
+    if (username.isNotEmpty) {
+      try {
+        final file = await _firmaFile(username);
+        if (await file.exists()) {
+          final bytes = await file.readAsBytes();
+          final b64 = base64Encode(bytes);
+          try { await _storage.write(key: _keyFor(username), value: b64); } catch (_) {}
+          return b64;
+        }
+      } catch (e) {
+        debugPrint('[FirmaTecnico] Error leyendo archivo por username: $e');
+      }
+    }
+
     return null;
   }
 
   // ── Guardar firma ─────────────────────────────────────────────────────────
-  /// Persiste la firma base64 del técnico en SecureStorage Y en archivo PNG.
-  Future<void> saveFirma(String username, String firmaBase64) async {
-    if (username.isEmpty || firmaBase64.isEmpty) return;
-    // 1. Guardar en SecureStorage
-    try {
-      await _storage.write(key: _keyFor(username), value: firmaBase64);
-      debugPrint('[FirmaTecnico] Firma guardada en SecureStorage para: $username');
-    } catch (e) {
-      debugPrint('[FirmaTecnico] Error en SecureStorage al guardar: $e');
+  Future<void> saveFirma(String username, String firmaBase64, {int idTecnico = 0}) async {
+    final cleanB64 = firmaBase64.contains(',') ? firmaBase64.split(',').last.trim() : firmaBase64.trim();
+    if (cleanB64.isEmpty) return;
+
+    // 1. SecureStorage
+    if (username.isNotEmpty) {
+      try {
+        await _storage.write(key: _keyFor(username), value: cleanB64);
+        await _storage.write(key: 'tecnico_firma_base64', value: cleanB64);
+      } catch (e) {
+        debugPrint('[FirmaTecnico] Error SecureStorage: $e');
+      }
     }
-    // 2. Guardar como archivo PNG físico (persistencia dual)
-    try {
-      final bytes = base64Decode(firmaBase64);
-      final file  = await _firmaFile(username);
-      await file.writeAsBytes(bytes);
-      debugPrint('[FirmaTecnico] Firma guardada como PNG en: ${file.path}');
-    } catch (e) {
-      debugPrint('[FirmaTecnico] Error guardando archivo PNG firma: $e');
+
+    // 2. PNG por username
+    if (username.isNotEmpty) {
+      try {
+        final bytes = base64Decode(cleanB64);
+        final file = await _firmaFile(username);
+        await file.writeAsBytes(bytes);
+      } catch (e) {
+        debugPrint('[FirmaTecnico] Error PNG username: $e');
+      }
+    }
+
+    // 3. PNG por idTecnico en ambas carpetas (/firmas_tecnicos y /firmas)
+    if (idTecnico > 0) {
+      try {
+        final bytes = base64Decode(cleanB64);
+        final fileId1 = await _firmaFileById(idTecnico);
+        await fileId1.writeAsBytes(bytes);
+        final fileId2 = await _firmaFileInFirmasFolder(idTecnico);
+        await fileId2.writeAsBytes(bytes);
+      } catch (e) {
+        debugPrint('[FirmaTecnico] Error PNG idTecnico: $e');
+      }
     }
   }
 
-  // ── Guardar firma local + sincronizar al servidor (v3.1) ─────────────────
-  /// Guarda la firma localmente Y la sube al servidor para que Windows pueda
-  /// verificarla en el login del técnico.
-  /// [idTecnico] es el ID en cat_tecnicos (requerido para el endpoint de API).
-  /// Retorna true si la sincronización al servidor fue exitosa.
+  // ── Sync desde la nube ─────────────────────────────────────────────────────
+  Future<String?> syncFirmaFromCloud(String username, int idTecnico) async {
+    try {
+      final loginFirma = await _storage.read(key: 'firma_cloud_login');
+      if (loginFirma != null && loginFirma.trim().length > 50) {
+        final clean = loginFirma.trim();
+        await saveFirma(username, clean, idTecnico: idTecnico);
+        await _storage.delete(key: 'firma_cloud_login');
+        return clean;
+      }
+    } catch (_) {}
+
+    if (idTecnico > 0) {
+      try {
+        final cloudB64 = await ApiService.instance.obtenerFirmaPerfil(idTecnico);
+        if (cloudB64 != null && cloudB64.trim().length > 50) {
+          final clean = cloudB64.trim();
+          await saveFirma(username, clean, idTecnico: idTecnico);
+          debugPrint('[FirmaTecnico] ✅ Firma descargada del servidor para id=$idTecnico ($username)');
+          return clean;
+        }
+      } catch (e) {
+        debugPrint('[FirmaTecnico] Warning sync nube: $e');
+      }
+    }
+
+    return getFirma(username, idTecnico: idTecnico);
+  }
+
   Future<bool> saveAndSyncFirma(
     String username,
     String firmaBase64,
     int idTecnico,
   ) async {
-    // 1. Guardar localmente primero (funciona offline)
-    await saveFirma(username, firmaBase64);
-    // 2. Intentar sincronizar al servidor
-    try {
-      final ok = await ApiService.instance.guardarFirmaPerfil(idTecnico, firmaBase64);
-      if (ok) {
-        debugPrint('[FirmaTecnico] ✅ Firma sincronizada al servidor para id=$idTecnico');
-      } else {
-        debugPrint('[FirmaTecnico] ⚠️  Firma guardada localmente pero NO sincronizada al servidor');
+    await saveFirma(username, firmaBase64, idTecnico: idTecnico);
+    if (idTecnico > 0) {
+      try {
+        final ok = await ApiService.instance.guardarFirmaPerfil(idTecnico, firmaBase64);
+        return ok;
+      } catch (e) {
+        debugPrint('[FirmaTecnico] Error guardando firma en servidor: $e');
+        return false;
       }
-      return ok;
-    } catch (e) {
-      debugPrint('[FirmaTecnico] Error al sincronizar firma al servidor: $e');
-      return false;
     }
+    return true;
   }
 
-  // ── Eliminar firma ────────────────────────────────────────────────────────
-  /// Elimina la firma del técnico (para permitir re-captura voluntaria).
-  Future<void> deleteFirma(String username) async {
+  Future<void> deleteFirma(String username, {int idTecnico = 0}) async {
     if (username.isEmpty) return;
     try { await _storage.delete(key: _keyFor(username)); } catch (_) {}
+    try { await _storage.delete(key: 'tecnico_firma_base64'); } catch (_) {}
     try {
       final file = await _firmaFile(username);
       if (await file.exists()) await file.delete();
     } catch (_) {}
-    debugPrint('[FirmaTecnico] Firma eliminada para: $username');
+    if (idTecnico > 0) {
+      try {
+        final fileId1 = await _firmaFileById(idTecnico);
+        if (await fileId1.exists()) await fileId1.delete();
+        final fileId2 = await _firmaFileInFirmasFolder(idTecnico);
+        if (await fileId2.exists()) await fileId2.delete();
+      } catch (_) {}
+    }
   }
 
-  // ── ¿Tiene firma? ─────────────────────────────────────────────────────────
-  Future<bool> tieneFirma(String username) async {
-    final f = await getFirma(username);
-    return f != null && f.isNotEmpty;
+  Future<bool> tieneFirma(String username, {int idTecnico = 0}) async {
+    final f = await getFirma(username, idTecnico: idTecnico);
+    return f != null && f.length > 50;
   }
 }
-
-

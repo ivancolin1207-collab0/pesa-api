@@ -354,15 +354,28 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(9),
                 child: Stack(children: [
-                  Signature(controller: _ctrl, backgroundColor: Colors.white),
+                  GestureDetector(
+                    onPanDown: (_) {},
+                    onPanStart: (_) {},
+                    onPanUpdate: (_) {},
+                    behavior: HitTestBehavior.opaque,
+                    child: Listener(
+                      onPointerDown: (_) {},
+                      onPointerMove: (_) {},
+                      behavior: HitTestBehavior.opaque,
+                      child: Signature(controller: _ctrl, backgroundColor: Colors.white),
+                    ),
+                  ),
                   if (_ctrl.isEmpty)
-                    const Center(
-                      child: Text(
-                        'Firma aquí con el dedo o lápiz',
-                        style: TextStyle(
-                          fontSize: 15,
-                          color: Color(0xFFD0D0D0),
-                          fontStyle: FontStyle.italic,
+                    const IgnorePointer(
+                      child: Center(
+                        child: Text(
+                          'Firma aquí con el dedo o lápiz',
+                          style: TextStyle(
+                            fontSize: 15,
+                            color: Color(0xFFD0D0D0),
+                            fontStyle: FontStyle.italic,
+                          ),
                         ),
                       ),
                     ),

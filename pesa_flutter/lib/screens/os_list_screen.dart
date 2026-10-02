@@ -318,11 +318,12 @@ class _OsListScreenState extends State<OsListScreen> {
       }
 
       if (mounted) {
-        if (list.isNotEmpty) {
-          setState(() { _all = list; _loading = false; });
+        final mutableList = list.map((m) => Map<String, dynamic>.from(m)).toList();
+        if (mutableList.isNotEmpty) {
+          setState(() { _all = mutableList; _loading = false; });
           await _applyFilters();
         } else if (memFiltered.isNotEmpty) {
-          setState(() { _all = List<Map<String, dynamic>>.from(memFiltered); _loading = false; });
+          setState(() { _all = memFiltered.map((m) => Map<String, dynamic>.from(m)).toList(); _loading = false; });
           await _applyFilters();
         } else if (_all.isNotEmpty) {
           // Resguardo de base local: no vaciar si ya tenemos datos en memoria
@@ -336,7 +337,7 @@ class _OsListScreenState extends State<OsListScreen> {
       debugPrint('[Dashboard] Error en _loadLocal: $e');
       if (mounted) {
         if (memFiltered.isNotEmpty) {
-          setState(() { _all = List<Map<String, dynamic>>.from(memFiltered); _loading = false; });
+          setState(() { _all = memFiltered.map((m) => Map<String, dynamic>.from(m)).toList(); _loading = false; });
           await _applyFilters();
         } else if (_all.isNotEmpty) {
           setState(() { _loading = false; });
@@ -378,38 +379,53 @@ class _OsListScreenState extends State<OsListScreen> {
     if (mounted) setState(() => _filtered = result);
   }
 
+  // ── Helpers de Estado de Ordenes ──────────────────────────────────────────
+  static bool tienePdfReal(Map<String, dynamic> orden) {
+    final folioStr = (orden['folio_os'] as String? ?? orden['folio'] as String? ?? '').trim();
+    final localPdfPath = (orden['pdf_path_local'] as String? ?? '').trim();
+    final bool hasPdfOnDisk = (localPdfPath.isNotEmpty && File(localPdfPath).existsSync()) ||
+        LocalDbService.instance.checkPdfExistsOnDiskSync(folioStr, localPdfPath);
+
+    final rawEstatus = (orden['estatus'] ?? orden['estado'] ?? '').toString().trim().toUpperCase();
+    final isCerrado = rawEstatus == 'CERRADO' ||
+        rawEstatus == 'CERRADA' ||
+        rawEstatus == 'COMPLETADO' ||
+        rawEstatus == 'COMPLETADA' ||
+        rawEstatus == 'FIRMADA' ||
+        rawEstatus == 'COMPLETADA_DIGITAL' ||
+        rawEstatus == 'COMPLETADA_FISICA';
+
+    final hasPdfField = orden['has_pdf'] == 1 ||
+        orden['has_pdf'] == '1' ||
+        orden['has_pdf'] == true ||
+        (orden['pdf_path'] != null && orden['pdf_path'].toString().trim().isNotEmpty) ||
+        (orden['pdf_url'] != null && orden['pdf_url'].toString().trim().isNotEmpty) ||
+        (orden['pdf_b64_local'] != null && orden['pdf_b64_local'].toString().trim().isNotEmpty) ||
+        hasPdfOnDisk;
+
+    return hasPdfField && (isCerrado || hasPdfOnDisk);
+  }
+
+  static bool sinIniciar(Map<String, dynamic> orden) {
+    if (tienePdfReal(orden)) return false;
+    final metro = orden['metrologia_data'] ?? orden['rep_json'] ?? orden['exac_json'];
+    if (metro == null) return true;
+    final s = metro.toString().trim();
+    return s.isEmpty || s == '{}' || s == '[]';
+  }
+
   // ── KPIs ─────────────────────────────────────────────────────────────────
   int get _kpiTotal => _filtered.length;
 
   int get _kpiProceso => _filtered.where((o) {
+    if (tienePdfReal(o)) return false;
     final e = (o['estado'] as String? ?? '').trim().toUpperCase();
     final est = (o['estatus'] as String? ?? '').trim().toUpperCase();
-    final folio = (o['folio_os'] as String? ?? o['folio'] as String? ?? '').trim();
-    final pdfPath = (o['pdf_path_local'] as String? ?? '').trim();
-    final bool hasPdf = (pdfPath.isNotEmpty && File(pdfPath).existsSync()) ||
-        LocalDbService.instance.checkPdfExistsOnDiskSync(folio, pdfPath);
-
-    final isCerrada = est == 'CERRADO' ||
-        est == 'CERRADA' ||
-        {'CERRADA', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'FIRMADA'}.contains(e) ||
-        hasPdf;
     final isCancelada = e == 'CANCELADA' || e == 'CANCELADO' || est == 'CANCELADO';
-    return !isCerrada && !isCancelada;
+    return !isCancelada;
   }).length;
 
-  int get _kpiCerrado => _filtered.where((o) {
-    final e = (o['estado'] as String? ?? '').trim().toUpperCase();
-    final est = (o['estatus'] as String? ?? '').trim().toUpperCase();
-    final folio = (o['folio_os'] as String? ?? o['folio'] as String? ?? '').trim();
-    final pdfPath = (o['pdf_path_local'] as String? ?? '').trim();
-    final bool hasPdf = (pdfPath.isNotEmpty && File(pdfPath).existsSync()) ||
-        LocalDbService.instance.checkPdfExistsOnDiskSync(folio, pdfPath);
-
-    return est == 'CERRADO' ||
-        est == 'CERRADA' ||
-        {'CERRADA', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'FIRMADA'}.contains(e) ||
-        hasPdf;
-  }).length;
+  int get _kpiCerrado => _filtered.where((o) => tienePdfReal(o)).length;
 
   int get _kpiFisico => _filtered.where((o) {
     final m = (o['modalidad'] as String? ?? '').trim().toUpperCase();
@@ -456,18 +472,18 @@ class _OsListScreenState extends State<OsListScreen> {
           final dbPath = (localOs['pdf_path_local'] as String? ?? '').trim();
           if (dbPath.isNotEmpty && File(dbPath).existsSync() && File(dbPath).lengthSync() > 500) {
             pathToOpen = dbPath;
-            os['pdf_path_local'] = dbPath;
+            try { os['pdf_path_local'] = dbPath; } catch (_) {}
           } else {
             final b64 = localOs['pdf_b64_local'] as String?;
             if (b64 != null && b64.trim().isNotEmpty) {
               final docDir = await getApplicationDocumentsDirectory();
-              final pdfDir = Directory('${docDir.path}/Pesa_PDFs');
+              final pdfDir = Directory('${docDir.path}/pdfs');
               if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
-              final restored = File('${pdfDir.path}/$folio.pdf');
-              await restored.writeAsBytes(base64Decode(b64.trim()));
+              final restored = File('${pdfDir.path}/OS-$folio.pdf');
+              await restored.writeAsBytes(base64Decode(b64.trim()), flush: true, mode: FileMode.write);
               if (restored.existsSync() && restored.lengthSync() > 500) {
                 pathToOpen = restored.path;
-                os['pdf_path_local'] = restored.path;
+                try { os['pdf_path_local'] = restored.path; } catch (_) {}
                 await LocalDbService.instance.updatePdfPathLocal(folio, restored.path);
               }
             }
@@ -482,7 +498,7 @@ class _OsListScreenState extends State<OsListScreen> {
       final diskPath = await LocalDbService.instance.resolvePdfPathFromDisk(folio);
       if (diskPath != null && File(diskPath).existsSync() && File(diskPath).lengthSync() > 500) {
         pathToOpen = diskPath;
-        os['pdf_path_local'] = diskPath;
+        try { os['pdf_path_local'] = diskPath; } catch (_) {}
       }
     }
 
@@ -552,16 +568,31 @@ class _OsListScreenState extends State<OsListScreen> {
       );
 
       await LocalDbService.instance.updatePdfPathLocal(folio, downloadedPath);
-      os['pdf_path_local'] = downloadedPath;
+      try {
+        os['pdf_path_local'] = downloadedPath;
+      } catch (_) {}
 
       if (ctx.mounted) {
+        final bytes = await File(downloadedPath).readAsBytes();
         ctx.push('/pdf-viewer', extra: {
           'pdfPath': downloadedPath,
-          'pdfBytes': File(downloadedPath).readAsBytesSync(),
+          'pdfBytes': bytes,
           'folio': folio,
         });
       }
     } catch (e) {
+      if (e.toString().contains('read-only')) {
+        final diskPath = await LocalDbService.instance.resolvePdfPathFromDisk(folio);
+        if (diskPath != null && File(diskPath).existsSync() && ctx.mounted) {
+          final bytes = await File(diskPath).readAsBytes();
+          ctx.push('/pdf-viewer', extra: {
+            'pdfPath': diskPath,
+            'pdfBytes': bytes,
+            'folio': folio,
+          });
+          return;
+        }
+      }
       if (ctx.mounted) {
         showDialog(
           context: ctx,
@@ -652,8 +683,10 @@ class _OsListScreenState extends State<OsListScreen> {
             label: const Text('Reabrir y Editar'),
             onPressed: () {
               Navigator.of(dialogCtx).pop();
-              os['estado'] = 'Proceso';
-              context.push('/captura/${os['local_id']}', extra: Map<String, dynamic>.from(os));
+              final editOs = Map<String, dynamic>.from(os);
+              editOs['estado'] = 'Proceso';
+              try { os['estado'] = 'Proceso'; } catch (_) {}
+              context.push('/captura/${os['local_id']}', extra: editOs);
             },
           ),
         ],
@@ -1430,16 +1463,18 @@ class _MobileOsCard extends StatelessWidget {
     final modalidad = (os['modalidad'] as String? ?? 'DIGITAL').toUpperCase();
     final syncSt    = (os['sync_status'] as String? ?? '');
 
-    final String localPdfPath = (os['pdf_path_local'] as String? ?? '').trim();
-    final bool hasPdfOnDisk = (localPdfPath.isNotEmpty && File(localPdfPath).existsSync()) ||
-        LocalDbService.instance.checkPdfExistsOnDiskSync(folioStr, localPdfPath);
+    final bool pdfReal = _OsListScreenState.tienePdfReal(os);
+    final bool noIniciada = _OsListScreenState.sinIniciar(os);
 
-    final bool isCerrado = estatus == 'CERRADO' ||
-        estatus == 'CERRADA' ||
-        {'COMPLETADA', 'FIRMADA', 'CERRADO', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA'}.contains(estado) ||
-        hasPdfOnDisk;
-
-    final String estadoLabel = isCerrado ? 'Cerrado' : (estado == 'PROCESO' ? 'Proceso' : (estado == 'CANCELADA' ? 'Cancelado' : estado));
+    final String estatusLabel = pdfReal
+        ? '✓ PDF Listo'
+        : (noIniciada ? '⚠️ Sin Formato' : 'Pendiente');
+    final Color estatusFg = pdfReal
+        ? const Color(0xFF2E7D32)
+        : (noIniciada ? const Color(0xFFD97706) : const Color(0xFF2563EB));
+    final Color estatusBg = pdfReal
+        ? const Color(0xFFE8F5E9)
+        : (noIniciada ? const Color(0xFFFFFBEB) : const Color(0xFFEFF6FF));
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
@@ -1448,7 +1483,7 @@ class _MobileOsCard extends StatelessWidget {
         os['sync_check_status'] == 'SUBIDA_SERVIDOR' ||
         os['sync_check_status'] == 'AUDITADA_ADMIN' ||
         os['sync_check_status'] == 'ABIERTO' ||
-        (isCerrado && syncSt != 'PENDIENTE_ACTUALIZAR');
+        (pdfReal && syncSt != 'PENDIENTE_ACTUALIZAR');
 
     final fechaStr = (os['fecha'] as String? ?? '').split('T').first.split(' ').first;
 
@@ -1485,15 +1520,15 @@ class _MobileOsCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: isCerrado ? const Color(0xFFE8F5E9) : const Color(0xFFFFF3E0),
+                  color: estatusBg,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  estadoLabel,
+                  estatusLabel,
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: isCerrado ? const Color(0xFF2E7D32) : const Color(0xFFE65100),
+                    color: estatusFg,
                   ),
                 ),
               ),
@@ -1564,80 +1599,8 @@ class _MobileOsCard extends StatelessWidget {
           const SizedBox(height: 12),
 
           // Fila Inferior (Acciones ergonómicas táctiles)
-          if (!isCerrado) ...[
-            SizedBox(
-              width: double.infinity,
-              height: 44,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _kCarmineRed,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                ),
-                onPressed: onCaptura,
-                icon: const Icon(Icons.edit_document, size: 18),
-                label: const Text(
-                  '📝 Continuar Toma de Datos',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: SizedBox(
-                    height: 40,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFEDE7F6),
-                        foregroundColor: const Color(0xFF5E35B1),
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFD1C4E9)),
-                        ),
-                      ),
-                      onPressed: () => onSubirPdfManual(context, os),
-                      icon: const Icon(Icons.upload_file_rounded, size: 16),
-                      label: const Text(
-                        '📤 Subir PDF manual',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SizedBox(
-                    height: 40,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFFEBEE),
-                        foregroundColor: const Color(0xFFC62828),
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFFFCDD2)),
-                        ),
-                      ),
-                      onPressed: () => onEliminarDatos(context, os),
-                      icon: const Icon(Icons.delete_forever_rounded, size: 16),
-                      label: const Text(
-                        '🗑️ Eliminar datos',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ] else ...[
+          if (pdfReal) ...[
+            // A) TIENE PDF REAL GENERADO O ADJUNTADO
             Row(
               children: [
                 Expanded(
@@ -1754,12 +1717,111 @@ class _MobileOsCard extends StatelessWidget {
                       onPressed: () => onEliminarDatos(context, os),
                       icon: const Icon(Icons.delete_forever_rounded, size: 16),
                       label: const Text(
-                        '🗑️ Eliminar datos desde 0',
+                        '🗑️ Eliminar datos',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ),
                 ),
+              ],
+            ),
+          ] else ...[
+            // B) SIN PDF / SIN INICIAR / PENDIENTE
+            if (isFisico) ...[
+              SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7C3AED),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
+                  icon: const Icon(Icons.document_scanner_outlined, size: 18),
+                  label: const Text(
+                    '📤 Adjuntar PDF Escaneado',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ] else ...[
+              SizedBox(
+                width: double.infinity,
+                height: 44,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: noIniciada ? const Color(0xFFE65100) : _kCarmineRed,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  onPressed: onCaptura,
+                  icon: Icon(noIniciada ? Icons.edit : Icons.edit_document, size: 18),
+                  label: Text(
+                    noIniciada ? '✍️ Iniciar Captura' : '📝 Continuar Toma de Datos',
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: SizedBox(
+                    height: 40,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFEDE7F6),
+                        foregroundColor: const Color(0xFF5E35B1),
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          side: const BorderSide(color: Color(0xFFD1C4E9)),
+                        ),
+                      ),
+                      onPressed: () => onSubirPdfManual(context, os),
+                      icon: const Icon(Icons.upload_file_rounded, size: 16),
+                      label: const Text(
+                        '📤 Subir PDF manual',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ),
+                if (!noIniciada) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SizedBox(
+                      height: 40,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFFFEBEE),
+                          foregroundColor: const Color(0xFFC62828),
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            side: const BorderSide(color: Color(0xFFFFCDD2)),
+                          ),
+                        ),
+                        onPressed: () => onEliminarDatos(context, os),
+                        icon: const Icon(Icons.delete_forever_rounded, size: 16),
+                        label: const Text(
+                          '🗑️ Eliminar datos',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ],
@@ -2443,8 +2505,8 @@ class _TableHeader extends StatelessWidget {
             const Expanded(flex: 2, child: _TH('TÉCNICO')),
           const Expanded(flex: 2, child: _TH('TIPO SERVICIO')),
           const SizedBox(width: 90, child: _TH('MODALIDAD')),
-          const SizedBox(width: 90, child: _TH('ESTATUS')),
-          const SizedBox(width: 90, child: _TH('SYNC')),
+          const SizedBox(width: 95, child: _TH('ESTATUS')),
+          const SizedBox(width: 85, child: _TH('SYNC')),
           const SizedBox(width: 360, child: _TH('ACCIONES')),
         ],
       ),
@@ -2496,24 +2558,28 @@ class _OsRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final folioStr  = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
-    final estado    = (os['estado'] as String? ?? '').toUpperCase().trim();
-    final estatus   = (os['estatus'] as String? ?? '').toUpperCase().trim();
     final modalidad = (os['modalidad'] as String? ?? 'DIGITAL').toUpperCase();
     final syncSt    = (os['sync_status'] as String? ?? '');
-    final isFisico  = modalidad.contains('FISIC');
+    final isFisico  = modalidad.contains('FISIC') || modalidad.contains('FÍSIC');
     final isEven    = index % 2 == 0;
 
-    final String localPdfPath = (os['pdf_path_local'] as String? ?? '').trim();
-    final bool hasPdfOnDisk = (localPdfPath.isNotEmpty && File(localPdfPath).existsSync()) ||
-        LocalDbService.instance.checkPdfExistsOnDiskSync(folioStr, localPdfPath);
+    final bool pdfReal = _OsListScreenState.tienePdfReal(os);
+    final bool noIniciada = _OsListScreenState.sinIniciar(os);
 
-    final bool isCerrado = estatus == 'CERRADO' ||
-        estatus == 'CERRADA' ||
-        {'COMPLETADA', 'FIRMADA', 'CERRADO', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA'}.contains(estado) ||
-        hasPdfOnDisk;
-
-    final Color estadoFg = isCerrado ? Colors.green.shade700 : (estado == 'PROCESO' ? _kCarmineRed : Colors.grey.shade600);
-    final String estadoLabel = isCerrado ? 'Cerrado' : (estado == 'PROCESO' ? 'Proceso' : 'Cancelado');
+    // Estatus Pill:
+    // A) SI TIENE PDF GENERADO O ADJUNTADO:
+    //    Píldora de estatus verde: [ ✓ PDF Listo ]
+    // B) SI NO SE HA HECHO PARA NADA / SIN PDF:
+    //    Píldora de estatus en gris / ámbar: [ ⚠️ Sin Formato ] o [ Pendiente ]
+    final String estatusLabel = pdfReal
+        ? '✓ PDF Listo'
+        : (noIniciada ? '⚠️ Sin Formato' : 'Pendiente');
+    final Color estatusFg = pdfReal
+        ? const Color(0xFF2E7D32)
+        : (noIniciada ? const Color(0xFFD97706) : const Color(0xFF2563EB));
+    final Color estatusBg = pdfReal
+        ? const Color(0xFFE8F5E9)
+        : (noIniciada ? const Color(0xFFFFFBEB) : const Color(0xFFEFF6FF));
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
@@ -2522,7 +2588,7 @@ class _OsRow extends StatelessWidget {
         os['sync_check_status'] == 'SUBIDA_SERVIDOR' ||
         os['sync_check_status'] == 'AUDITADA_ADMIN' ||
         os['sync_check_status'] == 'ABIERTO' ||
-        (isCerrado && syncSt != 'PENDIENTE_ACTUALIZAR');
+        (pdfReal && syncSt != 'PENDIENTE_ACTUALIZAR');
 
     final fechaStr = (os['fecha'] as String? ?? '').split('T').first.split(' ').first;
 
@@ -2606,18 +2672,18 @@ class _OsRow extends StatelessWidget {
               bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
             ),
           ),
-          // ESTATUS (90px)
+          // ESTATUS (95px)
           SizedBox(
-            width: 90,
+            width: 95,
             child: _Badge(
-              label: estadoLabel,
-              fg: estadoFg,
-              bg: estadoFg.withOpacity(0.08),
+              label: estatusLabel,
+              fg: estatusFg,
+              bg: estatusBg,
             ),
           ),
-          // SYNC (90px)
+          // SYNC (85px)
           SizedBox(
-            width: 90,
+            width: 85,
             child: SyncCheckBadge(
               status: (os['sync_check_status'] as String?)?.isNotEmpty == true
                   ? os['sync_check_status'] as String
@@ -2631,13 +2697,45 @@ class _OsRow extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
-                if (isFisico) ...[
-                  _ActionBtn(
-                    label: 'Adjuntar',
-                    icon: Icons.document_scanner_outlined,
-                    fg: Colors.white,
-                    bg: const Color(0xFF7C3AED),
-                    onTap: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
+                if (pdfReal) ...[
+                  // A) SI TIENE PDF GENERADO O ADJUNTADO
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF1976D2),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      minimumSize: const Size(60, 32),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.picture_as_pdf, size: 14),
+                    label: const Text('📄 Ver PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    onPressed: () => onAbrirPdf(context, os),
+                  ),
+                  const SizedBox(width: 4),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF2E7D32),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                      minimumSize: const Size(65, 32),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.download, size: 14),
+                    label: const Text('📥 Descargar', style: TextStyle(fontSize: 11)),
+                    onPressed: () => onDescargarPdf(context, os),
+                  ),
+                  const SizedBox(width: 4),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFF57C00),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                      minimumSize: const Size(60, 32),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.edit_note, size: 14),
+                    label: const Text('Rehacer', style: TextStyle(fontSize: 11)),
+                    onPressed: () => onRehacer(context, os),
                   ),
                   const SizedBox(width: 4),
                   ElevatedButton.icon(
@@ -2645,7 +2743,7 @@ class _OsRow extends StatelessWidget {
                       backgroundColor: const Color(0xFF4338CA),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                      minimumSize: const Size(60, 32),
+                      minimumSize: const Size(55, 32),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     ),
                     icon: const Icon(Icons.upload_file, size: 14),
@@ -2668,121 +2766,87 @@ class _OsRow extends StatelessWidget {
                     icon: const Icon(Icons.delete_forever, size: 16),
                     onPressed: () => onEliminarDatos(context, os),
                   ),
-                ] else if (isCerrado)
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1976D2),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                          minimumSize: const Size(60, 32),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        ),
-                        icon: const Icon(Icons.picture_as_pdf, size: 14),
-                        label: const Text('PDF', style: TextStyle(fontSize: 11)),
-                        onPressed: () => onAbrirPdf(context, os),
+                ] else ...[
+                  // B) SI NO SE HA HECHO PARA NADA / SIN PDF
+                  if (isFisico) ...[
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF7C3AED),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        minimumSize: const Size(110, 32),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                       ),
-                      const SizedBox(width: 4),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E7D32),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                          minimumSize: const Size(65, 32),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        ),
-                        icon: const Icon(Icons.download, size: 14),
-                        label: const Text('Descargar', style: TextStyle(fontSize: 11)),
-                        onPressed: () => onDescargarPdf(context, os),
+                      icon: const Icon(Icons.document_scanner_outlined, size: 15),
+                      label: const Text('📤 Adjuntar PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                      onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
+                    ),
+                  ] else ...[
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: noIniciada ? const Color(0xFFE65100) : _kCarmineRed,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                        minimumSize: const Size(115, 32),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                       ),
-                      const SizedBox(width: 4),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFF57C00),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                          minimumSize: const Size(65, 32),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        ),
-                        icon: const Icon(Icons.edit_note, size: 14),
-                        label: const Text('Rehacer', style: TextStyle(fontSize: 11)),
-                        onPressed: () => onRehacer(context, os),
+                      icon: Icon(noIniciada ? Icons.edit : Icons.edit_note_outlined, size: 15),
+                      label: Text(
+                        noIniciada ? '✍️ Iniciar Captura' : '📝 Continuar',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
-                      const SizedBox(width: 4),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF4338CA),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                          minimumSize: const Size(60, 32),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        ),
-                        icon: const Icon(Icons.upload_file, size: 14),
-                        label: const Text('Subir', style: TextStyle(fontSize: 11)),
-                        onPressed: () => onSubirPdfManual(context, os),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        tooltip: 'Eliminar datos desde 0',
-                        style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFFFFEBEE),
-                          foregroundColor: const Color(0xFFC62828),
-                          padding: const EdgeInsets.all(6),
-                          minimumSize: const Size(32, 32),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                            side: const BorderSide(color: Color(0xFFFFCDD2)),
-                          ),
-                        ),
-                        icon: const Icon(Icons.delete_forever, size: 16),
-                        onPressed: () => onEliminarDatos(context, os),
-                      ),
-                    ],
-                  )
-                else
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      _ActionBtn(
-                        label: '📝 Continuar Toma',
-                        icon: Icons.edit_note_outlined,
-                        fg: Colors.white,
-                        bg: _kCarmineRed,
-                        onTap: onCaptura,
-                      ),
-                      const SizedBox(width: 4),
-                      ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF4338CA),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                          minimumSize: const Size(60, 32),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        ),
-                        icon: const Icon(Icons.upload_file, size: 14),
-                        label: const Text('Subir', style: TextStyle(fontSize: 11)),
-                        onPressed: () => onSubirPdfManual(context, os),
-                      ),
-                      const SizedBox(width: 4),
-                      IconButton(
-                        tooltip: 'Eliminar datos desde 0',
-                        style: IconButton.styleFrom(
-                          backgroundColor: const Color(0xFFFFEBEE),
-                          foregroundColor: const Color(0xFFC62828),
-                          padding: const EdgeInsets.all(6),
-                          minimumSize: const Size(32, 32),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                            side: const BorderSide(color: Color(0xFFFFCDD2)),
-                          ),
-                        ),
-                        icon: const Icon(Icons.delete_forever, size: 16),
-                        onPressed: () => onEliminarDatos(context, os),
-                      ),
-                    ],
+                      onPressed: onCaptura,
+                    ),
+                  ],
+                  const SizedBox(width: 4),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF4338CA),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                      minimumSize: const Size(55, 32),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    icon: const Icon(Icons.upload_file, size: 14),
+                    label: const Text('Subir', style: TextStyle(fontSize: 11)),
+                    onPressed: () => onSubirPdfManual(context, os),
                   ),
+                  const SizedBox(width: 4),
+                  // Botones atenuados para Descargar
+                  Opacity(
+                    opacity: 0.35,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey.shade300,
+                        foregroundColor: Colors.grey.shade700,
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+                        minimumSize: const Size(60, 32),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        elevation: 0,
+                      ),
+                      icon: const Icon(Icons.download, size: 14),
+                      label: const Text('Descargar', style: TextStyle(fontSize: 10)),
+                      onPressed: null,
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  if (!noIniciada)
+                    IconButton(
+                      tooltip: 'Eliminar datos desde 0',
+                      style: IconButton.styleFrom(
+                        backgroundColor: const Color(0xFFFFEBEE),
+                        foregroundColor: const Color(0xFFC62828),
+                        padding: const EdgeInsets.all(6),
+                        minimumSize: const Size(32, 32),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(6),
+                          side: const BorderSide(color: Color(0xFFFFCDD2)),
+                        ),
+                      ),
+                      icon: const Icon(Icons.delete_forever, size: 16),
+                      onPressed: () => onEliminarDatos(context, os),
+                    ),
+                ],
               ],
             ),
           ),
@@ -2851,8 +2915,8 @@ class _LoteRowState extends State<_LoteRow> {
                   Expanded(flex: 2, child: Text(first['tecnico'] ?? '—', style: const TextStyle(fontSize: 11))),
                 Expanded(flex: 2, child: Text(first['tipo_servicio'] ?? '—', style: const TextStyle(fontSize: 11))),
                 const SizedBox(width: 90, child: Text('Lote', style: TextStyle(fontSize: 11))),
-                const SizedBox(width: 90, child: Text('Proceso', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
-                const SizedBox(width: 90),
+                const SizedBox(width: 95, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
+                const SizedBox(width: 85),
                 const SizedBox(width: 360),
               ],
             ),

@@ -26,10 +26,14 @@ class RepetibilidadTable extends StatefulWidget {
   State<RepetibilidadTable> createState() => _RepetibilidadTableState();
 }
 
-class _RepetibilidadTableState extends State<RepetibilidadTable> {
+class _RepetibilidadTableState extends State<RepetibilidadTable>
+    with AutomaticKeepAliveClientMixin {
   late TextEditingController _cargaCtrl;
   late List<_RepRow> _rows;
   bool _userEditedCarga = false;
+
+  @override
+  bool get wantKeepAlive => true; // Evita destrucción al cambiar de pestaña
 
   @override
   void initState() {
@@ -121,6 +125,7 @@ class _RepetibilidadTableState extends State<RepetibilidadTable> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // requerido por AutomaticKeepAliveClientMixin
     final dec = decimalsFromDivMin(widget.divMin);
     final cargaVal = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.'));
     final cargaInvalida = cargaVal != null && !isValidDivMin(cargaVal, widget.divMin);

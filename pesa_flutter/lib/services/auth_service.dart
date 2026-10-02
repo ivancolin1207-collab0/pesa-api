@@ -7,11 +7,56 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'api_service.dart';
 import 'firma_tecnico_service.dart';
 
+class UsuarioActual {
+  final int? id;
+  final String nombre;
+  final String rol;
+  final String username;
+
+  UsuarioActual({
+    this.id,
+    required this.nombre,
+    required this.rol,
+    required this.username,
+  });
+
+  bool get isTecnico {
+    final r = AuthService.normalizeRole(rol);
+    return r == 'tecnico' ||
+           r == 'servicio' ||
+           r == 'calibrador' ||
+           r == 'inspector' ||
+           r == 'operativo';
+  }
+
+  @override
+  String toString() => 'UsuarioActual(id: $id, nombre: $nombre, rol: $rol, username: $username)';
+}
+
 class AuthService extends ChangeNotifier {
   // Opciones Android: modo de cifrado compatible con todos los dispositivos
   static const _storage = FlutterSecureStorage(
     aOptions: AndroidOptions(encryptedSharedPreferences: true),
   );
+
+  static UsuarioActual? _usuarioActual;
+
+  /// Retorna los datos del usuario autenticado en la sesión actual
+  static UsuarioActual? get usuarioActual {
+    if (_usuarioActual != null) return _usuarioActual;
+    final r = ApiService.instance.userRole;
+    final n = ApiService.instance.lastNombre;
+    final id = ApiService.instance.lastIdTecnico;
+    if (r != null || n != null || id != null) {
+      return UsuarioActual(
+        id: id,
+        nombre: n ?? 'Usuario',
+        rol: r ?? 'tecnico',
+        username: '',
+      );
+    }
+    return null;
+  }
 
   bool    _authenticated  = false;
   String? _username;
@@ -71,6 +116,9 @@ class AuthService extends ChangeNotifier {
     await ApiService.instance.loadSavedToken();
     _authenticated = ApiService.instance.isAuthenticated;
     if (_authenticated) await _loadClaims();
+    if (_authenticated && _username != null && _username!.isNotEmpty) {
+      FirmaTecnicoService.instance.syncFirmaFromCloud(_username!, _idTecnico ?? 0);
+    }
     // Seed siempre en background (no bloquea la UI)
     _seedDefaultCredentials();
     notifyListeners();
@@ -122,6 +170,15 @@ class AuthService extends ChangeNotifier {
       await _storage.write(key: 'pesa_id_tecnico', value: _idTecnico.toString());
       await _storage.write(key: 'offline_id_tecnico_$username', value: _idTecnico.toString());
     }
+    if (_username != null && _username!.isNotEmpty) {
+      FirmaTecnicoService.instance.syncFirmaFromCloud(_username!, _idTecnico ?? 0);
+    }
+    _usuarioActual = UsuarioActual(
+      id: _idTecnico,
+      nombre: _nombreCompleto ?? username,
+      rol: _role ?? 'tecnico',
+      username: username,
+    );
     notifyListeners();
   }
 
@@ -274,6 +331,12 @@ class AuthService extends ChangeNotifier {
     if (_idTecnico == null || _idTecnico == 0) {
       _idTecnico = resolveKnownIdTecnico(_username ?? '');
     }
+    _usuarioActual = UsuarioActual(
+      id: _idTecnico,
+      nombre: _nombreCompleto ?? _username ?? '',
+      rol: _role ?? 'tecnico',
+      username: _username ?? '',
+    );
     debugPrint('[AuthService] Sesión: $_nombreCompleto | $_username | $_role | idTec=$_idTecnico');
   }
 
@@ -282,6 +345,10 @@ class AuthService extends ChangeNotifier {
   Future<bool> verificarFirmaEnServidor() async {
     final user = _username ?? '';
     final idTec = _idTecnico ?? (user.toLowerCase() == 'daikki19' ? 8 : 0);
+    if (user.isNotEmpty || idTec > 0) {
+      final cloudFirma = await FirmaTecnicoService.instance.syncFirmaFromCloud(user, idTec);
+      if (cloudFirma != null && cloudFirma.length > 50) return true;
+    }
     if (idTec > 0) {
       try {
         final serverTiene = await ApiService.instance.verificarFirmaPerfil(idTec);
@@ -295,7 +362,7 @@ class AuthService extends ChangeNotifier {
     }
     // Verificación local persistente
     if (user.isNotEmpty) {
-      final localTiene = await FirmaTecnicoService.instance.tieneFirma(user);
+      final localTiene = await FirmaTecnicoService.instance.tieneFirma(user, idTecnico: idTec);
       if (localTiene) return true;
     }
     return false;
@@ -311,6 +378,7 @@ class AuthService extends ChangeNotifier {
     _username       = null;
     _nombreCompleto = null;
     _role           = null;
+    _usuarioActual  = null;
     notifyListeners();
   }
 }

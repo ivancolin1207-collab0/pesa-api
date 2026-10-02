@@ -548,16 +548,29 @@ class _FirmaScreenState extends State<FirmaScreen>
           borderRadius: BorderRadius.circular(11),
           child: Stack(
             children: [
-              Signature(controller: ctrl, backgroundColor: Colors.white),
+              GestureDetector(
+                onPanDown: (_) {},
+                onPanStart: (_) {},
+                onPanUpdate: (_) {},
+                behavior: HitTestBehavior.opaque,
+                child: Listener(
+                  onPointerDown: (_) {},
+                  onPointerMove: (_) {},
+                  behavior: HitTestBehavior.opaque,
+                  child: Signature(controller: ctrl, backgroundColor: Colors.white),
+                ),
+              ),
               // Watermark guia
               if (ctrl.isEmpty)
-                const Center(
-                  child: Text(
-                    'Firme aquí',
-                    style: TextStyle(
-                      fontSize: 18,
-                      color: Color(0xFFD0D0D0),
-                      fontStyle: FontStyle.italic,
+                const IgnorePointer(
+                  child: Center(
+                    child: Text(
+                      'Firme aquí',
+                      style: TextStyle(
+                        fontSize: 18,
+                        color: Color(0xFFD0D0D0),
+                        fontStyle: FontStyle.italic,
+                      ),
                     ),
                   ),
                 ),
@@ -609,9 +622,7 @@ class _FirmaScreenState extends State<FirmaScreen>
   // ── Barra de accion final ─────────────────────────────────────────────────
 
   Widget _buildActionBar() {
-    final bottomInset = MediaQuery.of(context).viewPadding.bottom;
     return Container(
-      padding: EdgeInsets.fromLTRB(16, 10, 16, 12 + (bottomInset > 0 ? bottomInset : 8)),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -624,30 +635,54 @@ class _FirmaScreenState extends State<FirmaScreen>
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Indicadores de progreso de firmas
-          Row(children: [
-            _progressChip('Técnico', _ctrlTecnico, isPrecargada: _firmaTecPrecargada),
-            const SizedBox(width: 8),
-            _progressChip('Ing./Cliente', _ctrlCliente, isPrecargada: _firmaCliPrecargada),
-          ]),
-          const SizedBox(height: 10),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _red,
-              foregroundColor: Colors.white,
-              minimumSize: const Size(double.infinity, 50),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            child: Row(children: [
+              _progressChip('Técnico', _ctrlTecnico, isPrecargada: _firmaTecPrecargada),
+              const SizedBox(width: 8),
+              _progressChip('Ing./Cliente', _ctrlCliente, isPrecargada: _firmaCliPrecargada),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+            child: SafeArea(
+              child: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                alignment: WrapAlignment.end,
+                children: [
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.refresh),
+                    label: const Text("Reintentar / Modificar"),
+                    onPressed: () {
+                      if (context.canPop()) {
+                        context.pop();
+                      } else {
+                        context.go('/os');
+                      }
+                    },
+                  ),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFB81D24),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 20, height: 20,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white))
+                        : const Icon(Icons.picture_as_pdf),
+                    label: const Text("📑 Regenerar y Reemitir PDF",
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                    onPressed: _saving ? null : _onFinalizar,
+                  ),
+                ],
+              ),
             ),
-            icon: _saving
-                ? const SizedBox(
-                    width: 20, height: 20,
-                    child: CircularProgressIndicator(
-                        strokeWidth: 2, color: Colors.white))
-                : const Icon(Icons.picture_as_pdf),
-            label: const Text('Finalizar y Generar PDF',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-            onPressed: _saving ? null : _onFinalizar,
           ),
         ],
       ),
@@ -1063,6 +1098,7 @@ class _FirmaScreenState extends State<FirmaScreen>
                         if (context.mounted) {
                           context.push('/pdf-viewer', extra: {
                             'pdfPath': localPdfPath,
+                            'pdfBytes': File(localPdfPath).readAsBytesSync(),
                             'folio': folio,
                           });
                         }
@@ -1071,6 +1107,7 @@ class _FirmaScreenState extends State<FirmaScreen>
                       if (context.mounted) {
                         context.push('/pdf-viewer', extra: {
                           'pdfPath': localPdfPath,
+                          'pdfBytes': File(localPdfPath).readAsBytesSync(),
                           'folio': folio,
                         });
                       }
@@ -1078,6 +1115,7 @@ class _FirmaScreenState extends State<FirmaScreen>
                   } else if (context.mounted) {
                     context.push('/pdf-viewer', extra: {
                       'pdfPath': localPdfPath,
+                      'pdfBytes': File(localPdfPath).readAsBytesSync(),
                       'folio': folio,
                     });
                   }

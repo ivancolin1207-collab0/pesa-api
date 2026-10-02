@@ -28,8 +28,12 @@ class ExactitudTable extends StatefulWidget {
   State<ExactitudTable> createState() => _ExactitudTableState();
 }
 
-class _ExactitudTableState extends State<ExactitudTable> {
+class _ExactitudTableState extends State<ExactitudTable>
+    with AutomaticKeepAliveClientMixin {
   late List<TextEditingController> _nomCtrls, _initCtrls, _finalCtrls;
+
+  @override
+  bool get wantKeepAlive => true; // Evita destrucción al cambiar de pestaña
 
   @override
   void initState() {
@@ -113,6 +117,7 @@ class _ExactitudTableState extends State<ExactitudTable> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // requerido por AutomaticKeepAliveClientMixin
     final dec = getDecimalsFromD(widget.divMin);
 
     // Revisar si hay campos inválidos

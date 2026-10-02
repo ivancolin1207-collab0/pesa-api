@@ -50,6 +50,10 @@ class _CapturaScreenState extends State<CapturaScreen>
   // ── Controladores Paso 0 — Instrumento ───────────────────────────────────
   final _marcaCtrl      = TextEditingController();
   final _modeloCtrl     = TextEditingController();
+  final _marcaFocusNode  = FocusNode();
+  final _modeloFocusNode = FocusNode();
+  List<String> _marcasSugeridas  = [];
+  List<String> _modelosSugeridos = [];
   final _nsCtrl         = TextEditingController();
   final _idEquipoCtrl   = TextEditingController();
   final _capMaxCtrl     = TextEditingController();
@@ -117,6 +121,35 @@ class _CapturaScreenState extends State<CapturaScreen>
     });
     _precargaCampos();
     _loadLocalData();
+    _cargarMarcasModelos();
+  }
+
+  Future<void> _cargarMarcasModelos() async {
+    try {
+      final marcas = await LocalDbService.instance.getMarcas();
+      final modelos = await LocalDbService.instance.getModelos(marca: _marcaCtrl.text.trim());
+      if (mounted) {
+        setState(() {
+          _marcasSugeridas = marcas;
+          _modelosSugeridos = modelos;
+        });
+      }
+    } catch (e) {
+      debugPrint('[Captura] Error cargando marcas/modelos sugeridos: $e');
+    }
+  }
+
+  Future<void> _actualizarModelosParaMarca(String marca) async {
+    try {
+      final modelos = await LocalDbService.instance.getModelos(marca: marca.trim());
+      if (mounted) {
+        setState(() {
+          _modelosSugeridos = modelos;
+        });
+      }
+    } catch (e) {
+      debugPrint('[Captura] Error actualizando modelos sugeridos: $e');
+    }
   }
 
   /// Precarga TODOS los campos del instrumento con datos que ya vienen
@@ -255,6 +288,8 @@ class _CapturaScreenState extends State<CapturaScreen>
     _tabCtrl.dispose();
     _firmaClienteFocusNode.dispose();
     _obsFocusNode.dispose();
+    _marcaFocusNode.dispose();
+    _modeloFocusNode.dispose();
     for (final c in [
       _marcaCtrl, _modeloCtrl, _nsCtrl, _idEquipoCtrl,
       _capMaxCtrl, _divMinCtrl, _divVerCtrl, _ubicCtrl,
@@ -671,22 +706,34 @@ class _CapturaScreenState extends State<CapturaScreen>
         _SectionTitle('Identificación del Instrumento'),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _Field(
-            'Marca',
-            _marcaCtrl,
+          Expanded(child: _AutocompleteField(
+            label: 'Marca',
+            ctrl: _marcaCtrl,
+            focusNode: _marcaFocusNode,
+            suggestions: _marcasSugeridas,
             hint: 'METTLER TOLEDO',
             required: true,
             hasError: _mostrarErroresInstrumento && _marcaCtrl.text.trim().isEmpty,
-            onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
+            onChanged: (val) {
+              _actualizarModelosParaMarca(val);
+              if (_mostrarErroresInstrumento) setState(() {});
+            },
+            onSelected: (val) {
+              _actualizarModelosParaMarca(val);
+              setState(() {});
+            },
           )),
           const SizedBox(width: 12),
-          Expanded(child: _Field(
-            'Modelo',
-            _modeloCtrl,
+          Expanded(child: _AutocompleteField(
+            label: 'Modelo',
+            ctrl: _modeloCtrl,
+            focusNode: _modeloFocusNode,
+            suggestions: _modelosSugeridos,
             hint: 'IND560',
             required: true,
             hasError: _mostrarErroresInstrumento && _modeloCtrl.text.trim().isEmpty,
             onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
+            onSelected: (_) { setState(() {}); },
           )),
           const SizedBox(width: 12),
           Expanded(child: _Field('N° de Serie', _nsCtrl, hint: 'B215004321')),
@@ -1380,6 +1427,8 @@ class _CapturaScreenState extends State<CapturaScreen>
     final rules = _rules;
     _os['marca']                 = _marcaCtrl.text.trim();
     _os['modelo']                = _modeloCtrl.text.trim();
+    // Persistir combinación de marca y modelo en catálogo local SQLite
+    LocalDbService.instance.saveMarcaModelo(_marcaCtrl.text, _modeloCtrl.text);
     _os['ns']                    = _nsCtrl.text.trim();
     _os['serie']                 = _nsCtrl.text.trim();
     _os['id_equipo']             = _idEquipoCtrl.text.trim();
@@ -1510,11 +1559,16 @@ class _CapturaScreenState extends State<CapturaScreen>
         'div_min':               _divMinCtrl.text.trim(),
         'division_minima':       _divMinCtrl.text.trim(),
         'div_ver':               _divVerCtrl.text.trim(),
+        'div_verificacion':      _divVerCtrl.text.trim(),
+        'folio_dve':             _divVerCtrl.text.trim(),
+        'numero_dve':            _divVerCtrl.text.trim(),
         'numero_cca':            _ccaCtrl.text.trim(),
+        'cca':                   _ccaCtrl.text.trim(),
         'cca_aplica':            rules.tieneCalibracion || _ccaCtrl.text.trim().isNotEmpty,
         'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
         'holograma_anterior':    _holoAntCtrl.text.trim(),
         'holograma_actualizado': _holoActCtrl.text.trim(),
+        'holograma_nuevo':       _holoActCtrl.text.trim(),
         'tipo_instrumento':      _tipoInstrumento,
         'funcionamiento':        _funcionamiento,
         'puntos_apoyo':          _puntosApoyo,
@@ -1885,6 +1939,92 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) => Text(text,
       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800,
           color: Color(0xFF374151), letterSpacing: 0.5));
+}
+
+class _AutocompleteField extends StatelessWidget {
+  final String                label;
+  final TextEditingController ctrl;
+  final FocusNode             focusNode;
+  final List<String>          suggestions;
+  final String?               hint;
+  final bool                  required;
+  final bool                  hasError;
+  final ValueChanged<String>? onChanged;
+  final ValueChanged<String>? onSelected;
+
+  const _AutocompleteField({
+    required this.label,
+    required this.ctrl,
+    required this.focusNode,
+    required this.suggestions,
+    this.hint,
+    this.required = false,
+    this.hasError = false,
+    this.onChanged,
+    this.onSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return RawAutocomplete<String>(
+      textEditingController: ctrl,
+      focusNode: focusNode,
+      optionsBuilder: (TextEditingValue textEditingValue) {
+        final query = textEditingValue.text.trim().toLowerCase();
+        if (query.isEmpty) {
+          return suggestions.take(15);
+        }
+        return suggestions
+            .where((s) => s.toLowerCase().contains(query))
+            .take(15);
+      },
+      onSelected: (String selection) {
+        ctrl.text = selection;
+        onSelected?.call(selection);
+      },
+      optionsViewBuilder: (context, onSelect, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 6.0,
+            borderRadius: BorderRadius.circular(8),
+            color: Colors.white,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220, maxWidth: 280),
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                shrinkWrap: true,
+                itemCount: options.length,
+                separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                itemBuilder: (BuildContext context, int index) {
+                  final String option = options.elementAt(index);
+                  return InkWell(
+                    onTap: () => onSelect(option),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Text(
+                        option,
+                        style: const TextStyle(fontSize: 13, color: Colors.black87),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      fieldViewBuilder: (context, controller, fNode, onFieldSubmitted) {
+        return TextFormField(
+          controller: controller,
+          focusNode: fNode,
+          onChanged: onChanged,
+          decoration: _kInputDeco(label + (required ? ' *' : ''), hint: hint, hasError: hasError),
+          style: const TextStyle(fontSize: 13),
+        );
+      },
+    );
+  }
 }
 
 class _Field extends StatelessWidget {

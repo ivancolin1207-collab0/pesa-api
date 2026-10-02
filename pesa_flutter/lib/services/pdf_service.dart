@@ -130,13 +130,7 @@ class PdfService {
         pw.SizedBox(height: 3),
         // 5. Grid de instrumento
         _buildEquipo(osData),
-        if (_debeMostrarJia(osData)) ...[
-          pw.SizedBox(height: 2),
-          // 5.1 Fila JIA (inicial del calibrador)
-          _buildJiaRow(osData),
-          pw.SizedBox(height: 2),
-        ] else
-          pw.SizedBox(height: 4),
+        pw.SizedBox(height: 3),
         // 6. "PRUEBAS METROLÓGICAS"
         _sectionTitle('PRUEBAS METROLÓGICAS'),
         pw.SizedBox(height: 3),
@@ -268,7 +262,17 @@ class PdfService {
     final div    = _s(os, 'div_minima', _s(os, 'division_minima', _s(os, 'div_min', '')));
     final unidad = _s(os, 'unidad_medida', 'kg');
     final apoyo  = _s(os, 'puntos_apoyo', '4');
-    final cca    = _s(os, 'numero_cca', _s(os, 'cca', ''));
+    final cca      = _s(os, 'numero_cca', _s(os, 'cca', _s(os, 'numeroCca', '')));
+    final folioDve = _s(os, 'folio_dve', _s(os, 'numero_dve', _s(os, 'div_verificacion', _s(os, 'div_ver', _s(os, 'folioDve', _s(os, 'numeroDve', ''))))));
+    final holoAnt  = _s(os, 'holograma_anterior', _s(os, 'hologramaAnterior', ''));
+    final holoNue  = _s(os, 'holograma_actualizado', _s(os, 'holograma_nuevo', _s(os, 'hologramaNuevo', '')));
+
+    final bool debeMostrarInspec = _debeMostrarJia(os) ||
+        folioDve.isNotEmpty || holoAnt.isNotEmpty || holoNue.isNotEmpty || cca.isNotEmpty;
+
+    final j = os['jia_j'] == true || os['inicial_calibrador'] == 'J';
+    final i = os['jia_i'] == true || os['inicial_calibrador'] == 'I';
+    final a = os['jia_a'] == true || os['inicial_calibrador'] == 'A';
 
     return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
       _equipoRow([_FD('MARCA', marca, 0.28), _FD('MODELO', modelo, 0.36), _FD('SERIE / N/S', ns, 0.36)]),
@@ -279,11 +283,63 @@ class PdfService {
         _FD('PUNTOS DE APOYO', apoyo, 0.18),
         _FD('UBICACIÓN', ubic, 0.30),
       ]),
-      if (cca.isNotEmpty)
+      if (debeMostrarInspec) ...[
+        // Renglón 1: NÚMERO CCA + INICIAL CALIBRADOR J - I - A
+        _equipoJiaRow(
+          cca: cca.isNotEmpty ? cca : 'N/A',
+          j: j, i: i, a: a,
+        ),
+        // Renglón 2: FOLIO DVE + HOLOGRAMA ANTERIOR + HOLOGRAMA NUEVO
+        _equipoRow([
+          _FD('FOLIO DVE', folioDve.isNotEmpty ? folioDve : 'N/A', 0.34),
+          _FD('HOLO. ANTERIOR', holoAnt.isNotEmpty ? holoAnt : 'N/A', 0.33),
+          _FD('HOLO. NUEVO', holoNue.isNotEmpty ? holoNue : 'N/A', 0.33),
+        ]),
+      ] else if (cca.isNotEmpty) ...[
         _equipoRow([
           _FD('NÚMERO CCA', cca, 1.0),
         ]),
+      ],
     ]);
+  }
+
+  pw.Widget _equipoJiaRow({
+    required String cca,
+    required bool j,
+    required bool i,
+    required bool a,
+  }) {
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+      decoration: const pw.BoxDecoration(
+        border: pw.Border(bottom: pw.BorderSide(color: _grayL, width: 0.3))),
+      child: pw.Row(
+        children: [
+          pw.Expanded(
+            flex: 40,
+            child: pw.Row(children: [
+              pw.Text('NÚMERO CCA: ', style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold)),
+              pw.Expanded(child: pw.Text(cca, style: const pw.TextStyle(fontSize: 7.5))),
+            ]),
+          ),
+          pw.Expanded(
+            flex: 60,
+            child: pw.Row(
+              children: [
+                pw.Text('INICIAL CALIBRADOR (NOM-010-SCFI-2020): ',
+                  style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(width: 4),
+                _jiaBox('J', j),
+                pw.SizedBox(width: 8),
+                _jiaBox('I', i),
+                pw.SizedBox(width: 8),
+                _jiaBox('A', a),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -293,27 +349,6 @@ class PdfService {
     final tipoSvc = (os['tipo_servicio'] ?? os['tipo_servicio_nombre'] ?? '').toString().toLowerCase();
     // Si tipo_servicio NO contiene "calibr" ni "inspec" (por ej. es únicamente "Ajuste"), ocultar casillas J-I-A
     return tipoSvc.contains('calib') || tipoSvc.contains('inspec');
-  }
-
-  pw.Widget _buildJiaRow(Map<String, dynamic> os) {
-    if (!_debeMostrarJia(os)) return pw.SizedBox.shrink();
-    final j = os['jia_j'] == true || os['inicial_calibrador'] == 'J';
-    final i = os['jia_i'] == true || os['inicial_calibrador'] == 'I';
-    final a = os['jia_a'] == true || os['inicial_calibrador'] == 'A';
-
-    return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(vertical: 2),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.center,
-        children: [
-          _jiaBox('J', j),
-          pw.SizedBox(width: 30),
-          _jiaBox('I', i),
-          pw.SizedBox(width: 30),
-          _jiaBox('A', a),
-        ],
-      ),
-    );
   }
 
   pw.Widget _jiaBox(String code, bool marked) {
@@ -1030,29 +1065,51 @@ class PdfService {
   // ══════════════════════════════════════════════════════════════════════════
   Future<String> _saveToDisk(Map<String, dynamic> osData, Uint8List bytes) async {
     final dir = await getApplicationDocumentsDirectory();
-    final pdfDir = Directory('${dir.path}/Pesa_PDFs');
-    if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
+    final pdfDir = Directory('${dir.path}/pdfs');
+    if (!await pdfDir.exists()) {
+      await pdfDir.create(recursive: true);
+    }
 
     final folio = _s(osData, 'folio_os', _s(osData, 'folio', 'OS')).trim();
-    final idIndicador = _s(osData, 'id_indicador', _s(osData, 'id_equipo', 'INST')).trim();
-
-    // Sanitizar nombres de archivo para evitar caracteres no permitidos en sistemas de archivos
     final safeFolio = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    final safeId = idIndicador.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-    final fileName = safeId.isNotEmpty ? '$safeFolio-$safeId.pdf' : '$safeFolio.pdf';
+    final fileName = safeFolio.startsWith('OS-') ? '$safeFolio.pdf' : 'OS-$safeFolio.pdf';
     final filePath = '${pdfDir.path}/$fileName';
     final file = File(filePath);
-    await file.writeAsBytes(bytes);
+    if (await file.exists()) {
+      try {
+        await file.delete();
+      } catch (e) {
+        print("Aviso al eliminar PDF anterior: $e");
+      }
+    }
+    await file.writeAsBytes(bytes, flush: true, mode: FileMode.write);
 
-    // Guardar también copia en PESA_Tablet/PDF_OS para compatibilidad con versiones previas
+    // Guardar también copia en Pesa_PDFs para compatibilidad con versiones previas
     try {
-      final legacyDir = Directory('${dir.path}/PESA_Tablet/PDF_OS');
+      final legacyDir = Directory('${dir.path}/Pesa_PDFs');
       if (!await legacyDir.exists()) await legacyDir.create(recursive: true);
-      final legacyFile = File('${legacyDir.path}/$safeFolio.pdf');
-      await legacyFile.writeAsBytes(bytes);
+      final legacyFile = File('${legacyDir.path}/$fileName');
+      if (await legacyFile.exists()) {
+        await legacyFile.delete();
+      }
+      await legacyFile.writeAsBytes(bytes, flush: true, mode: FileMode.write);
     } catch (_) {}
 
     return filePath;
+  }
+
+  /// Guarda bytes de PDF directamente en el directorio seguro 'pdfs/OS-{folio}.pdf'
+  Future<String> guardarPdfEnDisco(String folio, Uint8List bytes) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final pdfDir = Directory('${dir.path}/pdfs');
+    if (!await pdfDir.exists()) {
+      await pdfDir.create(recursive: true);
+    }
+    final safeFolio = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final fileName = safeFolio.startsWith('OS-') ? '$safeFolio.pdf' : 'OS-$safeFolio.pdf';
+    final file = File('${pdfDir.path}/$fileName');
+    await file.writeAsBytes(bytes, flush: true, mode: FileMode.write);
+    return file.path;
   }
 
   Future<void> abrirPdf(String path) async {

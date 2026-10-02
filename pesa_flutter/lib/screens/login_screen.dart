@@ -25,6 +25,8 @@ class _LoginScreenState extends State<LoginScreen> {
   bool _loginedOffline = false;
   String? _error;
 
+  bool _obscurePassword = true;
+
   @override
   void initState() {
     super.initState();
@@ -36,164 +38,258 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    const carmineRed  = Color(0xFFB81D24);
+    const bgGray      = Color(0xFFF5F5F7);
+    const cardBorder  = Color(0xFFE5E5EA);
+    const fieldBg     = Color(0xFFFAFAFA);
+    const fieldBorder = Color(0xFFD1D1D6);
+    const subTitleColor = Color(0xFF86868B);
+    const textDark    = Color(0xFF1D1D1F);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF1C1C1E),
+      backgroundColor: bgGray,
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 400),
-          child: Card(
-            elevation: 8,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            child: Padding(
-              padding: const EdgeInsets.all(32),
-              child: Form(
-                key: _form,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Logo
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFC8102E),
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: const Icon(Icons.scale, color: Colors.white, size: 48),
-                    ),
-                    const SizedBox(height: 20),
-                    Text('Servicios PESA',
-                        style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w800)),
-                    Text('Panel de Técnico',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Colors.grey)),
-                    const SizedBox(height: 28),
-
-                    // Usuario
-                    TextFormField(
-                      controller: _userCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Usuario',
-                        prefixIcon: Icon(Icons.person_outline),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(10))),
-                      ),
-                      validator: (v) => (v?.isEmpty ?? true) ? 'Requerido' : null,
-                    ),
-                    const SizedBox(height: 14),
-
-                    // Contraseña
-                    TextFormField(
-                      controller: _passCtrl,
-                      obscureText: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Contraseña',
-                        prefixIcon: Icon(Icons.lock_outline),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.all(Radius.circular(10))),
-                      ),
-                      validator: (v) => (v?.isEmpty ?? true) ? 'Requerida' : null,
-                    ),
-
-                    // URL servidor (oculto por defecto)
-                    if (_showUrl) ...[
-                      const SizedBox(height: 14),
-                      TextFormField(
-                        controller: _urlCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'URL del servidor',
-                          prefixIcon: Icon(Icons.dns_outlined),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.all(Radius.circular(10))),
-                          helperText: 'Ej: http://192.168.1.100:8000',
-                        ),
-                      ),
-                    ],
-
-                    if (_error != null) ...[
-                      const SizedBox(height: 12),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: cardBorder, width: 1),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x0F000000),
+                    blurRadius: 24,
+                    offset: Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
+                child: Form(
+                  key: _form,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Encabezado: Logotipo vectorial y subtítulo
                       Container(
-                        padding: const EdgeInsets.all(10),
+                        padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: _loginedOffline
-                              ? Colors.blue.shade50
-                              : Colors.orange.shade50,
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                              color: _loginedOffline
-                                  ? Colors.blue.shade300
-                                  : Colors.orange.shade300),
+                          color: carmineRed,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x33B81D24),
+                              blurRadius: 12,
+                              offset: Offset(0, 4),
+                            )
+                          ],
                         ),
-                        child: Text(_error!,
-                            style: TextStyle(
+                        child: const Icon(Icons.scale_rounded, color: Colors.white, size: 40),
+                      ),
+                      const SizedBox(height: 18),
+                      const Text(
+                        'BÁSCULAS PESA',
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                          color: textDark,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Ecosistema Metrológico Operativo',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: subTitleColor,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 28),
+
+                      // Campo Usuario
+                      TextFormField(
+                        controller: _userCtrl,
+                        style: const TextStyle(fontSize: 14, color: textDark),
+                        decoration: InputDecoration(
+                          labelText: 'Usuario',
+                          labelStyle: const TextStyle(color: subTitleColor, fontSize: 13),
+                          prefixIcon: const Icon(Icons.person_outline_rounded, color: subTitleColor, size: 20),
+                          filled: true,
+                          fillColor: fieldBg,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: fieldBorder),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: fieldBorder),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: carmineRed, width: 2),
+                          ),
+                        ),
+                        validator: (v) => (v?.isEmpty ?? true) ? 'Requerido' : null,
+                      ),
+                      const SizedBox(height: 16),
+
+                      // Campo Contraseña con mostrar/ocultar
+                      TextFormField(
+                        controller: _passCtrl,
+                        obscureText: _obscurePassword,
+                        style: const TextStyle(fontSize: 14, color: textDark),
+                        decoration: InputDecoration(
+                          labelText: 'Contraseña',
+                          labelStyle: const TextStyle(color: subTitleColor, fontSize: 13),
+                          prefixIcon: const Icon(Icons.lock_outline_rounded, color: subTitleColor, size: 20),
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                              color: subTitleColor,
+                              size: 20,
+                            ),
+                            onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                          ),
+                          filled: true,
+                          fillColor: fieldBg,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: fieldBorder),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: fieldBorder),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: carmineRed, width: 2),
+                          ),
+                        ),
+                        validator: (v) => (v?.isEmpty ?? true) ? 'Requerida' : null,
+                      ),
+
+                      // URL servidor (oculto por defecto)
+                      if (_showUrl) ...[
+                        const SizedBox(height: 14),
+                        TextFormField(
+                          controller: _urlCtrl,
+                          style: const TextStyle(fontSize: 13, color: textDark),
+                          decoration: InputDecoration(
+                            labelText: 'URL del servidor',
+                            labelStyle: const TextStyle(color: subTitleColor, fontSize: 13),
+                            prefixIcon: const Icon(Icons.dns_outlined, color: subTitleColor, size: 20),
+                            filled: true,
+                            fillColor: fieldBg,
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: fieldBorder),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: const BorderSide(color: carmineRed, width: 2),
+                            ),
+                            helperText: 'Ej: https://pesa-api-za9i.onrender.com',
+                          ),
+                        ),
+                      ],
+
+                      if (_error != null) ...[
+                        const SizedBox(height: 14),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: _loginedOffline
+                                ? const Color(0xFFEFF6FF)
+                                : const Color(0xFFFEF2F2),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
                                 color: _loginedOffline
-                                    ? Colors.blue.shade800
-                                    : Colors.orange.shade800,
-                                fontSize: 13)),
+                                    ? const Color(0xFFBFDBFE)
+                                    : const Color(0xFFFCA5A5)),
+                          ),
+                          child: Text(_error!,
+                              style: TextStyle(
+                                  color: _loginedOffline
+                                      ? const Color(0xFF1E40AF)
+                                      : const Color(0xFF991B1B),
+                                  fontSize: 12.5)),
+                        ),
+                      ],
+
+                      const SizedBox(height: 8),
+                      // Checkbox: Recordar sesión
+                      Row(children: [
+                        Checkbox(
+                          value: _rememberMe,
+                          activeColor: carmineRed,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          onChanged: (v) => setState(() => _rememberMe = v ?? true),
+                        ),
+                        const Text('Recordar sesión',
+                            style: TextStyle(fontSize: 13, color: textDark)),
+                      ]),
+                      const SizedBox(height: 12),
+
+                      // Botón principal Iniciar Sesión
+                      SizedBox(
+                        width: double.infinity,
+                        height: 48,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: carmineRed,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                          onPressed: _loading ? null : _onLogin,
+                          child: _loading
+                              ? const SizedBox(
+                                  width: 22, height: 22,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white))
+                              : const Text('Iniciar Sesión',
+                                  style: TextStyle(
+                                      fontSize: 15, fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Acceso directo sin conexión al servidor
+                      SizedBox(
+                        width: double.infinity,
+                        height: 44,
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: textDark,
+                            side: const BorderSide(color: fieldBorder),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8)),
+                          ),
+                          icon: const Icon(Icons.wifi_off_rounded, size: 18, color: subTitleColor),
+                          label: const Text('Continuar sin conexión',
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+                          onPressed: _loading ? null : _onOfflineAccess,
+                        ),
+                      ),
+
+                      const SizedBox(height: 10),
+                      TextButton(
+                        onPressed: () => setState(() => _showUrl = !_showUrl),
+                        child: Text(
+                          _showUrl ? 'Ocultar configuración' : 'Configurar servidor',
+                          style: const TextStyle(color: subTitleColor, fontSize: 12),
+                        ),
                       ),
                     ],
-
-                    // Checkbox: Recordar sesión
-                    Row(children: [
-                      Checkbox(
-                        value: _rememberMe,
-                        activeColor: const Color(0xFFC8102E),
-                        onChanged: (v) => setState(() => _rememberMe = v ?? true),
-                      ),
-                      const Text('Recordar sesión',
-                          style: TextStyle(fontSize: 13)),
-                    ]),
-                    const SizedBox(height: 8),
-
-                    // Botón principal
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFC8102E),
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                        onPressed: _loading ? null : _onLogin,
-                        child: _loading
-                            ? const SizedBox(
-                                width: 22, height: 22,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white))
-                            : const Text('Iniciar Sesión',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-
-                    // [FIX-OFFLINE] Acceso directo sin conexión al servidor
-                    // El técnico entra a las órdenes guardadas en SQLite local.
-                    // La sincronización ocurrirá automáticamente al detectar red.
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.grey.shade700,
-                          side: BorderSide(color: Colors.grey.shade400),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10)),
-                        ),
-                        icon: const Icon(Icons.wifi_off, size: 18),
-                        label: const Text('Continuar sin conexión',
-                            style: TextStyle(fontSize: 14)),
-                        onPressed: _loading ? null : _onOfflineAccess,
-                      ),
-                    ),
-
-                    const SizedBox(height: 8),
-                    TextButton(
-                      onPressed: () => setState(() => _showUrl = !_showUrl),
-                      child: Text(_showUrl ? 'Ocultar configuración' : 'Configurar servidor'),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),

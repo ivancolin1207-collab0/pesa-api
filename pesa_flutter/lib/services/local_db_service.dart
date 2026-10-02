@@ -533,17 +533,19 @@ class LocalDbService {
 
     final safeFolio = f.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
     if (appDocDirPath != null && appDocDirPath!.isNotEmpty) {
-      final p1 = '$appDocDirPath/Pesa_PDFs/$safeFolio.pdf';
-      try {
-        final f1 = File(p1);
-        if (f1.existsSync() && f1.lengthSync() > 500) return true;
-      } catch (_) {}
-
-      final p2 = '$appDocDirPath/PESA_Tablet/PDF_OS/$safeFolio.pdf';
-      try {
-        final f2 = File(p2);
-        if (f2.existsSync() && f2.lengthSync() > 500) return true;
-      } catch (_) {}
+      final candidates = [
+        '$appDocDirPath/pdfs/OS-$safeFolio.pdf',
+        '$appDocDirPath/pdfs/$safeFolio.pdf',
+        '$appDocDirPath/Pesa_PDFs/$safeFolio.pdf',
+        '$appDocDirPath/Pesa_PDFs/OS-$safeFolio.pdf',
+        '$appDocDirPath/PESA_Tablet/PDF_OS/$safeFolio.pdf',
+      ];
+      for (final p in candidates) {
+        try {
+          final file = File(p);
+          if (file.existsSync() && file.lengthSync() > 500) return true;
+        } catch (_) {}
+      }
     }
     return false;
   }
@@ -558,19 +560,28 @@ class LocalDbService {
       final appDocDir = await getApplicationDocumentsDirectory();
       appDocDirPath = appDocDir.path;
 
-      final cand1 = File('${appDocDir.path}/Pesa_PDFs/$safeFolio.pdf');
-      if (await cand1.exists() && await cand1.length() > 500) return cand1.path;
+      final directCandidates = [
+        '${appDocDir.path}/pdfs/OS-$safeFolio.pdf',
+        '${appDocDir.path}/pdfs/$safeFolio.pdf',
+        '${appDocDir.path}/Pesa_PDFs/$safeFolio.pdf',
+        '${appDocDir.path}/Pesa_PDFs/OS-$safeFolio.pdf',
+        '${appDocDir.path}/PESA_Tablet/PDF_OS/$safeFolio.pdf',
+      ];
 
-      final cand2 = File('${appDocDir.path}/PESA_Tablet/PDF_OS/$safeFolio.pdf');
-      if (await cand2.exists() && await cand2.length() > 500) return cand2.path;
+      for (final path in directCandidates) {
+        final cand = File(path);
+        if (await cand.exists() && await cand.length() > 500) return cand.path;
+      }
 
-      final pdfDir = Directory('${appDocDir.path}/Pesa_PDFs');
-      if (await pdfDir.exists()) {
-        final files = pdfDir.listSync().whereType<File>();
-        for (final file in files) {
-          final name = file.path.split(Platform.pathSeparator).last;
-          if (name.startsWith(safeFolio) && file.lengthSync() > 500) {
-            return file.path;
+      for (final sub in ['pdfs', 'Pesa_PDFs']) {
+        final pdfDir = Directory('${appDocDir.path}/$sub');
+        if (await pdfDir.exists()) {
+          final files = pdfDir.listSync().whereType<File>();
+          for (final file in files) {
+            final name = file.path.split(Platform.pathSeparator).last;
+            if ((name.startsWith(safeFolio) || name.startsWith('OS-$safeFolio')) && file.lengthSync() > 500) {
+              return file.path;
+            }
           }
         }
       }
@@ -713,7 +724,6 @@ class LocalDbService {
         final int localIsDirty = _toInt(ex['is_dirty'], 0);
         final String? pdfPath = ex['pdf_path_local'] as String?;
         final String? pdfB64 = ex['pdf_b64_local'] as String?;
-        final int pdfSubido = _toInt(ex['pdf_subido'], 0);
         final String syncCheckSt = (ex['sync_check_status'] as String? ?? '').toUpperCase().trim();
         final String exEstatus = (ex['estatus'] as String? ?? '').toUpperCase().trim();
         final String exEstado = (ex['estado'] as String? ?? '').toUpperCase().trim();

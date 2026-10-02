@@ -549,13 +549,23 @@ class ApiService {
         final resp = await _getWithRetry(Uri.parse(tryUrl), timeout: _syncTimeout);
         if (resp.statusCode == 200 && resp.bodyBytes.length > 500) {
           final docDir = await getApplicationDocumentsDirectory();
-          final pdfDir = Directory('${docDir.path}/Pesa_PDFs');
+          final pdfDir = Directory('${docDir.path}/pdfs');
           if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
 
-          final cleanName = targetFileName ?? (folioFromUrl != null && folioFromUrl.isNotEmpty ? '$folioFromUrl.pdf' : 'pesa_pdf_${DateTime.now().millisecondsSinceEpoch}.pdf');
+          final cleanFolio = (folioFromUrl != null && folioFromUrl.isNotEmpty ? folioFromUrl : '').replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+          final cleanName = targetFileName ?? (cleanFolio.isNotEmpty ? (cleanFolio.startsWith('OS-') ? '$cleanFolio.pdf' : 'OS-$cleanFolio.pdf') : 'pesa_pdf_${DateTime.now().millisecondsSinceEpoch}.pdf');
           final localPath = '${pdfDir.path}/$cleanName';
-          await File(localPath).writeAsBytes(resp.bodyBytes);
+          final file = File(localPath);
+          await file.writeAsBytes(resp.bodyBytes, flush: true, mode: FileMode.write);
           debugPrint('[API] PDF descargado con éxito desde $tryUrl → $localPath');
+
+          // Guardar también copia en Pesa_PDFs para compatibilidad
+          try {
+            final legacyDir = Directory('${docDir.path}/Pesa_PDFs');
+            if (!await legacyDir.exists()) await legacyDir.create(recursive: true);
+            await File('${legacyDir.path}/$cleanName').writeAsBytes(resp.bodyBytes, flush: true, mode: FileMode.write);
+          } catch (_) {}
+
           return localPath;
         }
         lastResp = resp;

@@ -745,12 +745,20 @@ class SyncService extends ChangeNotifier {
       }
     } catch (_) {}
 
-    // 3. Carpeta Documents / PESA_Tablet / PDF_OS (Legacy)
+    // 3. Carpeta Documents / pdfs / Pesa_PDFs / PESA_Tablet
     try {
       final appDocDir = await getApplicationDocumentsDirectory();
-      final cand1 = File('${appDocDir.path}/PESA_Tablet/PDF_OS/$folio.pdf');
-      if (await cand1.exists() && await cand1.length() > 500) {
-        return cand1;
+      for (final p in [
+        '${appDocDir.path}/pdfs/OS-$folio.pdf',
+        '${appDocDir.path}/pdfs/$folio.pdf',
+        '${appDocDir.path}/Pesa_PDFs/$folio.pdf',
+        '${appDocDir.path}/Pesa_PDFs/OS-$folio.pdf',
+        '${appDocDir.path}/PESA_Tablet/PDF_OS/$folio.pdf',
+      ]) {
+        final f = File(p);
+        if (await f.exists() && await f.length() > 500) {
+          return f;
+        }
       }
     } catch (_) {}
 

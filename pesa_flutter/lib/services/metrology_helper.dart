@@ -108,13 +108,12 @@ String divMinErrorMsg(double? d) {
 int getPuntosApoyoPorDefecto(String? tipoInstrumento, {int fallback = 4}) {
   if (tipoInstrumento == null || tipoInstrumento.trim().isEmpty) return fallback;
   final t = tipoInstrumento.toLowerCase().trim();
-  if (t.contains('plataforma')) return 4;
+  if (t.contains('plataforma') || t.contains('piso')) return 5;
   if (t.contains('camionera') || t.contains('puente')) return 8;
   if (t.contains('ferrocarril') || t.contains('ferrovi')) return 8;
   if (t.contains('tolva')) return 3;
   if (t.contains('colgante') || t.contains('grúa') || t.contains('grua')) return 1;
   if (t.contains('analítica') || t.contains('analitica')) return 1;
-  if (t.contains('piso')) return 1;
   if (t.contains('mostrador')) return 1;
   if (t.contains('tanque') || t.contains('silo')) return 4;
   return fallback;

@@ -13,7 +13,7 @@ class NuevoDocScreen extends StatefulWidget {
 }
 
 class _NuevoDocScreenState extends State<NuevoDocScreen> {
-  static const _red    = Color(0xFFC8102E);
+  static const _red    = Color(0xFFB81D24);
   static const _border = Color(0xFFE5E7EB);
   static const _bg     = Color(0xFFF9FAFB);
 
@@ -29,14 +29,18 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
   List<Map<String, dynamic>> _tiposInst    = [];
 
   // ── Valores del formulario ───────────────────────────────────────────────
+  String  _tipoDoc     = 'OS';         // OS | RMA | RE | LP | LV
   String? _tipo        = 'Individual'; // Individual | Lote
   String? _modalidad   = 'Digital';    // Digital | Físico
   int?    _clienteId;
   int?    _tecnicoId;
   int?    _tipoServId;
   int?    _tipoInstId;
-  final _observCtrl  = TextEditingController();
-  final _cantidadCtrl = TextEditingController(text: '1'); // para lote
+  final _sucursalCtrl  = TextEditingController();
+  final _observCtrl    = TextEditingController();
+  final _cantidadCtrl  = TextEditingController(text: '1'); // para lote
+  final _fechaCtrl     = TextEditingController(
+      text: DateTime.now().toIso8601String().split('T')[0]);
 
   @override
   void initState() {
@@ -46,8 +50,10 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
   @override
   void dispose() {
+    _sucursalCtrl.dispose();
     _observCtrl.dispose();
     _cantidadCtrl.dispose();
+    _fechaCtrl.dispose();
     super.dispose();
   }
 
@@ -80,59 +86,65 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
     try {
       final payload = {
+        'tipo_documento':   _tipoDoc,
         'tipo':             _tipo,
         'modalidad':        _modalidad,
         'id_cliente':       _clienteId,
+        'sucursal':         _sucursalCtrl.text.trim(),
         'id_tecnico':       _tecnicoId,
         'id_tipo_servicio': _tipoServId,
         'id_tipo_instrumento': _tipoInstId,
         'observaciones':    _observCtrl.text.trim(),
+        'estado':           'ASIGNADA',
+        'fecha':            _fechaCtrl.text.trim(),
         if (_tipo == 'Lote')
           'cantidad': int.tryParse(_cantidadCtrl.text) ?? 1,
       };
 
       final result = await ApiService.instance.crearOrden(payload);
       if (mounted) {
-        final folio = result['folio_os'] ?? result['folio'] ?? 'creada';
+        final folio = result['folio_os'] ?? result['folio'] ?? 'asignada';
         showDialog(
           context: context,
           builder: (_) => AlertDialog(
             shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.circular(14)),
             title: const Row(children: [
-              Icon(Icons.check_circle, color: Colors.green, size: 24),
-              SizedBox(width: 8),
-              Text('Orden Creada', style: TextStyle(fontSize: 16)),
+              Icon(Icons.check_circle_rounded, color: Colors.green, size: 26),
+              SizedBox(width: 10),
+              Text('Servicio Asignado', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
             ]),
             content: Column(mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const Text('La orden fue creada exitosamente en el servidor.',
-                  style: TextStyle(fontSize: 13)),
-              const SizedBox(height: 8),
+              const Text('El formato fue registrado y asignado exitosamente en PostgreSQL (Render).',
+                  style: TextStyle(fontSize: 13, color: Color(0xFF374151))),
+              const SizedBox(height: 12),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFFEE2E2),
+                  color: const Color(0xFFFEF2F2),
                   borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFFFCA5A5)),
                 ),
                 child: Row(children: [
-                  const Icon(Icons.assignment, color: _red, size: 20),
-                  const SizedBox(width: 8),
-                  Text('Folio: $folio',
+                  const Icon(Icons.assignment_turned_in, color: _red, size: 22),
+                  const SizedBox(width: 10),
+                  Text('Documento: $folio',
                       style: const TextStyle(fontWeight: FontWeight.w800,
                           color: _red, fontSize: 14)),
                 ]),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 10),
               const Text(
-                'Sincroniza el dashboard para ver la nueva orden.',
-                style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+                'El técnico asignado recibirá la orden al sincronizar su tablet en campo.',
+                style: TextStyle(fontSize: 12, color: Color(0xFF6B7280)),
               ),
             ]),
             actions: [
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: _red, foregroundColor: Colors.white),
+                    backgroundColor: _red, foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                 onPressed: () {
                   Navigator.pop(context);
                   context.pop(); // regresar al dashboard
@@ -145,7 +157,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
       }
     } catch (e) {
       if (mounted) setState(() {
-        _error   = 'Error al crear la orden: $e';
+        _error   = 'Error al asignar servicio: $e';
         _loading = false;
       });
     } finally {
@@ -165,25 +177,31 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
             // Header
             Container(
               color: Colors.white,
-              padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
+              padding: const EdgeInsets.fromLTRB(20, 18, 20, 14),
               decoration: const BoxDecoration(
                 border: Border(bottom: BorderSide(color: _border)),
               ),
               child: Row(children: [
+                IconButton(
+                  icon: const Icon(Icons.menu_rounded, color: Color(0xFF111827), size: 24),
+                  tooltip: 'Menú principal',
+                  onPressed: () => AppShell.toggleMenu(context),
+                ),
+                const SizedBox(width: 4),
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
                       color: _red, borderRadius: BorderRadius.circular(8)),
-                  child: const Icon(Icons.add_circle_outline,
-                      color: Colors.white, size: 20),
+                  child: const Icon(Icons.assignment_add,
+                      color: Colors.white, size: 22),
                 ),
                 const SizedBox(width: 12),
                 const Expanded(child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Nueva Orden de Servicio',
+                  Text('Asignación de Servicios (Admin)',
                       style: TextStyle(color: Color(0xFF111827),
                           fontWeight: FontWeight.w800, fontSize: 17)),
-                  Text('Completa el formulario para crear la orden',
+                  Text('Genera y asigna formatos (OS, RMA, RE, LP, LV) para técnicos en campo',
                       style: TextStyle(color: Color(0xFF6B7280), fontSize: 11)),
                 ])),
                 IconButton(
@@ -203,6 +221,14 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
   }
 
   Widget _buildForm() {
+    final docs = [
+      {'key': 'OS',  'label': 'Orden de Servicio (OS)'},
+      {'key': 'RMA', 'label': 'Remisión Material (RMA)'},
+      {'key': 'RE',  'label': 'Revisión Báscula (RE)'},
+      {'key': 'LP',  'label': 'Levantamiento Proy. (LP)'},
+      {'key': 'LV',  'label': 'Levantamiento Met. (LV)'},
+    ];
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Form(
@@ -223,8 +249,36 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
             const SizedBox(height: 16),
           ],
 
-          // ── Tipo de documento ─────────────────────────────────────────────
-          _SectionTitle('Tipo de Documento'),
+          // ── Selector de Tipo de Formato / Documento ───────────────────────
+          _SectionTitle('Formato a Generar'),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              for (final d in docs)
+                Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: FilterChip(
+                    label: Text(d['key']!,
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: _tipoDoc == d['key'] ? Colors.white : const Color(0xFF374151))),
+                    selected: _tipoDoc == d['key'],
+                    selectedColor: _red,
+                    backgroundColor: Colors.white,
+                    side: BorderSide(color: _tipoDoc == d['key'] ? _red : _border),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    onSelected: (val) {
+                      if (val) setState(() => _tipoDoc = d['key']!);
+                    },
+                  ),
+                ),
+            ]),
+          ),
+          const SizedBox(height: 20),
+
+          // ── Modalidad de Formatos ─────────────────────────────────────────
+          _SectionTitle('Tipo de Asignación'),
           const SizedBox(height: 8),
           Row(children: [
             for (final t in ['Individual', 'Lote'])
@@ -243,13 +297,13 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
           if (_tipo == 'Lote') ...[
             const SizedBox(height: 12),
             _InputField(
-              label: 'Cantidad de OS en el lote',
+              label: 'Cantidad de formatos en el lote',
               controller: _cantidadCtrl,
               keyboardType: TextInputType.number,
               validator: (v) {
                 final n = int.tryParse(v ?? '');
                 if (n == null || n < 2) {
-                  return 'Mínimo 2 órdenes para un lote';
+                  return 'Mínimo 2 formatos para un lote';
                 }
                 return null;
               },
@@ -257,7 +311,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
           ],
 
           const SizedBox(height: 20),
-          // ── Modalidad ────────────────────────────────────────────────────
+          // ── Modalidad Digital / Físico ────────────────────────────────────
           _SectionTitle('Modalidad'),
           const SizedBox(height: 8),
           Row(children: [
@@ -277,16 +331,25 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
           const SizedBox(height: 20),
           // ── Cliente ───────────────────────────────────────────────────────
-          _SectionTitle('Cliente'),
+          _SectionTitle('Cliente / Razón Social'),
           const SizedBox(height: 8),
           _CatalogDropdown(
-            hint: 'Seleccionar cliente...',
+            hint: 'Seleccionar cliente del catálogo...',
             items: _clientes,
-            labelKey: 'nombre',  // catalogos.py devuelve alias 'nombre' de razon_social
+            labelKey: 'nombre',
             idKey: 'id',
             value: _clienteId,
             onChanged: (v) => setState(() => _clienteId = v),
             validator: (v) => v == null ? 'Selecciona un cliente' : null,
+          ),
+
+          const SizedBox(height: 16),
+          // ── Sucursal / Planta ─────────────────────────────────────────────
+          _SectionTitle('Sucursal / Planta'),
+          const SizedBox(height: 8),
+          _InputField(
+            label: 'Nombre o ubicación de la planta/sucursal',
+            controller: _sucursalCtrl,
           ),
 
           const SizedBox(height: 16),
@@ -300,7 +363,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
             idKey: 'id',
             value: _tecnicoId,
             onChanged: (v) => setState(() => _tecnicoId = v),
-            validator: (v) => v == null ? 'Selecciona un técnico' : null,
+            validator: (v) => v == null ? 'Selecciona un técnico asignado' : null,
           ),
 
           const SizedBox(height: 16),
@@ -319,7 +382,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
           const SizedBox(height: 16),
           // ── Tipo de Instrumento ───────────────────────────────────────────
-          _SectionTitle('Tipo de Instrumento'),
+          _SectionTitle('Tipo de Instrumento (Opcional)'),
           const SizedBox(height: 8),
           _CatalogDropdown(
             hint: 'Seleccionar tipo de instrumento...',
@@ -332,20 +395,20 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
           const SizedBox(height: 16),
           // ── Observaciones ─────────────────────────────────────────────────
-          _SectionTitle('Observaciones (opcional)'),
+          _SectionTitle('Observaciones e Instrucciones'),
           const SizedBox(height: 8),
           TextFormField(
             controller: _observCtrl,
             maxLines: 3,
             decoration: InputDecoration(
-              hintText: 'Instrucciones especiales, notas, etc.',
+              hintText: 'Instrucciones especiales para el técnico en campo...',
               hintStyle: const TextStyle(fontSize: 12,
                   color: Color(0xFF9CA3AF)),
               border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: _border)),
               focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: _red, width: 2)),
               filled: true,
               fillColor: Colors.white,
@@ -353,16 +416,16 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
           ),
 
           const SizedBox(height: 32),
-          // ── Botón crear ───────────────────────────────────────────────────
+          // ── Botón Asignar y Notificar a Servidor ──────────────────────────
           SizedBox(
             width: double.infinity,
-            height: 52,
+            height: 50,
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: _loading ? Colors.grey.shade400 : _red,
                 foregroundColor: Colors.white,
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                    borderRadius: BorderRadius.circular(8)),
                 elevation: 0,
               ),
               onPressed: _loading ? null : _submit,
@@ -370,11 +433,11 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                   ? const SizedBox(width: 18, height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2,
                           color: Colors.white))
-                  : const Icon(Icons.add_circle_outline, size: 20),
+                  : const Icon(Icons.send_rounded, size: 20),
               label: Text(
-                _loading ? 'Creando orden...' : 'Crear Orden de Servicio',
+                _loading ? 'Asignando...' : 'Asignar y Notificar a Servidor',
                 style: const TextStyle(fontSize: 15,
-                    fontWeight: FontWeight.w700),
+                    fontWeight: FontWeight.w600),
               ),
             ),
           ),

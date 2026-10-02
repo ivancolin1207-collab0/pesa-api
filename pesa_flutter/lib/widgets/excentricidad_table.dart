@@ -42,7 +42,8 @@ class ExcentricidadTable extends StatefulWidget {
   State<ExcentricidadTable> createState() => _ExcentricidadTableState();
 }
 
-class _ExcentricidadTableState extends State<ExcentricidadTable> {
+class _ExcentricidadTableState extends State<ExcentricidadTable>
+    with AutomaticKeepAliveClientMixin {
   late String _geometriaActual;
   late int _numPos;
   late List<String> _posLabels;
@@ -62,6 +63,9 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
   }
 
   bool get _isCamioneraOrFerro => _geometriaActual == 'Camionera';
+
+  @override
+  bool get wantKeepAlive => true; // Evita destrucción al cambiar de pestaña
 
   @override
   void initState() {
@@ -253,6 +257,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context); // requerido por AutomaticKeepAliveClientMixin
     if (!widget.aplicaExcentricidad) {
       return Center(
         child: Card(

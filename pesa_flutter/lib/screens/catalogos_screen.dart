@@ -2,6 +2,7 @@
 // Clientes | Técnicos | Tipos de Servicio | Tipos de Instrumento
 import 'package:flutter/material.dart';
 import '../services/api_service.dart';
+import '../services/local_db_service.dart';
 import '../widgets/app_shell.dart';
 
 class CatalogosScreen extends StatefulWidget {
@@ -55,6 +56,12 @@ class _CatalogosScreenState extends State<CatalogosScreen>
               ),
               child: Column(children: [
                 Row(children: [
+                  IconButton(
+                    icon: const Icon(Icons.menu_rounded, color: Color(0xFF111827), size: 24),
+                    tooltip: 'Menú principal',
+                    onPressed: () => AppShell.toggleMenu(context),
+                  ),
+                  const SizedBox(width: 4),
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
@@ -183,6 +190,28 @@ class _CatalogTabState extends State<_CatalogTab>
       final data = await ApiService.instance.getCatalogo(widget.endpoint);
       if (mounted) setState(() { _items = data; _loading = false; });
     } catch (e) {
+      // Fallback para /api/v1/clientes: usar registros locales de SQLite
+      if (widget.endpoint.contains('/clientes')) {
+        try {
+          final rows = await LocalDbService.instance.getClientesFromLocalOrders();
+          if (mounted) {
+            setState(() { _items = List<Map<String, dynamic>>.from(rows); _loading = false; _error = ''; });
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Usando catálogo local de clientes (servidor no disponible temporalmente).',
+                  style: TextStyle(fontSize: 12),
+                ),
+                duration: Duration(seconds: 4),
+                backgroundColor: Color(0xFF374151),
+              ),
+            );
+          }
+          return;
+        } catch (localErr) {
+          // Si incluso el fallback local falla, mostrar error original
+        }
+      }
       if (mounted) setState(() {
         _error   = 'Error al cargar datos: $e';
         _loading = false;
