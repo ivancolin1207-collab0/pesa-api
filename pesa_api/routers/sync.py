@@ -428,13 +428,14 @@ async def sync_pull(
                     id_tecnico or -1, username_jwt,
                 )
                 # Buscar OS con JOIN por nombre via cat_tecnicos (os.tecnico no existe como columna)
+                nombre_param = f"%{nombre_jwt.lower()}%" if nombre_jwt else "%"
                 os_por_nombre = await db.fetchval(
                     """
                     SELECT COUNT(*) FROM ordenes_servicio os
                     JOIN cat_tecnicos t ON t.id = os.id_tecnico
                     WHERE LOWER(t.nombre_completo) ILIKE $1 OR LOWER(t.usuario) ILIKE $1
                     """,
-                    nombre_param_word,
+                    nombre_param,
                 )
                 # Buscar OS por id_tecnico directo
                 os_por_id = await db.fetchval(
