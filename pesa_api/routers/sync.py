@@ -418,68 +418,72 @@ async def sync_pull(
 
             # Diagnóstico extra si no se encontró nada
             if len(rows) == 0:
-                # Contar cuántas OS hay sin filtro de técnico
-                total_os = await db.fetchval(
-                    "SELECT COUNT(*) FROM ordenes_servicio WHERE UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
-                )
-                # Buscar si existe el técnico en cat_tecnicos
-                tec_check = await db.fetchrow(
-                    "SELECT id, nombre_completo, usuario, activo FROM cat_tecnicos WHERE id = $1 OR LOWER(usuario) = LOWER($2)",
-                    id_tecnico or -1, username_jwt,
-                )
-                # Buscar OS con JOIN por nombre via cat_tecnicos (os.tecnico no existe como columna)
-                nombre_param = f"%{nombre_jwt.lower()}%" if nombre_jwt else "%"
-                os_por_nombre = await db.fetchval(
-                    """
-                    SELECT COUNT(*) FROM ordenes_servicio os
-                    JOIN cat_tecnicos t ON t.id = os.id_tecnico
-                    WHERE LOWER(t.nombre_completo) ILIKE $1 OR LOWER(t.usuario) ILIKE $1
-                    """,
-                    nombre_param,
-                )
-                # Buscar OS por id_tecnico directo
-                os_por_id = await db.fetchval(
-                    "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1",
-                    id_tecnico or -1,
-                )
-                # [FIX-DIAGNÓSTICO] OS por id_tecnico sin el filtro de since
-                os_por_id_sin_since = await db.fetchval(
-                    "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'",
-                    id_tecnico or -1,
-                )
-                # [FIX-DIAGNÓSTICO] OS con id_tecnico NULL (huérfanas — creadas sin técnico)
-                os_null_tecnico = await db.fetchval(
-                    "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico IS NULL AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
-                )
-                # [FIX-DIAGNÓSTICO] since podría estar bloqueando — OS del técnico anteriores al since
-                os_bloqueadas_since = await db.fetchval(
-                    "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND updated_at < $2::timestamp",
-                    id_tecnico or -1, since,
-                ) if since and since.year > 2000 else 0
-                logger.warning(
-                    "[SYNC PULL CERO RESULTADOS] DIAGNÓSTICO:\n"
-                    "  Total OS no canceladas en BD: %s\n"
-                    "  OS con id_tecnico=%s (con filtro since): %s\n"
-                    "  OS con id_tecnico=%s (SIN filtro since): %s\n"
-                    "  OS BLOQUEADAS por filtro since (%s): %s\n"
-                    "  OS con id_tecnico NULL (huerfanas): %s\n"
-                    "  OS con tecnico ILIKE '%s': %s\n"
-                    "  Registro en cat_tecnicos: %s",
-                    total_os, id_tecnico, os_por_id,
-                    id_tecnico, os_por_id_sin_since,
-                    since, os_bloqueadas_since,
-                    os_null_tecnico,
-                    primera_palabra, os_por_nombre,
-                    dict(tec_check) if tec_check else "NO ENCONTRADO",
-                )
-                print(
-                    f"[SYNC PULL CERO] total_os={total_os} | "
-                    f"os_by_id={os_por_id} | os_by_id_sin_since={os_por_id_sin_since} | "
-                    f"os_bloqueadas_since={os_bloqueadas_since} | "
-                    f"os_null_id_tecnico={os_null_tecnico} | "
-                    f"os_by_nombre={os_por_nombre} | "
-                    f"cat_tecnico={dict(tec_check) if tec_check else 'NO_ENCONTRADO'}"
-                )
+                try:
+                    # Contar cuántas OS hay sin filtro de técnico
+                    total_os = await db.fetchval(
+                        "SELECT COUNT(*) FROM ordenes_servicio WHERE UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
+                    )
+                    # Buscar si existe el técnico en cat_tecnicos
+                    tec_check = await db.fetchrow(
+                        "SELECT id, nombre_completo, usuario, activo FROM cat_tecnicos WHERE id = $1 OR LOWER(usuario) = LOWER($2)",
+                        id_tecnico or -1, username_jwt,
+                    )
+                    # Buscar OS con JOIN por nombre via cat_tecnicos
+                    nombre_param = f"%{nombre_jwt.lower()}%" if nombre_jwt else "%"
+                    os_por_nombre = await db.fetchval(
+                        """
+                        SELECT COUNT(*) FROM ordenes_servicio os
+                        JOIN cat_tecnicos t ON t.id = os.id_tecnico
+                        WHERE LOWER(t.nombre_completo) ILIKE $1 OR LOWER(t.usuario) ILIKE $1
+                        """,
+                        nombre_param,
+                    )
+                    # Buscar OS por id_tecnico directo
+                    os_por_id = await db.fetchval(
+                        "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1",
+                        id_tecnico or -1,
+                    )
+                    # OS por id_tecnico sin el filtro de since
+                    os_por_id_sin_since = await db.fetchval(
+                        "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'",
+                        id_tecnico or -1,
+                    )
+                    # OS con id_tecnico NULL (huérfanas)
+                    os_null_tecnico = await db.fetchval(
+                        "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico IS NULL AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
+                    )
+                    # since podría estar bloqueando
+                    os_bloqueadas_since = await db.fetchval(
+                        "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND updated_at < $2::timestamp",
+                        id_tecnico or -1, since,
+                    ) if since and since.year > 2000 else 0
+                    logger.warning(
+                        "[SYNC PULL CERO RESULTADOS] DIAGNÓSTICO:\n"
+                        "  Total OS no canceladas en BD: %s\n"
+                        "  OS con id_tecnico=%s (con filtro since): %s\n"
+                        "  OS con id_tecnico=%s (SIN filtro since): %s\n"
+                        "  OS BLOQUEADAS por filtro since (%s): %s\n"
+                        "  OS con id_tecnico NULL (huerfanas): %s\n"
+                        "  OS con tecnico ILIKE '%s': %s\n"
+                        "  Registro en cat_tecnicos: %s",
+                        total_os, id_tecnico, os_por_id,
+                        id_tecnico, os_por_id_sin_since,
+                        since, os_bloqueadas_since,
+                        os_null_tecnico,
+                        nombre_jwt, os_por_nombre,
+                        dict(tec_check) if tec_check else "NO ENCONTRADO",
+                    )
+                    print(
+                        f"[SYNC PULL CERO] total_os={total_os} | "
+                        f"os_by_id={os_por_id} | os_by_id_sin_since={os_por_id_sin_since} | "
+                        f"os_bloqueadas_since={os_bloqueadas_since} | "
+                        f"os_null_id_tecnico={os_null_tecnico} | "
+                        f"os_by_nombre={os_por_nombre} | "
+                        f"cat_tecnico={dict(tec_check) if tec_check else 'NO_ENCONTRADO'}"
+                    )
+                except Exception as e_diag:
+                    # El bloque de diagnóstico NUNCA debe romper la respuesta principal
+                    logger.warning("[SYNC PULL] Error en bloque diagnóstico (ignorado): %s", e_diag)
 
         # ── Trazabilidad Estado 2: Doble palomita gris (Recibida en Tablet) ──────
         pulled_folios = [r["folio_os"] for r in rows if r.get("folio_os")]
