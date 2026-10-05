@@ -1,0 +1,55 @@
+# Compila Servicios PESA (PyQt6) para Windows en un runner windows-latest
+# y lo publica como Release "windows-latest". El .env NO se incluye: cada
+# instalación conserva su propio .env junto al .exe.
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "servicios_pesa/**"
+      - ".github/workflows/windows-exe.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: servicios_pesa
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install PyQt6==6.10.2 psycopg2-binary==2.9.12 bcrypt python-dotenv==1.2.1 `
+                      reportlab==5.0.1 pillow==11.3.0 pdfplumber pypdf pyinstaller==6.22.3
+
+      - name: PyInstaller
+        run: python -m PyInstaller --noconfirm --clean "Servicios_PESA_v1.0.0.spec"
+
+      - name: Empaquetar
+        run: |
+          if (-not (Test-Path "dist\Servicios_PESA_v1.0.0\Servicios_PESA_v1.0.0.exe")) { throw "No se generó el .exe" }
+          Remove-Item -Force -ErrorAction SilentlyContinue "dist\Servicios_PESA_v1.0.0\.env"
+          Compress-Archive -Path "dist\Servicios_PESA_v1.0.0\*" -DestinationPath "Servicios_PESA_Windows.zip" -Force
+          "${{ github.sha }}" | Out-File -Encoding ascii BUILD_SHA.txt
+
+      - name: Publicar release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-latest
+          name: "Servicios PESA Windows (${{ github.sha }})"
+          prerelease: true
+          make_latest: false
+          files: |
+            servicios_pesa/Servicios_PESA_Windows.zip
+            servicios_pesa/BUILD_SHA.txt

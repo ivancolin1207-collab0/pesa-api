@@ -129,7 +129,7 @@ QLineEdit, QTextEdit, QPlainTextEdit {
     font-size: 13px;
 }
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
-    border: 1.5px solid #C8102E;
+    border: 1px solid #007AFF;
     background-color: #FFFFFF;
     padding: 6px 11px;
 }
@@ -489,20 +489,23 @@ QToolBar QToolButton:hover { background: #F1F5F9; color: #0F172A; }
 
 
 def get_badge_style(estado: str) -> str:
-    """Retorna el estilo CSS inline para un badge de estado OS — Enterprise pills."""
+    """Retorna el estilo CSS inline para un badge de estado OS — macOS Technical Pills."""
     styles = {
-        "PROCESO":            "background: #FEF3C7; color: #92400E;",
-        "CANCELADA":          "background: #FEE2E2; color: #991B1B;",
-        "ESCANEADA":          "background: #DCFCE7; color: #166534;",
-        "COMPLETADA":         "background: #DCFCE7; color: #166534;",
-        "COMPLETADA_DIGITAL": "background: #DBEAFE; color: #1E40AF;",
-        "FISICO":             "background: #F1F5F9; color: #475569;",
-        "DIGITAL":            "background: #EFF6FF; color: #1D4ED8;",
-        "PENDING":            "background: #FEF3C7; color: #92400E;",
-        "SYNCED":             "background: #DCFCE7; color: #166534;",
+        "PROCESO":            "background: #FFF3E0; color: #E65100; border: 1px solid #FFE0B2;",
+        "CANCELADA":          "background: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5;",
+        "ESCANEADA":          "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
+        "COMPLETADA":         "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
+        "COMPLETADA_DIGITAL": "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
+        "CERRADO":            "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
+        "CERRADA":            "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
+        "FISICO":             "background: #EDE7F6; color: #4A148C; border: 1px solid #D1C4E9;",
+        "DIGITAL":            "background: #E3F2FD; color: #0D47A1; border: 1px solid #BBDEFB;",
+        "PENDING":            "background: #FFF3E0; color: #E65100; border: 1px solid #FFE0B2;",
+        "SYNCED":             "background: #E8F5E9; color: #2E7D32; border: 1px solid #C8E6C9;",
     }
     base = (
-        "border-radius: 5px; padding: 2px 8px; "
-        "font-size: 11px; font-weight: 700; letter-spacing: 0.2px;"
+        "border-radius: 6px; padding: 3px 8px; "
+        "font-size: 11px; font-weight: 600; letter-spacing: 0.2px; "
     )
-    return base + styles.get(estado.upper(), "background: #F1F5F9; color: #475569;")
+    return base + styles.get(estado.upper(), "background: #F5F5F7; color: #1D1D1F; border: 1px solid #E5E5EA;")
+

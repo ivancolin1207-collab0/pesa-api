@@ -1,6 +1,53 @@
 .venv/
+.venv_mac/
 __pycache__/
 *.pyc
 .env
+.env.local_backup
 build/
 .dart_tool/
+
+# Artefactos de compilación / distribución (se publican en Releases, no en git)
+dist/
+Ejecutables/
+servicios_pesa/Ejecutables/
+servicios_pesa/dist/
+*.apk
+*.dmg
+*.exe
+build_log.txt
+
+# PDFs y datos locales (nunca versionar ni purgar)
+servicios_pesa/C:*/
+*.pdf
+importar_certificados.log
+
+# Entorno local / IDE / SO
+.DS_Store
+.idea/
+*.iml
+pesa_flutter/.flutter-plugins
+pesa_flutter/.flutter-plugins-dependencies
+pesa_flutter/android/local.properties
+pesa_flutter/android/key.properties
+*.jks
+*.keystore
+scratch/
+
+# Scripts locales de mantenimiento con credenciales de BD
+check_user.py
+clonar_bd.py
+migrar.py
+inspect_sync.py
+test_sync.py
+copy_apk.py
+run_migration_marcas_modelos.py
+run_migration_sync_checks.py
+servicios_pesa/inject_688.py
+
+# Cachés de build de Flutter nativo
+pesa_flutter/android/.gradle/
+pesa_flutter/android/app/.cxx/
+pesa_flutter/ios/Flutter/ephemeral/
+pesa_flutter/ios/Pods/
+pesa_flutter/ios/.symlinks/

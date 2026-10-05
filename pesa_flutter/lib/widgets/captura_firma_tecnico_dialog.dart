@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:signature/signature.dart';
 import '../services/firma_tecnico_service.dart';
+import 'signature_shield.dart';
 import '../services/sync_service.dart';
 import 'package:provider/provider.dart';
 
@@ -249,19 +250,10 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(11),
                   child: Stack(children: [
-                    GestureDetector(
-                      onPanDown: (_) {},
-                      onPanStart: (_) {},
-                      onPanUpdate: (_) {},
-                      behavior: HitTestBehavior.opaque,
-                      child: Listener(
-                        onPointerDown: (_) {},
-                        onPointerMove: (_) {},
-                        behavior: HitTestBehavior.opaque,
-                        child: Signature(
-                          controller: _ctrl,
-                          backgroundColor: Colors.white,
-                        ),
+                    SignatureGestureShield(
+                      child: Signature(
+                        controller: _ctrl,
+                        backgroundColor: Colors.white,
                       ),
                     ),
                     if (_ctrl.isEmpty)

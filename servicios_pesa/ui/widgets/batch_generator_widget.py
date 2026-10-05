@@ -15,7 +15,7 @@ import datetime
 from datetime import date
 from typing import Optional
 
-from PyQt6.QtCore    import Qt, QTimer, pyqtSignal, QThread, pyqtSlot
+from PyQt6.QtCore    import Qt, QTimer, pyqtSignal, QThread, pyqtSlot, QStringListModel, QDate
 from PyQt6.QtGui     import QFont, QColor
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -24,7 +24,6 @@ from PyQt6.QtWidgets import (
     QButtonGroup, QRadioButton, QMessageBox,
     QProgressBar, QAbstractItemView, QTextEdit, QLineEdit, QCompleter,
 )
-from PyQt6.QtCore import QDate
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +113,47 @@ class EquipoCard(QFrame):
             completer_ns.setFilterMode(Qt.MatchFlag.MatchContains)
             completer_ns.activated.connect(lambda text: self._on_completer_activated(text, "numero_serie"))
             self._inp_ns.setCompleter(completer_ns)
+
+    def set_marcas_modelos(self, mm_list: list) -> None:
+        """Configura el catálogo de marcas y modelos y autocompletado en cascada."""
+        self._mm_list = list(mm_list) if mm_list else []
+        marcas = sorted({m for m, mod in self._mm_list if m})
+
+        if marcas:
+            completer_marca = QCompleter(marcas, self)
+            completer_marca.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer_marca.setFilterMode(Qt.MatchFlag.MatchContains)
+            completer_marca.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+            self._inp_marca.setCompleter(completer_marca)
+
+        # Conectar cambio de texto en Marca para filtrar Modelos en cascada
+        try:
+            self._inp_marca.textChanged.disconnect(self._on_marca_text_changed)
+        except Exception:
+            pass
+        self._inp_marca.textChanged.connect(self._on_marca_text_changed)
+
+        self._actualizar_completer_modelo(self._inp_marca.text())
+
+    def _on_marca_text_changed(self, text: str) -> None:
+        self._actualizar_completer_modelo(text)
+
+    def _actualizar_completer_modelo(self, marca_text: str) -> None:
+        m = (marca_text or "").strip().lower()
+        mm = getattr(self, '_mm_list', [])
+        if m:
+            modelos = sorted({mod for marca, mod in mm if mod and marca.lower() == m})
+            if not modelos:
+                modelos = sorted({mod for marca, mod in mm if mod and m in marca.lower()})
+        else:
+            modelos = sorted({mod for marca, mod in mm if mod})
+
+        if modelos:
+            completer_modelo = QCompleter(modelos, self)
+            completer_modelo.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer_modelo.setFilterMode(Qt.MatchFlag.MatchContains)
+            completer_modelo.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+            self._inp_modelo.setCompleter(completer_modelo)
 
     def _on_completer_activated(self, text: str, field_name: str) -> None:
         """Al seleccionar un item del completer, rellena TODOS los campos del equipo."""
@@ -644,6 +684,28 @@ class EquipoCard(QFrame):
         else:
             self._cmb_aplica_exc.setEnabled(True)
 
+        # Regla metrológica de Puntos de Apoyo por default según Tipo de Instrumento
+        t_low = tipo_txt.lower()
+        if "plataforma" in t_low or "piso" in t_low:
+            def_pa = "5"
+        elif "camionera" in t_low or "puente" in t_low or "ferrocarril" in t_low or "ferrovi" in t_low:
+            def_pa = "8"
+        elif "tolva" in t_low:
+            def_pa = "3"
+        elif any(k in t_low for k in ["colgante", "grúa", "grua", "analítica", "analitica", "mostrador"]):
+            def_pa = "1"
+        elif "tanque" in t_low or "silo" in t_low:
+            def_pa = "4"
+        else:
+            def_pa = "5"
+
+        p = self.parent()
+        while p is not None:
+            if hasattr(p, 'sugerir_puntos_apoyo'):
+                p.sugerir_puntos_apoyo(def_pa)
+                break
+            p = p.parent()
+
         self._on_aplica_exc_changed()
         self._actualizar_visibilidad_secciones()
 
@@ -1046,6 +1108,7 @@ class _CatalogLoader(QThread):
     tecnicos_ready   = pyqtSignal(list)   # [(id, nombre_completo), ...]
     tipos_srv_ready  = pyqtSignal(list)   # [(id, nombre), ...]
     tipos_inst_ready = pyqtSignal(list)   # [(id, nombre), ...]
+    marcas_modelos_ready = pyqtSignal(list) # [(marca, modelo), ...]
     error            = pyqtSignal(str)
 
     def run(self) -> None:
@@ -1084,20 +1147,13 @@ class _CatalogLoader(QThread):
                     logger.warning("Sucursales no disponibles: %s", exc_s)
                     self.sucursales_ready.emit({})
 
-                # Tecnicos: SELECT id, nombre_completo FROM tecnicos WHERE activo = true ORDER BY nombre_completo ASC
+                # Tecnicos: SELECT id, nombre_completo FROM cat_tecnicos WHERE activo = true ORDER BY nombre_completo ASC
                 try:
                     with conn.cursor() as cur:
-                        try:
-                            cur.execute(
-                                "SELECT id, nombre_completo FROM tecnicos "
-                                "WHERE activo = true ORDER BY nombre_completo ASC"
-                            )
-                        except Exception:
-                            conn.rollback()
-                            cur.execute(
-                                "SELECT id, nombre_completo FROM cat_tecnicos "
-                                "WHERE activo = true ORDER BY nombre_completo ASC"
-                            )
+                        cur.execute(
+                            "SELECT id, nombre_completo FROM cat_tecnicos "
+                            "WHERE COALESCE(activo, true) = true ORDER BY nombre_completo ASC"
+                        )
                         _rows = cur.fetchall()
                     tecnicos = [(int(r[0]), str(r[1] or "")) for r in _rows]
                     self.tecnicos_ready.emit(tecnicos)
@@ -1132,6 +1188,18 @@ class _CatalogLoader(QThread):
                 except Exception as exc:
                     logger.warning("Tipos instrumento error: %s", exc)
 
+                # Catálogo Marcas y Modelos
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT DISTINCT marca, modelo FROM catalogo_marcas_modelos "
+                            "ORDER BY marca ASC, modelo ASC"
+                        )
+                        mm_rows = [(str(r[0] or "").strip(), str(r[1] or "").strip()) for r in cur.fetchall()]
+                    self.marcas_modelos_ready.emit(mm_rows)
+                except Exception as exc_mm:
+                    logger.warning("Marcas/modelos error: %s", exc_mm)
+
                 conn.commit()
             finally:
                 _db_pool.release_connection(conn)
@@ -1165,6 +1233,7 @@ class BatchGeneratorWidget(QWidget):
         self._equipo_cards: list = []   # tarjetas de equipo
 
         self._current_catalog: list[dict] = []   # catálogo de instrumentos activo
+        self._marcas_modelos: list[tuple[str, str]] = []  # catálogo consolidado de marcas/modelos
         # Diccionario de sucursales precargadas: {cliente_id: [(sid, nom, dir), ...]}
         self._suc_map: dict[int, list] = {}
         self._catalog_loader: Optional[_CatalogLoader] = None
@@ -1454,8 +1523,8 @@ class BatchGeneratorWidget(QWidget):
         col_puntos_apoyo.setSpacing(6)
         col_puntos_apoyo.addWidget(_field_label("Puntos de Apoyo"))
         self.cmb_puntos_apoyo = QComboBox()
-        self.cmb_puntos_apoyo.addItems(["", "3", "4", "5", "6", "8", "Libre"])
-        self.cmb_puntos_apoyo.setCurrentIndex(0)  # vacío por defecto
+        self.cmb_puntos_apoyo.addItems(["", "1", "3", "4", "5", "6", "8", "Libre"])
+        self.cmb_puntos_apoyo.setCurrentText("5")  # Por default 5 para plataforma / piso
         self.cmb_puntos_apoyo.setFixedWidth(100)
         col_puntos_apoyo.addWidget(self.cmb_puntos_apoyo)
         _row_exc_lay.addLayout(col_puntos_apoyo)
@@ -2224,6 +2293,7 @@ class BatchGeneratorWidget(QWidget):
         loader.tecnicos_ready.connect(self._on_tecnicos_loaded)
         loader.tipos_srv_ready.connect(self._on_tipos_srv_loaded)
         loader.tipos_inst_ready.connect(self._on_tipos_inst_loaded)
+        loader.marcas_modelos_ready.connect(self._on_marcas_modelos_loaded)
         loader.error.connect(lambda msg: logger.warning("[Catalog] %s", msg))
         self._catalog_loader = loader
         loader.start()
@@ -2297,6 +2367,21 @@ class BatchGeneratorWidget(QWidget):
             for card in self._equipo_cards:
                 if hasattr(card, 'set_tipos_instrumento'):
                     card.set_tipos_instrumento(self._tipos_inst)
+
+    @pyqtSlot(list)
+    def _on_marcas_modelos_loaded(self, mm_list: list) -> None:
+        self._marcas_modelos = list(mm_list) if mm_list else []
+        if hasattr(self, '_equipo_cards'):
+            for card in self._equipo_cards:
+                if hasattr(card, 'set_marcas_modelos'):
+                    card.set_marcas_modelos(self._marcas_modelos)
+
+    def sugerir_puntos_apoyo(self, def_pa: str) -> None:
+        """Asigna los puntos de apoyo sugeridos según el tipo de instrumento seleccionado."""
+        if hasattr(self, 'cmb_puntos_apoyo'):
+            idx = self.cmb_puntos_apoyo.findText(str(def_pa))
+            if idx >= 0:
+                self.cmb_puntos_apoyo.setCurrentIndex(idx)
 
     def recargar_catalogos(self) -> None:
         """Fuerza la recarga de catálogos desde PostgreSQL (técnicos, tipos de instrumento, clientes, etc.)."""
@@ -3232,6 +3317,8 @@ class BatchGeneratorWidget(QWidget):
             idx  = len(self._equipo_cards) + 1
             card = EquipoCard(idx, tipos_inst=self._tipos_inst)
             card.set_instrument_catalog(self._current_catalog)
+            if hasattr(self, '_marcas_modelos') and self._marcas_modelos:
+                card.set_marcas_modelos(self._marcas_modelos)
             if hasattr(self, '_tipos_inst') and self._tipos_inst:
                 card.set_tipos_instrumento(self._tipos_inst)
             card.set_calibracion_visible(es_calib)   # visibilidad inmediata
@@ -3454,10 +3541,24 @@ class BatchGeneratorWidget(QWidget):
         tipo_serv_nom = self.cmb_tipo_servicio.currentText() if ts_idx > 0 else ""
 
 
-        # Puntos de Apoyo (campo opcional)
+        # Puntos de Apoyo (campo opcional / editable)
         puntos_apoyo_val = ""
         if hasattr(self, "cmb_puntos_apoyo"):
             puntos_apoyo_val = self.cmb_puntos_apoyo.currentText().strip()
+        if not puntos_apoyo_val and equipos:
+            t_nom = equipos[0].get("tipo_instrumento", "").lower()
+            if "plataforma" in t_nom or "piso" in t_nom:
+                puntos_apoyo_val = "5"
+            elif "camionera" in t_nom or "puente" in t_nom or "ferrocarril" in t_nom or "ferrovi" in t_nom:
+                puntos_apoyo_val = "8"
+            elif "tolva" in t_nom:
+                puntos_apoyo_val = "3"
+            elif any(k in t_nom for k in ["colgante", "grúa", "grua", "analítica", "analitica", "mostrador"]):
+                puntos_apoyo_val = "1"
+            elif "tanque" in t_nom or "silo" in t_nom:
+                puntos_apoyo_val = "4"
+            else:
+                puntos_apoyo_val = "5"
 
         # Sucursal seleccionada (para inyectar dirección en PDF)
         sucursal_idx_sel = self.cmb_sucursal.currentIndex()
@@ -3771,6 +3872,21 @@ class BatchGeneratorWidget(QWidget):
                             )
                         # Se agrega siempre para que el PDF se genere correctamente
                         folios.append(folio)
+
+                        # Persistir marcas y modelos capturados en catalogo_marcas_modelos
+                        if _equipos:
+                            for eq in _equipos:
+                                eq_m = str(eq.get("marca") or "").strip()
+                                eq_mod = str(eq.get("modelo") or "").strip()
+                                if eq_m and eq_mod:
+                                    try:
+                                        cur.execute("""
+                                            INSERT INTO catalogo_marcas_modelos (marca, modelo)
+                                            VALUES (%s, %s)
+                                            ON CONFLICT (marca, modelo) DO NOTHING
+                                        """, (eq_m, eq_mod))
+                                    except Exception:
+                                        pass
 
                     # Calcular el último consecutivo usado (necesario para control_folios)
                     ultimo_consec_usado = consec_base + cant - 1

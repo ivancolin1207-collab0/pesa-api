@@ -48,36 +48,32 @@ def _cargar_env() -> None:
     """
     Busca el archivo .env en múltiples ubicaciones en orden de prioridad:
       1. Junto al binario empaquetado (sys._MEIPASS, si estamos frozen)
-      2. En APP_DATA_DIR (configuración persistente del usuario)
-      3. En el directorio de trabajo actual (desarrollo)
+      2. En el directorio de la aplicación o desarrollo (servicios_pesa / os.getcwd)
+      3. En APP_DATA_DIR (configuración del usuario en Application Support / AppData)
     """
     candidatos: list[Path] = []
 
     # ─ 1. Frozen (PyInstaller / macOS .app bundle) ──────────────────────────
     if getattr(sys, "frozen", False):
         candidatos.append(Path(sys._MEIPASS) / ".env")  # type: ignore[attr-defined]
-        # En macOS .app el ejecutable está en Contents/MacOS/
-        # El .env empaquetado quedaría en Contents/MacOS/_MEIPASS/.env
-        # También buscamos junto al .app para configuración de usuario
         exe_dir = Path(sys.executable).parent
         candidatos.append(exe_dir / ".env")
         candidatos.append(exe_dir.parent.parent / ".env")  # fuera del .app
 
-    # ─ 2. Configuración persistente del usuario ──────────────────────────────
-    candidatos.append(APP_DATA_DIR / ".env")
-
-    # ─ 3. Directorio de trabajo (modo desarrollo) ───────────────────────────
+    # ─ 2. Directorio de trabajo y código fuente ──────────────────────────────
+    candidatos.append(Path(__file__).parent / ".env")
     candidatos.append(Path(os.getcwd()) / ".env")
     candidatos.append(Path(__file__).parent.parent / ".env")
 
+    # ─ 3. Configuración del usuario ──────────────────────────────────────────
+    candidatos.append(APP_DATA_DIR / ".env")
+
     for ruta in candidatos:
         if ruta.exists():
-            load_dotenv(ruta)
+            load_dotenv(ruta, override=True)
             return  # Carga solo el primero encontrado
 
-    # Si no se encontró ninguno, dotenv usará solo las variables de entorno
-    # del sistema (perfecto para entornos CI/CD o servidores)
-    load_dotenv()   # no-op silencioso si no hay .env
+    load_dotenv(override=True)   # no-op silencioso si no hay .env
 
 
 _cargar_env()
@@ -95,8 +91,8 @@ APP_ORGANIZATION = "Básculas PESA"
 # BASE DE DATOS
 # Prioridad:
 #   1. DATABASE_URL (Render Production)  →  postgresql://user:pass@host:5432/db
-#   2. Variables PESA_DB_* individuales  →  Red local / VPN
-#   3. Defaults hardcoded               →  192.168.0.9 (servidor de oficina)
+#   2. Variables PESA_DB_* individuales  →  Render / Red local / VPN
+#   3. Defaults hardcoded               →  Render PostgreSQL (producción nube)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def _parse_db_url(url: str) -> dict:
@@ -106,30 +102,38 @@ def _parse_db_url(url: str) -> dict:
     return {
         "host":             p.hostname or "localhost",
         "port":             p.port or 5432,
-        "database":         (p.path or "/servicios_pesa").lstrip("/"),
-        "user":             p.username or "pesa_app",
-        "password":         p.password or "PesaApp2026!",
+        "database":         (p.path or "/pesa_db").lstrip("/"),
+        "user":             p.username or "pesa_user",
+        "password":         p.password or os.getenv("PESA_DB_PASSWORD", ""),
         "connect_timeout":  30,   # Render puede tardar ~10-15s la primera query
         "application_name": APP_NAME,
         "options":          "-c search_path=public",
-        "sslmode":          "require" if p.hostname and ".render.com" in p.hostname else "prefer",
+        "sslmode":          "require" if p.hostname and (".render.com" in p.hostname or "sslmode=require" in url) else "require",
     }
 
 _DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if _DATABASE_URL:
-    # Modo producción: Render PostgreSQL
+    # Modo producción: Render PostgreSQL via DATABASE_URL
     DB_CONFIG: dict = _parse_db_url(_DATABASE_URL)
 else:
-    # Modo local / VPN: variables individuales PESA_DB_*
+    # Modo producción/nube Render con fallback por defecto a Render
+    db_host = os.getenv("PESA_DB_HOST", "dpg-dak6nh61egvs739ar760-a.oregon-postgres.render.com").strip()
+    db_port = int(os.getenv("PESA_DB_PORT", "5432").strip())
+    db_name = os.getenv("PESA_DB_NAME", "pesa_db").strip()
+    db_user = os.getenv("PESA_DB_USER", "pesa_user").strip()
+    db_pass = os.getenv("PESA_DB_PASSWORD", "").strip()  # nunca hardcodear: viene de .env
+    ssl_mode = os.getenv("PESA_DB_SSLMODE", "require" if ".render.com" in db_host else "prefer").strip()
+
     DB_CONFIG: dict = {
-        "host":             os.getenv("PESA_DB_HOST",     "192.168.0.9").strip(),
-        "port":             int(os.getenv("PESA_DB_PORT", "5432").strip()),
-        "database":         os.getenv("PESA_DB_NAME",     "servicios_pesa").strip(),
-        "user":             os.getenv("PESA_DB_USER",     "pesa_app").strip(),
-        "password":         os.getenv("PESA_DB_PASSWORD", "PesaApp2026!").strip(),
-        "connect_timeout":  10,
+        "host":             db_host,
+        "port":             db_port,
+        "database":         db_name,
+        "user":             db_user,
+        "password":         db_pass,
+        "connect_timeout":  30,
         "application_name": APP_NAME,
         "options":          "-c search_path=public",
+        "sslmode":          ssl_mode,
     }
 
 

@@ -37,8 +37,54 @@ from PyQt6.QtWidgets import (
     QFrame, QSizePolicy, QMessageBox, QAbstractItemView,
     QGroupBox, QApplication, QTabWidget, QSplitter,
 )
+from PyQt6.QtCore import QThread, pyqtSignal
 
 logger = logging.getLogger(__name__)
+
+class SaveWorker(QThread):
+    finished_ok = pyqtSignal(str, str) # folio, pdf_path
+    finished_err = pyqtSignal(str)     # error msg
+    
+    def __init__(self, dialog_ref, form_data: dict, draft: bool, folio: str, os_id: int):
+        super().__init__()
+        self.dialog_ref = dialog_ref
+        self.form_data = form_data
+        self.draft = draft
+        self.folio = folio
+        self.os_id = os_id
+
+    def run(self):
+        try:
+            pdf_path = None
+            if not self.draft:
+                pdf_path = self.dialog_ref._generate_pdf_local(self.form_data)
+                
+            saved = True
+            # Evita importar localmente si _sync_manager es global,
+            # usamos el global _sync_manager que ya se importó arriba.
+            if _HAS_SYNC and _sync_manager:
+                saved = _sync_manager.save_local_service(
+                    self.folio, self.form_data, pdf_path
+                )
+                
+            if not self.draft and _HAS_SYNC and _sync_manager and _sync_manager.is_online():
+                from database.connection import db_pool
+                pg_conn = db_pool.get_connection()
+                try:
+                    self.dialog_ref._save_to_postgres(pg_conn, self.form_data)
+                except Exception as e:
+                    logger.warning("No se pudo guardar en PostgreSQL: %s", e)
+                finally:
+                    db_pool.release_connection(pg_conn)
+                    
+            if not saved:
+                raise RuntimeError("No se pudo guardar en SQLite local.")
+                
+            self.finished_ok.emit(self.folio, pdf_path or "")
+        except Exception as e:
+            logger.exception("Error en SaveWorker")
+            self.finished_err.emit(str(e))
+
 
 # ─── Dependencias opcionales ──────────────────────────────────────────────────
 try:
@@ -903,34 +949,82 @@ class TomDigitalDialog(QDialog):
         top_bar = self._build_top_bar()
         root.addWidget(top_bar)
 
-        # ── Contenido con scroll ──────────────────────────────────────────────
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setStyleSheet("background: transparent; border: none;")
+        # ── Pestañas horizontales principales ────────────────────────────────
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet("""
+            QTabWidget::pane { border: none; background: #F0F2F5; }
+            QTabBar::tab {
+                background: #E5E5EA;
+                padding: 14px 28px;
+                font-size: 15px;
+                font-weight: 600;
+                color: #6E6E73;
+                border-radius: 8px 8px 0 0;
+                margin-right: 4px;
+                margin-top: 10px;
+                min-height: 48px;
+            }
+            QTabBar::tab:selected {
+                background: #FFFFFF;
+                color: #1D1D1F;
+            }
+        """)
 
-        content = QWidget()
-        content.setStyleSheet(f"background: {_BG};")
-        self._content_lay = QVBoxLayout(content)
-        self._content_lay.setContentsMargins(20, 16, 20, 16)
-        self._content_lay.setSpacing(16)
+        # PESTAÑA 1: INSTRUMENTO
+        w_inst = QWidget()
+        l_inst = QVBoxLayout(w_inst)
+        l_inst.setContentsMargins(20, 20, 20, 20)
+        scroll_inst = QScrollArea()
+        scroll_inst.setWidgetResizable(True)
+        scroll_inst.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_inst.setStyleSheet("background: transparent;")
+        cont_inst = QWidget()
+        cl_inst = QVBoxLayout(cont_inst)
+        cl_inst.addWidget(self._build_equipo_block())
+        cl_inst.addStretch()
+        scroll_inst.setWidget(cont_inst)
+        l_inst.addWidget(scroll_inst)
+        self._tabs.addTab(w_inst, "1. INSTRUMENTO")
 
-        # Bloque 1: Datos del Equipo
-        self._content_lay.addWidget(self._build_equipo_block())
+        # PESTAÑA 2: REPETIBILIDAD
+        self._tbl_rep = TouchTableWidget("Repetibilidad", self._HEADERS_REP, rows=3, color=_RED)
+        self._tabs.addTab(self._tbl_rep, "2. REPETIBILIDAD")
 
-        # Bloque 2: Pruebas Metrológicas (Tabs)
-        self._content_lay.addWidget(self._build_pruebas_block())
+        # Detectar enlaces
+        _es_enlaces  = bool(self._os_data.get("es_enlace_sustitucion"))
+        _n_enlaces   = int(self._os_data.get("num_enlaces_sustitucion") or 4)
 
-        # Bloque 3: Observaciones
-        self._content_lay.addWidget(self._build_observaciones_block())
+        if _es_enlaces:
+            self._tbl_exc = None
+            self._tbl_exac = None
+            self._w_enlaces_sustitucion = EnlacesSustitucionWidget(n_enlaces=_n_enlaces)
+            self._tabs.addTab(self._w_enlaces_sustitucion, "3. EXACTITUD (SUSTITUCIÓN)")
+        else:
+            self._w_enlaces_sustitucion = None
+            self._tbl_exc = TouchTableWidget("Excentricidad", self._HEADERS_EXC, rows=6, color=_AMBER)
+            self._tabs.addTab(self._tbl_exc, "3. EXCENTRICIDAD")
 
-        # Bloque 4: Firmas
-        self._content_lay.addWidget(self._build_firmas_block())
+            self._tbl_exac = TouchTableWidget("Exactitud", self._HEADERS_EXAC, rows=10, color=_BLUE, has_nominal=True)
+            self._tabs.addTab(self._tbl_exac, "4. EXACTITUD")
 
-        self._content_lay.addStretch()
-        scroll.setWidget(content)
-        root.addWidget(scroll, stretch=1)
+        # PESTAÑA 5: CIERRE Y FIRMAS
+        w_cierre = QWidget()
+        l_cierre = QVBoxLayout(w_cierre)
+        l_cierre.setContentsMargins(20, 20, 20, 20)
+        scroll_cierre = QScrollArea()
+        scroll_cierre.setWidgetResizable(True)
+        scroll_cierre.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_cierre.setStyleSheet("background: transparent;")
+        cont_cierre = QWidget()
+        cl_cierre = QVBoxLayout(cont_cierre)
+        cl_cierre.addWidget(self._build_observaciones_block())
+        cl_cierre.addWidget(self._build_firmas_block())
+        cl_cierre.addStretch()
+        scroll_cierre.setWidget(cont_cierre)
+        l_cierre.addWidget(scroll_cierre)
+        self._tabs.addTab(w_cierre, "5. CIERRE Y FIRMAS")
+
+        root.addWidget(self._tabs, stretch=1)
 
         # ── Barra inferior de acción ──────────────────────────────────────────
         bottom_bar = self._build_bottom_bar()
@@ -942,7 +1036,7 @@ class TomDigitalDialog(QDialog):
         bar.setFixedHeight(70)
         bar.setStyleSheet(f"""
             QFrame {{
-                background: {_DARK};
+                background: #1E2230;
                 border-bottom: 2px solid {_RED};
             }}
         """)
@@ -1117,13 +1211,50 @@ class TomDigitalDialog(QDialog):
             """)
             setattr(self, attr, le)
             grid.addWidget(le, row * 2 + 1, col)
+            
+        def _combo_field(label: str, col: int, row: int, attr: str, items: list[str]) -> None:
+            from PyQt6.QtWidgets import QComboBox
+            lbl = QLabel(label)
+            lbl.setStyleSheet("font-size: 12px; font-weight: 600; color: #6B7280; background: transparent;")
+            grid.addWidget(lbl, row * 2, col)
 
+            cb = QComboBox()
+            cb.addItems(items)
+            cb.setMinimumHeight(_TOUCH_BTN_H)
+            cb.setStyleSheet(f"""
+                QComboBox {{
+                    font-size: {_TOUCH_FONT}px;
+                    background: #F7F8FA;
+                    border: 1.5px solid #E5E7EB;
+                    border-radius: 10px;
+                    padding: 0 14px;
+                    color: {_DARK};
+                }}
+                QComboBox::drop-down {{ border: none; }}
+            """)
+            setattr(self, attr, cb)
+            grid.addWidget(cb, row * 2 + 1, col)
+
+        # Fila 0
         _field("Marca",          0, 0, "_inp_marca",    "Ejemplo: METTLER TOLEDO")
         _field("Modelo",         1, 0, "_inp_modelo",   "Ejemplo: ICS465")
         _field("N° Serie",       2, 0, "_inp_ns",       "Número de serie")
-        _field("Capacidad Max",  0, 1, "_inp_capacidad", "ej. 30000")
-        _field("División",       1, 1, "_inp_division",  "ej. 10")
-        _field("Ubicación",      2, 1, "_inp_ubicacion", "Planta / Área")
+        
+        # Fila 1
+        _field("ID Indicador / Equipo", 0, 1, "_inp_id_equipo", "Ej: B-01")
+        _field("Ubicación",             1, 1, "_inp_ubicacion", "Planta / Área")
+        _combo_field("Tipo de Instrumento", 2, 1, "_combo_tipo_inst", 
+                     ["Báscula camionera", "Báscula de plataforma", "Tolva / Tanque", "Balanza analítica", "Otra"])
+
+        # Fila 2
+        _field("Capacidad Max",  0, 2, "_inp_capacidad", "ej. 30000")
+        _field("División Min (e/d)", 1, 2, "_inp_division",  "ej. 10")
+        
+        # Unidad y Aplica Excentricidad en una misma celda visual o separada
+        _combo_field("Unidad", 2, 2, "_combo_unidad", ["kg", "lb", "g", "t"])
+        
+        # Fila 3
+        _combo_field("¿Aplica Excentricidad?", 0, 3, "_combo_aplica_exc", ["Sí", "No"])
 
         lay.addLayout(grid)
 
@@ -1217,76 +1348,6 @@ class TomDigitalDialog(QDialog):
         self._frame_calib.setVisible(False)
 
         return frame
-
-    def _build_pruebas_block(self) -> QFrame:
-        """Bloque de pruebas metrológicas con pestañas táctiles."""
-        frame = QFrame()
-        frame.setStyleSheet(f"""
-            QFrame {{
-                background: {_WHITE};
-                border-radius: 14px;
-                border: 1.5px solid rgba(0,0,0,0.06);
-            }}
-        """)
-        lay = QVBoxLayout(frame)
-        lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(12)
-
-        lay.addWidget(self._build_section_header("📊", "Pruebas Metrológicas", _RED))
-
-        tabs = QTabWidget()
-        tabs.setStyleSheet("""
-            QTabWidget::pane { border: none; }
-            QTabBar::tab {
-                background: #F2F2F7;
-                padding: 12px 20px;
-                font-size: 14px;
-                font-weight: 600;
-                color: #6B7280;
-                border-radius: 8px 8px 0 0;
-                margin-right: 4px;
-                min-height: 48px;
-            }
-            QTabBar::tab:selected {
-                background: white;
-                color: #E63946;
-            }
-        """)
-
-        # Repetibilidad
-        self._tbl_rep = TouchTableWidget(
-            "Repetibilidad", self._HEADERS_REP, rows=3, color=_RED
-        )
-        tabs.addTab(self._tbl_rep, "🔄  Repetibilidad")
-
-        # ── Detectar modo de Calibración por Enlaces de Sustitución ──────────
-        _es_enlaces  = bool(self._os_data.get("es_enlace_sustitucion"))
-        _n_enlaces   = int(self._os_data.get("num_enlaces_sustitucion") or 4)
-
-        if _es_enlaces:
-            # Modo Tanque: ocultar Excentricidad, usar widget especial de enlaces
-            self._tbl_exc = None    # no aplica para Tanque
-            self._tbl_exac = None   # sustituido por el widget de enlaces
-
-            self._w_enlaces_sustitucion = EnlacesSustitucionWidget(n_enlaces=_n_enlaces)
-            tabs.addTab(self._w_enlaces_sustitucion, "🔗  Exactitud (Sustitución)")
-        else:
-            # Modo estándar: Excentricidad + Exactitud con tabla normal
-            self._w_enlaces_sustitucion = None
-
-            self._tbl_exc = TouchTableWidget(
-                "Excentricidad", self._HEADERS_EXC, rows=6, color=_AMBER
-            )
-            tabs.addTab(self._tbl_exc, "⚖️  Excentricidad")
-
-            self._tbl_exac = TouchTableWidget(
-                "Exactitud", self._HEADERS_EXAC, rows=10, color=_BLUE, has_nominal=True
-            )
-            tabs.addTab(self._tbl_exac, "🎯  Exactitud")
-
-        lay.addWidget(tabs)
-        return frame
-
 
     def _build_observaciones_block(self) -> QFrame:
         """Bloque de observaciones con teclado virtual hint."""
@@ -1597,65 +1658,41 @@ class TomDigitalDialog(QDialog):
                     return
 
         self._btn_save.setEnabled(False)
-        self._btn_save.setText("Guardando…")
+        self._btn_save.setText("Guardando y Sincronizando (espere)...")
         QApplication.processEvents()
 
         try:
             form_data = self._collect_form_data(draft)
-
-            # 1. Guardar en SQLite local (siempre)
-            pdf_path = None
-            if not draft:
-                try:
-                    pdf_path = self._generate_pdf_local(form_data)
-                except Exception as exc:
-                    logger.error("Error generando PDF: %s", exc)
-
-            saved = True
-            if _HAS_SYNC and _sync_manager:
-                saved = _sync_manager.save_local_service(
-                    self._folio_os, form_data, pdf_path
-                )
-
-            # 2. Intentar guardar también en PostgreSQL si hay conexión
-            if not draft and _HAS_SYNC and _sync_manager and _sync_manager.is_online():
-                try:
-                    from database.connection import db_pool
-                    pg_conn = db_pool.get_connection()
-                    try:
-                        self._save_to_postgres(pg_conn, form_data)
-                    finally:
-                        db_pool.release_connection(pg_conn)
-                    logger.info("OS %s guardada también en PostgreSQL.", self._folio_os)
-                except Exception as exc:
-                    logger.warning("No se pudo guardar en PostgreSQL: %s", exc)
-
-            if not saved:
-                raise RuntimeError("No se pudo guardar en SQLite local.")
-
-            # Feedback
-            mode_msg = "borrador guardado" if draft else "servicio completado"
-            pdf_msg  = f"\n\nPDF generado:\n{pdf_path}" if pdf_path else ""
-            QMessageBox.information(
-                self,
-                "✅ Guardado",
-                f"Orden {self._folio_os}: {mode_msg}.{pdf_msg}\n\n"
-                f"{'Los datos se sincronizarán al conectarse a la red de oficina.' if not draft else ''}"
-            )
-
-            if not draft:
-                self.servicio_completado.emit(self._folio_os)
-                self.accept()
-
+            self._worker = SaveWorker(self, form_data, draft, self._folio_os, self._os_id)
+            self._worker.finished_ok.connect(lambda f, p: self._on_save_finished(draft, f, p))
+            self._worker.finished_err.connect(self._on_save_error)
+            self._worker.start()
         except Exception as exc:
-            logger.exception("Error guardando formulario táctil: %s", exc)
-            QMessageBox.critical(
-                self, "Error al Guardar",
-                f"Error inesperado:\n{exc}\n\nRevisa los logs para más detalles."
-            )
-        finally:
-            self._btn_save.setEnabled(True)
-            self._btn_save.setText("  💾   Guardar y Generar PDF en Tablet  ")
+            self._on_save_error(str(exc))
+
+    def _on_save_finished(self, draft: bool, folio: str, pdf_path: str):
+        self._btn_save.setEnabled(True)
+        self._btn_save.setText("  💾   Guardar y Generar PDF en Tablet  ")
+        
+        mode_msg = "borrador guardado" if draft else "servicio completado"
+        pdf_msg  = f"\n\nPDF generado:\n{pdf_path}" if pdf_path else ""
+        QMessageBox.information(
+            self,
+            "✅ Guardado",
+            f"Orden {folio}: {mode_msg}.{pdf_msg}\n\n"
+            f"{'Los datos se sincronizarán al conectarse a la red de oficina.' if not draft else ''}"
+        )
+        if not draft:
+            self.servicio_completado.emit(folio)
+            self.accept()
+
+    def _on_save_error(self, err_msg: str):
+        self._btn_save.setEnabled(True)
+        self._btn_save.setText("  💾   Guardar y Generar PDF en Tablet  ")
+        QMessageBox.critical(
+            self, "Error al Guardar",
+            f"Error inesperado:\n{err_msg}\n\nRevisa los logs para más detalles."
+        )
 
     def _validate(self) -> list[str]:
         warnings: list[str] = []
@@ -1676,8 +1713,12 @@ class TomDigitalDialog(QDialog):
             "equipo_modelo":        self._inp_modelo.text().strip(),
             "equipo_ns":            self._inp_ns.text().strip(),
             "equipo_ubicacion":     self._inp_ubicacion.text().strip(),
+            "id_equipo":            self._inp_id_equipo.text().strip(),
+            "tipo_instrumento":     self._combo_tipo_inst.currentText(),
             "alcance_max":          self._inp_capacidad.text().strip(),
             "div_minima":           self._inp_division.text().strip(),
+            "unidad":               self._combo_unidad.currentText(),
+            "aplica_excentricidad": self._combo_aplica_exc.currentText() == "Sí",
             "observaciones":        self._txt_obs.toPlainText().strip(),
             "nombre_tecnico_firma": self._inp_nombre_tecnico.text().strip(),
             "nombre_cliente_firma": self._inp_nombre_cliente.text().strip(),
@@ -1710,8 +1751,8 @@ class TomDigitalDialog(QDialog):
                     ubicacion            = COALESCE(%s, ubicacion),
                     observaciones        = COALESCE(%s, observaciones),
                     firma_cliente_nombre = COALESCE(%s, firma_cliente_nombre),
-                    firma_tecnico_b64    = %s,
-                    firma_cliente_b64    = %s,
+                    firma_tecnico_b64    = COALESCE(%s, firma_tecnico_b64),
+                    firma_cliente_b64    = COALESCE(%s, firma_cliente_b64),
                     estado               = %s,
                     modalidad            = 'Digital',
                     sync_status          = 'SYNCED',

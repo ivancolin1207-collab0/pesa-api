@@ -3,10 +3,14 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/local_db_service.dart';
+import '../services/tipo_servicio_rules.dart';
 import '../widgets/app_shell.dart';
 
 class AttachScanScreen extends StatefulWidget {
@@ -27,7 +31,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
 
   // ── Paso 1: OS seleccionada ───────────────────────────────────────────────
   String?                   _folioOs;
-  int?                      _osId;
+  Map<String, dynamic>?     _osSel;   // OS seleccionada (datos homologados)
   List<Map<String,dynamic>> _resultados = [];
   bool                      _buscando   = false;
   final _searchCtrl = TextEditingController();
@@ -81,6 +85,16 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
           final cli    = (os['cliente']  as String? ?? '').toLowerCase();
           return folio.contains(q) || cli.contains(q);
         }).take(10).toList();
+        // Folio preseleccionado desde el dashboard: fijar la OS exacta.
+        if (widget.folioOs != null && _osSel == null) {
+          for (final os in all) {
+            if ((os['folio_os'] as String? ?? '').trim().toLowerCase() ==
+                widget.folioOs!.trim().toLowerCase()) {
+              _osSel = Map<String, dynamic>.from(os);
+              break;
+            }
+          }
+        }
         _buscando = false;
       });
     } catch (_) {
@@ -91,11 +105,87 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
   void _seleccionarOs(Map<String, dynamic> os) {
     setState(() {
       _folioOs     = os['folio_os'] as String?;
-      _osId        = os['local_id'] as int?;
+      _osSel       = Map<String, dynamic>.from(os);
       _resultados  = [];
       _currentStep = 1;
     });
     _searchCtrl.text = _folioOs ?? '';
+  }
+
+  // ── Datos homologados con la BD central ─────────────────────────────────────────
+  String _campo(List<String> keys) {
+    final os = _osSel ?? const <String, dynamic>{};
+    for (final k in keys) {
+      final v = (os[k] ?? '').toString().trim();
+      if (v.isNotEmpty && v != 'null') return v;
+    }
+    return '';
+  }
+
+  FormatoDocumento get _formato => detectarFormato(
+        folio: _folioOs,
+        nombre: _campo(['tipo_servicio']),
+      );
+
+  String get _formatoLabel => switch (_formato) {
+        FormatoDocumento.remision       => 'Remisión de Servicio',
+        FormatoDocumento.revisionCeldas => 'Revisión de Celdas de Carga',
+        FormatoDocumento.ordenServicio  => 'Orden de Servicio',
+      };
+
+  /// Campos que el formato físico debe contener (verificación visual previa).
+  List<String> get _checklistFormato => switch (_formato) {
+        FormatoDocumento.remision => const [
+          'Cliente y dirección', 'Técnico', 'Horarios (llegada / salida)',
+          'Descripción del trabajo', 'Refacciones / materiales usados', 'Firmas',
+        ],
+        FormatoDocumento.revisionCeldas => const [
+          'Identificación del instrumento', 'Capacidad y marca/modelo de celda',
+          'Resistencia entrada/salida (Ω)', 'Señal (mV/V)', 'Aislamiento (MΩ)',
+          'Balance de cero', 'Diagnóstico final',
+        ],
+        FormatoDocumento.ordenServicio => const [
+          'Datos del instrumento', 'Lecturas de prueba', 'Dictamen', 'Firmas',
+        ],
+      };
+
+  Map<String, dynamic> _payloadHomologado() {
+    final auth = context.read<AuthService>();
+    final tecnico = _campo(['tecnico', 'tecnico_nombre']).isNotEmpty
+        ? _campo(['tecnico', 'tecnico_nombre'])
+        : auth.displayName;
+    final fecha = _campo(['fecha', 'fecha_servicio']);
+    return {
+      'folio_os':      _folioOs,
+      'cliente':       _campo(['cliente', 'cliente_nombre', 'razon_social']),
+      'sucursal':      _campo(['sucursal', 'sucursal_nombre', 'direccion', 'direccion_cliente']),
+      'tecnico':       tecnico,
+      'fecha':         fecha.isNotEmpty
+          ? fecha.split(' ').first
+          : DateTime.now().toIso8601String().substring(0, 10),
+      'modalidad':     'FISICO',
+      'estatus':       'Cerrado',
+      'tipo_formato':  _formatoLabel,
+      'tipo_servicio': _campo(['tipo_servicio']),
+    };
+  }
+
+  /// Convierte la imagen capturada a un PDF de una página (A4 / Carta).
+  Future<File> _imagenAPdf(File img, String folio) async {
+    final bytes = await img.readAsBytes();
+    final doc = pw.Document();
+    final image = pw.MemoryImage(bytes);
+    doc.addPage(pw.Page(
+      pageFormat: PdfPageFormat.letter,
+      margin: const pw.EdgeInsets.all(12),
+      build: (_) => pw.Center(child: pw.Image(image, fit: pw.BoxFit.contain)),
+    ));
+    final dir = Directory('${(await getApplicationDocumentsDirectory()).path}/pdfs');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final safe = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_').trim();
+    final out = File('${dir.path}/$safe.pdf');
+    await out.writeAsBytes(await doc.save(), flush: true);
+    return out;
   }
 
   // ── Cámara ────────────────────────────────────────────────────────────────
@@ -103,7 +193,8 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
     try {
       final picked = await _picker.pickImage(
         source: ImageSource.camera,
-        imageQuality: 90,
+        imageQuality: 85,
+        maxWidth: 2200,
         preferredCameraDevice: CameraDevice.rear,
       );
       if (picked == null) return;
@@ -122,7 +213,8 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
     try {
       final picked = await _picker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 90,
+        imageQuality: 85,
+        maxWidth: 2200,
       );
       if (picked == null) return;
       setState(() {
@@ -160,12 +252,30 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
     if (_capturedImage == null || _folioOs == null) return;
     setState(() => _uploading = true);
 
+    final folio = _folioOs!;
     try {
-      await ApiService.instance.uploadEscaneo(
-        _osId ?? 0,
-        _capturedImage!,
-        _folioOs!,
+      final payload = _payloadHomologado();
+      final pdfFile = await _imagenAPdf(_capturedImage!, folio);
+
+      // 1) upload-pdf: localiza la OS por FOLIO, guarda el PDF en PostgreSQL
+      //    (pdf_b64, persistente) y marca estado/estatus = 'Cerrado'.
+      var ok = await ApiService.instance.uploadPdf(folio, pdfFile, data: payload);
+      var estadoLocal = 'Cerrado';
+
+      // 2) Respaldo: /adjunto por folio (os_id = 0 → nunca coincide con el
+      //    local_id de SQLite, que NO es el id del servidor).
+      if (!ok) {
+        await ApiService.instance.uploadEscaneo(0, pdfFile, folio, campos: payload);
+        ok = true;
+        estadoLocal = 'ESCANEADA';
+      }
+
+      await LocalDbService.instance.marcarFormatoFisicoRecibido(
+        folio,
+        pdfPath: pdfFile.path,
+        estado: estadoLocal,
       );
+
       if (mounted) {
         showDialog(
           context: context,
@@ -174,11 +284,11 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
             title: const Row(children: [
               Icon(Icons.check_circle, color: Colors.green),
               SizedBox(width: 8),
-              Text('Escaneo adjuntado'),
+              Text('Formato físico recibido'),
             ]),
             content: Text(
-              'El documento fue subido exitosamente a la orden $_folioOs.\n'
-              'Se actualizará en el servidor en la próxima sincronización.',
+              '$_formatoLabel $folio digitalizado y enviado al servidor.\n'
+              'Modalidad: Físico · Estatus: Cerrado.',
             ),
             actions: [
               ElevatedButton(
@@ -189,7 +299,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
                   setState(() {
                     _capturedImage = null;
                     _folioOs       = null;
-                    _osId          = null;
+                    _osSel         = null;
                     _currentStep   = 0;
                     _searchCtrl.clear();
                   });
@@ -567,9 +677,15 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
 
   // ── PASO 3: Adjuntar y subir ──────────────────────────────────────────────
   Widget _buildStep3() {
+    final p = _payloadHomologado();
+    String v(Object? x) {
+      final s = (x ?? '').toString().trim();
+      return s.isEmpty ? '—' : s;
+    }
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(children: [
+        Expanded(child: SingleChildScrollView(child: Column(children: [
         // Resumen
         Container(
           padding: const EdgeInsets.all(16),
@@ -585,7 +701,28 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
                     color: Color(0xFF111827))),
             const SizedBox(height: 12),
             _SummaryRow(icon: Icons.assignment_outlined,
-                label: 'Orden de Servicio', value: _folioOs ?? '—'),
+                label: 'Folio', value: _folioOs ?? '—'),
+            const SizedBox(height: 8),
+            _SummaryRow(icon: Icons.description_outlined,
+                label: 'Formato', value: _formatoLabel),
+            const SizedBox(height: 8),
+            _SummaryRow(icon: Icons.business_outlined,
+                label: 'Cliente', value: v(p['cliente'])),
+            const SizedBox(height: 8),
+            _SummaryRow(icon: Icons.store_outlined,
+                label: 'Sucursal', value: v(p['sucursal'])),
+            const SizedBox(height: 8),
+            _SummaryRow(icon: Icons.engineering_outlined,
+                label: 'Técnico', value: v(p['tecnico'])),
+            const SizedBox(height: 8),
+            _SummaryRow(icon: Icons.event_outlined,
+                label: 'Fecha', value: v(p['fecha'])),
+            const SizedBox(height: 8),
+            const _SummaryRow(icon: Icons.print_outlined,
+                label: 'Modalidad', value: 'Físico'),
+            const SizedBox(height: 8),
+            const _SummaryRow(icon: Icons.lock_outline,
+                label: 'Estatus al enviar', value: 'Cerrado'),
             const SizedBox(height: 8),
             _SummaryRow(icon: Icons.insert_drive_file_outlined,
                 label: 'Archivo', value: _capturedImage?.path.split('/').last ?? '—'),
@@ -593,6 +730,33 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
             _SummaryRow(icon: Icons.auto_fix_high,
                 label: 'Filtro escáner',
                 value: _filterApplied ? 'Aplicado ✓' : 'Sin filtro'),
+          ]),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBEB),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFFDE68A)),
+          ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Verifica que el formato físico contenga:',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
+                    color: Color(0xFF92400E))),
+            const SizedBox(height: 6),
+            for (final item in _checklistFormato)
+              Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Row(children: [
+                  const Icon(Icons.check_box_outlined, size: 14,
+                      color: Color(0xFFB45309)),
+                  const SizedBox(width: 6),
+                  Expanded(child: Text(item, style: const TextStyle(
+                      fontSize: 12, color: Color(0xFF78350F)))),
+                ]),
+              ),
           ]),
         ),
         if (_capturedImage != null) ...[
@@ -614,7 +778,8 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
             ),
           ),
         ],
-        const Spacer(),
+        ]))),
+        const SizedBox(height: 12),
         // Botones
         Row(children: [
           OutlinedButton.icon(
@@ -644,7 +809,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
                           color: Colors.white))
                   : const Icon(Icons.upload_file, size: 20),
               label: Text(
-                _uploading ? 'Subiendo...' : 'Adjuntar y Marcar como Escaneada',
+                _uploading ? 'Subiendo...' : 'Enviar Formato Físico (Cerrado)',
                 style: const TextStyle(fontSize: 14,
                     fontWeight: FontWeight.w700),
               ),

@@ -50,15 +50,15 @@ except ImportError as _e:
     db_pool = None  # type: ignore
 
 # ─── Paleta corporativa ───────────────────────────────────────────────────────
-_RED      = "#C8102E"    # Rojo PESA principal
-_RED_H    = "#A50D25"    # Hover
-_RED_P    = "#8A0B1E"    # Pressed
-_DARK     = "#1A1C23"    # Fondo ventana
-_DARK2    = "#2D3142"    # Texto oscuro / título
-_CARD_BG  = "#FFFFFF"    # Tarjeta
-_FIELD_BG = "#F4F5F7"    # Fondo input
-_BORDER   = "#E2E4E8"    # Borde input
-_GRAY     = "#767C88"    # Texto secundario
+_RED      = "#B81D24"    # Rojo carmín PESA principal
+_RED_H    = "#9E161C"    # Hover
+_RED_P    = "#831116"    # Pressed
+_BG       = "#F5F5F7"    # Fondo ventana macOS gray
+_DARK2    = "#1D1D1F"    # Texto Apple Anthracite
+_CARD_BG  = "#FFFFFF"    # Tarjeta blanca
+_FIELD_BG = "#FAFAFA"    # Fondo input
+_BORDER   = "#D1D1D6"    # Borde input neutro
+_GRAY     = "#86868B"    # Texto secundario
 _GRAY2    = "#5A6070"    # Texto botón salir
 _LGRAY    = "#B0B7C3"    # Gris claro
 _SUCCESS  = "#16A34A"    # Verde conexión OK
@@ -69,50 +69,20 @@ _WHITE    = "#FFFFFF"
 # ══════════════════════════════════════════════════════════════════════════════
 class _BackgroundWidget(QWidget):
     """
-    Widget de fondo oscuro con patrón de cuadrícula corporativa sutil.
-    Se usa como ventana contenedora del LoginDialog.
+    Widget de fondo gris neutro estilo macOS (#F5F5F7).
     """
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # ── Gradiente de fondo oscuro ─────────────────────────────────────────
-        grad = QLinearGradient(0, 0, self.width(), self.height())
-        grad.setColorAt(0.0, QColor("#16181F"))
-        grad.setColorAt(0.6, QColor("#1A1C23"))
-        grad.setColorAt(1.0, QColor("#1C2030"))
-        painter.fillRect(self.rect(), QBrush(grad))
-
-        # ── Cuadrícula corporativa sutil ──────────────────────────────────────
-        pen = QPen(QColor(255, 255, 255, 8))
-        pen.setWidth(1)
-        painter.setPen(pen)
-        grid_size = 36
-        for x in range(0, self.width(), grid_size):
-            painter.drawLine(x, 0, x, self.height())
-        for y in range(0, self.height(), grid_size):
-            painter.drawLine(0, y, self.width(), y)
-
-        # ── Borde rojo inferior (acento corporativo) ──────────────────────────
-        accent_pen = QPen(QColor(_RED))
-        accent_pen.setWidth(3)
-        painter.setPen(accent_pen)
-        painter.drawLine(0, self.height() - 1, self.width(), self.height() - 1)
+        painter.fillRect(self.rect(), QColor("#F5F5F7"))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 class LoginDialog(QDialog):
     """
-    Diálogo modal de autenticación — Enterprise UI v3.0.
-
-    Instanciación correcta en main.py:
-        app.setQuitOnLastWindowClosed(False)
-        app._login_dlg = LoginDialog()
-        if app._login_dlg.exec() == QDialog.DialogCode.Accepted:
-            window.show()
-        else:
-            app.quit()
+    Diálogo modal de autenticación — Enterprise UI v4.0.
+    Diseño minimalista con tarjeta central flotante (420px, radius 16px).
     """
     login_successful = pyqtSignal(str)   # emite el rol del usuario
 
@@ -145,31 +115,41 @@ class LoginDialog(QDialog):
     def _build_ui(self) -> None:
         self.setWindowTitle("Servicios PESA — Acceso Corporativo")
         self.setModal(True)
-        self.setFixedSize(480, 600)
+        self.setFixedSize(480, 620)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
-        # Capa exterior: fondo oscuro con padding para la sombra de la tarjeta
+        # Capa exterior: fondo gris con padding para la sombra
         outer = QVBoxLayout(self)
-        outer.setContentsMargins(24, 24, 24, 24)
+        outer.setContentsMargins(30, 30, 30, 30)
         outer.setSpacing(0)
 
-        # Tarjeta blanca central
+        # Tarjeta blanca central flotante (420px de ancho)
         card = QFrame()
         card.setObjectName("login_card")
-        outer.addWidget(card)
+        card.setFixedWidth(420)
+
+        # Sombra suave desplegada en tarjeta
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect(card)
+        shadow.setBlurRadius(24)
+        shadow.setOffset(0, 6)
+        shadow.setColor(QColor(0, 0, 0, 16))
+        card.setGraphicsEffect(shadow)
+
+        outer.addWidget(card, alignment=Qt.AlignmentFlag.AlignCenter)
 
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(44, 40, 44, 36)
+        lay.setContentsMargins(36, 32, 36, 28)
         lay.setSpacing(0)
 
-        # ── 1. Franja de marca superior (logo) ────────────────────────────────
+        # ── 1. Franja de marca superior (logo + subtítulo técnico) ────────────
         lay.addWidget(self._build_logo_header())
-        lay.addSpacing(28)
+        lay.addSpacing(22)
 
         # ── 2. Separador con etiqueta ──────────────────────────────────────────
         lay.addWidget(self._build_divider("ACCESO AL SISTEMA"))
-        lay.addSpacing(22)
+        lay.addSpacing(18)
 
         # ── 3. Campo Usuario ───────────────────────────────────────────────────
         lay.addWidget(self._field_label("USUARIO"))
@@ -179,21 +159,21 @@ class LoginDialog(QDialog):
             object_name="login_input"
         )
         lay.addWidget(self.txt_user)
-        lay.addSpacing(16)
+        lay.addSpacing(14)
 
         # ── 4. Campo Contraseña ────────────────────────────────────────────────
         lay.addWidget(self._field_label("CONTRASEÑA"))
         lay.addSpacing(5)
         self.txt_pass = self._build_password_field()
         lay.addWidget(self.txt_pass)
-        lay.addSpacing(6)
+        lay.addSpacing(4)
 
         # ── 5. Estado / error ──────────────────────────────────────────────────
         self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("login_status")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.lbl_status.setWordWrap(True)
-        self.lbl_status.setFixedHeight(32)
+        self.lbl_status.setFixedHeight(28)
         lay.addWidget(self.lbl_status)
 
         # ── 6. Barra de progreso (indeterminada, oculta por defecto) ───────────
@@ -203,21 +183,21 @@ class LoginDialog(QDialog):
         self.progress.setFixedHeight(3)
         self.progress.setVisible(False)
         lay.addWidget(self.progress)
-        lay.addSpacing(14)
+        lay.addSpacing(10)
 
         # ── 7. Botón principal CTA ────────────────────────────────────────────
-        self.btn_login = QPushButton("INGRESAR AL SISTEMA")
+        self.btn_login = QPushButton("Iniciar Sesión")
         self.btn_login.setObjectName("btn_login")
         self.btn_login.setFixedHeight(48)
         self.btn_login.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_login.clicked.connect(self._do_login)
         lay.addWidget(self.btn_login)
-        lay.addSpacing(10)
+        lay.addSpacing(8)
 
         # ── 8. Botón Salir (ghost) ────────────────────────────────────────────
         self.btn_salir = QPushButton("Cerrar Aplicación")
         self.btn_salir.setObjectName("btn_salir")
-        self.btn_salir.setFixedHeight(38)
+        self.btn_salir.setFixedHeight(36)
         self.btn_salir.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_salir.clicked.connect(self._on_salir)
         lay.addWidget(self.btn_salir)
@@ -235,14 +215,13 @@ class LoginDialog(QDialog):
 
     def _build_logo_header(self) -> QWidget:
         """
-        Cabecera con logo BP cargado desde assets/images/bp_pesa_logo.jpg.
-        Fallback tipográfico si el archivo no existe.
+        Cabecera con logo BP cargado desde assets/images/bp_pesa_logo.jpg y subtítulo técnico.
         """
         container = QWidget()
         container.setStyleSheet("background: transparent;")
         lay = QVBoxLayout(container)
         lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(8)
+        lay.setSpacing(6)
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # ── Intentar cargar el logo ───────────────────────────────────────────
@@ -252,8 +231,7 @@ class LoginDialog(QDialog):
         if logo_path.exists():
             pix = QPixmap(str(logo_path))
             if not pix.isNull():
-                # Escalar proporcionalmente a ancho max 260px
-                pix_scaled = pix.scaledToWidth(260, Qt.TransformationMode.SmoothTransformation)
+                pix_scaled = pix.scaledToWidth(240, Qt.TransformationMode.SmoothTransformation)
                 lbl_logo = QLabel()
                 lbl_logo.setPixmap(pix_scaled)
                 lbl_logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -262,54 +240,50 @@ class LoginDialog(QDialog):
                 logo_loaded = True
 
         if not logo_loaded:
-            # ── Fallback tipográfico ──────────────────────────────────────────
             row = QHBoxLayout()
             row.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            row.setSpacing(14)
+            row.setSpacing(12)
 
-            # Monograma BP
             lbl_mono = QLabel("BP")
-            lbl_mono.setFixedSize(56, 56)
+            lbl_mono.setFixedSize(50, 50)
             lbl_mono.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl_mono.setStyleSheet(f"""
                 background: {_RED};
                 color: white;
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 22px;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+                font-size: 20px;
                 font-weight: 800;
-                border-radius: 8px;
+                border-radius: 10px;
             """)
             row.addWidget(lbl_mono)
 
-            # Texto corporativo
             text_col = QVBoxLayout()
-            text_col.setSpacing(2)
+            text_col.setSpacing(1)
 
             lbl_name = QLabel("BÁSCULAS PESA")
             lbl_name.setStyleSheet(f"""
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 20px;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+                font-size: 18px;
                 font-weight: 800;
                 color: {_DARK2};
                 background: transparent;
-                letter-spacing: 1.5px;
+                letter-spacing: 1.2px;
             """)
             text_col.addWidget(lbl_name)
 
             lbl_tagline = QLabel("Metrología & Servicios")
             lbl_tagline.setStyleSheet(f"""
-                font-family: 'Segoe UI', sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
                 font-size: 11px;
                 color: {_GRAY};
                 background: transparent;
-                letter-spacing: 0.5px;
             """)
             text_col.addWidget(lbl_tagline)
             row.addLayout(text_col)
             lay.addLayout(row)
 
-        # ── Subtítulo del sistema (siempre visible) ───────────────────────────
-        lbl_sys = QLabel("ERP Metrológico y de Servicios")
+        # ── Subtítulo del sistema ─────────────────────────────────────────────
+        lbl_sys = QLabel("Ecosistema Metrológico Operativo")
         lbl_sys.setObjectName("login_subtitle")
         lbl_sys.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(lbl_sys)
@@ -317,28 +291,27 @@ class LoginDialog(QDialog):
         return container
 
     def _build_divider(self, label: str) -> QWidget:
-        """Separador horizontal con etiqueta centrada estilo 'OR' de enterprise forms."""
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(w)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(10)
 
-        for _ in range(2):
+        for i in range(2):
             line = QFrame()
             line.setFrameShape(QFrame.Shape.HLine)
-            line.setStyleSheet(f"background: {_BORDER}; max-height: 1px; border: none;")
+            line.setStyleSheet(f"background: #E5E5EA; max-height: 1px; border: none;")
             lay.addWidget(line, stretch=1)
-            if _ == 0:
+            if i == 0:
                 lbl = QLabel(label)
                 lbl.setStyleSheet(f"""
-                    font-family: 'Segoe UI', sans-serif;
+                    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
                     font-size: 9px;
                     font-weight: 700;
-                    color: {_LGRAY};
+                    color: {_GRAY};
                     background: transparent;
-                    letter-spacing: 1.8px;
-                    padding: 0 6px;
+                    letter-spacing: 1.5px;
+                    padding: 0 4px;
                 """)
                 lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 lay.addWidget(lbl)
@@ -356,20 +329,19 @@ class LoginDialog(QDialog):
         field = QLineEdit()
         field.setObjectName(object_name)
         field.setPlaceholderText(placeholder)
-        field.setFixedHeight(48)
+        field.setFixedHeight(46)
         return field
 
     def _build_password_field(self) -> QLineEdit:
-        """QLineEdit de contraseña con botón ojo como QAction."""
         field = QLineEdit()
         field.setObjectName("login_input")
         field.setPlaceholderText("Contraseña")
         field.setEchoMode(QLineEdit.EchoMode.Password)
-        field.setFixedHeight(48)
+        field.setFixedHeight(46)
 
         try:
             self._eye_action = QAction(field)
-            self._eye_action.setText("◎")
+            self._eye_action.setText("👁")
             self._eye_action.setCheckable(True)
             self._eye_action.toggled.connect(
                 lambda visible, f=field: f.setEchoMode(
@@ -384,14 +356,12 @@ class LoginDialog(QDialog):
         return field
 
     def _build_footer(self) -> QWidget:
-        """Footer con badge de BD + versión."""
         w = QWidget()
         w.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(w)
-        lay.setContentsMargins(0, 8, 0, 0)
+        lay.setContentsMargins(0, 6, 0, 0)
         lay.setSpacing(0)
 
-        # Badge de conexión
         conn_row = QHBoxLayout()
         conn_row.setSpacing(5)
         conn_row.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
@@ -400,7 +370,7 @@ class LoginDialog(QDialog):
         self.lbl_conn_dot.setStyleSheet(f"color: {_LGRAY}; font-size: 7px; background: transparent;")
         self.lbl_conn_text = QLabel("Verificando…")
         self.lbl_conn_text.setStyleSheet(
-            f"color: {_LGRAY}; font-size: 9px; font-family: 'Segoe UI'; background: transparent;"
+            f"color: {_GRAY}; font-size: 9px; font-family: -apple-system, sans-serif; background: transparent;"
         )
         conn_row.addWidget(self.lbl_conn_dot)
         conn_row.addWidget(self.lbl_conn_text)
@@ -408,8 +378,7 @@ class LoginDialog(QDialog):
 
         lay.addStretch()
 
-        # Versión
-        lbl_ver = QLabel("Básculas PESA  ·  v3.0")
+        lbl_ver = QLabel("Básculas PESA  ·  v4.0")
         lbl_ver.setObjectName("login_version")
         lbl_ver.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         lay.addWidget(lbl_ver)
@@ -419,50 +388,43 @@ class LoginDialog(QDialog):
     # ── Estilos QSS ──────────────────────────────────────────────────────────
 
     def _apply_styles(self) -> None:
-        # Fondo de la ventana (aplica al QDialog completo)
         self.setStyleSheet(f"""
-            /* ── Ventana (fondo oscuro) ─────────────────────────────────── */
             QDialog {{
-                background-color: {_DARK};
+                background-color: transparent;
             }}
 
-            /* ── Tarjeta blanca central ──────────────────────────────────── */
             QFrame#login_card {{
                 background-color: {_CARD_BG};
-                border-radius: 12px;
-                border: 1px solid #2E3040;
+                border-radius: 16px;
+                border: 1px solid #E5E5EA;
             }}
 
-            /* ── Subtítulo del sistema ───────────────────────────────────── */
             QLabel#login_subtitle {{
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 10px;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+                font-size: 11px;
                 color: {_GRAY};
                 background: transparent;
-                letter-spacing: 0.3px;
-                padding-top: 4px;
+                padding-top: 2px;
             }}
 
-            /* ── Etiquetas de campo ──────────────────────────────────────── */
             QLabel#login_field_label {{
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 9px;
-                font-weight: 700;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+                font-size: 10px;
+                font-weight: 600;
                 color: {_GRAY};
                 background: transparent;
-                letter-spacing: 1.5px;
+                letter-spacing: 1.2px;
             }}
 
-            /* ── Inputs flat ─────────────────────────────────────────────── */
             QLineEdit#login_input {{
                 background-color: {_FIELD_BG};
                 color: {_DARK2};
                 border: 1px solid {_BORDER};
-                border-radius: 6px;
+                border-radius: 8px;
                 padding: 0px 14px;
-                font-family: 'Segoe UI', sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
                 font-size: 14px;
-                selection-background-color: rgba(200, 16, 46, 0.15);
+                selection-background-color: rgba(184, 29, 36, 0.15);
             }}
             QLineEdit#login_input:focus {{
                 border: 1.5px solid {_RED};
@@ -470,7 +432,7 @@ class LoginDialog(QDialog):
                 color: {_DARK2};
             }}
             QLineEdit#login_input:disabled {{
-                background-color: #ECEEF1;
+                background-color: #F5F5F7;
                 color: {_LGRAY};
                 border-color: {_BORDER};
             }}
@@ -478,106 +440,72 @@ class LoginDialog(QDialog):
                 color: {_LGRAY};
             }}
 
-            /* ── Label de estado / error ─────────────────────────────────── */
             QLabel#login_status {{
-                font-family: 'Segoe UI', sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
                 font-size: 11px;
                 background: transparent;
                 padding: 2px 4px;
             }}
 
-            /* ── Barra de progreso ───────────────────────────────────────── */
             QProgressBar#login_progress {{
                 border: none;
                 border-radius: 1px;
-                background-color: {_BORDER};
+                background-color: #E5E5EA;
             }}
             QProgressBar#login_progress::chunk {{
                 background-color: {_RED};
                 border-radius: 1px;
             }}
 
-            /* ── Botón principal CTA ─────────────────────────────────────── */
             QPushButton#btn_login {{
                 background-color: {_RED};
                 color: {_WHITE};
                 border: none;
-                border-radius: 6px;
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 12px;
-                font-weight: 700;
-                letter-spacing: 1.2px;
-                min-height: 45px;
+                border-radius: 8px;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+                font-size: 14px;
+                font-weight: 600;
+                letter-spacing: 0.5px;
+                min-height: 48px;
             }}
             QPushButton#btn_login:hover   {{ background-color: {_RED_H}; }}
             QPushButton#btn_login:pressed {{ background-color: {_RED_P}; }}
             QPushButton#btn_login:disabled {{
-                background-color: #C4C9D4;
+                background-color: #C7C7CC;
                 color: #FFFFFF;
-                letter-spacing: 0.5px;
             }}
 
-            /* ── Botón Salir (ghost) ─────────────────────────────────────── */
             QPushButton#btn_salir {{
                 background: transparent;
-                color: {_GRAY2};
-                border: 1px solid {_BORDER};
-                border-radius: 6px;
-                font-family: 'Segoe UI', sans-serif;
-                font-size: 11px;
+                color: {_GRAY};
+                border: 1px solid #E5E5EA;
+                border-radius: 8px;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+                font-size: 12px;
                 font-weight: 500;
-                letter-spacing: 0.3px;
             }}
             QPushButton#btn_salir:hover {{
-                background: #EAECEF;
+                background: #F5F5F7;
                 color: {_DARK2};
-                border-color: #C4C9D4;
+                border-color: #D1D1D6;
             }}
             QPushButton#btn_salir:pressed {{
-                background: #DDE0E6;
+                background: #E5E5EA;
             }}
 
-            /* ── Versión ─────────────────────────────────────────────────── */
             QLabel#login_version {{
-                font-family: 'Segoe UI', sans-serif;
+                font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
                 font-size: 9px;
-                color: {_LGRAY};
+                color: {_GRAY};
                 background: transparent;
-                letter-spacing: 0.5px;
             }}
         """)
 
-    # ══════════════════════════════════════════════════════════════════════════
-    # PINTADO PERSONALIZADO — fondo oscuro de la ventana
-    # ══════════════════════════════════════════════════════════════════════════
-
     def paintEvent(self, event) -> None:
-        """Dibuja el fondo oscuro con cuadrícula corporativa fuera de la tarjeta."""
+        """Dibuja el fondo gris neutro #F5F5F7 estilo macOS."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Gradiente de fondo
-        grad = QLinearGradient(0, 0, self.width(), self.height())
-        grad.setColorAt(0.0, QColor("#15171D"))
-        grad.setColorAt(0.5, QColor("#1A1C23"))
-        grad.setColorAt(1.0, QColor("#1C1F2B"))
-        painter.fillRect(self.rect(), QBrush(grad))
-
-        # Cuadrícula sutil
-        pen = QPen(QColor(255, 255, 255, 7))
-        pen.setWidth(1)
-        painter.setPen(pen)
-        grid = 36
-        for x in range(0, self.width(), grid):
-            painter.drawLine(x, 0, x, self.height())
-        for y in range(0, self.height(), grid):
-            painter.drawLine(0, y, self.width(), y)
-
-        # Acento rojo inferior
-        accent = QPen(QColor(_RED))
-        accent.setWidth(3)
-        painter.setPen(accent)
-        painter.drawLine(0, self.height() - 2, self.width(), self.height() - 2)
+        painter.fillRect(self.rect(), QColor("#F5F5F7"))
 
     # ══════════════════════════════════════════════════════════════════════════
     # LÓGICA DE AUTENTICACIÓN (sin cambios funcionales)

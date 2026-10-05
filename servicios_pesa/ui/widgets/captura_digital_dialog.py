@@ -11,9 +11,38 @@ from PyQt6.QtWidgets import (
     QFrame, QFormLayout, QGroupBox, QCheckBox, QMessageBox, QSpinBox,
     QCompleter,
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QStringListModel
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QStringListModel, QThread
 
 logger = logging.getLogger(__name__)
+
+class CapturaSaveWorker(QThread):
+    finished_ok = pyqtSignal(str) # pdf_path
+    finished_err = pyqtSignal(str)
+
+    def __init__(self, dialog_ref, os_data_pdf, rep_rows, exc_rows, exac_rows, tecnico_exec, firma_tecnico_b64, datos_json, obs_text, nuevo_estado):
+        super().__init__()
+        self.dialog = dialog_ref
+        self.os_data_pdf = os_data_pdf
+        self.rep_rows = rep_rows
+        self.exc_rows = exc_rows
+        self.exac_rows = exac_rows
+        self.tecnico_exec = tecnico_exec
+        self.firma_tecnico_b64 = firma_tecnico_b64
+        self.datos_json = datos_json
+        self.obs_text = obs_text
+        self.nuevo_estado = nuevo_estado
+
+    def run(self):
+        try:
+            self.dialog._persistir_en_bd(self.datos_json, self.obs_text, self.nuevo_estado)
+            pdf_path = self.dialog._generar_pdf(
+                self.os_data_pdf, self.rep_rows, self.exc_rows, self.exac_rows, self.tecnico_exec,
+                firma_tecnico_b64=self.firma_tecnico_b64,
+            )
+            self.finished_ok.emit(pdf_path or "")
+        except Exception as e:
+            self.finished_err.emit(str(e))
+
 
 try:
     from database.connection import db_pool as _db_pool
@@ -78,43 +107,104 @@ class CapturaDigitalDialog(QDialog):
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 16)
-        root.setSpacing(12)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
-        lbl_titulo = QLabel("📝  Captura Metrologica Digital")
-        lbl_titulo.setStyleSheet(
-            "font-size: 16pt; font-weight: 800; color: #1D1D1F;"
-        )
-        root.addWidget(lbl_titulo)
+        # ── Barra superior (Encabezado oscuro) ──
+        self._top_bar = QFrame()
+        self._top_bar.setFixedHeight(70)
+        self._top_bar.setStyleSheet("""
+            QFrame { background: #1E2230; border-bottom: 2px solid #E63946; }
+            QLabel { color: #FFFFFF; font-weight: 700; font-size: 14px; }
+        """)
+        tb_lay = QHBoxLayout(self._top_bar)
+        tb_lay.setContentsMargins(20, 0, 20, 0)
+        self._lbl_folio_top = QLabel(self._folio)
+        self._lbl_folio_top.setStyleSheet("color: #E63946; font-size: 16px; font-weight: 800;")
+        tb_lay.addWidget(QLabel("Folio:"))
+        tb_lay.addWidget(self._lbl_folio_top)
+        
+        self._lbl_cliente_top = QLabel(self._os_data.get('cliente', ''))
+        tb_lay.addWidget(QLabel(" | Cliente:"))
+        tb_lay.addWidget(self._lbl_cliente_top)
+        
+        self._lbl_sucursal_top = QLabel(self._os_data.get('sucursal', ''))
+        tb_lay.addWidget(QLabel(" | Sucursal:"))
+        tb_lay.addWidget(self._lbl_sucursal_top)
+        tb_lay.addStretch()
+        root.addWidget(self._top_bar)
 
-        lbl_sub = QLabel(
-            f"Folio: {self._folio}  ·  Ingresa las lecturas y genera el PDF final."
-        )
-        lbl_sub.setStyleSheet("font-size: 9pt; color: #86868B; margin-bottom: 8px;")
-        root.addWidget(lbl_sub)
+        # ── Pestañas horizontales ──
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet("""
+            QTabWidget::pane { border: none; background: #F0F2F5; }
+            QTabBar::tab {
+                background: #E5E5EA; padding: 14px 28px; font-size: 14px; font-weight: 600;
+                color: #6E6E73; border-radius: 8px 8px 0 0; margin-right: 4px; margin-top: 10px;
+                min-height: 48px;
+            }
+            QTabBar::tab:selected { background: #FFFFFF; color: #1D1D1F; }
+        """)
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        content = QWidget()
-        content.setStyleSheet("background: #F5F5F7;")
-        self._content_layout = QVBoxLayout(content)
-        self._content_layout.setSpacing(12)
-
+        # PESTAÑA 1: INSTRUMENTO
+        self._w_inst = QWidget()
+        self._w_inst_lay = QVBoxLayout(self._w_inst)
+        self._w_inst_lay.setContentsMargins(20, 20, 20, 20)
+        
+        scroll_inst = QScrollArea()
+        scroll_inst.setWidgetResizable(True)
+        scroll_inst.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_inst.setStyleSheet("background: transparent;")
+        cont_inst = QWidget()
+        cl_inst = QVBoxLayout(cont_inst)
         self._grp_header = self._build_header_section()
-        self._content_layout.addWidget(self._grp_header)
         self._grp_instrumento = self._build_instrumento_section()
-        self._content_layout.addWidget(self._grp_instrumento)
-        self._grp_pruebas = self._build_pruebas_section()
-        self._content_layout.addWidget(self._grp_pruebas)
-        self._grp_obs = self._build_obs_section()
-        self._content_layout.addWidget(self._grp_obs)
-        self._grp_firma = self._build_firma_section()
-        self._content_layout.addWidget(self._grp_firma)
-        self._content_layout.addStretch()
+        cl_inst.addWidget(self._grp_header)
+        cl_inst.addWidget(self._grp_instrumento)
+        cl_inst.addStretch()
+        scroll_inst.setWidget(cont_inst)
+        self._w_inst_lay.addWidget(scroll_inst)
+        self._tabs.addTab(self._w_inst, "1. INSTRUMENTO")
 
-        scroll.setWidget(content)
-        root.addWidget(scroll, 1)
+        # PESTAÑAS 2, 3, 4
+        self._pruebas_widget = _PruebasMetrologicasWidget(self._os_data)
+        
+        self._w_rep = QWidget()
+        self._w_rep_lay = QVBoxLayout(self._w_rep)
+        self._w_rep_lay.addWidget(self._pruebas_widget.repetibilidad_widget)
+        self._tabs.addTab(self._w_rep, "2. REPETIBILIDAD")
+
+        self._w_exc = QWidget()
+        self._w_exc_lay = QVBoxLayout(self._w_exc)
+        self._w_exc_lay.addWidget(self._pruebas_widget.excentricidad_widget)
+        self._tabs.addTab(self._w_exc, "3. EXCENTRICIDAD")
+
+        self._w_exac = QWidget()
+        self._w_exac_lay = QVBoxLayout(self._w_exac)
+        self._w_exac_lay.addWidget(self._pruebas_widget.exactitud_widget)
+        self._tabs.addTab(self._w_exac, "4. EXACTITUD")
+
+        # PESTAÑA 5: CIERRE Y FIRMAS
+        self._w_cierre = QWidget()
+        self._w_cierre_lay = QVBoxLayout(self._w_cierre)
+        self._w_cierre_lay.setContentsMargins(20, 20, 20, 20)
+        
+        scroll_cierre = QScrollArea()
+        scroll_cierre.setWidgetResizable(True)
+        scroll_cierre.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_cierre.setStyleSheet("background: transparent;")
+        cont_cierre = QWidget()
+        cl_cierre = QVBoxLayout(cont_cierre)
+        self._grp_obs = self._build_obs_section()
+        self._grp_firma = self._build_firma_section()
+        cl_cierre.addWidget(self._grp_obs)
+        cl_cierre.addWidget(self._grp_firma)
+        cl_cierre.addStretch()
+        scroll_cierre.setWidget(cont_cierre)
+        self._w_cierre_lay.addWidget(scroll_cierre)
+        self._tabs.addTab(self._w_cierre, "5. CIERRE Y FIRMAS")
+
+        root.addWidget(self._tabs, 1)
         root.addWidget(self._build_button_bar())
 
     def _ro_field(self, text: str) -> QLineEdit:
@@ -184,10 +274,35 @@ class CapturaDigitalDialog(QDialog):
 
         # Fila 1
         row1 = QHBoxLayout()
+        
+        self._cmb_tipo_inst = QComboBox()
+        self._cmb_tipo_inst.addItems([
+            "Báscula camionera",
+            "Báscula de plataforma",
+            "Báscula de tolva / tanque",
+            "Balanza analítica / precisión",
+            "Báscula colgante",
+            "Báscula de ferrocarril",
+            "Otro"
+        ])
+        
+        tipo_inst = self._os_data.get('tipo_instrumento')
+        if tipo_inst:
+            index = self._cmb_tipo_inst.findText(tipo_inst, Qt.MatchFlag.MatchFixedString)
+            if index >= 0:
+                self._cmb_tipo_inst.setCurrentIndex(index)
+            else:
+                self._cmb_tipo_inst.setCurrentText(tipo_inst)
+                
         self._le_marca = QLineEdit()
         self._le_modelo = QLineEdit()
         self._le_serie = QLineEdit()
         self._le_id_equipo = QLineEdit()
+        
+        vl_tipo = QVBoxLayout()
+        vl_tipo.addWidget(QLabel("Tipo de Instrumento *"))
+        vl_tipo.addWidget(self._cmb_tipo_inst)
+        row1.addLayout(vl_tipo)
         
         for lbl_text, widget in [("Marca:", self._le_marca), ("Modelo:", self._le_modelo), 
                                  ("N° de Serie:", self._le_serie), ("ID Equipo:", self._le_id_equipo)]:
@@ -283,7 +398,7 @@ class CapturaDigitalDialog(QDialog):
         self._cmb_funcionamiento.addItems(["Electrónico", "Mecánico", "Electromecánico"])
         self._spn_puntos_apoyo = QSpinBox()
         self._spn_puntos_apoyo.setRange(1, 12)
-        self._spn_puntos_apoyo.setValue(4)
+        self._spn_puntos_apoyo.setValue(5)  # Por default 5 para plataforma / piso
         self._spn_puntos_apoyo.setStyleSheet(
             "background: #FFFFFF; border: 1px solid #D1D5DB;"
             "padding: 6px 10px; border-radius: 4px;"
@@ -654,13 +769,24 @@ class CapturaDigitalDialog(QDialog):
             if djp.get("puntos_apoyo") is not None:
                 try:
                     pa = int(djp["puntos_apoyo"])
-                    # Solo restaurar si el usuario explícitamente capturó >= 2
-                    # (valor 1 era el antiguo valor por defecto incorrecto)
-                    if pa >= 2:
+                    if pa >= 1:
                         self._spn_puntos_apoyo.setValue(pa)
-                    # Si pa==1 y el usuario realmente quiere 1, puede cambiarlo manualmente
                 except (ValueError, TypeError):
                     pass
+            else:
+                _t = (_tipo_ins_nombre or "").lower()
+                if "plataforma" in _t or "piso" in _t:
+                    self._spn_puntos_apoyo.setValue(5)
+                elif "camionera" in _t or "puente" in _t or "ferrocarril" in _t or "ferrovi" in _t:
+                    self._spn_puntos_apoyo.setValue(8)
+                elif "tolva" in _t:
+                    self._spn_puntos_apoyo.setValue(3)
+                elif any(k in _t for k in ["colgante", "grúa", "grua", "analítica", "analitica", "mostrador"]):
+                    self._spn_puntos_apoyo.setValue(1)
+                elif "tanque" in _t or "silo" in _t:
+                    self._spn_puntos_apoyo.setValue(4)
+                else:
+                    self._spn_puntos_apoyo.setValue(5)
 
             # ── Auto-configurar tipo_receptor desde tipo_instrumento de la BD ──
             # Si Logística ya definió el tipo, propagarlo al combo receptor
@@ -1037,6 +1163,7 @@ class CapturaDigitalDialog(QDialog):
                 "observaciones":  obs_text,
                 "tecnico_ejecutor": tecnico_exec,
                 "captura_digital":  True,
+                "tipo_instrumento": self._cmb_tipo_inst.currentText(),
                 "marca": self._le_marca.text().strip(),
                 "modelo": self._le_modelo.text().strip(),
                 "serie": self._le_serie.text().strip(),
@@ -1071,6 +1198,7 @@ class CapturaDigitalDialog(QDialog):
                 "repetibilidad":  rep_rows,
                 "excentricidad":  exc_rows,
                 "exactitud":      exac_rows,
+                "tipo_instrumento": self._cmb_tipo_inst.currentText(),
                 "marca": self._le_marca.text().strip() or self._os_data.get("marca", ""),
                 "modelo": self._le_modelo.text().strip() or self._os_data.get("modelo", ""),
                 "ns": self._le_serie.text().strip() or self._os_data.get("ns", ""),
@@ -1107,32 +1235,41 @@ class CapturaDigitalDialog(QDialog):
             firma_tecnico_b64 = self._get_firma_tecnico()
 
             nuevo_estado = "COMPLETADA"   # Estado canónico del check constraint
-            self._persistir_en_bd(datos_json, obs_text, nuevo_estado)
-            pdf_path = self._generar_pdf(
-                os_data_pdf, rep_rows, exc_rows, exac_rows, tecnico_exec,
-                firma_tecnico_b64=firma_tecnico_b64,
+            
+            self._btn_guardar.setEnabled(False)
+            self._btn_guardar.setText("Guardando y Generando PDF...")
+            
+            self._worker = CapturaSaveWorker(
+                self, os_data_pdf, rep_rows, exc_rows, exac_rows, tecnico_exec,
+                firma_tecnico_b64, datos_json, obs_text, nuevo_estado
             )
-
-            if pdf_path and os.path.exists(pdf_path):
-                self._open_file(pdf_path)
-
-            self.captura_guardada.emit()
-            QMessageBox.information(
-                self, "Guardado correctamente",
-                f"La captura digital se guardo exitosamente.\n\n"
-                f"PDF generado:\n  {pdf_path or '(no disponible)'}"
-            )
-            self.accept()
+            self._worker.finished_ok.connect(self._on_save_finished)
+            self._worker.finished_err.connect(self._on_save_error)
+            self._worker.start()
 
         except Exception as exc:
-            logger.error("CapturaDigitalDialog._on_guardar: %s", exc)
-            QMessageBox.critical(
-                self, "Error al guardar",
-                f"Ocurrio un error durante el guardado:\n\n{exc}"
-            )
-        finally:
-            self._btn_guardar.setEnabled(True)
-            self._btn_guardar.setText("💾  Guardar y Generar PDF Final")
+            self._on_save_error(str(exc))
+
+    def _on_save_finished(self, pdf_path: str):
+        if pdf_path and os.path.exists(pdf_path):
+            self._open_file(pdf_path)
+
+        self.captura_guardada.emit()
+        QMessageBox.information(
+            self, "Guardado correctamente",
+            f"La captura digital se guardo exitosamente.\n\n"
+            f"PDF generado:\n  {pdf_path or '(no disponible)'}"
+        )
+        self.accept()
+        
+    def _on_save_error(self, err_msg: str):
+        logger.error("CapturaDigitalDialog._on_guardar_error: %s", err_msg)
+        QMessageBox.critical(
+            self, "Error al guardar",
+            f"Ocurrio un error durante el guardado:\n\n{err_msg}"
+        )
+        self._btn_guardar.setEnabled(True)
+        self._btn_guardar.setText("💾  Guardar y Generar PDF Final")
 
     def _persistir_en_bd(
         self, datos_json: dict, obs: str, nuevo_estado: str
@@ -1180,6 +1317,24 @@ class CapturaDigitalDialog(QDialog):
                 )
             logger.info("OS id=%s guardada correctamente (%s filas, estado=%s)",
                         self._os_id, affected, nuevo_estado)
+
+            # Persistir combinación marca y modelo en el catálogo dinámico
+            marca_val = str(datos_json.get("marca") or "").strip()
+            modelo_val = str(datos_json.get("modelo") or "").strip()
+            if marca_val and modelo_val:
+                try:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            INSERT INTO catalogo_marcas_modelos (marca, modelo)
+                            VALUES (%s, %s)
+                            ON CONFLICT (marca, modelo) DO NOTHING
+                            """,
+                            (marca_val, modelo_val)
+                        )
+                    conn.commit()
+                except Exception as exc_mm:
+                    logger.warning("No se pudo guardar marca/modelo en catalogo: %s", exc_mm)
         except Exception:
             try:
                 conn.rollback()
@@ -1258,9 +1413,9 @@ class CapturaDigitalDialog(QDialog):
             if sys.platform == "win32":
                 os.startfile(path)
             elif sys.platform == "darwin":
-                subprocess.run(["open", path], check=False)
+                subprocess.Popen(["open", path])
             else:
-                subprocess.run(["xdg-open", path], check=False)
+                subprocess.Popen(["xdg-open", path])
         except Exception as exc:
             logger.warning("No se pudo abrir el PDF: %s", exc)
 
@@ -1291,8 +1446,17 @@ class CapturaDigitalDialog(QDialog):
                     pass
 
         try:
+            # Consultar catalogo_marcas_modelos consolidado
+            cat_rows = []
+            try:
+                cat_rows = _db_pool.execute_all(
+                    "SELECT DISTINCT marca, modelo FROM catalogo_marcas_modelos ORDER BY marca, modelo"
+                ) or []
+            except Exception:
+                pass
+
             if id_cliente:
-                rows = _db_pool.execute_many(
+                rows = _db_pool.execute_all(
                     """
                     SELECT DISTINCT
                         NULLIF(TRIM(marca),    '') AS marca,
@@ -1305,10 +1469,9 @@ class CapturaDigitalDialog(QDialog):
                     LIMIT 200
                     """,
                     (id_cliente,)
-                )
+                ) or []
             else:
-                # Sin id_cliente: muestra sugerencias globales (últimas 100 únicas)
-                rows = _db_pool.execute_many(
+                rows = _db_pool.execute_all(
                     """
                     SELECT DISTINCT
                         NULLIF(TRIM(marca),    '') AS marca,
@@ -1319,29 +1482,53 @@ class CapturaDigitalDialog(QDialog):
                     ORDER BY marca, modelo
                     LIMIT 100
                     """
-                )
+                ) or []
 
-            marcas    = sorted({r.get('marca')    for r in rows if r.get('marca')})
-            modelos   = sorted({r.get('modelo')   for r in rows if r.get('modelo')})
+            # Combinar pares únicos (marca, modelo)
+            all_pairs = []
+            for r in cat_rows:
+                if r.get('marca') and r.get('modelo'):
+                    all_pairs.append((str(r['marca']).strip(), str(r['modelo']).strip()))
+            for r in rows:
+                if r.get('marca') and r.get('modelo'):
+                    all_pairs.append((str(r['marca']).strip(), str(r['modelo']).strip()))
+
+            self._marcas_modelos_list = list(set(all_pairs))
+            marcas = sorted({m for m, mod in self._marcas_modelos_list if m})
             ubicaciones = sorted({r.get('ubicacion') for r in rows if r.get('ubicacion')})
 
-            def _attach_completer(line_edit: QLineEdit, suggestions: list[str]) -> None:
-                if not suggestions:
-                    return
+            def _attach_completer(line_edit: QLineEdit, suggestions: list[str]) -> QCompleter:
                 model = QStringListModel(suggestions, line_edit)
                 comp  = QCompleter(model, line_edit)
                 comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
                 comp.setFilterMode(Qt.MatchFlag.MatchContains)
                 comp.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
                 line_edit.setCompleter(comp)
+                return comp
 
-            _attach_completer(self._le_marca,    marcas)
-            _attach_completer(self._le_modelo,   modelos)
+            _attach_completer(self._le_marca, marcas)
             _attach_completer(self._le_ubicacion, ubicaciones)
+
+            def _update_modelos_for_marca(marca_txt: str) -> None:
+                m = (marca_txt or "").strip().lower()
+                if m:
+                    mods = sorted({mod for b, mod in self._marcas_modelos_list if mod and b.lower() == m})
+                    if not mods:
+                        mods = sorted({mod for b, mod in self._marcas_modelos_list if mod and m in b.lower()})
+                else:
+                    mods = sorted({mod for b, mod in self._marcas_modelos_list if mod})
+                _attach_completer(self._le_modelo, mods)
+
+            try:
+                self._le_marca.textChanged.disconnect()
+            except Exception:
+                pass
+            self._le_marca.textChanged.connect(_update_modelos_for_marca)
+            _update_modelos_for_marca(self._le_marca.text())
 
             logger.debug(
                 "[Autocomplete] cliente=%s → %d marcas, %d modelos, %d ubicaciones",
-                id_cliente, len(marcas), len(modelos), len(ubicaciones)
+                id_cliente, len(marcas), len(self._marcas_modelos_list), len(ubicaciones)
             )
 
         except Exception as exc:

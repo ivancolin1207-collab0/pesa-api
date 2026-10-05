@@ -114,8 +114,11 @@ class RePdfGenerator:
         logger.info("PDF RE (diagnostico) generado: %s", output_path)
         return output_path
 
-    # ── Ruta de logos ─────────────────────────────────────────────────────────
-    _IMG_DIR = Path(r"C:\Users\ivan1\OneDrive\Escritorio\Software Ivan\Ordenes De Servicio\Img")
+    # ── Ruta de logos (Multiplataforma / POSIX) ──────────────────────────────────
+    _BASE_DIR = Path(__file__).resolve().parent.parent.parent
+    _IMG_DIR  = _BASE_DIR / "Img"
+    if not _IMG_DIR.exists():
+        _IMG_DIR = Path(__file__).resolve().parent.parent / "Img"
 
     def _draw_header(self, c, y, rv):
         """Encabezado comprimido. Altura total ≈ 60 pt."""

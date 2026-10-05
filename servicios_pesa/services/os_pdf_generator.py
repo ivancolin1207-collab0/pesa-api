@@ -276,6 +276,12 @@ class OsPdfGenerator:
         if not force and Path(output_path).exists():
             logger.info(f"PDF ya existe, omitiendo regeneración: {output_path}")
             return output_path
+            
+        if force and Path(output_path).exists():
+            try:
+                Path(output_path).unlink()
+            except Exception as e:
+                logger.warning(f"No se pudo eliminar PDF anterior: {e}")
 
         c = rl_canvas.Canvas(output_path, pagesize=letter)
         c.setTitle(f"Toma de Datos - {os_data.get('folio_os', '')}")

@@ -188,14 +188,8 @@ class PdfGenerator:
         c.setLineWidth(0.5)
         c.line(self.ML, sep_y, self.ML + self.CW, sep_y)
 
-        # ── Título "TOMA DE DATOS" ────────────────────────────────────────────
+        # ── Título (Área central limpia) ────────────────────────────────────
         titulo_y = sep_y - 4
-        c.setFillColor(_BLACK)
-        c.setFont("Helvetica-Bold", 30)
-        c.drawString(self.ML, titulo_y - 30, "TOMA DE DATOS")
-        c.setFont("Helvetica", 9)
-        c.setFillColor(_GRAY_DARK)
-        c.drawString(self.ML, titulo_y - 42, "PESAJE SISTEMAS Y AUTOMATIZACIÓN")
 
         # ── Caja de Folio (derecha) ───────────────────────────────────────────
         folio_x  = self.ML + self.CW - 150
@@ -448,9 +442,9 @@ class PdfGenerator:
         c.drawString(x + 3, y - row_h + 4, "ERROR MÁXIMO ENCONTRADO:")
         # Calcular error máximo
         errors = [
-            abs((r.get("lectura_final") or 0) - (r.get("lectura_inicial") or 0))
+            abs((r.get("lectura_final") or 0) - (r.get("valor_kg") or r.get("carga") or 0))
             for r in data
-            if r.get("lectura_final") is not None and r.get("lectura_inicial") is not None
+            if r.get("lectura_final") is not None and (r.get("valor_kg") is not None or r.get("carga") is not None)
         ]
         if errors:
             c.drawRightString(x + w - 3, y - row_h + 4, self._fmt(max(errors)))

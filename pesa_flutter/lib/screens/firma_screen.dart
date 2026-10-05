@@ -16,6 +16,7 @@ import '../services/sync_service.dart';
 import '../services/pdf_service.dart';
 import '../services/auth_service.dart';
 import '../services/firma_tecnico_service.dart';
+import '../widgets/signature_shield.dart';
 
 class FirmaScreen extends StatefulWidget {
   final int osId;
@@ -210,6 +211,10 @@ class _FirmaScreenState extends State<FirmaScreen>
                 key: _formKey,
                 child: TabBarView(
                   controller: _tabCtrl,
+                  // Pantalla de firma 100 % fija: sin swipe entre pestañas
+                  // (se cambia tocando el TabBar), así la palma o el lápiz
+                  // nunca desplazan la vista mientras se firma.
+                  physics: const NeverScrollableScrollPhysics(),
                   children: [
                     _buildTabTecnico(),
                     _buildTabCliente(),
@@ -548,17 +553,8 @@ class _FirmaScreenState extends State<FirmaScreen>
           borderRadius: BorderRadius.circular(11),
           child: Stack(
             children: [
-              GestureDetector(
-                onPanDown: (_) {},
-                onPanStart: (_) {},
-                onPanUpdate: (_) {},
-                behavior: HitTestBehavior.opaque,
-                child: Listener(
-                  onPointerDown: (_) {},
-                  onPointerMove: (_) {},
-                  behavior: HitTestBehavior.opaque,
-                  child: Signature(controller: ctrl, backgroundColor: Colors.white),
-                ),
+              SignatureGestureShield(
+                child: Signature(controller: ctrl, backgroundColor: Colors.white),
               ),
               // Watermark guia
               if (ctrl.isEmpty)

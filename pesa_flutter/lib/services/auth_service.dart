@@ -99,6 +99,40 @@ class AuthService extends ChangeNotifier {
            r == 'operativo';
   }
 
+  /// Supervisión metrológica: puede CONSULTAR (solo lectura) el repositorio de
+  /// calibraciones concluidas de todos los técnicos. Alan Guevara (ID 8,
+  /// Daikki19), administradores e ivancolin1207.
+  bool get esSupervisorCalibracion => evaluarSupervisorCalibracion(
+        username: _username ?? usuarioActual?.username,
+        nombre:   _nombreCompleto ?? usuarioActual?.nombre,
+        id:       _idTecnico ?? usuarioActual?.id,
+        rol:      _role ?? usuarioActual?.rol,
+      );
+
+  /// Variante estática para servicios sin BuildContext (p.ej. SyncService).
+  static bool get esSupervisorCalibracionActual {
+    final u = usuarioActual;
+    if (u == null) return false;
+    return evaluarSupervisorCalibracion(
+      username: u.username, nombre: u.nombre, id: u.id, rol: u.rol,
+    );
+  }
+
+  static bool evaluarSupervisorCalibracion({
+    String? username,
+    String? nombre,
+    int? id,
+    String? rol,
+  }) {
+    final user = (username ?? '').toLowerCase().trim();
+    final nom  = (nombre ?? '').toLowerCase().trim();
+    return user == 'daikki19' ||
+           nom.contains('alan guevara') ||
+           id == 8 ||
+           normalizeRole(rol) == 'administrador' ||
+           user == 'ivancolin1207';
+  }
+
   String get displayName => _nombreCompleto?.isNotEmpty == true
       ? _nombreCompleto!
       : (_username ?? 'Usuario');

@@ -392,10 +392,14 @@ def main() -> int:
 
     # ── Fuente global ──────────────────────────────────────────────────────────
     try:
-        font = QFont("Segoe UI", 10)
+        if platform.system() == "Darwin":
+            font = QFont(".AppleSystemUIFont", 10)
+            font.setFamilies(["-apple-system", "BlinkMacSystemFont", "SF Pro Text", "Helvetica Neue", "Arial"])
+        else:
+            font = QFont("Segoe UI", 10)
         font.setHintingPreference(QFont.HintingPreference.PreferFullHinting)
         app.setFont(font)
-        logger.debug("Fuente global: Segoe UI 10pt")
+        logger.debug("Fuente global configurada para %s", platform.system())
     except Exception as exc:
         logger.warning("Error configurando fuente: %s", exc)
 

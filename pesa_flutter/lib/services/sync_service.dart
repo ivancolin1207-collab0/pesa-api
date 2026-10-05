@@ -212,6 +212,20 @@ class SyncService extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Descarga el repositorio de calibraciones concluidas (todos los técnicos)
+  /// a la tabla local `calibraciones_consulta`. Solo lectura; errores ignorados.
+  Future<void> _refrescarRepositorioCalibraciones() async {
+    try {
+      final rows = await ApiService.instance
+          .getCalibracionesConsulta()
+          .timeout(const Duration(seconds: 10));
+      await LocalDbService.instance.guardarCalibracionesConsulta(rows);
+      debugPrint('[Sync CALIB] Repositorio de calibraciones: ${rows.length} órdenes en caché');
+    } catch (e) {
+      debugPrint('[Sync CALIB] Refresco de repositorio ignorado: $e');
+    }
+  }
+
   Future<void> performSync() async {
     // ═══════════════════════════════════════════════════════════════════════
     //  GUARD: un solo sync activo a la vez; el watchdog libera si se cuelga.
@@ -313,12 +327,34 @@ class SyncService extends ChangeNotifier {
       _message = 'Subiendo cambios locales...';
       notifyListeners();
 
+      // Reconciliación única (v3.1.20+73): órdenes cerradas que el servidor
+      // respondió 200 pero NO registró (id NULL en PostgreSQL) se re-encolan.
+      try {
+        final prefsRec = await SharedPreferences.getInstance();
+        if (!(prefsRec.getBool('reconcile_estatus_v73_done') ?? false)) {
+          final n = await LocalDbService.instance.marcarCerradasParaReenvio(dias: 30);
+          await prefsRec.setBool('reconcile_estatus_v73_done', true);
+          debugPrint('[Sync] ♻️ Reconciliación v73: $n órdenes cerradas re-encoladas para PUSH');
+        }
+      } catch (e) {
+        debugPrint('[Sync] Reconciliación v73 ignorada: $e');
+      }
+
       try {
         final pushed = await _pushPendientes()
             .timeout(const Duration(seconds: 15), onTimeout: () => 0);
         debugPrint('[Sync PUSH] $pushed OS subidas');
       } catch (e) {
         debugPrint('[Sync PUSH pendientes] Error ignorado: $e');
+      }
+
+      // Reintentar resets que fallaron por red offline en el ciclo anterior
+      try {
+        final resets = await _pushResetsPendientes()
+            .timeout(const Duration(seconds: 10), onTimeout: () => 0);
+        if (resets > 0) debugPrint('[Sync PUSH RESET] $resets resets propagados al servidor');
+      } catch (e) {
+        debugPrint('[Sync PUSH RESET] Error ignorado: $e');
       }
 
       try {
@@ -409,6 +445,13 @@ class SyncService extends ChangeNotifier {
         _message = pullCount > 0
             ? 'Sincronizado ✓ ($pullCount nuevas OS)'
             : 'Sincronizado ✓ Sin cambios nuevos';
+
+        // Repositorio de Calibraciones (solo supervisión metrológica):
+        // refresco en segundo plano, sin bloquear el ciclo ni el watchdog.
+        // Se guarda en la tabla separada `calibraciones_consulta`.
+        if (AuthService.esSupervisorCalibracionActual) {
+          unawaited(_refrescarRepositorioCalibraciones());
+        }
 
       } on TimeoutException catch (e) {
         _state   = SyncState.offline;
@@ -561,6 +604,38 @@ class SyncService extends ChangeNotifier {
     return uploaded;
   }
 
+  /// Reintenta los resets de toma que fallaron en un ciclo anterior (sin red).
+  /// Busca OSs con sync_status = 'PENDIENTE_RESET' y llama al endpoint correspondiente.
+  Future<int> _pushResetsPendientes() async {
+    try {
+      final db   = LocalDbService.instance;
+      final rows = await db.getOrdenesConSyncStatus('PENDIENTE_RESET');
+      if (rows.isEmpty) return 0;
+      int ok = 0;
+      for (final os in rows) {
+        final folio = ((os['folio_os'] ?? os['folio']) as String? ?? '').trim();
+        if (folio.isEmpty) continue;
+        try {
+          final success = await ApiService.instance
+              .resetTomaEnServidor(folio)
+              .timeout(const Duration(seconds: 8));
+          if (success) {
+            await db.updateSyncStatus(folio, 'SINCRONIZADO');
+            updateLocalOrder(folio, {'sync_status': 'SINCRONIZADO'});
+            ok++;
+          }
+        } catch (e) {
+          debugPrint('[SYNC PUSH RESET] Reintentar $folio falló: $e');
+        }
+      }
+      if (ok > 0) notifyListeners();
+      return ok;
+    } catch (e) {
+      debugPrint('[SYNC PUSH RESET] Error en _pushResetsPendientes: $e');
+      return 0;
+    }
+  }
+
   /// Sube UNA orden al servidor. Retorna true si fue confirmada por Render.
   Future<bool> _subirUnaOrden(Map<String, dynamic> os) async {
     final db    = LocalDbService.instance;
@@ -591,11 +666,21 @@ class SyncService extends ChangeNotifier {
         pdfB64 = await _readPdfBase64(os['pdf_path_local'] as String?);
       }
 
+      final estLocal     = (os['estado']  as String? ?? '').toUpperCase().trim();
+      final estatusLocal = (os['estatus'] as String? ?? '').toUpperCase().trim();
+      final cerradaLocal = {'CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA'}.contains(estLocal)
+                        || {'CERRADO','CERRADA','COMPLETADA'}.contains(estatusLocal);
+
       final payload = {
         'folio_os':          folio,
         'device_id':         await db.getDeviceId(),
         'sync_version_base': os['sync_version'] ?? 0,
-        'nuevo_estado':      os['estado'] ?? 'COMPLETADA_DIGITAL',
+        // Estado canónico que el servidor acepta como cierre (evita que 'Cerrado'
+        // local sea rechazado por la tabla de transiciones y quede en 'Proceso').
+        'nuevo_estado':      cerradaLocal ? 'COMPLETADA_DIGITAL' : (os['estado'] ?? 'COMPLETADA_DIGITAL'),
+        // Estatus y modalidad explícitos para que PostgreSQL / macOS reflejen el cierre.
+        'estatus':           cerradaLocal ? 'Cerrado' : (os['estatus'] ?? 'Proceso'),
+        if ((os['modalidad'] as String?)?.isNotEmpty == true) 'modalidad': os['modalidad'],
         'observaciones':     os['observaciones'],
         'repetibilidad':     _decodeJson(os['rep_json']),
         'excentricidad':     _decodeJson(os['exc_json']),
@@ -701,14 +786,31 @@ class SyncService extends ChangeNotifier {
         'is_dirty': 1,
       });
 
-      // 3. Reset en Backend si hay red en segundo plano (no bloqueante)
+      // 3. Reset en Backend si hay red en segundo plano (no bloqueante).
+      //    Si falla (sin red), queda marcado PENDIENTE_RESET y el próximo
+      //    ciclo de PUSH lo reintentará automáticamente.
       unawaited(
         Future(() async {
           try {
-            await ApiService.instance.resetTomaEnServidor(folioKey).timeout(const Duration(seconds: 10));
-            debugPrint('[SYNC BG] Reset en servidor exitoso para $folioKey');
+            final serverOk = await ApiService.instance
+                .resetTomaEnServidor(folioKey)
+                .timeout(const Duration(seconds: 10));
+            if (serverOk) {
+              debugPrint('[SYNC BG] Reset en servidor exitoso para $folioKey');
+              // Actualizar sync_status a SINCRONIZADO una vez que el servidor confirmó
+              await LocalDbService.instance.updateSyncStatus(folioKey, 'SINCRONIZADO');
+              updateLocalOrder(folioKey, {'sync_status': 'SINCRONIZADO'});
+              notifyListeners();
+            } else {
+              debugPrint('[SYNC BG] Servidor rechazó el reset de $folioKey — reintentará en PUSH');
+            }
           } catch (e) {
-            debugPrint('[SYNC BG] Reset en servidor falló o sin red (se enviará en PUSH): $e');
+            debugPrint('[SYNC BG] Reset en servidor falló o sin red para $folioKey: $e');
+            // Asegurar que quede marcado para reintento en el próximo PUSH
+            try {
+              await LocalDbService.instance.updateSyncStatus(folioKey, 'PENDIENTE_RESET');
+              updateLocalOrder(folioKey, {'sync_status': 'PENDIENTE_RESET'});
+            } catch (_) {}
           }
         }),
       );

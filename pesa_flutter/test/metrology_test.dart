@@ -3,8 +3,8 @@ import 'package:pesa_tablet/services/metrology_helper.dart';
 
 void main() {
   group('Puntos de Apoyo por Instrumento', () {
-    test('Báscula de plataforma -> 4', () {
-      expect(getPuntosApoyoPorDefecto('Báscula de plataforma'), 4);
+    test('Báscula de plataforma -> 5', () {
+      expect(getPuntosApoyoPorDefecto('Báscula de plataforma'), 5);
     });
     test('Báscula camionera -> 8', () {
       expect(getPuntosApoyoPorDefecto('Báscula camionera'), 8);
@@ -23,8 +23,8 @@ void main() {
       expect(getPuntosApoyoPorDefecto('Báscula analítica'), 1);
       expect(getPuntosApoyoPorDefecto('Báscula analitica'), 1);
     });
-    test('Báscula de piso -> 1', () {
-      expect(getPuntosApoyoPorDefecto('Báscula de piso'), 1);
+    test('Báscula de piso -> 5', () {
+      expect(getPuntosApoyoPorDefecto('Báscula de piso'), 5);
     });
     test('Báscula de mostrador -> 1', () {
       expect(getPuntosApoyoPorDefecto('Báscula de mostrador'), 1);

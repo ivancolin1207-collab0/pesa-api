@@ -40,12 +40,43 @@ class _CapturaScreenState extends State<CapturaScreen>
   late final TabController _tabCtrl;
   Map<String, dynamic> _os = {};
 
-  // ── Reglas metrológicas (lookup dual ID + nombre) ─────────────────────────
+  // ── Reglas metrológicas (formato/folio → nombre → ID) ─────────────────────────
+  static int? _intOrNull(dynamic v) =>
+      v is int ? v : int.tryParse(v?.toString() ?? '');
+
   ServiceRules get _rules => getRules(
-    id: _os['id_tipo_servicio'] as int?
-        ?? _os['tipo_servicio_id'] as int?,
-    nombre: _os['tipo_servicio'] as String?,
+    id: _intOrNull(_os['id_tipo_servicio']) ?? _intOrNull(_os['tipo_servicio_id']),
+    nombre: _os['tipo_servicio']?.toString(),
+    folio: (_os['folio_os'] ?? widget.osData['folio_os'])?.toString(),
   );
+
+  /// CCA (+ Inicial J/I/A) solo si el tipo contiene "Calibración" o "CCA".
+  bool get _aplicaCCA => _rules.tieneCalibracion;
+  /// DVE + Hologramas solo si el tipo contiene "DVE", "Inspección" o "Verificación".
+  bool get _aplicaDVE => _rules.tieneInspeccion;
+
+  // Valores efectivos: si la sección no aplica se envían vacíos (no se
+  // arrastran datos precargados ni bloquean el guardado / PDF).
+  String get _ccaEf     => _aplicaCCA ? _ccaCtrl.text.trim() : '';
+  bool   get _jEf       => _aplicaCCA && _jChecked;
+  bool   get _iEf       => _aplicaCCA && _iChecked;
+  bool   get _aEf       => _aplicaCCA && _aChecked;
+  String get _dveEf     => _aplicaDVE ? _divVerCtrl.text.trim() : '';
+  String get _holoAntEf => _aplicaDVE ? _holoAntCtrl.text.trim() : '';
+  String get _holoActEf => _aplicaDVE ? _holoActCtrl.text.trim() : '';
+
+  /// Carga de sustitución OPCIONAL: solo aplica si el técnico eligió "Sí"
+  /// y capturó un valor > 0. Vacío / 0 / "No" ⇒ aplica_sustitucion = false.
+  double? get _pesoSustituto {
+    final v = double.tryParse(_masaPatronCtrl.text.trim().replaceAll(',', '.'));
+    return (v != null && v > 0) ? v : null;
+  }
+  double? get _factorSustituto {
+    final v = double.tryParse(_factorSustCtrl.text.trim().replaceAll(',', '.'));
+    return (v != null && v > 0) ? v : null;
+  }
+  bool get _aplicaSustitucion =>
+      _usaSustitucion && (_pesoSustituto != null || _factorSustituto != null);
 
   // ── Controladores Paso 0 — Instrumento ───────────────────────────────────
   final _marcaCtrl      = TextEditingController();
@@ -120,6 +151,7 @@ class _CapturaScreenState extends State<CapturaScreen>
       if (mounted) setState(() {});
     });
     _precargaCampos();
+    _normalizarTipoServicio(); // garantiza que id_tipo_servicio nunca quede null si hay nombre
     _loadLocalData();
     _cargarMarcasModelos();
   }
@@ -137,6 +169,16 @@ class _CapturaScreenState extends State<CapturaScreen>
     } catch (e) {
       debugPrint('[Captura] Error cargando marcas/modelos sugeridos: $e');
     }
+  }
+
+  /// Diagnóstico del tipo de servicio. Ya NO reescribe `id_tipo_servicio`:
+  /// la numeración local no debe viajar al servidor y el nombre/folio tienen
+  /// prioridad sobre el ID (hay IDs inconsistentes en PostgreSQL).
+  void _normalizarTipoServicio() {
+    final r = _rules;
+    debugPrint('[Captura] TipoServicio → folio=${_os['folio_os']}  '
+        'nombre="${_os['tipo_servicio'] ?? ''}"  id=${_os['id_tipo_servicio']}  '
+        '→ formato=${r.formato.name}  CCA=${r.tieneCalibracion}  DVE=${r.tieneInspeccion}');
   }
 
   Future<void> _actualizarModelosParaMarca(String marca) async {
@@ -941,60 +983,67 @@ class _CapturaScreenState extends State<CapturaScreen>
           const SizedBox(height: 16),
         ],
 
-        // ── Cargas de sustitución (solo si Logística la activó) ───────────
-        if (_usaSustitucion) ...[
-          Card(
-            margin: EdgeInsets.zero,
-            elevation: 0,
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
-                side: BorderSide(color: Colors.grey.shade200)),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              child: Row(
-                children: [
-                  const Icon(Icons.swap_horiz, color: _kRed),
-                  const SizedBox(width: 14),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Carga de Sustitución',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
-                        ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Activada por Logística (cap. máx. excede patrón disponible)',
-                          style: TextStyle(fontSize: 11, color: Colors.grey),
-                        ),
-                      ],
-                    ),
+        // ── Cargas de sustitución — COMPLETAMENTE OPCIONAL ─────────────────
+        // "No" o campos vacíos ⇒ se omite la sección y la exactitud se valida
+        // solo con pesas patrón directas (sin error ni bloqueo de guardado/PDF).
+        Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: BorderSide(color: _usaSustitucion
+                  ? _kRed.withValues(alpha: 0.35)
+                  : Colors.grey.shade200)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Icon(Icons.swap_horiz, color: _usaSustitucion ? _kRed : Colors.grey),
+                const SizedBox(width: 14),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '¿Se utilizó material de sustitución?',
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Opcional — si eliges "No" o lo dejas vacío, la exactitud se '
+                        'valida solo con pesas patrón directas.',
+                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                    ],
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFEE2E2),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: _kRed.withValues(alpha: 0.3)),
-                    ),
-                    child: const Text(
-                      'ACTIVA',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: _kRed),
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                SegmentedButton<bool>(
+                  key: const Key('captura_sustitucion_selector'),
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('No')),
+                    ButtonSegment(value: true,  label: Text('Sí')),
+                  ],
+                  selected: {_usaSustitucion},
+                  onSelectionChanged: (s) => setState(() {
+                    _usaSustitucion = s.first;
+                    _dataVersion++;
+                  }),
+                  style: const ButtonStyle(visualDensity: VisualDensity.compact),
+                ),
+              ],
             ),
           ),
+        ),
+        if (_usaSustitucion) ...[
           const SizedBox(height: 10),
           Row(children: [
-            Expanded(child: _NumField('Masa Patrón Disponible ($_unidadMedida)', _masaPatronCtrl)),
+            Expanded(child: _NumField('Peso sustituto ($_unidadMedida) — opcional', _masaPatronCtrl)),
             const SizedBox(width: 12),
-            Expanded(child: _NumField('Factor Sustitución',          _factorSustCtrl)),
+            Expanded(child: _NumField('Factor Sustitución — opcional', _factorSustCtrl)),
           ]),
-          const SizedBox(height: 16),
         ],
+        const SizedBox(height: 16),
 
         // ── Nuevos campos: Funcionamiento y Puntos de Apoyo ────────────────────
         _SectionTitle('Parámetros del Instrumento'),
@@ -1435,11 +1484,12 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['id_indicador']          = _idEquipoCtrl.text.trim();
     _os['ubicacion']             = _ubicCtrl.text.trim();
     _os['tipo_instrumento']      = _tipoInstrumento;
-    _os['jia_j']                 = _jChecked;
-    _os['jia_i']                 = _iChecked;
-    _os['jia_a']                 = _aChecked;
+    _os['jia_j']                 = _jEf;
+    _os['jia_i']                 = _iEf;
+    _os['jia_a']                 = _aEf;
     _os['aplica_excentricidad']  = _aplExc;
-    _os['usa_sustitucion']       = _usaSustitucion;
+    _os['usa_sustitucion']       = _aplicaSustitucion;
+    _os['aplica_sustitucion']    = _aplicaSustitucion;
     _os['funcionamiento']        = _funcionamiento;
     _os['puntos_apoyo']          = _puntosApoyo;
     _os['geometria_excentricidad'] = _geometriaExcentricidad;
@@ -1450,19 +1500,38 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['capacidad_max']         = _capMaxCtrl.text.trim();
     _os['division_minima']       = _divMinCtrl.text.trim();
 
-    // Solo guardar campos condicionales si aplican según las reglas activas
+    // Campos condicionales: solo se guardan si aplican; si NO aplican se
+    // vacían para no arrastrar datos precargados al PDF ni al servidor.
     if (rules.tieneCalibracion) {
       _os['numero_cca'] = _ccaCtrl.text.trim();
       _os['cca_aplica'] = true;
+    } else {
+      _os['numero_cca'] = '';
+      _os['cca']        = '';
+      _os['cca_aplica'] = false;
     }
     if (rules.tieneInspeccion) {
       _os['holograma_anterior']    = _holoAntCtrl.text.trim();
       _os['holograma_actualizado'] = _holoActCtrl.text.trim();
-      _os['div_verificacion']      = double.tryParse(_divVerCtrl.text) ?? 0;
+      _os['div_verificacion']      = double.tryParse(_divVerCtrl.text.replaceAll(',', '.')) ?? 0;
+    } else {
+      _os['holograma_anterior']    = '';
+      _os['holograma_actualizado'] = '';
+      _os['holograma_nuevo']       = '';
+      _os['folio_dve']             = '';
+      _os['numero_dve']            = '';
+      _os['div_ver']               = '';
+      _os['div_verificacion']      = null;
     }
-    if (_usaSustitucion) {
-      _os['masa_patron_disponible'] = double.tryParse(_masaPatronCtrl.text) ?? 0;
-      _os['factor_sustitucion']     = double.tryParse(_factorSustCtrl.text) ?? 0;
+    // Sustitución opcional: vacío / 0 / "No" ⇒ aplica_sustitucion=false, peso=null.
+    if (_aplicaSustitucion) {
+      _os['masa_patron_disponible'] = _pesoSustituto;
+      _os['peso_sustituto']         = _pesoSustituto;
+      _os['factor_sustitucion']     = _factorSustituto;
+    } else {
+      _os['masa_patron_disponible'] = null;
+      _os['peso_sustituto']         = null;
+      _os['factor_sustitucion']     = null;
     }
 
     final maxV = double.tryParse(_capMaxCtrl.text.replaceAll(',', '.'));
@@ -1558,17 +1627,17 @@ class _CapturaScreenState extends State<CapturaScreen>
         'capacidad_max':         _capMaxCtrl.text.trim(),
         'div_min':               _divMinCtrl.text.trim(),
         'division_minima':       _divMinCtrl.text.trim(),
-        'div_ver':               _divVerCtrl.text.trim(),
-        'div_verificacion':      _divVerCtrl.text.trim(),
-        'folio_dve':             _divVerCtrl.text.trim(),
-        'numero_dve':            _divVerCtrl.text.trim(),
-        'numero_cca':            _ccaCtrl.text.trim(),
-        'cca':                   _ccaCtrl.text.trim(),
-        'cca_aplica':            rules.tieneCalibracion || _ccaCtrl.text.trim().isNotEmpty,
+        'div_ver':               _dveEf,
+        'div_verificacion':      _dveEf,
+        'folio_dve':             _dveEf,
+        'numero_dve':            _dveEf,
+        'numero_cca':            _ccaEf,
+        'cca':                   _ccaEf,
+        'cca_aplica':            rules.tieneCalibracion,
         'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
-        'holograma_anterior':    _holoAntCtrl.text.trim(),
-        'holograma_actualizado': _holoActCtrl.text.trim(),
-        'holograma_nuevo':       _holoActCtrl.text.trim(),
+        'holograma_anterior':    _holoAntEf,
+        'holograma_actualizado': _holoActEf,
+        'holograma_nuevo':       _holoActEf,
         'tipo_instrumento':      _tipoInstrumento,
         'funcionamiento':        _funcionamiento,
         'puntos_apoyo':          _puntosApoyo,
@@ -1577,9 +1646,9 @@ class _CapturaScreenState extends State<CapturaScreen>
         'num_secciones':           _numSeccionesExc,
         'secciones_camionera':     _numSeccionesExc,
         'unidad_medida':         _unidadMedida,
-        'jia_j':                 _jChecked,
-        'jia_i':                 _iChecked,
-        'jia_a':                 _aChecked,
+        'jia_j':                 _jEf,
+        'jia_i':                 _iEf,
+        'jia_a':                 _aEf,
         'aplica_excentricidad':  _aplExc,
         'apl_exc_override':      _aplExcOverride,
         'usa_sustitucion':       _usaSustitucion,
@@ -1631,14 +1700,21 @@ class _CapturaScreenState extends State<CapturaScreen>
     _guardarDatosInstrumento();
     final rules = _rules;
 
-    // ── CANDADO METROLÓGICO: 6 CAMPOS OBLIGATORIOS DEL INSTRUMENTO ─────────
+    // ── CANDADO POR FORMATO ────────────────────────────────────────────────
+    //  • Orden de Servicio: 6 campos obligatorios del instrumento.
+    //  • Revisión de Celdas: solo identificación del instrumento.
+    //  • Remisión: solo datos comerciales/operativos (sin candado metrológico).
     final List<String> faltantes = [];
-    if (_marcaCtrl.text.trim().isEmpty)    faltantes.add('Marca');
-    if (_modeloCtrl.text.trim().isEmpty)   faltantes.add('Modelo');
-    if (_idEquipoCtrl.text.trim().isEmpty) faltantes.add('ID Indicador / Equipo');
-    if (_capMaxCtrl.text.trim().isEmpty)   faltantes.add('Capacidad Máxima');
-    if (_divMinCtrl.text.trim().isEmpty)   faltantes.add('División Mínima (d)');
-    if (_ubicCtrl.text.trim().isEmpty)     faltantes.add('Ubicación');
+    if (!rules.esRemision) {
+      if (_marcaCtrl.text.trim().isEmpty)    faltantes.add('Marca');
+      if (_modeloCtrl.text.trim().isEmpty)   faltantes.add('Modelo');
+      if (_idEquipoCtrl.text.trim().isEmpty) faltantes.add('ID Indicador / Equipo');
+    }
+    if (!rules.esRemision && !rules.esRevisionCeldas) {
+      if (_capMaxCtrl.text.trim().isEmpty)   faltantes.add('Capacidad Máxima');
+      if (_divMinCtrl.text.trim().isEmpty)   faltantes.add('División Mínima (d)');
+      if (_ubicCtrl.text.trim().isEmpty)     faltantes.add('Ubicación');
+    }
 
     if (faltantes.isNotEmpty) {
       setState(() => _mostrarErroresInstrumento = true);
@@ -1648,7 +1724,9 @@ class _CapturaScreenState extends State<CapturaScreen>
     }
 
     // ── Validaciones metrológicas de división mínima (d) ───────────────
-    final d = _dValue;
+    // La exactitud se valida solo con las cargas patrón capturadas; la
+    // sustitución (opcional) no interviene en esta validación.
+    final d = rules.esRemision ? null : _dValue;
     if (d != null && d > 0) {
       for (int i = 0; i < _repRows.length; i++) {
         final r = _repRows[i];
@@ -1693,18 +1771,20 @@ class _CapturaScreenState extends State<CapturaScreen>
       }
     }
 
-    // ── Validaciones obligatorias de servicio ───────────────────────────
-    if (rules.tieneCalibracion && _ccaCtrl.text.trim().isEmpty) {
+    // ── Validaciones obligatorias de servicio (solo si la sección aplica) ──
+    //  !_aplicaCCA → se omiten "Número de CCA" e "Inicial del Calibrador".
+    //  !_aplicaDVE → se omiten "División de Verificación" y hologramas.
+    if (_aplicaCCA && _ccaCtrl.text.trim().isEmpty) {
       _tabCtrl.animateTo(0);
       _showError('El Número de CCA es obligatorio para este tipo de servicio.');
       return;
     }
-    if (rules.tieneInspeccion && _holoAntCtrl.text.trim().isEmpty) {
+    if (_aplicaDVE && _holoAntCtrl.text.trim().isEmpty) {
       _tabCtrl.animateTo(0);
       _showError('El Holograma Anterior es obligatorio para este tipo de servicio.');
       return;
     }
-    if (rules.pideInicialJia && !_jChecked && !_iChecked && !_aChecked) {
+    if (_aplicaCCA && rules.pideInicialJia && !_jChecked && !_iChecked && !_aChecked) {
       _tabCtrl.animateTo(0);
       _showError('Selecciona la Inicial del Calibrador (J, I o A).');
       return;
@@ -1754,9 +1834,9 @@ class _CapturaScreenState extends State<CapturaScreen>
         'firma_cliente_nombre':  nombreCliente,
         'nombre_ing':            nombreCliente,
         'dictamen':              _dictamen,
-        'jia_j':                 _jChecked,
-        'jia_i':                 _iChecked,
-        'jia_a':                 _aChecked,
+        'jia_j':                 _jEf,
+        'jia_i':                 _iEf,
+        'jia_a':                 _aEf,
         'marca':                 _marcaCtrl.text.trim(),
         'equipo_marca':          _marcaCtrl.text.trim(),
         'modelo':                _modeloCtrl.text.trim(),
@@ -1774,13 +1854,24 @@ class _CapturaScreenState extends State<CapturaScreen>
         'division_minima':       _divMinCtrl.text.trim(),
         'div_minima':            _divMinCtrl.text.trim(),
         'equipo_division':       _divMinCtrl.text.trim(),
-        'div_verificacion':      _divVerCtrl.text.trim(),
-        'numero_cca':            _ccaCtrl.text.trim(),
-        'cca_aplica':            rules.tieneCalibracion || _ccaCtrl.text.trim().isNotEmpty,
+        'div_verificacion':      _dveEf,
+        'div_ver':               _dveEf,
+        'folio_dve':             _dveEf,
+        'numero_dve':            _dveEf,
+        'numero_cca':            _ccaEf,
+        'cca':                   _ccaEf,
+        'cca_aplica':            _aplicaCCA,
+        'aplica_cca':            _aplicaCCA,
+        'aplica_dve':            _aplicaDVE,
         'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
         'unidad_medida':         _unidadMedida,
-        'holograma_anterior':    _holoAntCtrl.text.trim(),
-        'holograma_actualizado': _holoActCtrl.text.trim(),
+        'holograma_anterior':    _holoAntEf,
+        'holograma_actualizado': _holoActEf,
+        'holograma_nuevo':       _holoActEf,
+        'usa_sustitucion':       _aplicaSustitucion,
+        'aplica_sustitucion':    _aplicaSustitucion,
+        'peso_sustituto':        _aplicaSustitucion ? _pesoSustituto : null,
+        'factor_sustitucion':    _aplicaSustitucion ? _factorSustituto : null,
         'tipo_instrumento':      _tipoInstrumento ?? '',
         'tipo_servicio':         _os['tipo_servicio'] ?? '',
         'funcionamiento':        _funcionamiento,
@@ -1898,12 +1989,16 @@ class _ServicioBanner extends StatelessWidget {
             const SizedBox(height: 6),
             Wrap(spacing: 6, children: [
               // Solo mostrar badges de lo que APLICA
+              if (rules.esRemision)
+                _Badge('Remisión — solo datos operativos', const Color(0xFF0F766E)),
+              if (rules.esRevisionCeldas)
+                _Badge('Revisión de Celdas', const Color(0xFF0F766E)),
               if (rules.tieneCalibracion)
                 _Badge('CCA requerido', const Color(0xFF1D4ED8)),
               if (rules.tieneInspeccion)
                 _Badge('Hologramas + DVE', const Color(0xFF7C3AED)),
-              if (rules.esSoloAjuste)
-                _Badge('Solo Ajuste', Colors.grey),
+              if (rules.esSoloAjuste && !rules.esRemision && !rules.esRevisionCeldas)
+                _Badge('Solo Ajuste — sin CCA ni DVE', Colors.grey),
             ]),
           ],
         )),

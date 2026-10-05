@@ -398,6 +398,24 @@ class ApiService {
 
   // ── Sync Pull ─────────────────────────────────────────────────────────────
 
+  /// Repositorio de calibraciones concluidas (solo lectura, supervisión metrológica).
+  /// El servidor valida que el usuario sea Alan Guevara (ID 8) o administrador.
+  Future<List<Map<String, dynamic>>> getCalibracionesConsulta() async {
+    final uri = Uri.parse('$_baseUrl/api/v1/sync/calibraciones-consulta');
+    final resp = await _getWithRetry(uri, timeout: const Duration(seconds: 30));
+    if (resp.statusCode == 200) {
+      final data = jsonDecode(utf8.decode(resp.bodyBytes));
+      if (data is List) {
+        return data
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList();
+      }
+      return const [];
+    }
+    throw HttpException('calibraciones-consulta HTTP ${resp.statusCode}');
+  }
+
   Future<List<Map<String, dynamic>>> syncPull({
     DateTime? since,
     String? updatedAfter,
@@ -580,13 +598,19 @@ class ApiService {
   // ── Upload Escaneo (multipart) ────────────────────────────────────────────
 
   /// Sube el archivo escaneado al servidor como adjunto de la OS.
-  Future<void> uploadEscaneo(int osId, File file, String folio) async {
+  Future<void> uploadEscaneo(int osId, File file, String folio,
+      {Map<String, dynamic>? campos}) async {
     final uri = Uri.parse('$_baseUrl/api/v1/ordenes/$osId/adjunto');
     debugPrint('[API] uploadEscaneo → $uri (folio: $folio)');
 
     Future<http.StreamedResponse> sendRequest() async {
       final request = http.MultipartRequest('POST', uri);
       request.headers.addAll(_authHeaders);
+      campos?.forEach((k, v) {
+        if (v != null && v.toString().trim().isNotEmpty) {
+          request.fields[k] = v.toString();
+        }
+      });
       request.fields['folio_os'] = folio;
       request.files.add(await http.MultipartFile.fromPath(
         'archivo', file.path,

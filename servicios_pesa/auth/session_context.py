@@ -142,7 +142,7 @@ _ROLE_PERMISSIONS: dict[str, set[str]] = {
 # ─── Ítems de navegación por rol ─────────────────────────────────────────────
 _ROLE_NAV: dict[str, list[str]] = {
     "admin": [
-        "dashboard", "lote", "buscar_os",
+        "dashboard", "mi_firma", "lote", "buscar_os",
         "escaneos", "catalogos", "entrega_semanal", "configuracion",
     ],
     "logistica": [
@@ -150,15 +150,15 @@ _ROLE_NAV: dict[str, list[str]] = {
         "escaneos", "entrega_semanal",
     ],
     "servicio": [
-        "dashboard", "buscar_os", "escaneos", "entrega_semanal",
+        "dashboard", "mi_firma", "buscar_os", "escaneos", "entrega_semanal",
     ],
     # Calibrador: mismo menú que técnico + acceso a buscar OS (para ver calibraciones)
     "calibrador": [
-        "dashboard", "buscar_os", "escaneos", "entrega_semanal",
+        "dashboard", "mi_firma", "buscar_os", "escaneos", "entrega_semanal",
     ],
     # Inspector: mismo menú que técnico + acceso a buscar OS (para ver inspecciones)
     "inspector": [
-        "dashboard", "buscar_os", "escaneos", "entrega_semanal",
+        "dashboard", "mi_firma", "buscar_os", "escaneos", "entrega_semanal",
     ],
     "recepcion": [
         "dashboard", "buscar_os", "entrega_semanal",

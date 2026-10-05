@@ -10,6 +10,7 @@ import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../widgets/app_shell.dart';
+import '../widgets/signature_shield.dart';
 
 class MiFirmaScreen extends StatefulWidget {
   const MiFirmaScreen({super.key});
@@ -27,6 +28,8 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
 
   bool    _cargando    = false;
   bool    _guardando   = false;
+  // Bloquea el scroll de la pantalla mientras hay dedo/lápiz sobre el canvas
+  bool    _isSigning   = false;
   String? _firmaActual;   // base64 de la firma guardada
   String? _msg;           // mensaje de estado
 
@@ -113,6 +116,9 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
         backgroundColor: const Color(0xFFF9FAFB),
         body: SafeArea(
           child: SingleChildScrollView(
+            physics: _isSigning
+                ? const NeverScrollableScrollPhysics()
+                : const BouncingScrollPhysics(),
             padding: const EdgeInsets.all(20),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -354,17 +360,11 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(9),
                 child: Stack(children: [
-                  GestureDetector(
-                    onPanDown: (_) {},
-                    onPanStart: (_) {},
-                    onPanUpdate: (_) {},
-                    behavior: HitTestBehavior.opaque,
-                    child: Listener(
-                      onPointerDown: (_) {},
-                      onPointerMove: (_) {},
-                      behavior: HitTestBehavior.opaque,
-                      child: Signature(controller: _ctrl, backgroundColor: Colors.white),
-                    ),
+                  SignatureGestureShield(
+                    onSigningChanged: (v) {
+                      if (mounted && v != _isSigning) setState(() => _isSigning = v);
+                    },
+                    child: Signature(controller: _ctrl, backgroundColor: Colors.white),
                   ),
                   if (_ctrl.isEmpty)
                     const IgnorePointer(

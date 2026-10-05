@@ -19,6 +19,7 @@ import '../services/sync_service.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
 import '../widgets/sync_check_badge.dart';
+import 'calibraciones_repositorio_view.dart';
 
 // ── Design Tokens ──────────────────────────────────────────────────────────
 const _kCarmineRed = Color(0xFFB81D24);
@@ -28,6 +29,13 @@ const _kBorder     = Color(0xFFE5E5EA);
 const _kTextPrim   = Color(0xFF1D1D1F);
 const _kTextSec    = Color(0xFF86868B);
 const _kTableHead  = Color(0xFFF3F4F6);
+
+/// Remisiones (RMA-) y Revisiones de Celdas (RE-) son formatos físicos:
+/// se digitalizan por escaneo, nunca con la captura metrológica de OS.
+bool esFolioFormatoFisico(String folio) {
+  final f = folio.trim().toUpperCase();
+  return f.startsWith('RMA-') || f.startsWith('RE-');
+}
 
 class OsListScreen extends StatefulWidget {
   const OsListScreen({super.key});
@@ -48,6 +56,9 @@ class _OsListScreenState extends State<OsListScreen> {
   String? _estado;
   String  _query     = '';
   final   _searchCtrl = TextEditingController();
+
+  // ── Vista: Mis Órdenes vs Repositorio de Calibraciones (solo supervisión) ──
+  bool _vistaRepositorio = false;
 
   @override
   void initState() {
@@ -448,8 +459,27 @@ class _OsListScreenState extends State<OsListScreen> {
   List<_OsGroup> _groupByLote(List<Map<String, dynamic>> list) {
     final Map<String, List<Map<String, dynamic>>> buckets = {};
     for (final os in list) {
+      // Criterio primario: id_lote explícito del servidor
       final lote = (os['id_lote'] as String?) ?? (os['lote'] as String?) ?? '';
-      final key = lote.isNotEmpty ? lote : 'solo_${os['folio_os'] ?? os['local_id']}';
+      String key;
+      if (lote.isNotEmpty) {
+        key = lote;
+      } else {
+        // Criterio secundario: agrupar por cliente + fecha de servicio
+        // cuando no hay lote asignado en el servidor (ej. Mar Bran multi-báscula)
+        final cliente   = (os['cliente'] as String? ?? '').trim();
+        final sucursal  = (os['sucursal'] as String? ?? '').trim();
+        final fecha     = (os['fecha_servicio'] as String?
+            ?? os['fecha_os'] as String?
+            ?? os['fecha'] as String?
+            ?? '').split('T').first.trim(); // solo la fecha, sin hora
+        // Solo agrupamos si hay cliente + fecha válidos (evitar agrupaciones falsas)
+        if (cliente.isNotEmpty && fecha.isNotEmpty) {
+          key = 'grp_${cliente}_${sucursal}_$fecha';
+        } else {
+          key = 'solo_${os['folio_os'] ?? os['local_id']}';
+        }
+      }
       buckets.putIfAbsent(key, () => []).add(os);
     }
     return buckets.entries.map((e) {
@@ -895,30 +925,94 @@ class _OsListScreenState extends State<OsListScreen> {
     final auth        = context.watch<AuthService>();
     final hideTecnico = auth.isTecnico;
 
+    final dashboard = LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 650) {
+          return _MobilePhoneDashboard(
+            state: this,
+            sync: sync,
+            hideTecnico: hideTecnico,
+          );
+        } else {
+          return _TabletDesktopDashboard(
+            state: this,
+            sync: sync,
+            hideTecnico: hideTecnico,
+          );
+        }
+      },
+    );
+
+    // Solo supervisión metrológica (Alan Guevara ID 8 / admins) ve el selector.
+    final esSupervisor = auth.esSupervisorCalibracion;
+    final repoActivo = esSupervisor && _vistaRepositorio;
+
     final content = Scaffold(
       backgroundColor: _kBgColor,
       body: SafeArea(
         bottom: false,
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            if (constraints.maxWidth < 650) {
-              return _MobilePhoneDashboard(
-                state: this,
-                sync: sync,
-                hideTecnico: hideTecnico,
-              );
-            } else {
-              return _TabletDesktopDashboard(
-                state: this,
-                sync: sync,
-                hideTecnico: hideTecnico,
-              );
-            }
-          },
-        ),
+        child: !esSupervisor
+            ? dashboard
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _selectorVista(repoActivo),
+                  Expanded(
+                    child: repoActivo
+                        ? const CalibracionesRepositorioView()
+                        : dashboard,
+                  ),
+                ],
+              ),
       ),
     );
     return AppShell(currentRoute: '/os', child: content);
+  }
+
+  Widget _selectorVista(bool repoActivo) {
+    const metro = Color(0xFF5B3FD6);
+    return LayoutBuilder(builder: (context, c) {
+      final compacto = c.maxWidth < 650;
+      return Container(
+        padding: EdgeInsets.fromLTRB(compacto ? 12 : 24, 10, compacto ? 12 : 24, 4),
+        child: Align(
+          alignment: compacto ? Alignment.center : Alignment.centerLeft,
+          child: SegmentedButton<bool>(
+            key: const Key('os_vista_selector'),
+            showSelectedIcon: false,
+            segments: [
+              ButtonSegment<bool>(
+                value: false,
+                icon: const Text('📋'),
+                label: Text(compacto ? 'Mis Órdenes' : 'Mis Órdenes Asignadas'),
+              ),
+              ButtonSegment<bool>(
+                value: true,
+                icon: const Text('📑'),
+                label: Text(compacto ? 'Calibraciones' : 'Repositorio Calibraciones (Todos)'),
+              ),
+            ],
+            selected: {repoActivo},
+            onSelectionChanged: (s) => setState(() => _vistaRepositorio = s.first),
+            style: ButtonStyle(
+              visualDensity: VisualDensity.compact,
+              textStyle: const WidgetStatePropertyAll(
+                TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+              backgroundColor: WidgetStateProperty.resolveWith((states) {
+                if (!states.contains(WidgetState.selected)) return Colors.white;
+                return repoActivo ? metro : _kCarmineRed;
+              }),
+              foregroundColor: WidgetStateProperty.resolveWith((states) =>
+                  states.contains(WidgetState.selected) ? Colors.white : _kTextPrim),
+              side: WidgetStatePropertyAll(
+                BorderSide(color: repoActivo ? metro : _kBorder),
+              ),
+            ),
+          ),
+        ),
+      );
+    });
   }
 }
 
@@ -1474,7 +1568,8 @@ class _MobileOsCard extends StatelessWidget {
 
     final bool pdfReal = _OsListScreenState.tienePdfReal(os);
     final bool noIniciada = _OsListScreenState.sinIniciar(os);
-    final bool isFisico = modalidad == 'FISICA' || modalidad == 'FISICO';
+    final bool isFisico = modalidad == 'FISICA' || modalidad == 'FISICO' ||
+        esFolioFormatoFisico(folioStr);
 
     final String estatusLabel = pdfReal
         ? '✓ PDF Listo'
@@ -2575,7 +2670,8 @@ class _OsRow extends StatelessWidget {
     final folioStr  = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     final modalidad = (os['modalidad'] as String? ?? 'DIGITAL').toUpperCase();
     final syncSt    = (os['sync_status'] as String? ?? '');
-    final isFisico  = modalidad.contains('FISIC') || modalidad.contains('FÍSIC');
+    final isFisico  = modalidad.contains('FISIC') || modalidad.contains('FÍSIC') ||
+        esFolioFormatoFisico(folioStr);
     final isEven    = index % 2 == 0;
 
     final bool hasDoc = _OsListScreenState.tieneDocumento(os);

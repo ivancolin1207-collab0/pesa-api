@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore    import Qt, QTimer, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore    import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
 from PyQt6.QtGui     import QFont, QColor
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
@@ -103,20 +103,22 @@ except Exception as _e_cfg:
 # (key, icon, label, tooltip, roles_permitidos)
 _NAV_ITEMS: list[tuple[str, str, str, str, list[str]]] = [
     ("dashboard",    "⌂",  "Dashboard",       "Tablero y resumen de actividad",              ["admin", "logistica", "servicio", "recepcion"]),
+    ("mi_firma",     "✎",  "Mi Firma",        "Gestionar firma registrada en servidor",      ["admin", "servicio", "calibrador", "inspector"]),
     ("lote",         "⬚",  "Generar Formatos", "Asistente de generación de OS, RMA y RE",    ["admin", "logistica"]),
     ("buscar_os",    "⌕",  "Buscar / Historial","Buscar, editar y consultar órdenes",        ["admin", "logistica", "recepcion", "calibrador", "inspector"]),
     ("recepcion_os", "📋", "Recepción / Entrega","Control de entrega semanal de OS por fecha", ["admin", "logistica", "recepcion"]),
-    ("escaneos",     "⊕",  "Adjuntar Escaneo", "Adjuntar formato físico escaneado",          ["admin", "logistica", "servicio"]),
+    ("escaneos",     "⎘",  "Adjuntar Escaneo", "Adjuntar formato físico escaneado",          ["admin", "logistica", "servicio"]),
     ("catalogos",    "⊞",  "Catálogos",        "Clientes, técnicos e instrumentos",          ["admin"]),
     ("configuracion","⚙",  "Configuración",    "Conexión a BD y ajustes del sistema",        ["admin"]),
 ]
 
 _ICON_MAP: dict[str, str] = {
     "dashboard":     "⌂",
+    "mi_firma":      "✎",
     "lote":          "⬚",
     "buscar_os":     "⌕",
     "recepcion_os":  "📋",
-    "escaneos":      "⊕",
+    "escaneos":      "⎘",
     "catalogos":     "⊞",
     "configuracion": "⚙",
 }
@@ -127,47 +129,53 @@ _ICON_MAP: dict[str, str] = {
 # ══════════════════════════════════════════════════════════════════════════════
 class SidebarNavButton(QPushButton):
     """
-    Botón de navegación con indicador lateral rojo (estilo macOS Sonoma).
-    Estados: inactivo / hover / activo
+    Botón de navegación con estilo técnico macOS HIG.
+    Estados: inactivo / hover / activo (#FCE8E9 + #B81D24) / colapsado (riel 54px)
     """
     def __init__(self, icon: str, label: str, tooltip: str, parent=None):
         super().__init__(parent)
         self._icon    = icon
         self._label   = label
         self._active  = False
+        self._collapsed = False
 
-        self.setToolTip(tooltip)
+        # Tooltip desactivado — evita cajas negras invasivas sobre los botones
+        self.setToolTip("")
         self.setFixedHeight(40)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-        # Layout interno: icono + texto
         self._build_layout()
         self._apply_inactive()
 
     def _build_layout(self):
-        from PyQt6.QtWidgets import QHBoxLayout as HL
-        lay = HL(self)
-        lay.setContentsMargins(14, 0, 12, 0)
-        lay.setSpacing(10)
-
-        # Indicador activo (línea izquierda roja)
-        self._indicator = QFrame()
-        self._indicator.setFixedSize(3, 22)
-        self._indicator.setStyleSheet("background: transparent; border-radius: 1px;")
-        lay.addWidget(self._indicator)
+        lay = QHBoxLayout(self)
+        self._lay = lay
+        lay.setContentsMargins(10, 0, 10, 0)
+        lay.setSpacing(8)
 
         # Ícono
         self._lbl_icon = QLabel(self._icon)
-        self._lbl_icon.setFixedWidth(18)
+        self._lbl_icon.setFixedWidth(22)
         self._lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lbl_icon.setStyleSheet("font-size: 14px; background: transparent;")
+        self._lbl_icon.setStyleSheet("font-size: 15px; background: transparent;")
         lay.addWidget(self._lbl_icon)
 
         # Texto
         self._lbl_text = QLabel(self._label)
         self._lbl_text.setStyleSheet("font-size: 13px; font-weight: 500; background: transparent;")
         lay.addWidget(self._lbl_text, stretch=1)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        self._collapsed = collapsed
+        if collapsed:
+            self._lbl_text.hide()
+            self._lay.setContentsMargins(0, 0, 0, 0)
+            self._lbl_icon.setFixedWidth(38)
+        else:
+            self._lbl_text.show()
+            self._lay.setContentsMargins(10, 0, 10, 0)
+            self._lbl_icon.setFixedWidth(22)
 
     def set_active(self, active: bool) -> None:
         self._active = active
@@ -179,22 +187,17 @@ class SidebarNavButton(QPushButton):
     def _apply_active(self):
         self.setStyleSheet("""
             QPushButton {
-                background-color: #FEF2F2;
+                background-color: #FCE8E9;
                 border: none;
-                border-left: 4px solid #C8102E;
-                border-radius: 0px;
-                margin: 0 0 0 0;
-                padding-left: 10px;
+                border-radius: 8px;
+                margin: 2px 8px;
             }
         """)
-        self._indicator.setStyleSheet(
-            "background: transparent; border-radius: 0px;"
-        )
         self._lbl_icon.setStyleSheet(
-            "font-size: 14px; color: #C8102E; background: transparent;"
+            "font-size: 15px; color: #B81D24; background: transparent; font-weight: 600;"
         )
         self._lbl_text.setStyleSheet(
-            "font-size: 13px; font-weight: 700; color: #C8102E; background: transparent;"
+            "font-size: 13px; font-weight: 600; color: #B81D24; background: transparent;"
         )
 
     def _apply_inactive(self):
@@ -202,26 +205,23 @@ class SidebarNavButton(QPushButton):
             QPushButton {
                 background-color: transparent;
                 border: none;
-                border-radius: 0px;
-                margin: 0;
-                padding-left: 14px;
+                border-radius: 8px;
+                margin: 2px 8px;
             }
             QPushButton:hover {
-                background-color: #F1F5F9;
+                background-color: rgba(0, 0, 0, 0.04);
             }
             QPushButton:pressed {
-                background-color: #E2E8F0;
+                background-color: rgba(0, 0, 0, 0.08);
             }
         """)
-        self._indicator.setStyleSheet("background: transparent;")
         self._lbl_icon.setStyleSheet(
-            "font-size: 14px; color: #475569; background: transparent;"
+            "font-size: 15px; color: #6E6E73; background: transparent;"
         )
         self._lbl_text.setStyleSheet(
-            "font-size: 13px; font-weight: 500; color: #475569; background: transparent;"
+            "font-size: 13px; font-weight: 500; color: #48484A; background: transparent;"
         )
 
-    # Compatibilidad con código antiguo que usa set_active
     def is_active(self) -> bool:
         return self._active
 
@@ -277,6 +277,14 @@ class UserChip(QFrame):
         lay.addLayout(info_lay, stretch=1)
 
         self._update_frame_style()
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed:
+            self._lbl_name.hide()
+            self._lbl_role.hide()
+        else:
+            self._lbl_name.show()
+            self._lbl_role.show()
 
     def _update_frame_style(self):
         self.setStyleSheet("""
@@ -335,6 +343,12 @@ class ConnectionIndicator(QWidget):
         lay.addWidget(self._dot)
         lay.addWidget(self._lbl, stretch=1)
 
+    def set_collapsed(self, collapsed: bool) -> None:
+        if collapsed:
+            self._lbl.hide()
+        else:
+            self._lbl.show()
+
     def set_status(self, connected: Optional[bool]) -> None:
         if connected is True:
             self._dot.setStyleSheet("font-size: 8px; color: #34C759;")
@@ -353,7 +367,7 @@ class ConnectionIndicator(QWidget):
 class MainWindow(QMainWindow):
     """
     Ventana principal con:
-    - Sidebar Apple (blanco, 220px, indicador rojo lateral)
+    - Sidebar Apple (blanco, 210px colapsable a 56px con botón hamburguesa ☰)
     - Header/breadcrumb integrado al contenido
     - Navegación filtrada por rol (RBAC via session_context)
     - Monitor de conexión BD cada 30s
@@ -365,6 +379,7 @@ class MainWindow(QMainWindow):
         self._nav_buttons: dict[str, SidebarNavButton] = {}
         self._current_key: str = ""
         self._page_meta:   dict[str, tuple[str, str, str]] = {}  # key → (icon, label, tooltip)
+        self._sidebar_collapsed: bool = False
 
         self._setup_window()
         self._setup_ui()
@@ -375,28 +390,21 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(0, self.aplicar_permisos_rol)
         QTimer.singleShot(80, lambda: self._navigate("dashboard"))
 
-    # ── Setup ──────────────────────────────────────────────────────────────────
-
     def _setup_window(self) -> None:
         self.setWindowTitle(f"{APP_NAME}  —  v{APP_VERSION}")
         self.setMinimumSize(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
 
-        # Iniciar maximizado para adaptarse a tablets y pantallas grandes.
-        # Si la pantalla disponible es menor a 1440px (ej. tablet 1024px),
-        # ajustamos el tamaño para ocupar todo el espacio disponible.
         if screen := self.screen():
             geo = screen.availableGeometry()
             if geo.width() >= 1440:
                 self.resize(1440, 900)
                 self.move((geo.width() - 1440) // 2, (geo.height() - 900) // 2)
             else:
-                # Tablet / pantalla pequeña — ocupar todo el espacio disponible
                 self.resize(geo.width(), geo.height())
                 self.move(geo.left(), geo.top())
         else:
             self.resize(1440, 900)
 
-        # Arrancar maximizado para una mejor experiencia en tablets
         self.showMaximized()
 
     def _setup_ui(self) -> None:
@@ -407,23 +415,24 @@ class MainWindow(QMainWindow):
         root.setSpacing(0)
 
         # Sidebar
-        root.addWidget(self._build_sidebar())
+        self._sidebar = self._build_sidebar()
+        root.addWidget(self._sidebar)
 
         # Área de contenido (header + stack)
         content_wrapper = QWidget()
-        content_wrapper.setStyleSheet("background-color: #F0F2F5;")
+        content_wrapper.setStyleSheet("background-color: #F5F5F7;")
         content_wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay = QVBoxLayout(content_wrapper)
         cw_lay.setContentsMargins(0, 0, 0, 0)
         cw_lay.setSpacing(0)
 
-        # Header breadcrumb
+        # Header breadcrumb + hamburguesa
         self._header = self._build_header()
         cw_lay.addWidget(self._header)
 
         # Stack de páginas con tamaño expandible
         self._stack = QStackedWidget()
-        self._stack.setStyleSheet("background-color: #F0F2F5;")
+        self._stack.setStyleSheet("background-color: #F5F5F7;")
         self._stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay.addWidget(self._stack, stretch=1)
 
@@ -436,7 +445,7 @@ class MainWindow(QMainWindow):
         sb.setStyleSheet("""
             QWidget#sidebar {
                 background-color: #FFFFFF;
-                border-right: 1px solid #E2E8F0;
+                border-right: 1px solid #E5E5EA;
             }
         """)
 
@@ -449,18 +458,18 @@ class MainWindow(QMainWindow):
         brand.setFixedHeight(72)
         brand.setStyleSheet("background-color: #FFFFFF;")
         bl = QVBoxLayout(brand)
-        bl.setContentsMargins(18, 18, 18, 8)
+        bl.setContentsMargins(14, 18, 14, 8)
         bl.setSpacing(2)
 
         # Ícono + nombre
         brand_row = QHBoxLayout()
-        brand_row.setSpacing(8)
+        brand_row.setSpacing(6)
 
         icon_box = QLabel("⚖")
         icon_box.setStyleSheet("""
             font-size: 20px;
-            color: #E63946;
-            background: rgba(230, 57, 70, 0.08);
+            color: #B81D24;
+            background: rgba(184, 29, 36, 0.08);
             border-radius: 8px;
             padding: 2px 6px;
         """)
@@ -470,14 +479,14 @@ class MainWindow(QMainWindow):
 
         name_lay = QVBoxLayout()
         name_lay.setSpacing(0)
-        lbl_name = QLabel("Servicios PESA")
-        lbl_name.setStyleSheet(
-            "font-size: 14px; font-weight: 700; color: #1E293B; letter-spacing: -0.2px;"
+        self._lbl_brand_name = QLabel("Servicios PESA")
+        self._lbl_brand_name.setStyleSheet(
+            "font-size: 14px; font-weight: 700; color: #1D1D1F; letter-spacing: -0.2px;"
         )
-        lbl_sub = QLabel("ERP Metrológico")
-        lbl_sub.setStyleSheet("font-size: 9px; color: #94A3B8; letter-spacing: 0.5px; font-weight: 600;")
-        name_lay.addWidget(lbl_name)
-        name_lay.addWidget(lbl_sub)
+        self._lbl_brand_sub = QLabel("ERP Metrológico")
+        self._lbl_brand_sub.setStyleSheet("font-size: 9px; color: #86868B; letter-spacing: 0.5px; font-weight: 600;")
+        name_lay.addWidget(self._lbl_brand_name)
+        name_lay.addWidget(self._lbl_brand_sub)
         brand_row.addLayout(name_lay, stretch=1)
         bl.addLayout(brand_row)
         lay.addWidget(brand)
@@ -486,20 +495,14 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._hsep())
         lay.addSpacing(8)
 
-        # ── Navegación — se crean TODOS los botones desde el inicio ───────────
-        # IMPORTANTE: crear TODOS los items aunque el rol actual no tenga
-        # permiso para algunos. La visibilidad se controla en
-        # aplicar_permisos_rol() que se invoca justo después.
-        # Si solo se crean los permitidos en el primer login, los botones
-        # "faltantes" nunca existirán en self._nav_buttons y no podrán
-        # mostrarse cuando el usuario cambie a un rol con más privilegios.
-        sec_nav = QLabel("MENÚ")
-        sec_nav.setObjectName("sidebar_section")
-        sec_nav.setStyleSheet(
-            "color: #94A3B8; font-size: 9px; font-weight: 700; "
-            "letter-spacing: 1.5px; padding-left: 16px; padding-bottom: 4px;"
+        # ── Navegación ────────────────────────────────────────────────────────
+        self._sec_nav_label = QLabel("MENÚ")
+        self._sec_nav_label.setObjectName("sidebar_section")
+        self._sec_nav_label.setStyleSheet(
+            "color: #86868B; font-size: 10px; font-weight: 700; "
+            "letter-spacing: 1.2px; padding-left: 16px; padding-bottom: 4px;"
         )
-        lay.addWidget(sec_nav)
+        lay.addWidget(self._sec_nav_label)
 
         for key, icon, label, tip, roles in _NAV_ITEMS:
             icon_char = _ICON_MAP.get(key, icon)
@@ -508,11 +511,11 @@ class MainWindow(QMainWindow):
             self._nav_buttons[key] = btn
             self._page_meta[key] = (icon_char, label, tip)
             lay.addWidget(btn)
-            btn.setVisible(False)   # ocultar por defecto; aplicar_permisos_rol los mostrará
+            btn.setVisible(False)
 
         lay.addStretch()
         lay.addWidget(self._hsep())
-        lay.addSpacing(6)
+        lay.addSpacing(8)
 
         # ── Chip de usuario ────────────────────────────────────────────────────
         self._user_chip = UserChip()
@@ -529,11 +532,12 @@ class MainWindow(QMainWindow):
         lay.addWidget(chip_wrapper)
 
         # ── Botón Cerrar Sesión ────────────────────────────────────────────────
-        btn_logout = QPushButton("🚪  Cerrar Sesión")
-        btn_logout.setObjectName("btn_logout")
-        btn_logout.setFixedHeight(32)
-        btn_logout.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_logout.setStyleSheet("""
+        self._btn_logout = QPushButton("🚪  Cerrar Sesión")
+        self._btn_logout.setObjectName("btn_logout")
+        self._btn_logout.setFixedHeight(32)
+        self._btn_logout.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_logout.setToolTip("")  # Sin tooltip invasivo
+        self._btn_logout.setStyleSheet("""
             QPushButton#btn_logout {
                 background: transparent;
                 color: #86868B;
@@ -544,30 +548,98 @@ class MainWindow(QMainWindow):
                 padding: 0 8px;
             }
             QPushButton#btn_logout:hover {
-                background: rgba(230,57,70,0.06);
-                color: #E63946;
-                border-color: rgba(230,57,70,0.3);
+                background: #FCE8E9;
+                color: #B81D24;
+                border-color: rgba(184, 29, 36, 0.3);
             }
             QPushButton#btn_logout:pressed {
-                background: rgba(230,57,70,0.12);
+                background: rgba(184, 29, 36, 0.12);
             }
         """)
-        btn_logout.clicked.connect(self._on_cerrar_sesion)
-        lay.addWidget(btn_logout)
+        self._btn_logout.clicked.connect(self._on_cerrar_sesion)
+        lay.addWidget(self._btn_logout)
 
-        # ── Indicador de conexión ──────────────────────────────────────────────
+        # ── Indicador de conexión + Versión (sin superposición) ───────────────
         self._conn_indicator = ConnectionIndicator()
         lay.addWidget(self._conn_indicator)
 
-        # Versión
-        ver = QLabel(f"v{APP_VERSION}")
-        ver.setStyleSheet("color: #C7C7CC; font-size: 9px; padding-left: 16px; padding-bottom: 8px;")
-        lay.addWidget(ver)
+        lay.addSpacing(2)
+
+        # Versión — color muy discreto, no compite con el resto
+        self._ver_label = QLabel(f"v{APP_VERSION}")
+        self._ver_label.setStyleSheet(
+            "color: #C7C7CC; font-size: 9px; padding-left: 16px; padding-bottom: 10px;"
+        )
+        lay.addWidget(self._ver_label)
 
         return sb
 
+    def _toggle_sidebar(self) -> None:
+        """Alterna el menú lateral entre modo expandido (220px), riel compacto (54px) y oculto (0px) con QPropertyAnimation."""
+        if not hasattr(self, "_sidebar_mode"):
+            self._sidebar_mode = 0  # 0: 220px, 1: 54px, 2: 0px
+
+        self._sidebar_mode = (self._sidebar_mode + 1) % 3
+        
+        target_w = 220
+        if self._sidebar_mode == 1:
+            target_w = 54
+        elif self._sidebar_mode == 2:
+            target_w = 0
+
+        self._sidebar_collapsed = (self._sidebar_mode != 0)
+        is_hidden = (self._sidebar_mode == 2)
+
+        start_w = self._sidebar.width()
+
+        # Animación QPropertyAnimation sobre maximumWidth y minimumWidth
+        self._anim_group = QParallelAnimationGroup(self)
+
+        anim_max = QPropertyAnimation(self._sidebar, b"maximumWidth")
+        anim_max.setDuration(220)
+        anim_max.setStartValue(start_w)
+        anim_max.setEndValue(target_w)
+        anim_max.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+        anim_min = QPropertyAnimation(self._sidebar, b"minimumWidth")
+        anim_min.setDuration(220)
+        anim_min.setStartValue(start_w)
+        anim_min.setEndValue(target_w)
+        anim_min.setEasingCurve(QEasingCurve.Type.InOutCubic)
+
+        self._anim_group.addAnimation(anim_max)
+        self._anim_group.addAnimation(anim_min)
+
+        # Actualizar visibilidad
+        if is_hidden:
+            self._sidebar.setVisible(False)
+        else:
+            self._sidebar.setVisible(True)
+
+        if hasattr(self, "_lbl_brand_name"):
+            self._lbl_brand_name.setVisible(not self._sidebar_collapsed)
+        if hasattr(self, "_lbl_brand_sub"):
+            self._lbl_brand_sub.setVisible(not self._sidebar_collapsed)
+        if hasattr(self, "_sec_nav_label"):
+            self._sec_nav_label.setVisible(not self._sidebar_collapsed)
+        if hasattr(self, "_ver_label"):
+            self._ver_label.setVisible(not self._sidebar_collapsed)
+        if hasattr(self, "_btn_logout"):
+            self._btn_logout.setText("🚪" if self._sidebar_collapsed else "🚪  Cerrar Sesión")
+        if hasattr(self, "_user_chip"):
+            self._user_chip.set_collapsed(self._sidebar_collapsed)
+        if hasattr(self, "_conn_indicator"):
+            self._conn_indicator.set_collapsed(self._sidebar_collapsed)
+
+        for btn in self._nav_buttons.values():
+            btn.set_collapsed(self._sidebar_collapsed)
+
+        self._anim_group.start()
+
     def _build_header(self) -> QWidget:
-        """Header mínimo con breadcrumb y título de página actual."""
+        """Header con breadcrumb y título de página actual.
+        SIN botón hamburguesa duplicado — el toggle del sidebar vive en la marca lateral.
+        """
         header = QWidget()
         header.setObjectName("content_header")
         header.setFixedHeight(52)
@@ -579,20 +651,19 @@ class MainWindow(QMainWindow):
         """)
 
         lay = QHBoxLayout(header)
-        lay.setContentsMargins(28, 0, 24, 0)
-        lay.setSpacing(12)
+        lay.setContentsMargins(20, 0, 24, 0)
+        lay.setSpacing(10)
 
-        # Breadcrumb
+        # Breadcrumb — sin botón ☰ duplicado
         self._lbl_breadcrumb = QLabel("Dashboard")
         self._lbl_breadcrumb.setObjectName("breadcrumb")
         self._lbl_breadcrumb.setStyleSheet(
-            "color: #86868B; font-size: 12px; font-weight: 500;"
+            "color: #86868B; font-size: 13px; font-weight: 600;"
         )
-
         lay.addWidget(self._lbl_breadcrumb)
         lay.addStretch()
 
-        # Indicador de sesión (pequeño)
+        # Indicador de sesión (pequeño chip)
         if _HAS_SESSION and _session and _session.is_authenticated:
             _role_labels = {
                 "admin":      "ADMINISTRADOR",
@@ -737,7 +808,7 @@ class MainWindow(QMainWindow):
             # Actualizar breadcrumb
             meta = self._page_meta.get(key, ("", key.replace("_", " ").title(), ""))
             self._lbl_breadcrumb.setText(f"{meta[0]}  {meta[1]}")
-            self.statusBar().showMessage(f"Módulo: {meta[1]}")
+            self.statusBar().showMessage("Listo")
             logger.debug("Navegado a: %s", key)
 
     def _create_page(self, key: str) -> Optional[QWidget]:
@@ -762,6 +833,10 @@ class MainWindow(QMainWindow):
                 if hasattr(w, "navegar_a"):
                     w.navegar_a.connect(self._navigate)
                 return w
+
+            elif key == "mi_firma":
+                from ui.widgets.firma_widget import FirmaWidget
+                return FirmaWidget()
 
             elif key == "nueva_os":
                 _cls = OSFormWidget

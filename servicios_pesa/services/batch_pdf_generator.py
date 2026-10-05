@@ -168,12 +168,8 @@ class BatchPdfGenerator:
         c.setStrokeColor(_GRAY); c.setLineWidth(0.5)
         c.line(self.ML, top - 42, self.ML + self.CW, top - 42)
 
-        # ── Título + Folio ────────────────────────────────────────────────────
+        # ── Título + Folio (Área central limpia) ─────────────────────────────
         ty = top - 46
-        c.setFillColor(_BLACK); c.setFont("Helvetica-Bold", 28)
-        c.drawString(self.ML, ty - 28, "TOMA DE DATOS")
-        c.setFont("Helvetica", 9); c.setFillColor(_GRAY_DK)
-        c.drawString(self.ML, ty - 40, "PESAJE SISTEMAS Y AUTOMATIZACIÓN")
 
         # Caja folio
         fx = self.ML + self.CW - 148

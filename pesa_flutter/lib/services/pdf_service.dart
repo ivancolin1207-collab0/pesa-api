@@ -1063,6 +1063,19 @@ class PdfService {
   // ══════════════════════════════════════════════════════════════════════════
   // GUARDAR EN DISCO
   // ══════════════════════════════════════════════════════════════════════════
+  /// Escribe a un temporal y lo renombra sobre el destino: si la escritura
+  /// falla, el PDF existente permanece intacto (nunca se borra antes).
+  Future<void> _writeAtomic(File target, Uint8List bytes) async {
+    final tmp = File('${target.path}.tmp');
+    await tmp.writeAsBytes(bytes, flush: true, mode: FileMode.write);
+    try {
+      await tmp.rename(target.path);
+    } catch (_) {
+      await target.writeAsBytes(bytes, flush: true, mode: FileMode.write);
+      try { await tmp.delete(); } catch (_) {}
+    }
+  }
+
   Future<String> _saveToDisk(Map<String, dynamic> osData, Uint8List bytes) async {
     final dir = await getApplicationDocumentsDirectory();
     final pdfDir = Directory('${dir.path}/pdfs');
@@ -1075,24 +1088,13 @@ class PdfService {
     final fileName = safeFolio.startsWith('OS-') ? '$safeFolio.pdf' : 'OS-$safeFolio.pdf';
     final filePath = '${pdfDir.path}/$fileName';
     final file = File(filePath);
-    if (await file.exists()) {
-      try {
-        await file.delete();
-      } catch (e) {
-        print("Aviso al eliminar PDF anterior: $e");
-      }
-    }
-    await file.writeAsBytes(bytes, flush: true, mode: FileMode.write);
+    await _writeAtomic(file, bytes);
 
     // Guardar también copia en Pesa_PDFs para compatibilidad con versiones previas
     try {
       final legacyDir = Directory('${dir.path}/Pesa_PDFs');
       if (!await legacyDir.exists()) await legacyDir.create(recursive: true);
-      final legacyFile = File('${legacyDir.path}/$fileName');
-      if (await legacyFile.exists()) {
-        await legacyFile.delete();
-      }
-      await legacyFile.writeAsBytes(bytes, flush: true, mode: FileMode.write);
+      await _writeAtomic(File('${legacyDir.path}/$fileName'), bytes);
     } catch (_) {}
 
     return filePath;

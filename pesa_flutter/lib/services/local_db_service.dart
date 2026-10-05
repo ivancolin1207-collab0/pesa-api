@@ -389,12 +389,40 @@ class LocalDbService {
     final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
     final validCols = info.map((r) => r['name'] as String).toSet();
 
+    // [PULL PROTEGIDO] Folios trabajados localmente (cerrados, sucios, con PDF,
+    // mediciones o firmas) NUNCA se reemplazan con REPLACE: se fusionan vía upsertOs.
+    final protegidos = <String>{};
+    try {
+      final locales = await db.rawQuery('''
+        SELECT folio_os FROM ordenes_servicio
+        WHERE COALESCE(is_dirty, 0) = 1
+           OR UPPER(COALESCE(estado, '')) IN ('CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA')
+           OR UPPER(COALESCE(estatus, '')) IN ('CERRADO','CERRADA','COMPLETADA')
+           OR COALESCE(pdf_path_local, '') <> ''
+           OR COALESCE(pdf_b64_local, '') <> ''
+           OR COALESCE(rep_json, '') NOT IN ('', '[]', 'null')
+           OR COALESCE(exac_json, '') NOT IN ('', '[]', 'null')
+           OR COALESCE(firma_cliente, '') <> ''
+      ''');
+      for (final r in locales) {
+        final f = (r['folio_os'] as String? ?? '').trim();
+        if (f.isNotEmpty) protegidos.add(f);
+      }
+    } catch (e) {
+      debugPrint('[LocalDB] insertOrdenesBatch: no se pudo leer protegidos ($e)');
+    }
+    final pendientesMerge = <Map<String, dynamic>>[];
+
     int count = 0;
     await db.transaction((txn) async {
       final batch = txn.batch();
       for (final raw in listaJson) {
         final folio = (raw['folio_os'] ?? raw['folio'])?.toString().trim();
         if (folio == null || folio.isEmpty) continue;
+        if (protegidos.contains(folio)) {
+          pendientesMerge.add(raw);
+          continue;
+        }
 
         final cliente   = (raw['cliente'] ?? raw['cliente_nombre'] ?? '').toString();
         final sucursal  = (raw['sucursal'] ?? raw['sucursal_nombre'] ?? '').toString();
@@ -483,7 +511,32 @@ class LocalDbService {
       }
       await batch.commit(noResult: true);
     });
+
+    // Fusión protegida (REGLA 1 de upsertOs) para órdenes trabajadas en la tablet.
+    for (final raw in pendientesMerge) {
+      try {
+        if (await upsertOs(raw)) count++;
+      } catch (e) {
+        debugPrint('[LocalDB] Merge protegido falló para ${raw['folio_os']}: $e');
+      }
+    }
     return count;
+  }
+
+  /// Reconciliación única: re-encola para PUSH las órdenes cerradas en la tablet
+  /// (con PDF) de los últimos [dias] días. El reenvío es idempotente en el servidor.
+  /// No borra ni modifica PDFs: solo marca is_dirty / pdf_subido.
+  Future<int> marcarCerradasParaReenvio({int dias = 30}) async {
+    final db = await _ensureInit();
+    final desde = DateTime.now().subtract(Duration(days: dias)).toIso8601String().substring(0, 10);
+    return await db.rawUpdate('''
+      UPDATE ordenes_servicio
+         SET is_dirty = 1, pdf_subido = 0, sync_status = 'PENDIENTE'
+       WHERE (UPPER(COALESCE(estado, '')) IN ('CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA')
+              OR UPPER(COALESCE(estatus, '')) IN ('CERRADO','CERRADA','COMPLETADA'))
+         AND (COALESCE(pdf_path_local, '') <> '' OR COALESCE(pdf_b64_local, '') <> '')
+         AND COALESCE(fecha, '') >= ?
+    ''', [desde]);
   }
 
   static String? appDocDirPath;
@@ -821,6 +874,19 @@ class LocalDbService {
             safeUpdate['sync_status'] = 'SINCRONIZADO';
           }
 
+          // AUTO-REPARACIÓN DE DESFASE: la tablet la tiene Cerrada (con PDF) pero
+          // PostgreSQL sigue en 'Proceso' → re-encolar para PUSH en el próximo ciclo.
+          final srvEstado = (row['estado']?.toString() ?? '').trim().toUpperCase();
+          final srvCerrada = {'CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','ESCANEADA','FIRMADA'}.contains(srvEstado)
+              || srvEstado.startsWith('CANCEL');
+          if (statusIsClosed && (hasPdfPath || hasPdfB64 || pdfDiskExists) && !srvCerrada) {
+            debugPrint('[LocalDB] ♻️ Desfase detectado en $folio (local=Cerrado, servidor=$srvEstado) → re-encolando PUSH');
+            safeUpdate['is_dirty'] = 1;
+            safeUpdate['pdf_subido'] = 0;
+            safeUpdate['sync_status'] = 'PENDIENTE';
+            safeUpdate['is_synced'] = 0;
+          }
+
           await db.update(
             'ordenes_servicio',
             safeUpdate,
@@ -997,6 +1063,142 @@ class LocalDbService {
     }
 
     return [];
+  }
+
+  // ── Repositorio de Calibraciones (consulta read-only) ──────────────────────
+  // Tabla SEPARADA de `ordenes_servicio`: la purga de órdenes de otros técnicos
+  // y el PUSH de sincronización nunca la tocan, por lo que el repositorio no
+  // altera las órdenes activas ni puede generar registros "dirty".
+
+  bool _calibTableReady = false;
+
+  Future<void> _ensureCalibracionesTable(Database db) async {
+    if (_calibTableReady) return;
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS calibraciones_consulta (
+        folio_os        TEXT PRIMARY KEY,
+        fecha           TEXT,
+        cliente         TEXT,
+        sucursal        TEXT,
+        tecnico         TEXT,
+        id_tecnico      INTEGER,
+        tipo_servicio   TEXT,
+        estado          TEXT,
+        estatus         TEXT,
+        modalidad       TEXT,
+        tiene_pdf       INTEGER DEFAULT 0,
+        pdf_path_local  TEXT,
+        updated_at      TEXT
+      )
+    ''');
+    _calibTableReady = true;
+  }
+
+  /// Reemplaza la caché del repositorio con lo devuelto por el servidor,
+  /// preservando la ruta local del PDF ya descargado de cada folio.
+  Future<void> guardarCalibracionesConsulta(List<Map<String, dynamic>> rows) async {
+    final db = await _ensureInit();
+    await _ensureCalibracionesTable(db);
+    await db.transaction((txn) async {
+      final prev = await txn.query('calibraciones_consulta',
+          columns: ['folio_os', 'pdf_path_local']);
+      final paths = <String, String>{
+        for (final r in prev)
+          if ((r['pdf_path_local'] ?? '').toString().isNotEmpty)
+            r['folio_os'].toString(): r['pdf_path_local'].toString(),
+      };
+      await txn.delete('calibraciones_consulta');
+      for (final r in rows) {
+        final folio = (r['folio_os'] ?? '').toString().trim();
+        if (folio.isEmpty) continue;
+        final tienePdf = r['tiene_pdf'];
+        await txn.insert(
+          'calibraciones_consulta',
+          {
+            'folio_os': folio,
+            'fecha': r['fecha']?.toString(),
+            'cliente': r['cliente']?.toString(),
+            'sucursal': r['sucursal']?.toString(),
+            'tecnico': r['tecnico']?.toString(),
+            'id_tecnico': int.tryParse('${r['id_tecnico'] ?? ''}'),
+            'tipo_servicio': r['tipo_servicio']?.toString(),
+            'estado': r['estado']?.toString(),
+            'estatus': r['estatus']?.toString(),
+            'modalidad': r['modalidad']?.toString(),
+            'tiene_pdf': (tienePdf == true || tienePdf == 1 || tienePdf == '1') ? 1 : 0,
+            'pdf_path_local': paths[folio],
+            'updated_at': r['updated_at']?.toString(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
+  }
+
+  /// Registra la ruta local del PDF descargado para un folio del repositorio.
+  Future<void> setCalibracionPdfPath(String folio, String path) async {
+    final db = await _ensureInit();
+    await _ensureCalibracionesTable(db);
+    await db.update('calibraciones_consulta', {'pdf_path_local': path},
+        where: 'folio_os = ?', whereArgs: [folio]);
+  }
+
+  /// Órdenes de calibración/ajuste concluidas (Cerrado / Completado) para
+  /// consulta. Combina la caché del servidor con las propias órdenes cerradas
+  /// locales (la caché tiene prioridad por folio). Solo lectura.
+  Future<List<Map<String, dynamic>>> getCalibracionesFinalizadasConsulta() async {
+    final db = await _ensureInit();
+    await _ensureCalibracionesTable(db);
+
+    final cache = await db.rawQuery('''
+      SELECT * FROM calibraciones_consulta
+      WHERE (
+          LOWER(COALESCE(tipo_servicio, '')) LIKE '%calibraci%'
+          OR LOWER(COALESCE(tipo_servicio, '')) LIKE '%ajuste%'
+        )
+    ''');
+
+    final propias = await db.rawQuery('''
+      SELECT folio_os, fecha, cliente, sucursal, tecnico, id_tecnico,
+             tipo_servicio, estado, estatus, modalidad, pdf_path_local,
+             CASE WHEN COALESCE(pdf_path_local, '') != ''
+                       OR COALESCE(pdf_subido, 0) = 1 THEN 1 ELSE 0 END AS tiene_pdf,
+             updated_at
+      FROM ordenes_servicio
+      WHERE (
+          LOWER(COALESCE(estatus, '')) IN ('cerrado', 'cerrada', 'completado', 'completada')
+          OR UPPER(COALESCE(estado, '')) IN ('CERRADO', 'CERRADA', 'COMPLETADA',
+             'COMPLETADO', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'ESCANEADA', 'FIRMADA')
+        )
+        AND (
+          LOWER(COALESCE(tipo_servicio, '')) LIKE '%calibraci%'
+          OR LOWER(COALESCE(tipo_servicio, '')) LIKE '%ajuste%'
+        )
+    ''');
+
+    final byFolio = <String, Map<String, dynamic>>{};
+    for (final r in propias) {
+      byFolio[r['folio_os'].toString()] = Map<String, dynamic>.from(r);
+    }
+    for (final r in cache) {
+      final folio = r['folio_os'].toString();
+      final merged = Map<String, dynamic>.from(r);
+      final local = byFolio[folio];
+      if ((merged['pdf_path_local'] ?? '').toString().isEmpty && local != null) {
+        merged['pdf_path_local'] = local['pdf_path_local'];
+      }
+      byFolio[folio] = merged;
+    }
+
+    final list = byFolio.values.toList();
+    list.sort((a, b) {
+      final fa = (a['fecha'] ?? '').toString();
+      final fb = (b['fecha'] ?? '').toString();
+      final c = fb.compareTo(fa);
+      if (c != 0) return c;
+      return (b['folio_os'] ?? '').toString().compareTo((a['folio_os'] ?? '').toString());
+    });
+    return list;
   }
 
   /// Purga órdenes locales que pertenezcan a otros técnicos (para garantizar privacidad y filtrado estricto).
@@ -1509,6 +1711,25 @@ class LocalDbService {
     }
   }
 
+  /// Actualiza únicamente el campo `sync_status` de una OS por folio.
+  /// Útil para marcar PENDIENTE_RESET o SINCRONIZADO tras un reset remoto.
+  Future<void> updateSyncStatus(String folio, String syncStatus) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return;
+    try {
+      final db = await _ensureInit();
+      await db.update(
+        'ordenes_servicio',
+        {'sync_status': syncStatus, 'updated_at': DateTime.now().toIso8601String()},
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [folioKey, folioKey],
+      );
+      debugPrint('[LocalDB] updateSyncStatus: $folioKey → $syncStatus');
+    } catch (e) {
+      debugPrint('[LocalDB] Error en updateSyncStatus para $folioKey: $e');
+    }
+  }
+
   Future<void> updatePdfPathLocal(String folio, String path) async {
     final folioKey = folio.trim();
     if (folioKey.isEmpty) return;
@@ -1801,6 +2022,42 @@ class LocalDbService {
     }
   }
 
+  /// Marca un formato físico (OS/Remisión/Revisión de Celdas) como recibido
+  /// tras subir su escaneo: modalidad FISICO, estatus Cerrado, PDF local.
+  Future<void> marcarFormatoFisicoRecibido(
+    String folio, {
+    required String pdfPath,
+    String estado = 'Cerrado',
+  }) async {
+    final db = await _ensureInit();
+    final f = folio.trim();
+    if (f.isEmpty) return;
+    final data = <String, dynamic>{
+      'estado': estado.toUpperCase(),
+      'estatus': 'Cerrado',
+      'modalidad': 'FISICO',
+      'pdf_path_local': pdfPath,
+      'pdf_subido': 1,
+      'sync_status': 'SINCRONIZADO',
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+      final cols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+      final sanitized = <String, dynamic>{};
+      data.forEach((k, v) {
+        if (cols.contains(k.toLowerCase())) sanitized[k] = v;
+      });
+      if (sanitized.isEmpty) return;
+      final where = cols.contains('folio') ? 'folio_os = ? OR folio = ?' : 'folio_os = ?';
+      final args = cols.contains('folio') ? [f, f] : [f];
+      await db.update('ordenes_servicio', sanitized, where: where, whereArgs: args);
+      debugPrint('[LocalDB] marcarFormatoFisicoRecibido OK para $f');
+    } catch (e) {
+      debugPrint('[LocalDB] Error en marcarFormatoFisicoRecibido para $f: $e');
+    }
+  }
+
   /// Obtiene órdenes completadas/cerradas cuyo PDF aún no se ha confirmado subido al servidor.
   Future<List<Map<String, dynamic>>> getOsParaSubirPdf() async {
     final db = await _ensureInit();
@@ -1833,6 +2090,19 @@ class LocalDbService {
          OR (sync_check_status IN ('RECIBIDA_TABLET', 'PENDIENTE_SUBIDA', 'ASIGNADA') 
              AND (estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA') OR estatus = 'Cerrado'))
     ''');
+  }
+
+  /// Retorna todas las OSs que tengan un `sync_status` específico.
+  /// Usado por [SyncService._pushResetsPendientes] para reintentar
+  /// resets que fallaron por red offline.
+  Future<List<Map<String, dynamic>>> getOrdenesConSyncStatus(String status) async {
+    final db = await _ensureInit();
+    return await db.query(
+      'ordenes_servicio',
+      columns: ['local_id', 'folio_os', 'folio', 'sync_status'],
+      where: 'sync_status = ?',
+      whereArgs: [status],
+    );
   }
 
   Future<List<Map<String, dynamic>>> getFirmasPendientes() async {
