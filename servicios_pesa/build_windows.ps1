@@ -20,8 +20,13 @@ try {
     Write-Host "    Sin conexion a Render (el exe se genera igual)" -ForegroundColor DarkYellow
 }
 
-# 3. Activar .env de produccion
+# 3. Activar .env de produccion (archivo LOCAL, nunca versionado en Git)
 Write-Host "[3/6] Activando .env de produccion (Render)..." -ForegroundColor Yellow
+if (-not (Test-Path ".env.production")) {
+    Write-Host "ERROR: falta servicios_pesa\.env.production (no se sube a GitHub)." -ForegroundColor Red
+    Write-Host "       Copia .env.example a .env.production y llena las credenciales reales." -ForegroundColor Red
+    exit 1
+}
 if (Test-Path ".env") { Copy-Item ".env" ".env.local_backup" -Force }
 Copy-Item ".env.production" ".env" -Force
 Write-Host "    .env -> Render PostgreSQL OK" -ForegroundColor Green

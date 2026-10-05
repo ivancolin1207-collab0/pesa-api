@@ -33,7 +33,7 @@ passwords_to_try = [
     ("postgres",  "password"),
     ("postgres",  "1234"),
     # Intentar tambien con el usuario de la app si tiene permisos DDL
-    ("pesa_app",  "PesaApp2026!"),
+    ("pesa_app",  os.getenv("PESA_DB_PASSWORD", "")),
 ]
 
 print(f"Leyendo SQL: {SQL_PATH}")

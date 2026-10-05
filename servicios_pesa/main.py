@@ -60,17 +60,16 @@ def _bootstrap() -> None:
     try:
         from dotenv import load_dotenv as _load_dotenv
 
-        _candidatos = []
+        _candidatos = [_app_data / ".env"]   # 1. configuración del usuario
         if _frozen:
-            _meipass_path = Path(sys._MEIPASS)  # type: ignore[attr-defined]
-            _candidatos.append(_meipass_path / ".env")
             _exe_dir = Path(sys.executable).parent
-            _candidatos.append(_exe_dir / ".env")
+            _candidatos.append(_exe_dir / ".env")                       # 2. junto al .exe
             # macOS: fuera del .app (al lado del bundle en el DMG o en /Applications)
             _candidatos.append(_exe_dir.parent.parent.parent / ".env")
-        _candidatos.append(_app_data / ".env")
-        _candidatos.append(Path(__file__).resolve().parent.parent / ".env")
+        _candidatos.append(Path(__file__).resolve().parent.parent / ".env")  # 3. dev
         _candidatos.append(Path(os.getcwd()) / ".env")
+        if _frozen:
+            _candidatos.append(Path(sys._MEIPASS) / ".env")  # type: ignore[attr-defined]  # 4. bundle
 
         for _ruta in _candidatos:
             if _ruta.exists():

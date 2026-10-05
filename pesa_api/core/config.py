@@ -73,7 +73,7 @@ else:
     _DB_PORT     = int(os.getenv("PESA_DB_PORT", "5432"))
     _DB_NAME     = os.getenv("PESA_DB_NAME",     "servicios_pesa")
     _DB_USER     = os.getenv("PESA_DB_USER",     "pesa_app")
-    _DB_PASSWORD = os.getenv("PESA_DB_PASSWORD", "PesaApp2026!")
+    _DB_PASSWORD = os.getenv("PESA_DB_PASSWORD", "")  # nunca hardcodear
     _DB_DSN      = (
         f"postgresql://{_DB_USER}:{_DB_PASSWORD}"
         f"@{_DB_HOST}:{_DB_PORT}/{_DB_NAME}"

@@ -2,10 +2,17 @@
 .venv_mac/
 __pycache__/
 *.pyc
-.env
-.env.local_backup
 build/
 .dart_tool/
+
+# ── Credenciales y configuración local (NUNCA versionar) ─────────────────────
+.env
+.env.*
+*.env
+config_local.py
+# Única plantilla permitida (sin valores reales)
+!.env.example
+!**/.env.example
 
 # Artefactos de compilación / distribución (se publican en Releases, no en git)
 dist/

@@ -47,26 +47,34 @@ APP_DATA_DIR: Path = get_app_data_dir()
 def _cargar_env() -> None:
     """
     Busca el archivo .env en múltiples ubicaciones en orden de prioridad:
-      1. Junto al binario empaquetado (sys._MEIPASS, si estamos frozen)
-      2. En el directorio de la aplicación o desarrollo (servicios_pesa / os.getcwd)
-      3. En APP_DATA_DIR (configuración del usuario en Application Support / AppData)
+      1. APP_DATA_DIR (configuración del usuario en Application Support / AppData)
+      2. Junto al ejecutable instalado (Windows: carpeta del .exe; macOS: fuera del .app)
+      3. Directorio de desarrollo (servicios_pesa / os.getcwd)
+      4. Dentro del bundle PyInstaller (sys._MEIPASS) — solo valores por defecto
+    La configuración externa gana sobre la empaquetada para poder rotar
+    credenciales sin recompilar ni redistribuir el ejecutable.
     """
     candidatos: list[Path] = []
+    frozen = getattr(sys, "frozen", False)
 
-    # ─ 1. Frozen (PyInstaller / macOS .app bundle) ──────────────────────────
-    if getattr(sys, "frozen", False):
-        candidatos.append(Path(sys._MEIPASS) / ".env")  # type: ignore[attr-defined]
+    # ─ 1. Configuración del usuario ──────────────────────────────────────────
+    candidatos.append(APP_DATA_DIR / ".env")
+
+    # ─ 2. Junto al ejecutable instalado ──────────────────────────────────────
+    if frozen:
         exe_dir = Path(sys.executable).parent
         candidatos.append(exe_dir / ".env")
-        candidatos.append(exe_dir.parent.parent / ".env")  # fuera del .app
+        candidatos.append(exe_dir.parent.parent.parent / ".env")  # junto al .app
+        candidatos.append(exe_dir.parent.parent / ".env")         # dentro del .app
 
-    # ─ 2. Directorio de trabajo y código fuente ──────────────────────────────
+    # ─ 3. Directorio de trabajo y código fuente ──────────────────────────────
     candidatos.append(Path(__file__).parent / ".env")
     candidatos.append(Path(os.getcwd()) / ".env")
     candidatos.append(Path(__file__).parent.parent / ".env")
 
-    # ─ 3. Configuración del usuario ──────────────────────────────────────────
-    candidatos.append(APP_DATA_DIR / ".env")
+    # ─ 4. Bundle PyInstaller (valores empaquetados) ──────────────────────────
+    if frozen:
+        candidatos.append(Path(sys._MEIPASS) / ".env")  # type: ignore[attr-defined]
 
     for ruta in candidatos:
         if ruta.exists():

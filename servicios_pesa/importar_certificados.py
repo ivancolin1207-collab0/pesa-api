@@ -44,7 +44,7 @@ DB_CONFIG = {
     "port":     5432,
     "database": "servicios_pesa",
     "user":     "pesa_app",
-    "password": "PesaApp2026!",
+    "password": os.getenv("PESA_DB_PASSWORD", ""),
     "connect_timeout": 10,
     "options":  "-c search_path=public",
 }
