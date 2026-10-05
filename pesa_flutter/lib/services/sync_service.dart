@@ -407,13 +407,16 @@ class SyncService extends ChangeNotifier {
       String? updatedAfter;
       if (conteoLocal > 0) {
         updatedAfter = prefs.getString('last_sync_timestamp');
-        // v3.1.20+76: backfill único de tipo_servicio. Las OS descargadas por
-        // /api/v1/ordenes antes de este fix llegaron sin tipo → forzar 1 PULL completo.
-        if (!(prefs.getBool('backfill_tipo_servicio_v76') ?? false)) {
-          debugPrint('[SYNC] Backfill v76: PULL completo para recuperar tipo_servicio');
+        // v3.1.20+77: auto-reparación de tipo_servicio. Si alguna OS local quedó
+        // sin tipo (descargada antes del fix de /api/v1/ordenes), forzar PULL
+        // completo en cada ciclo hasta que todas lo tengan. Sustituye la bandera
+        // única de v76, que se consumía aunque el servidor aún no tuviera el fix.
+        await LocalDbService.instance.parchearTiposServicioConocidos();
+        final sinTipo = await LocalDbService.instance.contarSinTipoServicio();
+        if (sinTipo > 0) {
+          debugPrint('[SYNC] $sinTipo OS sin tipo_servicio → PULL completo');
           updatedAfter = null;
           await prefs.remove('last_sync_timestamp');
-          await prefs.setBool('backfill_tipo_servicio_v76', true);
         }
       } else {
         // SI LOCAL ESTÁ EN 0, OBLIGAR CARGA COMPLETA

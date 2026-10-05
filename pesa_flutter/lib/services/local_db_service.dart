@@ -33,6 +33,7 @@ class LocalDbService {
       sucursal               TEXT,
       tecnico                TEXT,
       tipo_servicio          TEXT,
+      id_tipo_servicio       INTEGER,
       tipo_instrumento       TEXT,
       aplica_excentricidad   INTEGER DEFAULT 1,
       num_celdas_camionera   INTEGER DEFAULT 0,
@@ -194,6 +195,7 @@ class LocalDbService {
             'geometria_excentricidad': 'TEXT',
             'unidad_medida': "TEXT DEFAULT 'kg'",
             'firma_tecnico_descargada': 'TEXT',
+            'id_tipo_servicio': 'INTEGER',
             'pdf_b64_local': 'TEXT',
             'id_lote': 'TEXT',
             'rango_lote': 'TEXT',
@@ -427,7 +429,8 @@ class LocalDbService {
         final cliente   = (raw['cliente'] ?? raw['cliente_nombre'] ?? '').toString();
         final sucursal  = (raw['sucursal'] ?? raw['sucursal_nombre'] ?? '').toString();
         final tecnico   = (raw['tecnico'] ?? raw['tecnico_nombre'] ?? '').toString();
-        final tipoSvc   = (raw['tipo_servicio'] ?? raw['tipo_servicio_nombre'] ?? '').toString();
+        final tipoSvc   = (raw['tipo_servicio'] ?? raw['tipo_servicio_nombre'] ?? raw['tipo'] ?? '').toString().trim();
+        final idTipoSvc = _toIntOrNull(raw['id_tipo_servicio'] ?? raw['tipo_servicio_id']);
         final direccion = (raw['direccion'] ?? raw['direccion_cliente'] ?? raw['sucursal_direccion'] ?? raw['planta'] ?? '').toString();
 
         final rawIdTec = _toIntOrNull(raw['id_tecnico'] ?? raw['tecnico_id']);
@@ -459,6 +462,7 @@ class LocalDbService {
           'direccion':         direccion,
           'tecnico':           tecnico,
           'tipo_servicio':     tipoSvc,
+          if (idTipoSvc != null && idTipoSvc > 0) 'id_tipo_servicio': idTipoSvc,
           'tipo_instrumento':  raw['tipo_instrumento']?.toString(),
           'aplica_excentricidad': _toBoolInt(raw['aplica_excentricidad']),
           'num_celdas_camionera': _toInt(raw['num_celdas_camionera'], 0),
@@ -706,7 +710,8 @@ class LocalDbService {
     final sucursal = (data['sucursal_nombre'] ?? data['sucursal'] ?? '').toString();
     final cliente  = (data['cliente'] ?? data['cliente_nombre'] ?? '').toString();
     final tecnico  = (data['tecnico'] ?? data['tecnico_nombre'] ?? '').toString();
-    final tipoSvc  = (data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? '').toString();
+    final tipoSvc  = (data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? data['tipo'] ?? '').toString().trim();
+    final idTipoSvc = _toIntOrNull(data['id_tipo_servicio'] ?? data['tipo_servicio_id']);
     final direccion = (data['direccion'] ?? data['direccion_cliente'] ?? data['sucursal_direccion'] ?? data['planta'] ?? '').toString();
 
     final rawIdTec = _toIntOrNull(data['id_tecnico'] ?? data['tecnico_id']);
@@ -736,6 +741,7 @@ class LocalDbService {
       'direccion':         direccion,
       'tecnico':           tecnico,
       'tipo_servicio':     tipoSvc,
+      if (idTipoSvc != null && idTipoSvc > 0) 'id_tipo_servicio': idTipoSvc,
       'tipo_instrumento':  data['tipo_instrumento']?.toString(),
       // [FIX] aplica_excentricidad puede llegar como bool (JSON), int o String
       'aplica_excentricidad': _toBoolInt(data['aplica_excentricidad']),
@@ -843,6 +849,7 @@ class LocalDbService {
             'direccion': direccion.isNotEmpty ? direccion : ex['direccion'],
             'tecnico': tecnico.isNotEmpty ? tecnico : ex['tecnico'],
             'tipo_servicio': tipoSvc.isNotEmpty ? tipoSvc : ex['tipo_servicio'],
+            if (idTipoSvc != null && idTipoSvc > 0) 'id_tipo_servicio': idTipoSvc,
             if (idTecnicoFinal != null && idTecnicoFinal > 0) 'id_tecnico': idTecnicoFinal,
 
             // Mantener intactos: estatus 'Cerrado', estado local, mediciones, firmas y pdf_path_local
@@ -1748,6 +1755,101 @@ class LocalDbService {
     } catch (e) {
       debugPrint('[LocalDB] Error en updatePdfPathLocal: $e');
     }
+  }
+
+  /// Borra TODAS las copias locales del PDF de un folio (caché estancada).
+  /// Retorna cuántos archivos se eliminaron.
+  Future<int> invalidarPdfLocal(String folio, {String? pathExtra}) async {
+    final f = folio.trim();
+    if (f.isEmpty) return 0;
+    final safe = f.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    int borrados = 0;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final candidatos = <String>{
+        '${dir.path}/$safe.pdf',
+        '${dir.path}/pdfs/$safe.pdf',
+        '${dir.path}/pdfs/OS-$safe.pdf',
+        '${dir.path}/Pesa_PDFs/$safe.pdf',
+        '${dir.path}/Pesa_PDFs/OS-$safe.pdf',
+        '${dir.path}/PESA_Tablet/PDF_OS/$safe.pdf',
+        if (pathExtra != null && pathExtra.trim().isNotEmpty) pathExtra.trim(),
+      };
+      for (final p in candidatos) {
+        try {
+          final file = File(p);
+          if (await file.exists()) {
+            await file.delete();
+            borrados++;
+          }
+        } catch (_) {}
+      }
+    } catch (e) {
+      debugPrint('[LocalDB] invalidarPdfLocal($f) error: $e');
+    }
+    debugPrint('[LocalDB] invalidarPdfLocal($f): $borrados archivo(s) eliminados');
+    return borrados;
+  }
+
+  /// Reemplaza la ruta y el Base64 del PDF local por la versión fresca del servidor.
+  Future<void> reemplazarPdfLocal(String folio, String path, String? pdfB64) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return;
+    try {
+      final db = await _ensureInit();
+      await db.update(
+        'ordenes_servicio',
+        {
+          'pdf_path_local': path,
+          if (pdfB64 != null && pdfB64.isNotEmpty) 'pdf_b64_local': pdfB64,
+        },
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [folioKey, folioKey],
+      );
+    } catch (e) {
+      debugPrint('[LocalDB] reemplazarPdfLocal($folioKey) error: $e');
+    }
+  }
+
+  /// Número de órdenes locales sin tipo de servicio (para forzar PULL completo).
+  Future<int> contarSinTipoServicio() async {
+    try {
+      final db = await _ensureInit();
+      return Sqflite.firstIntValue(await db.rawQuery(
+            "SELECT COUNT(*) FROM ordenes_servicio WHERE TRIM(COALESCE(tipo_servicio, '')) = ''",
+          )) ??
+          0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Respaldo para órdenes históricas que quedaron sin tipo en SQLite.
+  /// Valores confirmados en PostgreSQL (cat_tipo_servicio). Solo rellena vacíos.
+  static const Map<String, (int, String)> _tiposConocidos = {
+    'OS-26-688': (6, 'Ajuste + Inspección'),
+    'OS-26-689': (7, 'Calibración + Ajuste + Inspección'),
+    'OS-26-696': (4, 'Calibración + Ajuste'),
+    'OS-26-697': (4, 'Calibración + Ajuste'),
+    'OS-26-698': (4, 'Calibración + Ajuste'),
+  };
+
+  Future<int> parchearTiposServicioConocidos() async {
+    int n = 0;
+    try {
+      final db = await _ensureInit();
+      for (final e in _tiposConocidos.entries) {
+        n += await db.rawUpdate(
+          "UPDATE ordenes_servicio SET tipo_servicio = ?, id_tipo_servicio = ? "
+          "WHERE (folio_os = ? OR folio = ?) AND TRIM(COALESCE(tipo_servicio, '')) = ''",
+          [e.value.$2, e.value.$1, e.key, e.key],
+        );
+      }
+    } catch (e) {
+      debugPrint('[LocalDB] parchearTiposServicioConocidos error: $e');
+    }
+    if (n > 0) debugPrint('[LocalDB] Tipo de servicio restaurado en $n orden(es) histórica(s)');
+    return n;
   }
 
   /// Consolida el cierre de una OS con PDF local y firmas en un solo UPDATE.

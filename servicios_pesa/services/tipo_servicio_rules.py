@@ -291,7 +291,8 @@ def _clasificar(nombre: Optional[str], id_tipo: Optional[int] = None,
 
 def etiqueta_corta(nombre: Optional[str], id_tipo: Optional[int] = None,
                    folio: Optional[str] = None) -> str:
-    """CCA + DVE · CCA + Ajuste · CCA · DVE + Ajuste · DVE · Ajuste · Remisión · Revisión · Sin tipo"""
+    """Calibración + Ajuste + Inspección · Ajuste + Inspección · Calibración + Ajuste · Ajuste
+    (CCA = Calibración, DVE = Inspección). También Remisión · Revisión · Sin tipo."""
     fmt, cca, dve, aju = _clasificar(nombre, id_tipo, folio)
     if fmt == "rma":
         return "Remisión"
@@ -299,13 +300,14 @@ def etiqueta_corta(nombre: Optional[str], id_tipo: Optional[int] = None,
         return "Revisión"
     if fmt == "sin":
         return "Sin tipo"
-    if cca and dve:
-        return "CCA + DVE"
+    partes = []
     if cca:
-        return "CCA + Ajuste" if aju else "CCA"
+        partes.append("Calibración")
+    if aju or (not cca and not dve):
+        partes.append("Ajuste")
     if dve:
-        return "DVE + Ajuste" if aju else "DVE"
-    return "Ajuste"
+        partes.append("Inspección")
+    return " + ".join(partes)
 
 
 def etiqueta_larga(nombre: Optional[str], id_tipo: Optional[int] = None,
@@ -318,10 +320,11 @@ def etiqueta_larga(nombre: Optional[str], id_tipo: Optional[int] = None,
         return "Revisión de Celdas — sin CCA ni DVE"
     if fmt == "sin":
         return "Tipo de servicio no asignado"
+    corta = etiqueta_corta(nombre, id_tipo, folio)
     if cca and dve:
-        return "Calibración + Inspección (CCA + DVE)"
+        return f"{corta} (CCA + DVE)"
     if cca:
-        return "Calibración + Ajuste (CCA)" if aju else "Calibración (CCA)"
+        return f"{corta} (CCA)"
     if dve:
-        return "Ajuste + Inspección (DVE)" if aju else "Inspección (DVE)"
+        return f"{corta} (DVE)"
     return "Ajuste — sin CCA ni DVE"

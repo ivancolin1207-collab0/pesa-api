@@ -277,6 +277,8 @@ class _OsListScreenState extends State<OsListScreen> {
         isAdmin: false,
       );
     }
+    // Órdenes históricas que quedaron sin tipo de servicio → rellenar (solo vacíos)
+    await LocalDbService.instance.parchearTiposServicioConocidos();
 
     List<Map<String, dynamic>> filterMem(List<Map<String, dynamic>> src) {
       if (!isTecnico) return src;
@@ -490,15 +492,63 @@ class _OsListScreenState extends State<OsListScreen> {
   }
 
   // ── Actions Handlers ──────────────────────────────────────────────────────
+  /// True si la OS ya fue enviada al servidor (su PDF oficial vive en PostgreSQL).
+  static bool _pdfEnServidor(Map<String, dynamic> os) {
+    final st = (os['sync_check_status'] ?? '').toString().toUpperCase();
+    return st == 'SUBIDA_SERVIDOR' || st == 'AUDITADA_ADMIN' || st == 'ABIERTO' ||
+        os['pdf_subido'] == 1 || os['pdf_subido'] == true;
+  }
+
+  /// Invalida la caché local y descarga la versión VIGENTE del PDF del servidor
+  /// (p. ej. tras regenerar la firma en backend). Retorna la ruta nueva o null.
+  Future<String?> _refrescarPdfDesdeServidor(Map<String, dynamic> os) async {
+    final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
+    if (folio.isEmpty || !_pdfEnServidor(os)) return null;
+    try {
+      final conn = await Connectivity().checkConnectivity();
+      if (!conn.any((r) => r != ConnectivityResult.none)) return null;
+      final bytes = await ApiService.instance.fetchPdfFresco(folio);
+      if (bytes == null) return null;
+
+      // 1. Borrar explícitamente TODAS las copias viejas estancadas
+      await LocalDbService.instance.invalidarPdfLocal(
+        folio, pathExtra: os['pdf_path_local']?.toString());
+
+      // 2. Guardar la versión fresca
+      final dir = await getApplicationDocumentsDirectory();
+      final pdfDir = Directory('${dir.path}/pdfs');
+      if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
+      final safe = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+      final file = File('${pdfDir.path}/$safe.pdf');
+      await file.writeAsBytes(bytes, flush: true, mode: FileMode.write);
+      try {
+        final legacy = Directory('${dir.path}/Pesa_PDFs');
+        if (!await legacy.exists()) await legacy.create(recursive: true);
+        await File('${legacy.path}/$safe.pdf').writeAsBytes(bytes, flush: true, mode: FileMode.write);
+      } catch (_) {}
+
+      // 3. Actualizar SQLite (ruta + Base64) para que el fallback offline también sea el nuevo
+      await LocalDbService.instance.reemplazarPdfLocal(folio, file.path, base64Encode(bytes));
+      try { os['pdf_path_local'] = file.path; } catch (_) {}
+      debugPrint('[Dashboard] PDF fresco de $folio → ${file.path} (${bytes.length} B)');
+      return file.path;
+    } catch (e) {
+      debugPrint('[Dashboard] No se pudo refrescar PDF de $folio: $e');
+      return null;
+    }
+  }
+
   Future<void> _abrirPdf(BuildContext context, Map<String, dynamic> os) async {
     final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     final ctx = context;
     if (folio.isEmpty) return;
 
-    String? pathToOpen;
+    // Si la OS ya está en el servidor, SIEMPRE mostrar la versión vigente
+    // (evita abrir una copia local estancada con firma antigua).
+    String? pathToOpen = await _refrescarPdfDesdeServidor(os);
 
     final memPath = (os['pdf_path_local'] as String? ?? '').trim();
-    if (memPath.isNotEmpty && File(memPath).existsSync() && File(memPath).lengthSync() > 500) {
+    if (pathToOpen == null && memPath.isNotEmpty && File(memPath).existsSync() && File(memPath).lengthSync() > 500) {
       pathToOpen = memPath;
     }
 
@@ -670,13 +720,16 @@ class _OsListScreenState extends State<OsListScreen> {
   Future<void> _descargarPdfConNomenclatura(BuildContext context, Map<String, dynamic> os) async {
     final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     if (folio.isEmpty) return;
+    // Borrar la copia vieja y bajar la vigente del servidor antes de exportar
+    final fresco = await _refrescarPdfDesdeServidor(os);
+    if (!context.mounted) return;
     await PdfStorageService.instance.exportToDownloads(
       folio: folio,
       cliente: (os['cliente'] ?? os['razon_social'] ?? os['cliente_nombre'])?.toString(),
       idIndicador: (os['id_indicador'] ?? os['id_instrumento'] ?? os['no_serie'])?.toString(),
       tipoServicio: (os['tipo_servicio'] ?? os['servicio'])?.toString(),
       osData: os,
-      sourcePdfPath: os['pdf_path_local'] as String?,
+      sourcePdfPath: fresco ?? os['pdf_path_local'] as String?,
       context: context,
     );
   }
@@ -718,11 +771,17 @@ class _OsListScreenState extends State<OsListScreen> {
             ),
             icon: const Icon(Icons.edit_outlined, size: 16),
             label: const Text('Reabrir y Editar'),
-            onPressed: () {
+            onPressed: () async {
               Navigator.of(dialogCtx).pop();
+              // Eliminar la copia vieja estancada del PDF (el Base64 en SQLite
+              // queda como respaldo hasta que se genere el nuevo).
+              await LocalDbService.instance.invalidarPdfLocal(
+                folio, pathExtra: os['pdf_path_local']?.toString());
               final editOs = Map<String, dynamic>.from(os);
               editOs['estado'] = 'Proceso';
-              try { os['estado'] = 'Proceso'; } catch (_) {}
+              editOs.remove('pdf_path_local');
+              try { os['estado'] = 'Proceso'; os.remove('pdf_path_local'); } catch (_) {}
+              if (!context.mounted) return;
               context.push('/captura/${os['local_id']}', extra: editOs);
             },
           ),
@@ -2616,7 +2675,7 @@ class _TableHeader extends StatelessWidget {
             flex: 3,
             child: _TH('CLIENTE / SUCURSAL'),
           ),
-          SizedBox(width: 108, child: _TH('TIPO SERVICIO')),
+          SizedBox(width: 150, child: _TH('TIPO SERVICIO')),
           SizedBox(width: 90, child: _TH('MODALIDAD')),
           SizedBox(width: 100, child: _TH('ESTATUS')),
           SizedBox(width: 90, child: _TH('SYNC')),
@@ -2771,8 +2830,8 @@ class _OsRow extends StatelessWidget {
                   ],
                 ),
               ),
-              // [TIPO SERVICIO] (108px)
-              SizedBox(width: 108, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: os))),
+              // [TIPO SERVICIO] (150px)
+              SizedBox(width: 150, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: os))),
               // [MODALIDAD] (90px)
               SizedBox(
                 width: 90,
@@ -3001,7 +3060,7 @@ class _LoteRowState extends State<_LoteRow> {
                     softWrap: true,
                   ),
                 ),
-                SizedBox(width: 108, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: first))),
+                SizedBox(width: 150, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: first))),
                 const SizedBox(width: 90, child: Text('Lote', style: TextStyle(fontSize: 11))),
                 const SizedBox(width: 100, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
                 const SizedBox(width: 90),
@@ -3036,21 +3095,31 @@ class TipoServicioBadge extends StatelessWidget {
 
   static int? _int(dynamic v) => v is int ? v : int.tryParse(v?.toString() ?? '');
 
+  static String? _nombre(Map<String, dynamic> os) {
+    for (final k in const ['tipo_servicio', 'tipo_servicio_nombre', 'tipo']) {
+      final v = os[k]?.toString().trim() ?? '';
+      if (v.isNotEmpty) return v;
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final rules = getRules(
       id: _int(os['id_tipo_servicio']) ?? _int(os['tipo_servicio_id']),
-      nombre: os['tipo_servicio']?.toString(),
+      nombre: _nombre(os),
       folio: (os['folio_os'] ?? os['folio'])?.toString(),
     );
     final label = rules.etiquetaCorta;
-    final (Color fg, Color bg) = switch (label) {
-      'CCA + DVE'             => (const Color(0xFF3730A3), const Color(0xFFEEF2FF)), // índigo
-      'CCA + Ajuste' || 'CCA' => (const Color(0xFF1D4ED8), const Color(0xFFEFF6FF)), // azul
-      'DVE + Ajuste' || 'DVE' => (const Color(0xFF0F766E), const Color(0xFFF0FDFA)), // verde azulado
-      'Ajuste'                => (const Color(0xFF4B5563), const Color(0xFFF3F4F6)), // gris
-      'Sin tipo'              => (const Color(0xFFB45309), const Color(0xFFFFFBEB)), // ámbar
-      _                       => (const Color(0xFF6B7280), const Color(0xFFF9FAFB)),
+    final (Color fg, Color bg) = switch (rules) {
+      _ when rules.sinTipo              => (const Color(0xFFB45309), const Color(0xFFFFFBEB)), // ámbar
+      _ when rules.esRemision || rules.esRevisionCeldas
+                                        => (const Color(0xFF6B7280), const Color(0xFFF9FAFB)),
+      _ when rules.pideCca && rules.pideDve
+                                        => (const Color(0xFF3730A3), const Color(0xFFEEF2FF)), // índigo
+      _ when rules.pideCca              => (const Color(0xFF1D4ED8), const Color(0xFFEFF6FF)), // azul
+      _ when rules.pideDve              => (const Color(0xFF0F766E), const Color(0xFFF0FDFA)), // verde azulado
+      _                                 => (const Color(0xFF4B5563), const Color(0xFFF3F4F6)), // gris (Ajuste)
     };
     return Tooltip(
       message: rules.etiquetaLarga,
@@ -3070,7 +3139,8 @@ class _Badge extends StatelessWidget {
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
         child: Text(
           label,
-          style: TextStyle(fontSize: 10, color: fg, fontWeight: FontWeight.w600),
+          style: TextStyle(fontSize: 10, color: fg, fontWeight: FontWeight.w600, height: 1.2),
+          maxLines: 2,
           overflow: TextOverflow.ellipsis,
         ),
       );

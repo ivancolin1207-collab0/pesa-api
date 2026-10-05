@@ -564,7 +564,12 @@ class ApiService {
     for (final tryUrl in urlsToTry.toSet()) {
       try {
         debugPrint('[API] downloadPdf intentando → $tryUrl');
-        final resp = await _getWithRetry(Uri.parse(tryUrl), timeout: _syncTimeout);
+        final baseTry = Uri.parse(tryUrl);
+        final noCacheUri = baseTry.replace(queryParameters: {
+          ...baseTry.queryParameters,
+          't': DateTime.now().millisecondsSinceEpoch.toString(),
+        });
+        final resp = await _getWithRetry(noCacheUri, timeout: _syncTimeout);
         if (resp.statusCode == 200 && resp.bodyBytes.length > 500) {
           final docDir = await getApplicationDocumentsDirectory();
           final pdfDir = Directory('${docDir.path}/pdfs');
@@ -593,6 +598,42 @@ class ApiService {
     }
 
     throw HttpException('PDF download failed: HTTP ${lastResp?.statusCode ?? 404}');
+  }
+
+  /// Descarga en memoria la versión VIGENTE del PDF de un folio, evitando
+  /// cualquier caché HTTP (query param `t` + cabeceras no-cache).
+  /// Retorna null si el servidor no tiene PDF o no hay conexión.
+  Future<Uint8List?> fetchPdfFresco(String folio) async {
+    final f = folio.trim();
+    if (f.isEmpty) return null;
+    final t = DateTime.now().millisecondsSinceEpoch;
+    final urls = <String>[
+      '$_baseUrl/api/v1/ordenes/$f/download-pdf?t=$t',
+      '$_baseUrl/api/v1/pdf/$f?t=$t',
+      '$_baseUrl/api/v1/os/$f/download-pdf?t=$t',
+      '$_baseUrl/api/v1/ordenes/$f/pdf?t=$t',
+    ];
+    final headers = <String, String>{
+      ..._authHeaders,
+      'Cache-Control': 'no-cache, no-store, max-age=0',
+      'Pragma': 'no-cache',
+    };
+    for (final u in urls) {
+      try {
+        var resp = await http.get(Uri.parse(u), headers: headers).timeout(_syncTimeout);
+        if (resp.statusCode == 401 &&
+            await silentRefresh().timeout(const Duration(seconds: 15), onTimeout: () => false)) {
+          resp = await http.get(Uri.parse(u), headers: {...headers, ..._authHeaders}).timeout(_syncTimeout);
+        }
+        final b = resp.bodyBytes;
+        final esPdf = b.length > 500 && b[0] == 0x25 && b[1] == 0x50 && b[2] == 0x44 && b[3] == 0x46; // %PDF
+        debugPrint('[API] fetchPdfFresco $u → ${resp.statusCode} (${b.length} B, pdf=$esPdf)');
+        if (resp.statusCode == 200 && esPdf) return b;
+      } catch (e) {
+        debugPrint('[API] fetchPdfFresco error $u: $e');
+      }
+    }
+    return null;
   }
 
   // ── Upload Escaneo (multipart) ────────────────────────────────────────────

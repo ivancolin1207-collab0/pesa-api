@@ -95,11 +95,12 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         "synced":       ("#E8F5E9", "#2E7D32", "#C8E6C9"),
         "pending":      ("#FFF3E0", "#E65100", "#FFE0B2"),
         # Tipos de servicio — etiquetas homologadas con la tablet (match exacto)
-        "cca + dve":    ("#EEF2FF", "#3730A3", "#C7D2FE"),
-        "cca + ajuste": ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
-        "cca":          ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
-        "dve + ajuste": ("#F0FDFA", "#0F766E", "#99F6E4"),
-        "dve":          ("#F0FDFA", "#0F766E", "#99F6E4"),
+        "calibración + ajuste + inspección": ("#EEF2FF", "#3730A3", "#C7D2FE"),
+        "calibración + inspección":          ("#EEF2FF", "#3730A3", "#C7D2FE"),
+        "calibración + ajuste":              ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
+        "calibración":                       ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
+        "ajuste + inspección":               ("#F0FDFA", "#0F766E", "#99F6E4"),
+        "inspección":                        ("#F0FDFA", "#0F766E", "#99F6E4"),
         "sin tipo":     ("#FFFBEB", "#B45309", "#FDE68A"),
         "remisión":     ("#F5F5F7", "#48484A", "#E5E5EA"),
         "revisión":     ("#F5F5F7", "#48484A", "#E5E5EA"),
@@ -1825,9 +1826,9 @@ class DashboardWidget(QWidget):
         header.setSectionResizeMode(self._COL_TECNICO,  QHeaderView.ResizeMode.Fixed)
         table.setColumnWidth(self._COL_TECNICO, 130)
 
-        # Col 6 — Tipo Servicio / badge (fijo 130px)
+        # Col 6 — Tipo Servicio / badge (fijo 200px, etiquetas descriptivas)
         header.setSectionResizeMode(self._COL_SERVICIO, QHeaderView.ResizeMode.Fixed)
-        table.setColumnWidth(self._COL_SERVICIO, 130)
+        table.setColumnWidth(self._COL_SERVICIO, 200)
 
         # Col 7 — Modalidad / badge (fijo 100px)
         header.setSectionResizeMode(self._COL_MODAL,    QHeaderView.ResizeMode.Fixed)

@@ -69,16 +69,23 @@ class ServiceRules {
     return n.contains('ajuste') || n.contains('mantenim');
   }
 
-  /// Etiqueta corta homologada para badges de Dashboard (tablet / escritorio).
-  ///   CCA + DVE · DVE + Ajuste · CCA + Ajuste · Ajuste
+  /// True si el servicio incluye Ajuste / Mantenimiento.
+  bool get tieneAjuste => _mencionaAjuste;
+
+  /// Etiqueta homologada para badges de Dashboard (tablet / escritorio).
+  /// Se arma con los componentes reales (CCA = Calibración, DVE = Inspección):
+  ///   Calibración + Ajuste + Inspección · Ajuste + Inspección ·
+  ///   Calibración + Ajuste · Ajuste (y variantes sin Ajuste).
   String get etiquetaCorta {
     if (esRemision) return 'Remisión';
     if (esRevisionCeldas) return 'Revisión';
     if (sinTipo) return 'Sin tipo';
-    if (pideCca && pideDve) return 'CCA + DVE';
-    if (pideCca) return _mencionaAjuste ? 'CCA + Ajuste' : 'CCA';
-    if (pideDve) return _mencionaAjuste ? 'DVE + Ajuste' : 'DVE';
-    return 'Ajuste';
+    final partes = <String>[
+      if (pideCca) 'Calibración',
+      if (_mencionaAjuste || (!pideCca && !pideDve)) 'Ajuste',
+      if (pideDve) 'Inspección',
+    ];
+    return partes.join(' + ');
   }
 
   /// Etiqueta descriptiva para el banner de captura.
@@ -86,9 +93,9 @@ class ServiceRules {
     if (esRemision) return 'Remisión — sin CCA ni DVE';
     if (esRevisionCeldas) return 'Revisión de Celdas — sin CCA ni DVE';
     if (sinTipo) return 'Tipo de servicio no recibido — sincroniza la orden';
-    if (pideCca && pideDve) return 'Calibración + Inspección (CCA + DVE)';
-    if (pideCca) return _mencionaAjuste ? 'Calibración + Ajuste (CCA)' : 'Calibración (CCA)';
-    if (pideDve) return _mencionaAjuste ? 'Ajuste + Inspección (DVE)' : 'Inspección (DVE)';
+    if (pideCca && pideDve) return '$etiquetaCorta (CCA + DVE)';
+    if (pideCca) return '$etiquetaCorta (CCA)';
+    if (pideDve) return '$etiquetaCorta (DVE)';
     return 'Ajuste — sin CCA ni DVE';
   }
 

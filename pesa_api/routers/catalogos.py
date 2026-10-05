@@ -504,12 +504,24 @@ async def adjuntar_escaneo(
     summary="Descargar PDF de una OS (alias download-pdf)",
     tags=["Catálogos", "Órdenes de Servicio"],
 )
+@router.get(
+    "/pdf/{folio}",
+    summary="Descargar PDF vigente de una OS (alias corto, sin caché)",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
 async def download_pdf_orden(
     folio: str,
     db=Depends(get_db),
 ):
     from pesa_api.routers.os_router import download_pdf
-    return await download_pdf(folio_os=folio, db=db)
+    resp = await download_pdf(folio_os=folio, db=db)
+    # Siempre la versión vigente (p. ej. tras re-estampar la firma del técnico)
+    try:
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+    except Exception:
+        pass
+    return resp
 
 
 # ── Subida directa de PDF generado desde la tablet ───────────────────────────
