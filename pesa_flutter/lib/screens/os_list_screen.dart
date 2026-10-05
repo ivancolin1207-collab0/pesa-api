@@ -16,6 +16,7 @@ import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
 import '../services/pdf_storage_service.dart';
 import '../services/sync_service.dart';
+import '../services/tipo_servicio_rules.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
 import '../widgets/sync_check_badge.dart';
@@ -2615,6 +2616,7 @@ class _TableHeader extends StatelessWidget {
             flex: 3,
             child: _TH('CLIENTE / SUCURSAL'),
           ),
+          SizedBox(width: 108, child: _TH('TIPO SERVICIO')),
           SizedBox(width: 90, child: _TH('MODALIDAD')),
           SizedBox(width: 100, child: _TH('ESTATUS')),
           SizedBox(width: 90, child: _TH('SYNC')),
@@ -2759,12 +2761,9 @@ class _OsRow extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       maxLines: 1,
                     ),
-                    if ((os['sucursal'] ?? '').toString().isNotEmpty || (os['tipo_servicio'] ?? '').toString().isNotEmpty)
+                    if ((os['sucursal'] ?? '').toString().isNotEmpty)
                       Text(
-                        [
-                          if ((os['sucursal'] ?? '').toString().isNotEmpty) os['sucursal']!.toString(),
-                          if ((os['tipo_servicio'] ?? '').toString().isNotEmpty) os['tipo_servicio']!.toString(),
-                        ].join(' · '),
+                        os['sucursal']!.toString(),
                         style: const TextStyle(fontSize: 10, color: _kTextSec),
                         overflow: TextOverflow.ellipsis,
                         maxLines: 1,
@@ -2772,6 +2771,8 @@ class _OsRow extends StatelessWidget {
                   ],
                 ),
               ),
+              // [TIPO SERVICIO] (108px)
+              SizedBox(width: 108, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: os))),
               // [MODALIDAD] (90px)
               SizedBox(
                 width: 90,
@@ -3000,6 +3001,7 @@ class _LoteRowState extends State<_LoteRow> {
                     softWrap: true,
                   ),
                 ),
+                SizedBox(width: 108, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: first))),
                 const SizedBox(width: 90, child: Text('Lote', style: TextStyle(fontSize: 11))),
                 const SizedBox(width: 100, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
                 const SizedBox(width: 90),
@@ -3027,6 +3029,36 @@ class _LoteRowState extends State<_LoteRow> {
 }
 
 // ── Shared Helpers ─────────────────────────────────────────────────────────
+/// Badge homologado de tipo de servicio (mismas etiquetas que escritorio).
+class TipoServicioBadge extends StatelessWidget {
+  final Map<String, dynamic> os;
+  const TipoServicioBadge({super.key, required this.os});
+
+  static int? _int(dynamic v) => v is int ? v : int.tryParse(v?.toString() ?? '');
+
+  @override
+  Widget build(BuildContext context) {
+    final rules = getRules(
+      id: _int(os['id_tipo_servicio']) ?? _int(os['tipo_servicio_id']),
+      nombre: os['tipo_servicio']?.toString(),
+      folio: (os['folio_os'] ?? os['folio'])?.toString(),
+    );
+    final label = rules.etiquetaCorta;
+    final (Color fg, Color bg) = switch (label) {
+      'CCA + DVE'             => (const Color(0xFF3730A3), const Color(0xFFEEF2FF)), // índigo
+      'CCA + Ajuste' || 'CCA' => (const Color(0xFF1D4ED8), const Color(0xFFEFF6FF)), // azul
+      'DVE + Ajuste' || 'DVE' => (const Color(0xFF0F766E), const Color(0xFFF0FDFA)), // verde azulado
+      'Ajuste'                => (const Color(0xFF4B5563), const Color(0xFFF3F4F6)), // gris
+      'Sin tipo'              => (const Color(0xFFB45309), const Color(0xFFFFFBEB)), // ámbar
+      _                       => (const Color(0xFF6B7280), const Color(0xFFF9FAFB)),
+    };
+    return Tooltip(
+      message: rules.etiquetaLarga,
+      child: _Badge(label: label, fg: fg, bg: bg),
+    );
+  }
+}
+
 class _Badge extends StatelessWidget {
   final String label;
   final Color fg, bg;

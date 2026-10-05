@@ -260,13 +260,29 @@ async def get_ordenes(
             COALESCE(cl.razon_social, os.cliente, '') AS cliente,
             COALESCE(cl.razon_social, os.cliente, '') AS cliente_nombre,
             COALESCE(tc.nombre_completo, '') AS tecnico,
-            COALESCE(tc.nombre_completo, '') AS tecnico_nombre
+            COALESCE(tc.nombre_completo, '') AS tecnico_nombre,
+            os.id_tipo_servicio,
+            COALESCE(ts.nombre, '') AS tipo_servicio,
+            os.sucursal_id,
+            COALESCE(cs.nombre_sucursal, '') AS sucursal_nombre
         FROM ordenes_servicio os
         LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
         LEFT JOIN cat_tecnicos tc ON os.id_tecnico = tc.id
+        LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
+        LEFT JOIN cliente_sucursales cs ON os.sucursal_id = cs.id
         WHERE (os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')
     """
     params = []
+
+    # Privacidad: un técnico solo recibe sus propias OS (mismo criterio que /sync/pull).
+    _role = str(current_user.get("role", "")).lower()
+    _es_admin = any(k in _role for k in ("admin", "logist", "recep", "gerencia", "direcc")) \
+        or str(current_user.get("username", "")).strip().lower() == "ivancolin1207"
+    if not _es_admin and current_user.get("id_tecnico"):
+        params.append(int(current_user["id_tecnico"]))
+        query += f" AND os.id_tecnico = ${len(params)}"
+        tecnico_nombre = None
+        tecnico_id = None
 
     # Filtro flexible y tolerante a mayúsculas/minúsculas y espacios:
     if tecnico_nombre and str(tecnico_nombre).strip():

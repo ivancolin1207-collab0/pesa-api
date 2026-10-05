@@ -1969,23 +1969,31 @@ class _ServicioBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final nombreReal = (tipoServicioNombre ?? '').trim();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF3F4F6),
+        color: rules.sinTipo ? const Color(0xFFFFFBEB) : const Color(0xFFF3F4F6),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(color: rules.sinTipo ? const Color(0xFFFCD34D) : const Color(0xFFE5E7EB)),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Icon(Icons.rule, size: 18, color: _kRed),
+        Icon(rules.sinTipo ? Icons.warning_amber_rounded : Icons.rule, size: 18,
+            color: rules.sinTipo ? const Color(0xFFD97706) : _kRed),
         const SizedBox(width: 10),
         Expanded(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Tipo de Servicio: ${tipoServicioNombre ?? rules.nombre}',
+              'Tipo de Servicio: ${rules.etiquetaLarga}',
               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
             ),
+            if (nombreReal.isNotEmpty && nombreReal != rules.etiquetaLarga)
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text('Asignado por logística: $nombreReal',
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
+              ),
             const SizedBox(height: 6),
             Wrap(spacing: 6, children: [
               // Solo mostrar badges de lo que APLICA
@@ -1997,7 +2005,9 @@ class _ServicioBanner extends StatelessWidget {
                 _Badge('CCA requerido', const Color(0xFF1D4ED8)),
               if (rules.tieneInspeccion)
                 _Badge('Hologramas + DVE', const Color(0xFF7C3AED)),
-              if (rules.esSoloAjuste && !rules.esRemision && !rules.esRevisionCeldas)
+              if (rules.sinTipo)
+                _Badge('Sin tipo — sincroniza antes de capturar', const Color(0xFFD97706))
+              else if (rules.esSoloAjuste && !rules.esRemision && !rules.esRevisionCeldas)
                 _Badge('Solo Ajuste — sin CCA ni DVE', Colors.grey),
             ]),
           ],

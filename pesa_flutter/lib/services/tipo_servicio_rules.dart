@@ -61,6 +61,37 @@ class ServiceRules {
   bool get esRemision          => formato == FormatoDocumento.remision;
   bool get esRevisionCeldas    => formato == FormatoDocumento.revisionCeldas;
 
+  /// True si la OS llegó sin tipo de servicio (ni nombre ni ID).
+  bool get sinTipo             => tipoServicioId == 0 && formato == FormatoDocumento.ordenServicio;
+
+  bool get _mencionaAjuste {
+    final n = _normalize(nombre);
+    return n.contains('ajuste') || n.contains('mantenim');
+  }
+
+  /// Etiqueta corta homologada para badges de Dashboard (tablet / escritorio).
+  ///   CCA + DVE · DVE + Ajuste · CCA + Ajuste · Ajuste
+  String get etiquetaCorta {
+    if (esRemision) return 'Remisión';
+    if (esRevisionCeldas) return 'Revisión';
+    if (sinTipo) return 'Sin tipo';
+    if (pideCca && pideDve) return 'CCA + DVE';
+    if (pideCca) return _mencionaAjuste ? 'CCA + Ajuste' : 'CCA';
+    if (pideDve) return _mencionaAjuste ? 'DVE + Ajuste' : 'DVE';
+    return 'Ajuste';
+  }
+
+  /// Etiqueta descriptiva para el banner de captura.
+  String get etiquetaLarga {
+    if (esRemision) return 'Remisión — sin CCA ni DVE';
+    if (esRevisionCeldas) return 'Revisión de Celdas — sin CCA ni DVE';
+    if (sinTipo) return 'Tipo de servicio no recibido — sincroniza la orden';
+    if (pideCca && pideDve) return 'Calibración + Inspección (CCA + DVE)';
+    if (pideCca) return _mencionaAjuste ? 'Calibración + Ajuste (CCA)' : 'Calibración (CCA)';
+    if (pideDve) return _mencionaAjuste ? 'Ajuste + Inspección (DVE)' : 'Inspección (DVE)';
+    return 'Ajuste — sin CCA ni DVE';
+  }
+
   @override
   String toString() =>
       'ServiceRules(id=$tipoServicioId, nombre=$nombre, formato=${formato.name}, '

@@ -94,9 +94,18 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         "pendiente":    ("#FFF3E0", "#E65100", "#FFE0B2"),
         "synced":       ("#E8F5E9", "#2E7D32", "#C8E6C9"),
         "pending":      ("#FFF3E0", "#E65100", "#FFE0B2"),
-        # Tipos de servicio
+        # Tipos de servicio — etiquetas homologadas con la tablet (match exacto)
+        "cca + dve":    ("#EEF2FF", "#3730A3", "#C7D2FE"),
+        "cca + ajuste": ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
+        "cca":          ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
+        "dve + ajuste": ("#F0FDFA", "#0F766E", "#99F6E4"),
+        "dve":          ("#F0FDFA", "#0F766E", "#99F6E4"),
+        "sin tipo":     ("#FFFBEB", "#B45309", "#FDE68A"),
+        "remisión":     ("#F5F5F7", "#48484A", "#E5E5EA"),
+        "revisión":     ("#F5F5F7", "#48484A", "#E5E5EA"),
+        # Tipos de servicio (texto libre heredado)
         "calibracion":  ("#E8F5E9", "#1B5E20", "#C8E6C9"),
-        "ajuste":       ("#FFF3E0", "#E65100", "#FFE0B2"),
+        "ajuste":       ("#F3F4F6", "#4B5563", "#E5E7EB"),
         "inspeccion":   ("#E3F2FD", "#0D47A1", "#BBDEFB"),
         "revision":     ("#F5F5F7", "#48484A", "#E5E5EA"),
         "refacciones":  ("#F5F5F7", "#48484A", "#E5E5EA"),
@@ -2682,7 +2691,17 @@ class DashboardWidget(QWidget):
         item.setText(self._COL_TECNICO,  tecnico)
 
         # Col 6-9: badges (texto para el delegate)
-        item.setText(self._COL_SERVICIO, servicio)
+        # Col 6: TIPO SERVICIO homologado (CCA + DVE / DVE + Ajuste / CCA + Ajuste / Ajuste)
+        try:
+            from services.tipo_servicio_rules import etiqueta_corta, etiqueta_larga
+            _folio_ref = "" if is_batch_parent else folio_text
+            item.setText(self._COL_SERVICIO, etiqueta_corta(servicio, folio=_folio_ref))
+            item.setToolTip(
+                self._COL_SERVICIO,
+                f"{etiqueta_larga(servicio, folio=_folio_ref)}\nAsignado: {servicio or '—'}",
+            )
+        except Exception:
+            item.setText(self._COL_SERVICIO, servicio)
         item.setText(self._COL_MODAL,    modal_label)
         item.setText(self._COL_ESTADO,   estado_label)
 

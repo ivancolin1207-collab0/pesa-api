@@ -12,6 +12,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:path_provider/path_provider.dart';
 import 'metrology_helper.dart';
+import 'tipo_servicio_rules.dart' as tsr;
 
 class PdfService {
   static final PdfService instance = PdfService._();
@@ -32,6 +33,22 @@ class PdfService {
 
   // ── API pública ───────────────────────────────────────────────────────────
   Future<String> generarPdfFinal({
+    required Map<String, dynamic> osData,
+    required List<Map<String, dynamic>> repRows,
+    required List<Map<String, dynamic>> excRows,
+    required List<Map<String, dynamic>> exacRows,
+    String? firmaTecBase64,
+    String? firmaCliBase64,
+  }) async {
+    final bytes = await buildPdfBytes(
+      osData: osData, repRows: repRows, excRows: excRows, exacRows: exacRows,
+      firmaTecBase64: firmaTecBase64, firmaCliBase64: firmaCliBase64,
+    );
+    return _saveToDisk(osData, bytes);
+  }
+
+  /// Construye el PDF en memoria (sin guardarlo). Útil para pruebas locales.
+  Future<Uint8List> buildPdfBytes({
     required Map<String, dynamic> osData,
     required List<Map<String, dynamic>> repRows,
     required List<Map<String, dynamic>> excRows,
@@ -85,7 +102,7 @@ class PdfService {
     ));
 
     final bytes = await doc.save();
-    return _saveToDisk(osData, bytes);
+    return bytes;
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -267,8 +284,16 @@ class PdfService {
     final holoAnt  = _s(os, 'holograma_anterior', _s(os, 'hologramaAnterior', ''));
     final holoNue  = _s(os, 'holograma_actualizado', _s(os, 'holograma_nuevo', _s(os, 'hologramaNuevo', '')));
 
-    final bool debeMostrarInspec = _debeMostrarJia(os) ||
-        folioDve.isNotEmpty || holoAnt.isNotEmpty || holoNue.isNotEmpty || cca.isNotEmpty;
+    // Reglas por tipo de servicio real (nombre → ID). Si la OS llegó sin tipo,
+    // solo se imprime lo que efectivamente fue capturado. Nunca se imprime "N/A".
+    final rules = tsr.getRules(
+      id: int.tryParse('${os['id_tipo_servicio'] ?? ''}'),
+      nombre: (os['tipo_servicio'] ?? os['tipo_servicio_nombre'])?.toString(),
+      folio: os['folio']?.toString(),
+    );
+    final bool mostrarCca = rules.pideCca || (rules.sinTipo && cca.isNotEmpty);
+    final bool mostrarDve = rules.pideDve ||
+        (rules.sinTipo && (folioDve.isNotEmpty || holoAnt.isNotEmpty || holoNue.isNotEmpty));
 
     final j = os['jia_j'] == true || os['inicial_calibrador'] == 'J';
     final i = os['jia_i'] == true || os['inicial_calibrador'] == 'I';
@@ -283,23 +308,16 @@ class PdfService {
         _FD('PUNTOS DE APOYO', apoyo, 0.18),
         _FD('UBICACIÓN', ubic, 0.30),
       ]),
-      if (debeMostrarInspec) ...[
-        // Renglón 1: NÚMERO CCA + INICIAL CALIBRADOR J - I - A
-        _equipoJiaRow(
-          cca: cca.isNotEmpty ? cca : 'N/A',
-          j: j, i: i, a: a,
-        ),
-        // Renglón 2: FOLIO DVE + HOLOGRAMA ANTERIOR + HOLOGRAMA NUEVO
+      // Renglón CCA + casillas J I A — solo si el servicio incluye Calibración
+      if (mostrarCca)
+        _equipoJiaRow(cca: cca, j: j, i: i, a: a),
+      // Renglón DVE + hologramas — solo si el servicio incluye Inspección / DVE
+      if (mostrarDve)
         _equipoRow([
-          _FD('FOLIO DVE', folioDve.isNotEmpty ? folioDve : 'N/A', 0.34),
-          _FD('HOLO. ANTERIOR', holoAnt.isNotEmpty ? holoAnt : 'N/A', 0.33),
-          _FD('HOLO. NUEVO', holoNue.isNotEmpty ? holoNue : 'N/A', 0.33),
+          _FD('FOLIO DVE', folioDve, 0.34),
+          _FD('HOLO. ANTERIOR', holoAnt, 0.33),
+          _FD('HOLO. NUEVO', holoNue, 0.33),
         ]),
-      ] else if (cca.isNotEmpty) ...[
-        _equipoRow([
-          _FD('NÚMERO CCA', cca, 1.0),
-        ]),
-      ],
     ]);
   }
 
@@ -326,9 +344,6 @@ class PdfService {
             flex: 60,
             child: pw.Row(
               children: [
-                pw.Text('INICIAL CALIBRADOR (NOM-010-SCFI-2020): ',
-                  style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
-                pw.SizedBox(width: 4),
                 _jiaBox('J', j),
                 pw.SizedBox(width: 8),
                 _jiaBox('I', i),
@@ -344,12 +359,8 @@ class PdfService {
 
   // ══════════════════════════════════════════════════════════════════════════
   // 5.1 FILA JIA (Solo para Calibración o Inspección — Oculto en Ajuste puro)
+  //     La visibilidad se decide en _buildEquipo con tipo_servicio_rules.
   // ══════════════════════════════════════════════════════════════════════════
-  bool _debeMostrarJia(Map<String, dynamic> os) {
-    final tipoSvc = (os['tipo_servicio'] ?? os['tipo_servicio_nombre'] ?? '').toString().toLowerCase();
-    // Si tipo_servicio NO contiene "calibr" ni "inspec" (por ej. es únicamente "Ajuste"), ocultar casillas J-I-A
-    return tipoSvc.contains('calib') || tipoSvc.contains('inspec');
-  }
 
   pw.Widget _jiaBox(String code, bool marked) {
     return pw.Row(

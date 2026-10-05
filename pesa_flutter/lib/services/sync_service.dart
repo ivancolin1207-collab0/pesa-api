@@ -407,6 +407,14 @@ class SyncService extends ChangeNotifier {
       String? updatedAfter;
       if (conteoLocal > 0) {
         updatedAfter = prefs.getString('last_sync_timestamp');
+        // v3.1.20+76: backfill único de tipo_servicio. Las OS descargadas por
+        // /api/v1/ordenes antes de este fix llegaron sin tipo → forzar 1 PULL completo.
+        if (!(prefs.getBool('backfill_tipo_servicio_v76') ?? false)) {
+          debugPrint('[SYNC] Backfill v76: PULL completo para recuperar tipo_servicio');
+          updatedAfter = null;
+          await prefs.remove('last_sync_timestamp');
+          await prefs.setBool('backfill_tipo_servicio_v76', true);
+        }
       } else {
         // SI LOCAL ESTÁ EN 0, OBLIGAR CARGA COMPLETA
         debugPrint("[SYNC] Base local vacía (0 registros). Forzando PULL completo sin updated_after.");

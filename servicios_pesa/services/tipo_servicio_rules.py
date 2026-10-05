@@ -242,3 +242,86 @@ def campos_equipo_visibles(id_tipo_servicio: Optional[int]) -> dict[str, bool]:
 def get_all_rules() -> dict[int, ServiceRules]:
     """Retorna la tabla completa de reglas (útil para depuración / tests)."""
     return dict(_RULES)
+
+
+# ── Etiquetas homologadas (Dashboard tablet / escritorio) ─────────────────────
+# Clasificación por NOMBRE real (igual que pesa_flutter/lib/services/
+# tipo_servicio_rules.dart → _resolveByName). El nombre manda sobre el ID.
+
+def _norm(s: str) -> str:
+    s = (s or "").strip().lower()
+    for a, b in (("á", "a"), ("é", "e"), ("í", "i"), ("ó", "o"), ("ú", "u"), ("ü", "u"), ("ñ", "n")):
+        s = s.replace(a, b)
+    return s
+
+
+_ID_A_NOMBRE_BD = {
+    1: "Calibración", 2: "Ajuste", 3: "Inspección", 4: "Calibración + Ajuste",
+    5: "Calibración + Inspección", 6: "Ajuste + Inspección",
+    7: "Calibración + Ajuste + Inspección", 8: "Entrega Refacciones",
+}
+
+
+def _clasificar(nombre: Optional[str], id_tipo: Optional[int] = None,
+                folio: Optional[str] = None) -> tuple[str, bool, bool, bool]:
+    """Retorna (formato, cca, dve, ajuste). formato: 'os' | 'rma' | 're' | 'sin'."""
+    import re
+    f = (folio or "").strip().upper()
+    if f.startswith("RMA-"):
+        return "rma", False, False, False
+    if f.startswith("RE-"):
+        return "re", False, False, False
+    n = _norm(nombre or "")
+    if not n and id_tipo:
+        try:
+            n = _norm(_ID_A_NOMBRE_BD.get(int(id_tipo), ""))
+        except (TypeError, ValueError):
+            n = ""
+    if not n:
+        return "sin", False, False, False
+    if "refacci" in n or "remisi" in n:
+        return "rma", False, False, False
+    if "revisi" in n or "celda" in n:
+        return "re", False, False, False
+    cca = "calibra" in n or bool(re.search(r"\bcca\b", n))
+    dve = bool(re.search(r"\bdve\b", n)) or "inspecc" in n or "verifica" in n
+    aju = "ajuste" in n or "mantenim" in n
+    return "os", cca, dve, aju
+
+
+def etiqueta_corta(nombre: Optional[str], id_tipo: Optional[int] = None,
+                   folio: Optional[str] = None) -> str:
+    """CCA + DVE · CCA + Ajuste · CCA · DVE + Ajuste · DVE · Ajuste · Remisión · Revisión · Sin tipo"""
+    fmt, cca, dve, aju = _clasificar(nombre, id_tipo, folio)
+    if fmt == "rma":
+        return "Remisión"
+    if fmt == "re":
+        return "Revisión"
+    if fmt == "sin":
+        return "Sin tipo"
+    if cca and dve:
+        return "CCA + DVE"
+    if cca:
+        return "CCA + Ajuste" if aju else "CCA"
+    if dve:
+        return "DVE + Ajuste" if aju else "DVE"
+    return "Ajuste"
+
+
+def etiqueta_larga(nombre: Optional[str], id_tipo: Optional[int] = None,
+                   folio: Optional[str] = None) -> str:
+    """Descripción para tooltips / banners (misma redacción que la tablet)."""
+    fmt, cca, dve, aju = _clasificar(nombre, id_tipo, folio)
+    if fmt == "rma":
+        return "Remisión — sin CCA ni DVE"
+    if fmt == "re":
+        return "Revisión de Celdas — sin CCA ni DVE"
+    if fmt == "sin":
+        return "Tipo de servicio no asignado"
+    if cca and dve:
+        return "Calibración + Inspección (CCA + DVE)"
+    if cca:
+        return "Calibración + Ajuste (CCA)" if aju else "Calibración (CCA)"
+    if dve:
+        return "Ajuste + Inspección (DVE)" if aju else "Inspección (DVE)"
+    return "Ajuste — sin CCA ni DVE"
