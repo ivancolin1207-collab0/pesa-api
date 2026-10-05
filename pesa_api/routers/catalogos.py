@@ -290,8 +290,17 @@ async def get_ordenes(
 
     query += " ORDER BY os.folio_os DESC, os.updated_at DESC LIMIT 200"
 
-    rows = await db.fetch(query, *params)
-    return [dict(r) for r in rows]
+    try:
+        rows = await db.fetch(query, *params)
+        return [dict(r) for r in rows]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ORDENES GET ERROR] Falla al listar órdenes: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en servidor al obtener órdenes: {str(e)}",
+        )
 
 
 # ── Crear Orden de Servicio ────────────────────────────────────────────────────

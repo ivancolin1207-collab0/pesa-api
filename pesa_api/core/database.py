@@ -48,7 +48,15 @@ async def init_db_pool(
             database_url = database_url.replace("postgres://", "postgresql://", 1)
 
         # Determinar si es un host remoto para configurar SSL
-        is_remote = ("localhost" not in database_url and "127.0.0.1" not in database_url)
+        # En Render, conexiones internas privadas (ej. dpg-...-a sin '.') no usan SSL.
+        # Dominios externos (ej. .oregon-postgres.render.com) requieren SSL.
+        from urllib.parse import urlparse
+        parsed = urlparse(database_url)
+        host_str = (parsed.hostname or "").lower()
+        is_internal_render = host_str.startswith("dpg-") and "." not in host_str
+        is_local = host_str in ("127.0.0.1", "localhost", "::1", "0.0.0.0")
+        is_remote = not is_local and not is_internal_render
+
         if is_remote:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
@@ -58,8 +66,8 @@ async def init_db_pool(
             ssl_cfg = False
 
         logger.info(
-            "Conectando a PostgreSQL mediante DATABASE_URL  [SSL=%s]",
-            "ctx" if is_remote else "off",
+            "Conectando a PostgreSQL mediante DATABASE_URL (host=%s) [SSL=%s]",
+            host_str, "ctx" if is_remote else "off",
         )
 
         pool_kwargs = dict(
@@ -88,14 +96,30 @@ async def init_db_pool(
 
     for attempt in range(1, retries + 1):
         try:
-            _pool = await asyncpg.create_pool(
-                **pool_kwargs,
-                timeout         = 10.0,  # segundos por intento de conexión
-                command_timeout = 15.0,  # segundos por query
-            )
-            # Verificar que el pool realmente puede ejecutar queries
-            async with _pool.acquire() as conn:
-                await conn.fetchval("SELECT 1")
+            try:
+                _pool = await asyncpg.create_pool(
+                    **pool_kwargs,
+                    timeout         = 10.0,
+                    command_timeout = 15.0,
+                )
+                async with _pool.acquire() as conn:
+                    await conn.fetchval("SELECT 1")
+            except (asyncpg.PostgresConnectionError, ssl.SSLError) as e_ssl:
+                # Si falló por SSL en modo remoto/interno, probar la alternativa
+                alt_ssl = False if pool_kwargs.get("ssl") else True
+                logger.warning(
+                    "Fallo con SSL=%s (%s), probando alternativa SSL=%s",
+                    pool_kwargs.get("ssl"), e_ssl, alt_ssl
+                )
+                pool_kwargs["ssl"] = alt_ssl
+                _pool = await asyncpg.create_pool(
+                    **pool_kwargs,
+                    timeout         = 10.0,
+                    command_timeout = 15.0,
+                )
+                async with _pool.acquire() as conn:
+                    await conn.fetchval("SELECT 1")
+
             logger.info("✅ Pool de PostgreSQL listo (min=%d, max=%d)",
                         pool_kwargs["min_size"], pool_kwargs["max_size"])
             return
@@ -161,16 +185,30 @@ def get_pool() -> asyncpg.Pool:
 async def get_db():
     """
     Dependency de FastAPI: retorna una conexión del pool.
-    Responde HTTP 503 si el pool no está activo, en lugar de crashear.
+    Responde HTTP 503 si el pool no está activo, en lugar de crashear con 500.
     """
     if _pool is None:
         raise HTTPException(
             status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
             detail      = (
-                "Base de datos no disponible. "
-                "Verifique que PostgreSQL esté activo en "
-                f"{settings.DB_HOST}:{settings.DB_PORT}."
+                "Base de datos no disponible temporalmente. "
+                "Verifique que PostgreSQL esté activo."
             ),
         )
-    async with _pool.acquire() as conn:
+    try:
+        conn = await _pool.acquire()
+    except Exception as exc:
+        logger.error("[DB ERROR] Error al adquirir conexión de PostgreSQL: %s", exc, exc_info=True)
+        raise HTTPException(
+            status_code = status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail      = f"Error al conectar con la base de datos: {str(exc)}",
+        )
+    try:
+        # Las excepciones del endpoint (HTTPException 403/404/500, etc.) se
+        # propagan intactas: NO se re-etiquetan como error de conexión.
         yield conn
+    finally:
+        try:
+            await _pool.release(conn)
+        except Exception as exc_rel:
+            logger.warning("[DB WARN] No se pudo liberar conexión: %s", exc_rel)

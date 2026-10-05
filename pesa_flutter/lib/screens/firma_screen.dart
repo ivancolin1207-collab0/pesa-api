@@ -88,37 +88,34 @@ class _FirmaScreenState extends State<FirmaScreen>
 
   /// Carga las firmas existentes (técnico y cliente) de la orden, BD local o perfil.
   Future<void> _cargarFirmasExistentes() async {
-    // 1. Firma del Técnico: OS actual > SQLite > Perfil
-    final tecOs = (widget.capturaData['firma_tecnico'] ?? widget.capturaData['firma_tecnico_b64'] ?? '').toString().trim();
-    if (tecOs.length > 50) {
-      if (mounted) {
-        setState(() {
-          _firmaTecPrecargada = true;
-          _firmaTecBase64Guardada = tecOs;
-        });
-      }
-    } else {
-      if (widget.osId > 0) {
-        final osRow = await LocalDbService.instance.getOs(widget.osId);
-        final tecDb = (osRow?['firma_tecnico'] ?? osRow?['firma_tecnico_b64'] ?? '').toString().trim();
-        if (tecDb.length > 50 && mounted) {
-          setState(() {
-            _firmaTecPrecargada = true;
-            _firmaTecBase64Guardada = tecDb;
-          });
-        }
-      }
-      if (!_firmaTecPrecargada) {
-        final auth     = context.read<AuthService>();
-        final username = auth.username ?? '';
-        final firma    = await FirmaTecnicoService.instance.getFirma(username);
-        if (firma != null && firma.length > 50 && mounted) {
-          setState(() {
-            _firmaTecPrecargada   = true;
-            _firmaTecBase64Guardada = firma;
-          });
-        }
-      }
+    // 1. Firma del Técnico — PRIORIDAD: Perfil oficial > OS actual > SQLite.
+    //    La firma registrada en "Mi Firma Digital" gana sobre cualquier trazo
+    //    residual guardado en la orden (evita estampar trazos accidentales).
+    final auth      = context.read<AuthService>();
+    final username  = auth.username ?? '';
+    final idLogeado = auth.idTecnico ?? 0;
+    final idOrden   = int.tryParse('${widget.capturaData['id_tecnico'] ?? ''}') ?? 0;
+    final esTecnicoAsignado = idOrden <= 0 || idLogeado <= 0 || idOrden == idLogeado;
+
+    String? firmaTec;
+    if (esTecnicoAsignado) {
+      final perfil = await FirmaTecnicoService.instance.getFirma(username, idTecnico: idLogeado);
+      if (perfil != null && perfil.trim().length > 50) firmaTec = perfil.trim();
+    }
+    if (firmaTec == null) {
+      final tecOs = (widget.capturaData['firma_tecnico'] ?? widget.capturaData['firma_tecnico_b64'] ?? '').toString().trim();
+      if (tecOs.length > 50) firmaTec = tecOs;
+    }
+    if (firmaTec == null && widget.osId > 0) {
+      final osRow = await LocalDbService.instance.getOs(widget.osId);
+      final tecDb = (osRow?['firma_tecnico'] ?? osRow?['firma_tecnico_b64'] ?? '').toString().trim();
+      if (tecDb.length > 50) firmaTec = tecDb;
+    }
+    if (firmaTec != null && mounted) {
+      setState(() {
+        _firmaTecPrecargada     = true;
+        _firmaTecBase64Guardada = firmaTec;
+      });
     }
 
     // 2. Firma del Cliente: OS actual > SQLite
@@ -800,20 +797,24 @@ class _FirmaScreenState extends State<FirmaScreen>
         // Usar firma persistida del perfil
         tecBase64 = _firmaTecBase64Guardada!;
       } else {
+        final auth     = context.read<AuthService>();
         final Uint8List? imgTec = await _ctrlTecnico.toPngBytes();
         tecBase64 = imgTec != null ? base64Encode(imgTec) : '';
-        // ── v3.1: Guardar firma de perfil localmente + sincronizar al servidor ──
-        // Esto permite que Windows valide la firma del técnico en el login.
+        // Solo se registra como firma de PERFIL si el técnico aún no tiene una.
+        // Un trazo hecho para esta orden NO debe reemplazar la firma oficial
+        // registrada en "Mi Firma Digital" (eso se hace desde esa pantalla).
         if (tecBase64.isNotEmpty) {
-          final auth     = context.read<AuthService>();
           final username = auth.username ?? '';
           final idTec    = auth.idTecnico ?? 0;
-          if (idTec > 0) {
-            FirmaTecnicoService.instance.saveAndSyncFirma(username, tecBase64, idTec)
-                .then((ok) => debugPrint('[Firma] Sync al servidor: ${ok ? "OK" : "WARN (no crítico)"}'));
-          } else {
-            // Sin ID de técnico: guardar solo localmente
-            FirmaTecnicoService.instance.saveFirma(username, tecBase64);
+          final yaTienePerfil =
+              await FirmaTecnicoService.instance.tieneFirma(username, idTecnico: idTec);
+          if (!yaTienePerfil) {
+            if (idTec > 0) {
+              FirmaTecnicoService.instance.saveAndSyncFirma(username, tecBase64, idTec)
+                  .then((ok) => debugPrint('[Firma] Sync al servidor: ${ok ? "OK" : "WARN (no crítico)"}'));
+            } else {
+              FirmaTecnicoService.instance.saveFirma(username, tecBase64);
+            }
           }
         }
       }

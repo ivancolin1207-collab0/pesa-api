@@ -203,6 +203,52 @@ def _es_servicio_calibracion(os_data: dict) -> bool:
     return "calibraci" in servicio_norm
 
 
+def _limpiar_b64_firma(valor) -> Optional[str]:
+    """Normaliza una firma Base64 (quita prefijo data:) y valida que sea imagen."""
+    if not valor:
+        return None
+    s = str(valor).strip()
+    if "," in s and s.lower().startswith("data:"):
+        s = s.split(",", 1)[1].strip()
+    if len(s) <= 50:
+        return None
+    try:
+        cabecera = base64.b64decode(s[:64] + "=" * (-len(s[:64]) % 4))
+    except Exception:
+        return None
+    # PNG o JPEG únicamente
+    if cabecera.startswith(b"\x89PNG") or cabecera.startswith(b"\xff\xd8"):
+        return s
+    return None
+
+
+def _firma_perfil_tecnico(os_data: dict) -> Optional[str]:
+    """
+    Firma OFICIAL registrada del técnico asignado (cat_tecnicos.firma_digital).
+
+    Regla de negocio: la firma de perfil ("Mi Firma Digital") tiene prioridad
+    sobre cualquier trazo guardado en la orden, para evitar estampar trazos
+    residuales o accidentales en el PDF.
+    """
+    directa = _limpiar_b64_firma(
+        os_data.get("firma_tecnico_perfil") or os_data.get("firma_digital")
+    )
+    if directa:
+        return directa
+    id_tec = os_data.get("id_tecnico")
+    if not id_tec:
+        return None
+    try:
+        from models.orden_servicio import orden_servicio_repo
+        row = orden_servicio_repo._fetch_one(
+            "SELECT firma_digital FROM cat_tecnicos WHERE id = %s", (int(id_tec),)
+        )
+        return _limpiar_b64_firma((row or {}).get("firma_digital"))
+    except Exception as exc:
+        logger.debug("No se pudo leer firma de perfil del técnico %s: %s", id_tec, exc)
+        return None
+
+
 class OsPdfGenerator:
     """
     Genera el PDF Toma de Datos de una Orden de Servicio.
@@ -276,23 +322,35 @@ class OsPdfGenerator:
         if not force and Path(output_path).exists():
             logger.info(f"PDF ya existe, omitiendo regeneración: {output_path}")
             return output_path
-            
-        if force and Path(output_path).exists():
-            try:
-                Path(output_path).unlink()
-            except Exception as e:
-                logger.warning(f"No se pudo eliminar PDF anterior: {e}")
 
-        c = rl_canvas.Canvas(output_path, pagesize=letter)
+        # Prioridad de firma del técnico:
+        #   1. Firma oficial registrada en su perfil (cat_tecnicos.firma_digital)
+        #   2. Firma explícita recibida por parámetro (trazada en la sesión)
+        #   3. Firma guardada en la orden (os_data) — se resuelve en _draw_firmas
+        firma_perfil = _firma_perfil_tecnico(os_data)
+        if firma_perfil:
+            firma_tecnico_b64 = firma_perfil
+
+        # Escritura atómica: se renderiza a .tmp y se reemplaza al final.
+        # Si el render falla, el PDF anterior queda intacto en disco.
+        tmp_path = f"{output_path}.tmp"
+        c = rl_canvas.Canvas(tmp_path, pagesize=letter)
         c.setTitle(f"Toma de Datos - {os_data.get('folio_os', '')}")
         c.setAuthor("Servicios PESA")
         c.setSubject("Orden de Servicio Metrologica")
 
-        self._draw_page(c, os_data, repetibilidad, excentricidad, exactitud,
-                        tecnico_nombre, digital=digital,
-                        firma_tecnico_b64=firma_tecnico_b64)
-
-        c.save()
+        try:
+            self._draw_page(c, os_data, repetibilidad, excentricidad, exactitud,
+                            tecnico_nombre, digital=digital,
+                            firma_tecnico_b64=firma_tecnico_b64)
+            c.save()
+            _os.replace(tmp_path, output_path)
+        except Exception:
+            try:
+                Path(tmp_path).unlink()
+            except OSError:
+                pass
+            raise
         logger.info(f"PDF OS generado: {output_path}")
         return output_path
 
@@ -2255,7 +2313,7 @@ class OsPdfGenerator:
         has_firma_cli = False
         # Intentar estampar firma del técnico si hay base64 disponible
         # (aplica en modo digital Y físico — la firma se descarga al sincronizar)
-        _firma_b64_efectiva = (
+        _firma_b64_efectiva = _limpiar_b64_firma(
             firma_tecnico_b64
             or os_data.get("firma_tecnico_b64")
             or os_data.get("firma_tecnico")
@@ -2276,6 +2334,7 @@ class OsPdfGenerator:
                         img_reader, left_x, img_y,
                         width=col_w, height=img_h,
                         preserveAspectRatio=True,
+                        anchor="c",
                         mask="auto",
                     )
                     firma_tec_rendered = True

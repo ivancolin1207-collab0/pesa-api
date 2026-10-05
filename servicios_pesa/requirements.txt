@@ -10,6 +10,7 @@ psycopg2-binary>=2.9.9
 
 # Generación de PDFs
 reportlab>=4.2.0
+pypdf>=5.0.0
 
 # Procesamiento de imágenes (logos, escaneos)
 Pillow>=10.4.0

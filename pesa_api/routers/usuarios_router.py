@@ -21,6 +21,7 @@ class FirmaPayload(BaseModel):
 class FirmaStatus(BaseModel):
     tiene_firma: bool
     id_tecnico: int
+    firma_digital: Optional[str] = None  # Base64 PNG (solo en GET)
 
 
 @router.put(
@@ -52,17 +53,21 @@ async def guardar_firma_tecnico(
         )
         
         # REGLA DE NEGOCIO: Actualizar la firma del técnico en todas sus órdenes ya realizadas/cerradas
-        await db.execute("""
-            UPDATE ordenes_servicio 
-            SET firma_tecnico_b64 = $1,
-                firma_tecnico = $1,
-                updated_at = NOW()
-            WHERE id_tecnico = $2 
-            AND (estado IN ('CERRADA', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'FIRMADA') 
-                 OR estatus IN ('Cerrado', 'CERRADO'))
-        """, firma_b64, id_tecnico)
+        try:
+            await db.execute("""
+                UPDATE ordenes_servicio 
+                SET firma_tecnico_b64 = $1,
+                    firma_tecnico = $1,
+                    updated_at = NOW()
+                WHERE id_tecnico = $2 
+                AND (estado IN ('CERRADA', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'FIRMADA') 
+                     OR estatus IN ('Cerrado', 'CERRADO'))
+            """, firma_b64, id_tecnico)
+        except Exception as e_upd_os:
+            logger.warning("No se pudo propagar firma a órdenes anteriores: %s", e_upd_os)
         
     except Exception as exc:
+        logger.error("[USUARIOS FIRMA ERROR] Falla al guardar firma para id=%s: %s", id_tecnico, exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error al guardar firma: {exc}",
@@ -74,7 +79,7 @@ async def guardar_firma_tecnico(
             detail=f"No se encontró técnico con id={id_tecnico}.",
         )
 
-    return FirmaStatus(tiene_firma=True, id_tecnico=id_tecnico)
+    return FirmaStatus(tiene_firma=True, id_tecnico=id_tecnico, firma_digital=firma_b64)
 
 
 @router.get(
@@ -93,17 +98,24 @@ async def verificar_firma_tecnico(
             id_tecnico,
         )
     except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al consultar firma: {exc}",
-        ) from exc
-
-    if not row:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No se encontró técnico con id={id_tecnico}.",
+        logger.warning("[USUARIOS FIRMA] Error consultando firma de técnico %s: %s", id_tecnico, exc)
+        return FirmaStatus(
+            tiene_firma=False,
+            id_tecnico=id_tecnico,
+            firma_digital=None,
         )
 
-    tiene = bool((row["firma"] or "").strip())
-    return FirmaStatus(tiene_firma=tiene, id_tecnico=id_tecnico)
+    if not row:
+        return FirmaStatus(
+            tiene_firma=False,
+            id_tecnico=id_tecnico,
+            firma_digital=None,
+        )
+
+    firma = (row.get("firma") or "").strip() if isinstance(row, dict) else (row["firma"] or "").strip()
+    return FirmaStatus(
+        tiene_firma=bool(firma),
+        id_tecnico=id_tecnico,
+        firma_digital=firma or None,
+    )
 

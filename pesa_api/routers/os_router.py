@@ -12,6 +12,7 @@ import os
 import json
 import base64
 import logging
+import functools
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -25,6 +26,26 @@ from pesa_api.core.security import get_current_user, require_roles, _normalizar_
 
 router = APIRouter()
 logger = logging.getLogger("pesa_api.os_router")
+
+
+def _safe_endpoint(tag: str):
+    """
+    Envuelve un endpoint async: propaga HTTPException intacta y convierte
+    cualquier otra excepción en HTTP 500 con detalle descriptivo + traza en log.
+    functools.wraps conserva la firma para la inyección de dependencias de FastAPI.
+    """
+    def _decorator(func):
+        @functools.wraps(func)
+        async def _wrapper(*args, **kwargs):
+            try:
+                return await func(*args, **kwargs)
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"[{tag} ERROR] Falla en {func.__name__}: {str(e)}", exc_info=True)
+                raise HTTPException(status_code=500, detail=f"Error en servidor: {str(e)}")
+        return _wrapper
+    return _decorator
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -52,6 +73,7 @@ class OSEstadoUpdate(BaseModel):
     response_model = list[OSListItem],
     summary        = "Listar OS con filtrado por rol",
 )
+@_safe_endpoint("OS LIST")
 async def list_os(
     estado:         Optional[str] = Query(None),
     modalidad:      Optional[str] = Query(None),
@@ -147,15 +169,32 @@ async def list_os(
     "/{folio_os}",
     summary = "Obtener OS completa por folio",
 )
+@_safe_endpoint("OS GET")
 async def get_os(
     folio_os:     str,
     db            = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
     """Retorna todos los datos de una OS, con control de acceso por rol."""
-    row = await db.fetchrow(
-        "SELECT * FROM v_ordenes_servicio WHERE folio_os = $1", folio_os
-    )
+    try:
+        row = await db.fetchrow(
+            "SELECT * FROM v_ordenes_servicio WHERE folio_os = $1", folio_os
+        )
+    except Exception as e_view:
+        # La vista no existe en todas las instalaciones (p. ej. Render):
+        # se consulta la tabla base con los JOINs mínimos.
+        logger.warning("[OS GET] v_ordenes_servicio no disponible (%s); usando tabla base", e_view)
+        row = await db.fetchrow(
+            """
+            SELECT os.*, cl.razon_social AS cliente_nombre,
+                   tc.nombre_completo AS tecnico_nombre
+            FROM ordenes_servicio os
+            LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
+            LEFT JOIN cat_tecnicos tc ON os.id_tecnico = tc.id
+            WHERE os.folio_os = $1
+            """,
+            folio_os,
+        )
     if row is None:
         raise HTTPException(status_code=404, detail="OS no encontrada")
 
@@ -165,7 +204,7 @@ async def get_os(
     is_admin = norm_role in _ADMIN_ROLES or any(ar in norm_role for ar in {"admin", "superadmin", "gerencia"})
 
     # Técnicos solo pueden ver sus propias OS
-    if not is_admin and row["id_tecnico"] != current_user.get("id_tecnico"):
+    if not is_admin and dict(row).get("id_tecnico") != current_user.get("id_tecnico"):
         raise HTTPException(status_code=403, detail="Acceso denegado a esta OS")
 
     return dict(row)
@@ -175,6 +214,7 @@ async def get_os(
     "/{folio_os}/estado",
     summary = "Actualizar estado de una OS (solo admin/logistica)",
 )
+@_safe_endpoint("OS ESTADO")
 async def update_estado(
     folio_os:     str,
     body:         OSEstadoUpdate,
@@ -215,13 +255,16 @@ async def update_estado(
     "/{folio_os}/download-pdf",
     summary = "Descargar PDF de una OS (alias download-pdf)",
 )
+@_safe_endpoint("PDF DOWNLOAD")
 async def download_pdf(
     folio_os:     str,
+    force_regenerate: bool = False,
+    force: bool = False,
     db            = Depends(get_db),
 ):
     """
     Busca el PDF de la OS en el directorio UPLOAD_DIR o lo reconstruye desde pdf_b64 en PostgreSQL.
-    Permite descarga directa tanto para la app de Windows como para navegadores.
+    Si force_regenerate=True o force=True, invalida la caché en disco y reconstruye desde la BD.
     """
     clean_folio = folio_os.strip()
     row = await db.fetchrow(
@@ -250,61 +293,58 @@ async def download_pdf(
     except Exception as e_audit:
         logger.warning("[DOWNLOAD PDF] Error actualizando auditoria a AUDITADA_ADMIN: %s", e_audit)
 
-    # Estrategia 1: pdf_path absoluto guardado en BD
-    bd_path = row.get("pdf_path")
-    if bd_path and Path(bd_path).exists():
-        return FileResponse(
-            path=bd_path,
-            media_type="application/pdf",
-            filename=f"{folio_os}.pdf",
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"},
-        )
-
-    # Estrategia 2: buscar en UPLOAD_DIR por nombre de folio
     upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
     candidate  = Path(upload_dir) / f"{folio_os}.pdf"
-    if candidate.exists():
-        return FileResponse(
-            path=str(candidate),
-            media_type="application/pdf",
-            filename=f"{folio_os}.pdf",
-            headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"},
-        )
+    _no_cache  = {"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"}
 
-    # Estrategia 3: pdf_url es una ruta relativa local
-    pdf_url = row.get("pdf_url") or ""
-    if pdf_url.startswith("/uploads/"):
-        local_path = Path(upload_dir) / Path(pdf_url).name
-        if local_path.exists():
-            return FileResponse(
-                path=str(local_path),
-                media_type="application/pdf",
-                filename=f"{folio_os}.pdf",
-                headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"},
-            )
-
-    # Estrategia 4: Reconstruir desde pdf_b64 almacenado en PostgreSQL
+    # Estrategia 1 (fuente de verdad): pdf_b64 en PostgreSQL.
+    # Se prioriza sobre cualquier copia en disco para que un PDF regenerado
+    # (p. ej. con la firma oficial del técnico) reemplace de inmediato la copia
+    # vieja que la tablet subió a uploads/. La caché se refresca si difiere.
     pdf_b64 = row.get("pdf_b64")
     if pdf_b64:
         try:
             pdf_bytes = base64.b64decode(pdf_b64)
-            # Guardar en UPLOAD_DIR para acelerar siguientes peticiones
             try:
-                os.makedirs(upload_dir, exist_ok=True)
-                with open(str(candidate), "wb") as f_out:
-                    f_out.write(pdf_bytes)
-            except Exception:
-                pass
+                if (force_regenerate or force or not candidate.exists()
+                        or candidate.stat().st_size != len(pdf_bytes)
+                        or candidate.read_bytes() != pdf_bytes):
+                    os.makedirs(upload_dir, exist_ok=True)
+                    tmp = candidate.with_suffix(".pdf.tmp")
+                    tmp.write_bytes(pdf_bytes)
+                    os.replace(str(tmp), str(candidate))
+            except Exception as e_cache:
+                logger.warning("[DOWNLOAD PDF] No se pudo refrescar caché de %s: %s", folio_os, e_cache)
             return Response(
                 content=pdf_bytes,
                 media_type="application/pdf",
                 headers={
                     "Content-Disposition": f'inline; filename="{folio_os}.pdf"',
-                    "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+                    **_no_cache,
                 },
             )
-        except Exception as e:
-            pass
+        except Exception as e_b64:
+            logger.warning("[DOWNLOAD PDF] pdf_b64 inválido para %s: %s", folio_os, e_b64)
+
+    # Sin pdf_b64 en BD: recurrir a copias en disco.
+    # Estrategia 2: pdf_path absoluto guardado en BD
+    bd_path = row.get("pdf_path")
+    if bd_path and Path(bd_path).exists():
+        return FileResponse(path=bd_path, media_type="application/pdf",
+                            filename=f"{folio_os}.pdf", headers=_no_cache)
+
+    # Estrategia 3: buscar en UPLOAD_DIR por nombre de folio
+    if candidate.exists():
+        return FileResponse(path=str(candidate), media_type="application/pdf",
+                            filename=f"{folio_os}.pdf", headers=_no_cache)
+
+    # Estrategia 4: pdf_url es una ruta relativa local
+    pdf_url = row.get("pdf_url") or ""
+    if pdf_url.startswith("/uploads/"):
+        local_path = Path(upload_dir) / Path(pdf_url).name
+        if local_path.exists():
+            return FileResponse(path=str(local_path), media_type="application/pdf",
+                                filename=f"{folio_os}.pdf", headers=_no_cache)
 
     # PDF no disponible en servidor
     raise HTTPException(
@@ -317,6 +357,7 @@ async def download_pdf(
     "/{folio_os}/auditar",
     summary="Marcar orden como auditada/abierta por administracion (Doble check verde)",
 )
+@_safe_endpoint("OS AUDITAR")
 async def auditar_orden_endpoint(
     folio_os: str,
     db=Depends(get_db),
@@ -344,6 +385,7 @@ async def auditar_orden_endpoint(
     "/{folio_os}/upload-pdf",
     summary="Subir PDF generado por la tablet a Render",
 )
+@_safe_endpoint("PDF UPLOAD")
 async def upload_pdf_tablet_os(
     folio_os: str,
     file: Optional[UploadFile] = File(None),
@@ -514,7 +556,7 @@ async def upload_pdf_tablet_os(
                     float(r["lectura_final"]) if r.get("lectura_final") is not None else None,
                 )
         except Exception as e_json:
-            pass
+            logger.warning("[UPLOAD-PDF OS] Error procesando payload JSON: %s", e_json)
 
     return {
         "ok": True,
@@ -529,6 +571,7 @@ async def upload_pdf_tablet_os(
     "/{folio_os}/sync-data",
     summary="Subir payload JSON con mediciones y firmas a Render",
 )
+@_safe_endpoint("SYNC DATA")
 async def sync_data_os(
     folio_os: str,
     payload: dict,
@@ -635,6 +678,7 @@ async def sync_data_os(
 
 @router.delete("/{folio_os}/toma", summary="Eliminar toma metrológica desde cero")
 @router.post("/{folio_os}/reset-toma", summary="Alias POST para reiniciar toma metrológica")
+@_safe_endpoint("RESET TOMA")
 async def reset_toma_endpoint(
     folio_os: str,
     db=Depends(get_db),

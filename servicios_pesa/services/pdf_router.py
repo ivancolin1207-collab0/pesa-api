@@ -25,14 +25,140 @@ def _get_output_path(folio: str, subfolder: str = "PDF_OS") -> str:
     Intenta primero el servidor centralizado; si no tiene permisos,
     cae a la carpeta local del usuario.
     """
-    server_dir = Path(r"C:\PesaServidorCentral") / subfolder
+    import sys
+    if sys.platform == "win32":
+        server_dir = Path(r"C:\PesaServidorCentral") / subfolder
+        try:
+            server_dir.mkdir(parents=True, exist_ok=True)
+            return str(server_dir / f"{folio}.pdf")
+        except (PermissionError, OSError):
+            pass
+    # macOS / Linux (o Windows sin permisos): carpeta local del usuario.
+    # Antes se creaba una carpeta literal "C:\PesaServidorCentral" en el CWD.
+    local_dir = Path.home() / "PesaServidorLocal" / subfolder
+    local_dir.mkdir(parents=True, exist_ok=True)
+    return str(local_dir / f"{folio}.pdf")
+
+
+def _actualizar_bd_pdf(os_id: int, pdf_path: str) -> None:
+    """Actualiza pdf_path, pdf_b64 y marca pdf_generado=True en la base de datos."""
     try:
-        server_dir.mkdir(parents=True, exist_ok=True)
-        return str(server_dir / f"{folio}.pdf")
-    except (PermissionError, OSError):
-        local_dir = Path.home() / "PesaServidorLocal" / subfolder
-        local_dir.mkdir(parents=True, exist_ok=True)
-        return str(local_dir / f"{folio}.pdf")
+        import base64
+        from models.orden_servicio import orden_servicio_repo
+        with open(pdf_path, "rb") as fh:
+            b64 = base64.b64encode(fh.read()).decode("ascii")
+        orden_servicio_repo._write(
+            """
+            UPDATE ordenes_servicio
+            SET pdf_path     = %s,
+                pdf_b64      = %s,
+                pdf_generado = TRUE,
+                updated_at   = NOW()
+            WHERE id = %s
+            """,
+            (pdf_path, b64, os_id),
+            returning=False,
+        )
+    except Exception as exc:
+        logger.debug("No se pudo actualizar pdf_b64 en BD para os_id=%s: %s", os_id, exc)
+
+
+def _reestampar_firma_en_pdf(os_data: dict, output_path: str) -> Optional[str]:
+    """
+    Reestampa la firma oficial de perfil del técnico directamente sobre un PDF
+    existente en pdf_b64 (típico de órdenes completadas en tablet).
+    Preserva intactos todos los datos metrológicos y números de la orden.
+    """
+    import base64
+    import io
+    import os as _os
+    import zlib
+    from PIL import Image
+    from pypdf import PdfReader, PdfWriter
+    from pypdf.generic import NameObject, NumberObject
+    from services.os_pdf_generator import _firma_perfil_tecnico, _limpiar_b64_firma
+
+    firma_b64 = _firma_perfil_tecnico(os_data) or _limpiar_b64_firma(os_data.get("firma_tecnico"))
+    if not firma_b64:
+        return None
+
+    pdf_raw = os_data.get("pdf_b64")
+    if not pdf_raw:
+        return None
+
+    try:
+        pdf_bytes = base64.b64decode(pdf_raw)
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        if not reader.pages:
+            return None
+        writer = PdfWriter(clone_from=reader)
+        page = writer.pages[0]
+        xobjects = page["/Resources"].get("/XObject", {})
+
+        target_obj = None
+        min_area = float("inf")
+        for _name, xobj_ref in xobjects.items():
+            obj = xobj_ref.get_object()
+            if obj.get("/Subtype") == "/Image":
+                w = int(obj.get("/Width", 0))
+                h = int(obj.get("/Height", 0))
+                if 120 <= w <= 1400 and 30 <= h <= 350 and (w / max(1, h)) > 1.4:
+                    area = w * h
+                    if area < min_area:
+                        min_area = area
+                        target_obj = obj
+
+        if not target_obj:
+            return None
+
+        ow, oh = int(target_obj["/Width"]), int(target_obj["/Height"])
+        aspect = ow / max(1, oh)
+
+        raw_img = firma_b64.split(",")[-1].strip()
+        img_bytes = base64.b64decode(raw_img)
+        firma = Image.open(io.BytesIO(img_bytes)).convert("RGBA")
+        bbox = firma.getbbox()
+        if bbox:
+            firma = firma.crop(bbox)
+        fw, fh = firma.size
+
+        if fw / max(1, fh) >= aspect:
+            cw, ch = fw, max(1, round(fw / aspect))
+        else:
+            cw, ch = max(1, round(fh * aspect)), fh
+        pad = 4
+        cw, ch = cw + 2 * pad, max(1, round((cw + 2 * pad) / aspect))
+        canvas = Image.new("RGBA", (cw, ch), (255, 255, 255, 0))
+        canvas.paste(firma, ((cw - fw) // 2, (ch - fh) // 2), firma)
+
+        rgb = canvas.convert("RGB").tobytes()
+        alpha = canvas.getchannel("A").tobytes()
+
+        def _reemplazar(stream_obj, raw, colorspace):
+            stream_obj._data = zlib.compress(raw)
+            stream_obj[NameObject("/Filter")] = NameObject("/FlateDecode")
+            stream_obj[NameObject("/Width")] = NumberObject(cw)
+            stream_obj[NameObject("/Height")] = NumberObject(ch)
+            stream_obj[NameObject("/BitsPerComponent")] = NumberObject(8)
+            stream_obj[NameObject("/ColorSpace")] = NameObject(colorspace)
+            for k in ("/DecodeParms", "/Length"):
+                if k in stream_obj:
+                    del stream_obj[k]
+
+        _reemplazar(target_obj, rgb, "/DeviceRGB")
+        if "/SMask" in target_obj:
+            smask = target_obj["/SMask"].get_object()
+            _reemplazar(smask, alpha, "/DeviceGray")
+
+        tmp_path = f"{output_path}.tmp"
+        with open(tmp_path, "wb") as f_out:
+            writer.write(f_out)
+        _os.replace(tmp_path, output_path)
+        logger.info("Firma oficial reestampada en PDF existente: %s", output_path)
+        return output_path
+    except Exception as exc:
+        logger.warning("Fallo al reestampar firma en PDF existente: %s", exc)
+        return None
 
 
 def regenerar_pdf(os_id: int, folio: str, force: bool = True) -> Optional[str]:
@@ -156,21 +282,62 @@ def regenerar_pdf(os_id: int, folio: str, force: bool = True) -> Optional[str]:
                     logger.debug("No se pudo enriquecer tipo_instrumento: %s", ti_exc)
 
             output_path = _get_output_path(folio, "PDF_OS")
-            return os_pdf_generator.generate_os_pdf(
-                os_data=os_data,
-                repetibilidad=rep,
-                excentricidad=exc,
-                exactitud=exac,
-                output_path=output_path,
-                tecnico_nombre=tecnico_nombre,
-                force=force,
-            )
+
+            # Caso especial: orden digital de la tablet con lecturas completas en pdf_b64
+            # pero sin filas normalizadas en det_repetibilidad/det_exactitud.
+            # Reestampamos la firma oficial del perfil del técnico manteniendo
+            # 100% intactas todas las lecturas y datos metrológicos del documento original.
+            res_pdf = None
+            if not rep and not exc and not exac and os_data.get("pdf_b64"):
+                res_pdf = _reestampar_firma_en_pdf(os_data, output_path)
+
+            if not res_pdf:
+                res_pdf = os_pdf_generator.generate_os_pdf(
+                    os_data=os_data,
+                    repetibilidad=rep,
+                    excentricidad=exc,
+                    exactitud=exac,
+                    output_path=output_path,
+                    tecnico_nombre=tecnico_nombre,
+                    force=force,
+                )
+
+            if res_pdf and Path(res_pdf).exists():
+                _actualizar_bd_pdf(os_id, res_pdf)
+
+            return res_pdf
 
     except Exception as exc:
         logger.exception(
             "regenerar_pdf: error para folio=%s os_id=%s: %s", folio, os_id, exc
         )
         return None
+
+
+def regenerar_pdf_orden(folio: str, force: bool = True) -> Optional[str]:
+    """
+    Regenera el PDF de una orden a partir de su FOLIO.
+
+    Con force=True invalida el PDF existente y lo vuelve a renderizar desde
+    los datos metrológicos en BD y la firma OFICIAL registrada del técnico
+    asignado (cat_tecnicos.firma_digital). El archivo se sobrescribe con el
+    mismo nombre: {folio}.pdf.
+
+    Returns:
+        Ruta absoluta del PDF regenerado, o None si no existe la orden o falló.
+    """
+    folio = (folio or "").strip()
+    if not folio:
+        return None
+    from models.orden_servicio import orden_servicio_repo
+
+    row = orden_servicio_repo._fetch_one(
+        "SELECT id FROM ordenes_servicio WHERE folio_os = %s", (folio,)
+    )
+    if not row:
+        logger.error("regenerar_pdf_orden: folio %s no existe en BD", folio)
+        return None
+    return regenerar_pdf(int(row["id"]), folio, force=force)
 
 
 def abrir_pdf(os_id: int, folio: str) -> Optional[str]:

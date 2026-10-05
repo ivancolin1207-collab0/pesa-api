@@ -266,45 +266,54 @@ async def calibraciones_consulta(
         )
 
     tipo_expr = _TIPO_SERVICIO_SQL
-    rows = await db.fetch(
-        """
-        SELECT DISTINCT ON (os.folio_os)
-            os.folio_os,
-            os.fecha::text                                   AS fecha,
-            COALESCE(cl.razon_social, os.cliente, '')        AS cliente,
-            COALESCE(suc.nombre_sucursal, '')                AS sucursal,
-            os.id_tecnico,
-            COALESCE(tc.nombre_completo, '')                 AS tecnico,
-            """ + tipo_expr + """                            AS tipo_servicio,
-            COALESCE(os.estado, '')                          AS estado,
-            COALESCE(os.estatus, '')                         AS estatus,
-            COALESCE(os.modalidad, '')                       AS modalidad,
-            (COALESCE(os.pdf_generado, FALSE)
-               OR COALESCE(os.pdf_url, '') <> ''
-               OR COALESCE(os.pdf_path, '') <> '')           AS tiene_pdf,
-            COALESCE(os.updated_at, NOW())::text             AS updated_at
-        FROM ordenes_servicio os
-        LEFT JOIN cat_clientes       cl  ON os.id_cliente       = cl.id
-        LEFT JOIN cliente_sucursales suc ON os.sucursal_id      = suc.id
-        LEFT JOIN cat_tecnicos       tc  ON os.id_tecnico       = tc.id
-        LEFT JOIN cat_tipo_servicio  ts  ON os.id_tipo_servicio = ts.id
-        WHERE (
-                UPPER(TRIM(COALESCE(os.estado, ''))) IN
-                    ('CERRADO','CERRADA','COMPLETADA','COMPLETADO','COMPLETADA_DIGITAL',
-                     'COMPLETADA_FISICA','ESCANEADA','FIRMADA')
-             OR UPPER(TRIM(COALESCE(os.estatus, ''))) IN ('CERRADO','CERRADA','COMPLETADO','COMPLETADA')
-          )
-          AND (
-                LOWER(""" + tipo_expr + """) LIKE '%%calibraci%%'
-             OR LOWER(""" + tipo_expr + """) LIKE '%%ajuste%%'
-          )
-        ORDER BY os.folio_os, os.updated_at DESC NULLS LAST
-        """.replace("%%", "%"),
-    )
-    data = [dict(r) for r in rows]
-    data.sort(key=lambda r: (r.get("fecha") or "", r.get("folio_os") or ""), reverse=True)
-    logger.info("[CALIBRACIONES CONSULTA] user=%s id_tec=%s → %d registros", username, id_tec, len(data))
-    return data
+    try:
+        rows = await db.fetch(
+            """
+            SELECT DISTINCT ON (os.folio_os)
+                os.folio_os,
+                os.fecha::text                                   AS fecha,
+                COALESCE(cl.razon_social, os.cliente, '')        AS cliente,
+                COALESCE(suc.nombre_sucursal, '')                AS sucursal,
+                os.id_tecnico,
+                COALESCE(tc.nombre_completo, '')                 AS tecnico,
+                """ + tipo_expr + """                            AS tipo_servicio,
+                COALESCE(os.estado, '')                          AS estado,
+                COALESCE(os.estatus, '')                         AS estatus,
+                COALESCE(os.modalidad, '')                       AS modalidad,
+                (COALESCE(os.pdf_generado, FALSE)
+                   OR COALESCE(os.pdf_url, '') <> ''
+                   OR COALESCE(os.pdf_path, '') <> '')           AS tiene_pdf,
+                COALESCE(os.updated_at, NOW())::text             AS updated_at
+            FROM ordenes_servicio os
+            LEFT JOIN cat_clientes       cl  ON os.id_cliente       = cl.id
+            LEFT JOIN cliente_sucursales suc ON os.sucursal_id      = suc.id
+            LEFT JOIN cat_tecnicos       tc  ON os.id_tecnico       = tc.id
+            LEFT JOIN cat_tipo_servicio  ts  ON os.id_tipo_servicio = ts.id
+            WHERE (
+                    UPPER(TRIM(COALESCE(os.estado, ''))) IN
+                        ('CERRADO','CERRADA','COMPLETADA','COMPLETADO','COMPLETADA_DIGITAL',
+                         'COMPLETADA_FISICA','ESCANEADA','FIRMADA')
+                 OR UPPER(TRIM(COALESCE(os.estatus, ''))) IN ('CERRADO','CERRADA','COMPLETADO','COMPLETADA')
+              )
+              AND (
+                    LOWER(""" + tipo_expr + """) LIKE '%%calibraci%%'
+                 OR LOWER(""" + tipo_expr + """) LIKE '%%ajuste%%'
+              )
+            ORDER BY os.folio_os, os.updated_at DESC NULLS LAST
+            """.replace("%%", "%"),
+        )
+        data = [dict(r) for r in rows]
+        data.sort(key=lambda r: (r.get("fecha") or "", r.get("folio_os") or ""), reverse=True)
+        logger.info("[CALIBRACIONES CONSULTA] user=%s id_tec=%s → %d registros", username, id_tec, len(data))
+        return data
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SYNC ERROR] Falla en calibraciones_consulta: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en servidor al consultar calibraciones: {str(e)}",
+        )
 
 
 @router.get("", response_model=list[OSCompleta], summary="Sincronización de OS (alias de /pull)", tags=["Sincronización Offline"])
@@ -605,8 +614,8 @@ async def sync_pull(
                     # since podría estar bloqueando
                     os_bloqueadas_since = await db.fetchval(
                         "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND updated_at < $2::timestamp",
-                        id_tecnico or -1, since,
-                    ) if since and since.year > 2000 else 0
+                        id_tecnico or -1, since_dt,
+                    ) if since_dt else 0
                     logger.warning(
                         "[SYNC PULL CERO RESULTADOS] DIAGNÓSTICO:\n"
                         "  Total OS no canceladas en BD: %s\n"
@@ -618,7 +627,7 @@ async def sync_pull(
                         "  Registro en cat_tecnicos: %s",
                         total_os, id_tecnico, os_por_id,
                         id_tecnico, os_por_id_sin_since,
-                        since, os_bloqueadas_since,
+                        since_dt, os_bloqueadas_since,
                         os_null_tecnico,
                         nombre_jwt, os_por_nombre,
                         dict(tec_check) if tec_check else "NO ENCONTRADO",
@@ -658,21 +667,23 @@ async def sync_pull(
 
         resultado = []
         for r in rows:
-            d = dict(r)
-            if not is_admin and d.get("sync_check_status") == "ASIGNADA":
-                d["sync_check_status"] = "RECIBIDA_TABLET"
-            resultado.append(OSCompleta(**d))
+            try:
+                d = dict(r)
+                if not is_admin and d.get("sync_check_status") == "ASIGNADA":
+                    d["sync_check_status"] = "RECIBIDA_TABLET"
+                resultado.append(OSCompleta(**d))
+            except Exception as e_row:
+                logger.warning("[SYNC PULL] Error serializando OS %s: %s", r.get("folio_os"), e_row)
 
         return resultado
 
     except HTTPException:
         raise
-    except Exception as exc:
-        logger.error("[SYNC PULL CRITICAL ERROR]: %s", exc)
-        traceback.print_exc()
+    except Exception as e:
+        logger.error(f"[SYNC ERROR] Falla en sincronización: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail      = f"Error interno al generar el payload de sync: {exc}",
+            detail      = f"Error en servidor: {str(e)}",
         )
 
 
@@ -697,296 +708,313 @@ async def sync_push(
       → Para datos metrológicos: gana la tablet (campo = verdad)
       → Para estado: si servidor tiene CANCELADA/COMPLETADA, no se sobreescribe
     """
-    id_tecnico = current_user.get("id_tecnico")
+    try:
+        id_tecnico = current_user.get("id_tecnico")
 
-    # Obtener OS actual del servidor
-    row = await db.fetchrow(
-        """
-        SELECT id, estado,
-               COALESCE(sync_version, 0) AS sync_version,
-               id_tecnico, id_tipo_servicio, id_clase_exactitud
-        FROM ordenes_servicio
-        WHERE folio_os = $1
-        """,
-        payload.folio_os,
-    )
-    if row is None:
-        raise HTTPException(
-            status_code = status.HTTP_404_NOT_FOUND,
-            detail      = f"OS {payload.folio_os!r} no encontrada",
+        # Obtener OS actual del servidor
+        row = await db.fetchrow(
+            """
+            SELECT id, estado,
+                   COALESCE(sync_version, 0) AS sync_version,
+                   id_tecnico, id_tipo_servicio, id_clase_exactitud
+            FROM ordenes_servicio
+            WHERE folio_os = $1
+            """,
+            payload.folio_os,
         )
+        if row is None:
+            raise HTTPException(
+                status_code = status.HTTP_404_NOT_FOUND,
+                detail      = f"OS {payload.folio_os!r} no encontrada",
+            )
 
-    # Verificar que la OS pertenece al técnico autenticado
-    if row["id_tecnico"] != id_tecnico:
-        raise HTTPException(
-            status_code = status.HTTP_403_FORBIDDEN,
-            detail      = "Esta OS no está asignada a tu usuario",
-        )
+        import unicodedata
+        role = "".join(
+            c for c in unicodedata.normalize("NFKD", str(current_user.get("role", "")))
+            if not unicodedata.combining(c)
+        ).lower()
+        is_admin = "admin" in role or str(current_user.get("username", "")).strip().lower() == "ivancolin1207"
 
-    os_id         = row["id"]
-    server_version = row["sync_version"]
-    conflicto     = server_version > payload.sync_version_base
+        # Verificar que la OS pertenece al técnico autenticado
+        if not is_admin and row["id_tecnico"] != id_tecnico:
+            raise HTTPException(
+                status_code = status.HTTP_403_FORBIDDEN,
+                detail      = "Esta OS no está asignada a tu usuario",
+            )
 
-    # Determinar estado final
-    estado_protegido = row["estado"] in ("CANCELADA", "COMPLETADA")
-    nuevo_estado = row["estado"]
+        os_id         = row["id"]
+        server_version = row["sync_version"]
+        conflicto     = server_version > payload.sync_version_base
 
-    if not estado_protegido and payload.nuevo_estado:
-        # Acepta transiciones válidas + cierre digital desde tablet
-        _TRANSICIONES_VALIDAS = {
-            "ASIGNADA":          ["EN_CAMPO", "COMPLETADA_DIGITAL"],
-            "EN_CAMPO":          ["SYNC_PENDIENTE", "FIRMADA", "COMPLETADA_DIGITAL"],
-            "SYNC_PENDIENTE":    ["EN_CAMPO", "FIRMADA", "COMPLETADA_DIGITAL"],
-            "FIRMADA":           ["COMPLETADA_DIGITAL"],
-            "COMPLETADA_DIGITAL": [],  # estado final desde tablet
-        }
-        estados_siguientes = _TRANSICIONES_VALIDAS.get(row["estado"], [])
-        if payload.nuevo_estado in estados_siguientes:
-            nuevo_estado = payload.nuevo_estado
-        elif payload.nuevo_estado == "COMPLETADA_DIGITAL":
-            # Permitir cierre siempre que no esté ya cancelada/completada por admin
+        # Determinar estado final
+        estado_protegido = row["estado"] in ("CANCELADA", "COMPLETADA")
+        nuevo_estado = row["estado"]
+
+        if not estado_protegido and payload.nuevo_estado:
+            # Acepta transiciones válidas + cierre digital desde tablet
+            _TRANSICIONES_VALIDAS = {
+                "ASIGNADA":          ["EN_CAMPO", "COMPLETADA_DIGITAL"],
+                "EN_CAMPO":          ["SYNC_PENDIENTE", "FIRMADA", "COMPLETADA_DIGITAL"],
+                "SYNC_PENDIENTE":    ["EN_CAMPO", "FIRMADA", "COMPLETADA_DIGITAL"],
+                "FIRMADA":           ["COMPLETADA_DIGITAL"],
+                "COMPLETADA_DIGITAL": [],  # estado final desde tablet
+            }
+            estados_siguientes = _TRANSICIONES_VALIDAS.get(row["estado"], [])
+            if payload.nuevo_estado in estados_siguientes:
+                nuevo_estado = payload.nuevo_estado
+            elif payload.nuevo_estado == "COMPLETADA_DIGITAL":
+                # Permitir cierre siempre que no esté ya cancelada/completada por admin
+                nuevo_estado = "COMPLETADA_DIGITAL"
+
+        # Si la tablet declara la orden Cerrada explícitamente, el estado final es COMPLETADA_DIGITAL
+        if (not estado_protegido
+                and (payload.estatus or "").strip().upper() in ("CERRADO", "CERRADA", "COMPLETADO", "COMPLETADA")):
             nuevo_estado = "COMPLETADA_DIGITAL"
 
-    # Si la tablet declara la orden Cerrada explícitamente, el estado final es COMPLETADA_DIGITAL
-    if (not estado_protegido
-            and (payload.estatus or "").strip().upper() in ("CERRADO", "CERRADA", "COMPLETADO", "COMPLETADA")):
-        nuevo_estado = "COMPLETADA_DIGITAL"
+        _CERRADOS = {"COMPLETADA", "COMPLETADA_DIGITAL", "CERRADO", "CERRADA", "ESCANEADA", "FIRMADA"}
+        nuevo_estatus = "Cerrado" if str(nuevo_estado or "").upper() in _CERRADOS else None
 
-    _CERRADOS = {"COMPLETADA", "COMPLETADA_DIGITAL", "CERRADO", "CERRADA", "ESCANEADA", "FIRMADA"}
-    nuevo_estatus = "Cerrado" if str(nuevo_estado or "").upper() in _CERRADOS else None
+        # Resolver clase de exactitud (si viene el código, buscar el ID)
+        id_clase = row["id_clase_exactitud"]
+        if payload.clase_exactitud_codigo:
+            clase_row = await db.fetchrow(
+                "SELECT id FROM cat_clase_exactitud WHERE codigo = $1",
+                payload.clase_exactitud_codigo,
+            )
+            if clase_row:
+                id_clase = clase_row["id"]
 
-    # Resolver clase de exactitud (si viene el código, buscar el ID)
-    id_clase = row["id_clase_exactitud"]
-    if payload.clase_exactitud_codigo:
-        clase_row = await db.fetchrow(
-            "SELECT id FROM cat_clase_exactitud WHERE codigo = $1",
-            payload.clase_exactitud_codigo,
-        )
-        if clase_row:
-            id_clase = clase_row["id"]
-
-    # Actualizar OS en el servidor
-    # [FIX] Primer intento con sync_version, sync_at, device_id, pdf_b64, unidad_medida.
-    # Si alguna columna no existe (BD sin migrar), reintenta sin ellas.
-    try:
-        upd_status = await db.execute(
-            """
-            UPDATE ordenes_servicio SET
-                estado                = $1,
-                estatus               = COALESCE($21, estatus),
-                modalidad             = COALESCE($22, modalidad),
-                observaciones         = COALESCE($2, observaciones),
-                valor_repetibilidad   = COALESCE($3, valor_repetibilidad),
-                valor_excentricidad   = COALESCE($4, valor_excentricidad),
-                id_clase_exactitud    = COALESCE($5, id_clase_exactitud),
-                marca                 = COALESCE($6, marca),
-                modelo                = COALESCE($7, modelo),
-                ns                    = COALESCE($8, ns),
-                ubicacion             = COALESCE($9, ubicacion),
-                id_equipo             = COALESCE($10, id_equipo),
-                pdf_b64               = COALESCE($11, pdf_b64),
-                unidad_medida         = COALESCE($12, unidad_medida),
-                firma_tecnico         = COALESCE($13, firma_tecnico),
-                firma_tecnico_b64     = COALESCE($13, firma_tecnico_b64),
-                firma_cliente         = COALESCE($14, firma_cliente),
-                firma_cliente_b64     = COALESCE($14, firma_cliente_b64),
-                nombre_ing            = COALESCE($15, nombre_ing),
-                puesto_ing            = COALESCE($16, puesto_ing),
-                firma_cliente_nombre  = COALESCE($17, firma_cliente_nombre),
-                dictamen              = COALESCE($18, dictamen),
-                sync_status           = 'SINCRONIZADO',
-                sync_version          = COALESCE(sync_version, 0) + 1,
-                sync_at               = NOW(),
-                device_id             = $19,
-                sync_check_status     = CASE
-                    WHEN $11 IS NOT NULL OR $1 IN ('COMPLETADA', 'COMPLETADA_DIGITAL') THEN 'SUBIDA_SERVIDOR'
-                    WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN'
-                    ELSE COALESCE(sync_check_status, 'RECIBIDA_TABLET')
-                END,
-                fecha_subida_servidor = CASE
-                    WHEN $11 IS NOT NULL OR $1 IN ('COMPLETADA', 'COMPLETADA_DIGITAL') THEN COALESCE(fecha_subida_servidor, NOW())
-                    ELSE fecha_subida_servidor
-                END,
-                updated_at            = NOW()
-            WHERE id = $20
-            """,
-            nuevo_estado,
-            payload.observaciones,
-            payload.valor_repetibilidad,
-            payload.valor_excentricidad,
-            id_clase,
-            payload.marca, payload.modelo, payload.ns, payload.ubicacion,
-            payload.id_equipo,
-            payload.pdf_b64,        # $11
-            payload.unidad_medida,  # $12
-            payload.firma_tecnico,  # $13
-            payload.firma_cliente,  # $14
-            payload.nombre_ing or payload.firma_cliente_nombre,  # $15
-            payload.puesto_ing,     # $16
-            payload.firma_cliente_nombre or payload.nombre_ing,  # $17
-            payload.dictamen,       # $18
-            payload.device_id,      # $19
-            os_id,                  # $20
-            nuevo_estatus,          # $21
-            payload.modalidad,      # $22
-        )
-    except Exception as e_full:
-        logger.warning("UPDATE con sync_version falló (%s) — reintentando sin columnas opcionales", e_full)
-        # Fallback sin sync_version / sync_at / device_id (BD sin migración)
-        upd_status = await db.execute(
-            """
-            UPDATE ordenes_servicio SET
-                estado               = $1,
-                observaciones        = COALESCE($2, observaciones),
-                valor_repetibilidad  = COALESCE($3, valor_repetibilidad),
-                valor_excentricidad  = COALESCE($4, valor_excentricidad),
-                id_clase_exactitud   = COALESCE($5, id_clase_exactitud),
-                marca                = COALESCE($6, marca),
-                modelo               = COALESCE($7, modelo),
-                ns                   = COALESCE($8, ns),
-                ubicacion            = COALESCE($9, ubicacion),
-                id_equipo            = COALESCE($10, id_equipo),
-                firma_tecnico        = COALESCE($11, firma_tecnico),
-                firma_tecnico_b64    = COALESCE($11, firma_tecnico_b64),
-                firma_cliente        = COALESCE($12, firma_cliente),
-                firma_cliente_b64    = COALESCE($12, firma_cliente_b64),
-                nombre_ing           = COALESCE($13, nombre_ing),
-                puesto_ing           = COALESCE($14, puesto_ing),
-                firma_cliente_nombre = COALESCE($15, firma_cliente_nombre),
-                dictamen             = COALESCE($16, dictamen),
-                estatus              = COALESCE($18, estatus),
-                sync_status          = 'SINCRONIZADO',
-                updated_at           = NOW()
-            WHERE id = $17
-            """,
-            nuevo_estado,
-            payload.observaciones,
-            payload.valor_repetibilidad,
-            payload.valor_excentricidad,
-            id_clase,
-            payload.marca, payload.modelo, payload.ns, payload.ubicacion,
-            payload.id_equipo,
-            payload.firma_tecnico,
-            payload.firma_cliente,
-            payload.nombre_ing or payload.firma_cliente_nombre,
-            payload.puesto_ing,
-            payload.firma_cliente_nombre or payload.nombre_ing,
-            payload.dictamen,
-            os_id,
-            nuevo_estatus,
-        )
-
-    # Nunca devolver 200 si PostgreSQL no registró el cambio (p.ej. id NULL):
-    # la tablet marcaría 'Enviada' mientras macOS sigue viendo 'Proceso'.
-    if str(upd_status or "").strip().endswith(" 0"):
-        logger.error("[SYNC PUSH] UPDATE afectó 0 filas para %s (id=%s)", payload.folio_os, os_id)
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"OS {payload.folio_os!r} no se pudo actualizar en el servidor",
-        )
-
-    # Upsert de pruebas metrológicas
-    await _upsert_pruebas(db, os_id, payload)
-
-    # Si viene el PDF en Base64, guardarlo en el almacenamiento de Render
-    if payload.pdf_b64:
+        # Actualizar OS en el servidor
+        # [FIX] Primer intento con sync_version, sync_at, device_id, pdf_b64, unidad_medida.
+        # Si alguna columna no existe (BD sin migrar), reintenta sin ellas.
         try:
-            import os
-            import base64
-            upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
-            os.makedirs(upload_dir, exist_ok=True)
-            p_filename = f"{payload.folio_os}.pdf"
-            p_filepath = os.path.join(upload_dir, p_filename)
-            p_bytes = base64.b64decode(payload.pdf_b64)
-            with open(p_filepath, "wb") as pf:
-                pf.write(p_bytes)
+            upd_status = await db.execute(
+                """
+                UPDATE ordenes_servicio SET
+                    estado                = $1,
+                    estatus               = COALESCE($21, estatus),
+                    modalidad             = COALESCE($22, modalidad),
+                    observaciones         = COALESCE($2, observaciones),
+                    valor_repetibilidad   = COALESCE($3, valor_repetibilidad),
+                    valor_excentricidad   = COALESCE($4, valor_excentricidad),
+                    id_clase_exactitud    = COALESCE($5, id_clase_exactitud),
+                    marca                 = COALESCE($6, marca),
+                    modelo                = COALESCE($7, modelo),
+                    ns                    = COALESCE($8, ns),
+                    ubicacion             = COALESCE($9, ubicacion),
+                    id_equipo             = COALESCE($10, id_equipo),
+                    pdf_b64               = COALESCE($11, pdf_b64),
+                    unidad_medida         = COALESCE($12, unidad_medida),
+                    firma_tecnico         = COALESCE($13, firma_tecnico),
+                    firma_tecnico_b64     = COALESCE($13, firma_tecnico_b64),
+                    firma_cliente         = COALESCE($14, firma_cliente),
+                    firma_cliente_b64     = COALESCE($14, firma_cliente_b64),
+                    nombre_ing            = COALESCE($15, nombre_ing),
+                    puesto_ing            = COALESCE($16, puesto_ing),
+                    firma_cliente_nombre  = COALESCE($17, firma_cliente_nombre),
+                    dictamen              = COALESCE($18, dictamen),
+                    sync_status           = 'SINCRONIZADO',
+                    sync_version          = COALESCE(sync_version, 0) + 1,
+                    sync_at               = NOW(),
+                    device_id             = $19,
+                    sync_check_status     = CASE
+                        WHEN $11 IS NOT NULL OR $1 IN ('COMPLETADA', 'COMPLETADA_DIGITAL') THEN 'SUBIDA_SERVIDOR'
+                        WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN'
+                        ELSE COALESCE(sync_check_status, 'RECIBIDA_TABLET')
+                    END,
+                    fecha_subida_servidor = CASE
+                        WHEN $11 IS NOT NULL OR $1 IN ('COMPLETADA', 'COMPLETADA_DIGITAL') THEN COALESCE(fecha_subida_servidor, NOW())
+                        ELSE fecha_subida_servidor
+                    END,
+                    updated_at            = NOW()
+                WHERE id = $20
+                """,
+                nuevo_estado,
+                payload.observaciones,
+                payload.valor_repetibilidad,
+                payload.valor_excentricidad,
+                id_clase,
+                payload.marca, payload.modelo, payload.ns, payload.ubicacion,
+                payload.id_equipo,
+                payload.pdf_b64,        # $11
+                payload.unidad_medida,  # $12
+                payload.firma_tecnico,  # $13
+                payload.firma_cliente,  # $14
+                payload.nombre_ing or payload.firma_cliente_nombre,  # $15
+                payload.puesto_ing,     # $16
+                payload.firma_cliente_nombre or payload.nombre_ing,  # $17
+                payload.dictamen,       # $18
+                payload.device_id,      # $19
+                os_id,                  # $20
+                nuevo_estatus,          # $21
+                payload.modalidad,      # $22
+            )
+        except Exception as e_full:
+            logger.warning("UPDATE con sync_version falló (%s) — reintentando sin columnas opcionales", e_full)
+            # Fallback sin sync_version / sync_at / device_id (BD sin migración)
+            upd_status = await db.execute(
+                """
+                UPDATE ordenes_servicio SET
+                    estado               = $1,
+                    observaciones        = COALESCE($2, observaciones),
+                    valor_repetibilidad  = COALESCE($3, valor_repetibilidad),
+                    valor_excentricidad  = COALESCE($4, valor_excentricidad),
+                    id_clase_exactitud   = COALESCE($5, id_clase_exactitud),
+                    marca                = COALESCE($6, marca),
+                    modelo               = COALESCE($7, modelo),
+                    ns                   = COALESCE($8, ns),
+                    ubicacion            = COALESCE($9, ubicacion),
+                    id_equipo            = COALESCE($10, id_equipo),
+                    firma_tecnico        = COALESCE($11, firma_tecnico),
+                    firma_tecnico_b64    = COALESCE($11, firma_tecnico_b64),
+                    firma_cliente        = COALESCE($12, firma_cliente),
+                    firma_cliente_b64    = COALESCE($12, firma_cliente_b64),
+                    nombre_ing           = COALESCE($13, nombre_ing),
+                    puesto_ing           = COALESCE($14, puesto_ing),
+                    firma_cliente_nombre = COALESCE($15, firma_cliente_nombre),
+                    dictamen             = COALESCE($16, dictamen),
+                    estatus              = COALESCE($18, estatus),
+                    sync_status          = 'SINCRONIZADO',
+                    updated_at           = NOW()
+                WHERE id = $17
+                """,
+                nuevo_estado,
+                payload.observaciones,
+                payload.valor_repetibilidad,
+                payload.valor_excentricidad,
+                id_clase,
+                payload.marca, payload.modelo, payload.ns, payload.ubicacion,
+                payload.id_equipo,
+                payload.firma_tecnico,
+                payload.firma_cliente,
+                payload.nombre_ing or payload.firma_cliente_nombre,
+                payload.puesto_ing,
+                payload.firma_cliente_nombre or payload.nombre_ing,
+                payload.dictamen,
+                os_id,
+                nuevo_estatus,
+            )
+
+        # Nunca devolver 200 si PostgreSQL no registró el cambio (p.ej. id NULL):
+        # la tablet marcaría 'Enviada' mientras macOS sigue viendo 'Proceso'.
+        if str(upd_status or "").strip().endswith(" 0"):
+            logger.error("[SYNC PUSH] UPDATE afectó 0 filas para %s (id=%s)", payload.folio_os, os_id)
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"OS {payload.folio_os!r} no se pudo actualizar en el servidor",
+            )
+
+        # Upsert de pruebas metrológicas
+        await _upsert_pruebas(db, os_id, payload)
+
+        # Si viene el PDF en Base64, guardarlo en el almacenamiento de Render
+        if payload.pdf_b64:
+            try:
+                import os
+                import base64
+                upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+                os.makedirs(upload_dir, exist_ok=True)
+                p_filename = f"{payload.folio_os}.pdf"
+                p_filepath = os.path.join(upload_dir, p_filename)
+                p_bytes = base64.b64decode(payload.pdf_b64)
+                with open(p_filepath, "wb") as pf:
+                    pf.write(p_bytes)
+                await db.execute(
+                    """
+                    UPDATE ordenes_servicio 
+                    SET pdf_url = $1, pdf_path = $2, pdf_b64 = $4,
+                        pdf_generado = TRUE,
+                        sync_check_status = CASE 
+                            WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN' 
+                            ELSE 'SUBIDA_SERVIDOR' 
+                        END,
+                        fecha_subida_servidor = COALESCE(fecha_subida_servidor, NOW()),
+                        updated_at = NOW()
+                    WHERE id = $3
+                    """,
+                    f"/uploads/{p_filename}", p_filepath, os_id, payload.pdf_b64,
+                )
+                logger.info("[SYNC PUSH] PDF guardado en disco y PostgreSQL para %s (%d bytes)", payload.folio_os, len(p_bytes))
+            except Exception as e_pdf_disk:
+                logger.warning("[SYNC PUSH] Error guardando PDF en disco: %s", e_pdf_disk)
+
+        # ── Auto-registro de báscula (Modalidad DIGITAL) ──────────────────────────────
+        # Si la tablet envía sucursal_id + número de serie, registramos el equipo
+        # en cliente_equipos si es nuevo (UPSERT = nunca duplica).
+        nuevo_equipo_id: Optional[int] = payload.equipo_catalogo_id
+        if payload.sucursal_id and payload.ns:
+            try:
+                existing = await db.fetchrow(
+                    "SELECT id FROM cliente_equipos "
+                    "WHERE sucursal_id = $1 AND numero_serie = $2 AND activo = TRUE",
+                    payload.sucursal_id, payload.ns,
+                )
+                if existing:
+                    nuevo_equipo_id = existing["id"]
+                else:
+                    # Equipo nuevo: insertar vía función SQL
+                    upsert_row = await db.fetchrow(
+                        """
+                        SELECT fn_upsert_equipo_desde_os(
+                            $1, $2, $3, $4, $5, $6, NULL, NULL, NULL
+                        ) AS equipo_id
+                        """,
+                        payload.sucursal_id,
+                        payload.ns,
+                        payload.marca,
+                        payload.modelo,
+                        payload.id_equipo,
+                        payload.ubicacion,
+                    )
+                    if upsert_row:
+                        nuevo_equipo_id = upsert_row["equipo_id"]
+                        logger.info(
+                            "Auto-registro báscula: sucursal=%d ns=%s → equipo_id=%s",
+                            payload.sucursal_id, payload.ns, nuevo_equipo_id,
+                        )
+            except Exception as exc_eq:
+                # Si la función SQL aún no existe (migración pendiente), no bloqueamos el push
+                logger.warning("Auto-registro equipo: fn_upsert_equipo_desde_os no disponible (%s)", exc_eq)
+
+        # Vincular OS al equipo y a la sucursal
+        if payload.sucursal_id or nuevo_equipo_id:
             await db.execute(
                 """
-                UPDATE ordenes_servicio 
-                SET pdf_url = $1, pdf_path = $2, pdf_b64 = $4,
-                    pdf_generado = TRUE,
-                    sync_check_status = CASE 
-                        WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN' 
-                        ELSE 'SUBIDA_SERVIDOR' 
-                    END,
-                    fecha_subida_servidor = COALESCE(fecha_subida_servidor, NOW()),
-                    updated_at = NOW()
+                UPDATE ordenes_servicio SET
+                    sucursal_id        = COALESCE($1, sucursal_id),
+                    equipo_catalogo_id = COALESCE($2, equipo_catalogo_id)
                 WHERE id = $3
                 """,
-                f"/uploads/{p_filename}", p_filepath, os_id, payload.pdf_b64,
+                payload.sucursal_id,
+                nuevo_equipo_id,
+                os_id,
             )
-            logger.info("[SYNC PUSH] PDF guardado en disco y PostgreSQL para %s (%d bytes)", payload.folio_os, len(p_bytes))
-        except Exception as e_pdf_disk:
-            logger.warning("[SYNC PUSH] Error guardando PDF en disco: %s", e_pdf_disk)
 
-    # ── Auto-registro de báscula (Modalidad DIGITAL) ──────────────────────────────
-    # Si la tablet envía sucursal_id + número de serie, registramos el equipo
-    # en cliente_equipos si es nuevo (UPSERT = nunca duplica).
-    nuevo_equipo_id: Optional[int] = payload.equipo_catalogo_id
-    if payload.sucursal_id and payload.ns:
-        try:
-            existing = await db.fetchrow(
-                "SELECT id FROM cliente_equipos "
-                "WHERE sucursal_id = $1 AND numero_serie = $2 AND activo = TRUE",
-                payload.sucursal_id, payload.ns,
-            )
-            if existing:
-                nuevo_equipo_id = existing["id"]
-            else:
-                # Equipo nuevo: insertar vía función SQL
-                upsert_row = await db.fetchrow(
-                    """
-                    SELECT fn_upsert_equipo_desde_os(
-                        $1, $2, $3, $4, $5, $6, NULL, NULL, NULL
-                    ) AS equipo_id
-                    """,
-                    payload.sucursal_id,
-                    payload.ns,
-                    payload.marca,
-                    payload.modelo,
-                    payload.id_equipo,
-                    payload.ubicacion,
-                )
-                if upsert_row:
-                    nuevo_equipo_id = upsert_row["equipo_id"]
-                    logger.info(
-                        "Auto-registro báscula: sucursal=%d ns=%s → equipo_id=%s",
-                        payload.sucursal_id, payload.ns, nuevo_equipo_id,
-                    )
-        except Exception as exc_eq:
-            # Si la función SQL aún no existe (migración pendiente), no bloqueamos el push
-            logger.warning("Auto-registro equipo: fn_upsert_equipo_desde_os no disponible (%s)", exc_eq)
-
-    # Vincular OS al equipo y a la sucursal
-    if payload.sucursal_id or nuevo_equipo_id:
-        await db.execute(
-            """
-            UPDATE ordenes_servicio SET
-                sucursal_id        = COALESCE($1, sucursal_id),
-                equipo_catalogo_id = COALESCE($2, equipo_catalogo_id)
-            WHERE id = $3
-            """,
-            payload.sucursal_id,
-            nuevo_equipo_id,
-            os_id,
+        new_version = server_version + 1
+        logger.info(
+            "Sync PUSH: folio=%s device=%s estado=%s sync_v=%d conflicto=%s",
+            payload.folio_os, payload.device_id, nuevo_estado, new_version, conflicto
         )
 
-    new_version = server_version + 1
-    logger.info(
-        "Sync PUSH: folio=%s device=%s estado=%s sync_v=%d conflicto=%s",
-        payload.folio_os, payload.device_id, nuevo_estado, new_version, conflicto
-    )
+        return PushResponse(
+            folio_os     = payload.folio_os,
+            sync_version = new_version,
+            estado       = nuevo_estado,
+            conflicto    = conflicto,
+            mensaje      = (
+                "Sincronización exitosa (conflicto resuelto: datos de tablet aplicados)"
+                if conflicto else "Sincronización exitosa"
+            ),
+        )
 
-    return PushResponse(
-        folio_os     = payload.folio_os,
-        sync_version = new_version,
-        estado       = nuevo_estado,
-        conflicto    = conflicto,
-        mensaje      = (
-            "Sincronización exitosa (conflicto resuelto: datos de tablet aplicados)"
-            if conflicto else "Sincronización exitosa"
-        ),
-    )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SYNC ERROR] Falla en sincronización push: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail      = f"Error en servidor: {str(e)}",
+        )
 
 
 async def _upsert_pruebas(db, os_id: int, payload: PushPayload) -> None:
@@ -1045,77 +1073,95 @@ async def upload_firmas(
 
     Al recibir las firmas, el estado de la OS avanza automáticamente a FIRMADA.
     """
-    id_tecnico = current_user.get("id_tecnico")
-
-    row = await db.fetchrow(
-        "SELECT id, id_tecnico, estado FROM ordenes_servicio WHERE folio_os = $1",
-        folio_os,
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"OS {folio_os!r} no encontrada")
-    if row["id_tecnico"] != id_tecnico:
-        raise HTTPException(status_code=403, detail="OS no asignada a este usuario")
-    if row["estado"] in ("CANCELADA", "COMPLETADA"):
-        raise HTTPException(status_code=400, detail=f"OS en estado {row['estado']!r}, no se pueden añadir firmas")
-
-    f_tec = payload.firma_tecnico or payload.firma_tecnico_png
-    f_cli = payload.firma_cliente or payload.firma_cliente_png
-    nom_ing = payload.nombre_ing or payload.firma_cliente_nombre
-    puesto_ing = payload.puesto_ing
-
-    # [FIX] Intenta con sync_version y sync_at; si no existen, usa fallback
     try:
-        await db.execute(
-            """
-            UPDATE ordenes_servicio SET
-                firma_tecnico        = COALESCE($1, firma_tecnico),
-                firma_tecnico_b64    = COALESCE($1, firma_tecnico_b64),
-                firma_cliente        = COALESCE($2, firma_cliente),
-                firma_cliente_b64    = COALESCE($2, firma_cliente_b64),
-                nombre_ing           = COALESCE($3, nombre_ing),
-                puesto_ing           = COALESCE($4, puesto_ing),
-                firma_cliente_nombre = COALESCE($3, firma_cliente_nombre),
-                estado               = 'FIRMADA',
-                sync_version         = COALESCE(sync_version, 0) + 1,
-                sync_at              = NOW(),
-                updated_at           = NOW()
-            WHERE id = $5
-            """,
-            f_tec,
-            f_cli,
-            nom_ing,
-            puesto_ing,
-            row["id"],
-        )
-    except Exception as e_firmas:
-        logger.warning("UPDATE firmas con sync_version falló (%s) — reintentando sin columnas opcionales", e_firmas)
-        await db.execute(
-            """
-            UPDATE ordenes_servicio SET
-                firma_tecnico        = COALESCE($1, firma_tecnico),
-                firma_tecnico_b64    = COALESCE($1, firma_tecnico_b64),
-                firma_cliente        = COALESCE($2, firma_cliente),
-                firma_cliente_b64    = COALESCE($2, firma_cliente_b64),
-                nombre_ing           = COALESCE($3, nombre_ing),
-                puesto_ing           = COALESCE($4, puesto_ing),
-                firma_cliente_nombre = COALESCE($3, firma_cliente_nombre),
-                estado               = 'FIRMADA',
-                updated_at           = NOW()
-            WHERE id = $5
-            """,
-            f_tec,
-            f_cli,
-            nom_ing,
-            puesto_ing,
-            row["id"],
-        )
+        id_tecnico = current_user.get("id_tecnico")
 
-    logger.info("Firmas subidas para folio=%s por tecnico_id=%d", folio_os, id_tecnico)
-    return {
-        "detail":       "Firmas registradas. Estado actualizado a FIRMADA.",
-        "folio_os":     folio_os,
-        "nuevo_estado": "FIRMADA",
-    }
+        row = await db.fetchrow(
+            "SELECT id, id_tecnico, estado FROM ordenes_servicio WHERE folio_os = $1",
+            folio_os,
+        )
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"OS {folio_os!r} no encontrada")
+
+        import unicodedata
+        role = "".join(
+            c for c in unicodedata.normalize("NFKD", str(current_user.get("role", "")))
+            if not unicodedata.combining(c)
+        ).lower()
+        is_admin = "admin" in role or str(current_user.get("username", "")).strip().lower() == "ivancolin1207"
+
+        if not is_admin and row["id_tecnico"] != id_tecnico:
+            raise HTTPException(status_code=403, detail="OS no asignada a este usuario")
+        if row["estado"] in ("CANCELADA", "COMPLETADA"):
+            raise HTTPException(status_code=400, detail=f"OS en estado {row['estado']!r}, no se pueden añadir firmas")
+
+        f_tec = payload.firma_tecnico or payload.firma_tecnico_png
+        f_cli = payload.firma_cliente or payload.firma_cliente_png
+        nom_ing = payload.nombre_ing or payload.firma_cliente_nombre
+        puesto_ing = payload.puesto_ing
+
+        # [FIX] Intenta con sync_version y sync_at; si no existen, usa fallback
+        try:
+            await db.execute(
+                """
+                UPDATE ordenes_servicio SET
+                    firma_tecnico        = COALESCE($1, firma_tecnico),
+                    firma_tecnico_b64    = COALESCE($1, firma_tecnico_b64),
+                    firma_cliente        = COALESCE($2, firma_cliente),
+                    firma_cliente_b64    = COALESCE($2, firma_cliente_b64),
+                    nombre_ing           = COALESCE($3, nombre_ing),
+                    puesto_ing           = COALESCE($4, puesto_ing),
+                    firma_cliente_nombre = COALESCE($3, firma_cliente_nombre),
+                    estado               = 'FIRMADA',
+                    sync_version         = COALESCE(sync_version, 0) + 1,
+                    sync_at              = NOW(),
+                    updated_at           = NOW()
+                WHERE id = $5
+                """,
+                f_tec,
+                f_cli,
+                nom_ing,
+                puesto_ing,
+                row["id"],
+            )
+        except Exception as e_firmas:
+            logger.warning("UPDATE firmas con sync_version falló (%s) — reintentando sin columnas opcionales", e_firmas)
+            await db.execute(
+                """
+                UPDATE ordenes_servicio SET
+                    firma_tecnico        = COALESCE($1, firma_tecnico),
+                    firma_tecnico_b64    = COALESCE($1, firma_tecnico_b64),
+                    firma_cliente        = COALESCE($2, firma_cliente),
+                    firma_cliente_b64    = COALESCE($2, firma_cliente_b64),
+                    nombre_ing           = COALESCE($3, nombre_ing),
+                    puesto_ing           = COALESCE($4, puesto_ing),
+                    firma_cliente_nombre = COALESCE($3, firma_cliente_nombre),
+                    estado               = 'FIRMADA',
+                    updated_at           = NOW()
+                WHERE id = $5
+                """,
+                f_tec,
+                f_cli,
+                nom_ing,
+                puesto_ing,
+                row["id"],
+            )
+
+        logger.info("Firmas subidas para folio=%s por tecnico_id=%s", folio_os, id_tecnico)
+        return {
+            "detail":       "Firmas registradas. Estado actualizado a FIRMADA.",
+            "folio_os":     folio_os,
+            "nuevo_estado": "FIRMADA",
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SYNC ERROR] Falla en upload_firmas: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail      = f"Error en servidor: {str(e)}",
+        )
 
 
 @router.get(

@@ -100,3 +100,12 @@ class PdfService:
 
 
 pdf_service = PdfService()
+
+# Re-exportar funciones del enrutador centralizado
+try:
+    from services.pdf_router import regenerar_pdf, regenerar_pdf_orden
+except ImportError:
+    try:
+        from servicios_pesa.services.pdf_router import regenerar_pdf, regenerar_pdf_orden
+    except ImportError:
+        pass

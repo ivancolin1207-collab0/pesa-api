@@ -47,6 +47,10 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sync_at       TIMESTAMPTZ",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS device_id     TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS estatus       TEXT DEFAULT 'Proceso'",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS modalidad     VARCHAR(50) DEFAULT 'DIGITAL'",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS unidad_medida VARCHAR(20) DEFAULT 'kg'",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS firma_tecnico_descargada TEXT",
+                "ALTER TABLE cat_tecnicos ADD COLUMN IF NOT EXISTS firma_digital      TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_generado  BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_path      TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_url       TEXT",
@@ -114,6 +118,14 @@ async def permission_handler(request: Request, exc: PermissionError):
     return JSONResponse(
         status_code = status.HTTP_403_FORBIDDEN,
         content     = {"detail": str(exc)},
+    )
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error("[UNHANDLED EXCEPTION] %s %s: %s", request.method, request.url.path, exc, exc_info=True)
+    return JSONResponse(
+        status_code = status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content     = {"detail": f"Error interno en servidor: {str(exc)}"},
     )
 
 # ─── Routers ─────────────────────────────────────────────────────────────────
