@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import json
 import base64
+import logging
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -23,6 +24,7 @@ from pesa_api.core.database import get_db
 from pesa_api.core.security import get_current_user, require_roles, _normalizar_rol
 
 router = APIRouter()
+logger = logging.getLogger("pesa_api.os_router")
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -377,7 +379,7 @@ async def upload_pdf_tablet_os(
     pdf_b64 = base64.b64encode(content).decode("ascii")
 
     try:
-        await db.execute(
+        upd_status = await db.execute(
             """
             UPDATE ordenes_servicio
             SET estado            = 'Cerrado',
@@ -401,7 +403,7 @@ async def upload_pdf_tablet_os(
             actual_id,
         )
     except Exception:
-        await db.execute(
+        upd_status = await db.execute(
             """
             UPDATE ordenes_servicio
             SET estado            = 'Cerrado',
@@ -424,6 +426,25 @@ async def upload_pdf_tablet_os(
             filepath,
             actual_id,
         )
+
+    if str(upd_status or "").strip().endswith(" 0"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"OS '{actual_folio}' no se pudo actualizar en el servidor (id={actual_id})",
+        )
+
+    if data:
+        # Modalidad homologada enviada por la tablet (p. ej. escaneos 'FISICO').
+        try:
+            from pesa_api.routers.catalogos import _normalizar_modalidad
+            modalidad_n = _normalizar_modalidad(json.loads(data).get("modalidad"))
+            if modalidad_n:
+                await db.execute(
+                    "UPDATE ordenes_servicio SET modalidad = $1 WHERE id = $2",
+                    modalidad_n, actual_id,
+                )
+        except Exception as e_mod:
+            logger.warning("[UPLOAD-PDF OS] No se pudo aplicar modalidad: %s", e_mod)
 
     if data:
         try:

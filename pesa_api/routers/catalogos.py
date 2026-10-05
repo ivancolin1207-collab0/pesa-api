@@ -369,6 +369,18 @@ async def crear_orden(
 
 # ── Adjuntar escaneo ──────────────────────────────────────────────────────────
 
+def _normalizar_modalidad(valor) -> Optional[str]:
+    """'Físico'/'fisico'/'FISICO' → 'FISICO'; 'Digital' → 'DIGITAL'; otro → None."""
+    if valor is None:
+        return None
+    v = str(valor).strip().upper().replace("Í", "I")
+    if v.startswith("FISIC"):
+        return "FISICO"
+    if v.startswith("DIGITAL"):
+        return "DIGITAL"
+    return None
+
+
 @router.post(
     "/ordenes/{os_id}/adjunto",
     summary="Adjuntar escaneo a una OS",
@@ -378,23 +390,34 @@ async def adjuntar_escaneo(
     os_id:    int,
     folio_os: str      = Form(...),
     archivo:  UploadFile = File(...),
+    modalidad: Optional[str] = Form(None),
+    estatus:   Optional[str] = Form(None),
     db=Depends(get_db),
     _=Depends(get_current_user),
 ):
     """
     Recibe un archivo (imagen/PDF) y lo adjunta como escaneo a la OS indicada.
-    El archivo se guarda en el directorio /uploads/ del servidor.
-    El estado de la OS se actualiza a ESCANEADA.
+    La OS se localiza PRIMERO por folio; os_id solo se usa como respaldo
+    (la tablet no conoce el id del servidor). Si el archivo es PDF se guarda
+    también en pdf_b64 (persistente) y se marca estatus 'Cerrado'.
     """
-    # Validar que la OS existe
-    row = await db.fetchrow(
-        "SELECT folio_os FROM ordenes_servicio WHERE id = $1 OR folio_os = $2",
-        os_id, folio_os,
-    )
+    clean_folio = (folio_os or "").strip()
+    row = None
+    if clean_folio:
+        row = await db.fetchrow(
+            "SELECT id, folio_os FROM ordenes_servicio WHERE folio_os = $1",
+            clean_folio,
+        )
+    if row is None and os_id and os_id > 0:
+        row = await db.fetchrow(
+            "SELECT id, folio_os FROM ordenes_servicio WHERE id = $1",
+            os_id,
+        )
     if row is None:
         raise HTTPException(status_code=404, detail="Orden de servicio no encontrada")
 
     folio = row["folio_os"]
+    actual_id = row["id"]
 
     # Guardar archivo
     upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
@@ -408,24 +431,39 @@ async def adjuntar_escaneo(
     with open(filepath, "wb") as f:
         f.write(content)
 
-    # Actualizar estado de la OS
+    es_pdf     = ext.lower() == ".pdf" or content[:4] == b"%PDF"
+    pdf_b64    = base64.b64encode(content).decode("ascii") if es_pdf else None
+    modalidad_n = _normalizar_modalidad(modalidad) or "FISICO"
+    estatus_n  = (estatus or "").strip() or "Cerrado"
+    estado_n   = "Cerrado" if es_pdf else "ESCANEADA"
+
     await db.execute(
         """
         UPDATE ordenes_servicio
-        SET estado      = 'ESCANEADA',
-            pdf_url     = $1,
-            updated_at  = NOW()
-        WHERE folio_os = $2
+        SET estado       = $1,
+            estatus      = $2,
+            modalidad    = $3,
+            pdf_url      = $4,
+            pdf_b64      = COALESCE($5, pdf_b64),
+            pdf_generado = CASE WHEN $5::text IS NULL THEN pdf_generado ELSE TRUE END,
+            updated_at   = NOW()
+        WHERE id = $6
         """,
+        estado_n,
+        estatus_n,
+        modalidad_n,
         f"/uploads/{filename}",
-        folio,
+        pdf_b64,
+        actual_id,
     )
 
     return {
-        "folio_os": folio,
-        "archivo":  filename,
-        "estado":   "ESCANEADA",
-        "size_kb":  round(len(content) / 1024, 1),
+        "folio_os":  folio,
+        "archivo":   filename,
+        "estado":    estado_n,
+        "estatus":   estatus_n,
+        "modalidad": modalidad_n,
+        "size_kb":   round(len(content) / 1024, 1),
     }
 
 
@@ -503,7 +541,7 @@ async def upload_pdf_tablet(
     pdf_b64 = base64.b64encode(content).decode("ascii")
 
     # Actualizar estado, pdf_b64, pdf_url y sync_status en PostgreSQL
-    await db.execute(
+    upd_status = await db.execute(
         """
         UPDATE ordenes_servicio
         SET estado            = 'Cerrado',
@@ -526,6 +564,24 @@ async def upload_pdf_tablet(
         filepath,
         actual_id,
     )
+
+    if str(upd_status or "").strip().endswith(" 0"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"OS '{actual_folio}' no se pudo actualizar en el servidor (id={actual_id})",
+        )
+
+    if data:
+        # Modalidad homologada enviada por la tablet (p. ej. escaneos 'FISICO').
+        try:
+            modalidad_n = _normalizar_modalidad(json.loads(data).get("modalidad"))
+            if modalidad_n:
+                await db.execute(
+                    "UPDATE ordenes_servicio SET modalidad = $1 WHERE id = $2",
+                    modalidad_n, actual_id,
+                )
+        except Exception as e_mod:
+            logger.warning("[UPLOAD-PDF] No se pudo aplicar modalidad: %s", e_mod)
 
     if data:
         try:

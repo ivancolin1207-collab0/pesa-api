@@ -31,11 +31,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 
 from pesa_api.core.database import get_db
-from pesa_api.core.security import require_roles
+from pesa_api.core.security import get_current_user, require_roles
 from pesa_api.core.config   import settings
 
 router = APIRouter()
 logger = logging.getLogger("pesa_api.sync")
+
+# Tipo de servicio efectivo. En formatos físicos RE (Revisión de Celdas),
+# RMA (Remisión / Entrega Refacciones) y LV prevalece el texto capturado en
+# os.tipo_servicio: existen órdenes con id_tipo_servicio erróneo (p. ej. 4 =
+# "Calibración + Ajuste") que harían que la tablet exigiera CCA/DVE.
+_TIPO_SERVICIO_SQL = """
+            CASE
+                WHEN UPPER(COALESCE(os.tipo_documento, '')) IN ('RE', 'RMA', 'LV')
+                  OR os.folio_os ~* '^(RE|RMA|LV)-'
+                THEN COALESCE(NULLIF(TRIM(os.tipo_servicio), ''), ts.nombre, '')
+                ELSE COALESCE(ts.nombre, os.tipo_servicio, '')
+            END"""
 
 
 # ── Schemas ────────────────────────────────────────────────────────────────────
@@ -159,6 +171,9 @@ class PushPayload(BaseModel):
 
     # Estado solicitado por la tablet
     nuevo_estado:   Optional[str] = None
+    # Estatus legible (Proceso/Cerrado) y modalidad enviados explícitamente por la tablet
+    estatus:        Optional[str] = None
+    modalidad:      Optional[str] = None
 
     # Offline-First v2: PDF + firmas digitales
     pdf_b64:              Optional[str] = None  # PDF completo en Base64
@@ -208,6 +223,89 @@ class FolioLockResponse(BaseModel):
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
+
+# Supervisores de calibración autorizados a consultar el repositorio global
+# (solo lectura). Alan Guevara = cat_tecnicos.id 8 / usuario Daikki19.
+_SUPERVISORES_CALIBRACION_IDS       = {8}
+_SUPERVISORES_CALIBRACION_USERNAMES = {"daikki19", "ivancolin1207"}
+
+
+@router.get(
+    "/calibraciones-consulta",
+    summary = "Repositorio de calibraciones concluidas (solo lectura, supervisión metrológica)",
+)
+async def calibraciones_consulta(
+    db           = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+) -> list[dict]:
+    """
+    Devuelve las OS concluidas cuyo tipo de servicio contiene 'Calibración' o 'Ajuste',
+    de TODOS los técnicos, con el nombre del técnico ejecutor y si tienen PDF.
+    Solo metadatos de consulta: no incluye mediciones, firmas ni PDF en Base64.
+    """
+    import unicodedata
+    role = "".join(
+        c for c in unicodedata.normalize("NFKD", str(current_user.get("role", "")))
+        if not unicodedata.combining(c)
+    ).lower()
+    username = str(current_user.get("username", "")).strip().lower()
+    try:
+        id_tec = int(current_user.get("id_tecnico") or 0)
+    except (TypeError, ValueError):
+        id_tec = 0
+
+    autorizado = (
+        "admin" in role
+        or username in _SUPERVISORES_CALIBRACION_USERNAMES
+        or id_tec in _SUPERVISORES_CALIBRACION_IDS
+    )
+    if not autorizado:
+        raise HTTPException(
+            status_code = status.HTTP_403_FORBIDDEN,
+            detail      = "No autorizado para consultar el repositorio de calibraciones",
+        )
+
+    tipo_expr = _TIPO_SERVICIO_SQL
+    rows = await db.fetch(
+        """
+        SELECT DISTINCT ON (os.folio_os)
+            os.folio_os,
+            os.fecha::text                                   AS fecha,
+            COALESCE(cl.razon_social, os.cliente, '')        AS cliente,
+            COALESCE(suc.nombre_sucursal, '')                AS sucursal,
+            os.id_tecnico,
+            COALESCE(tc.nombre_completo, '')                 AS tecnico,
+            """ + tipo_expr + """                            AS tipo_servicio,
+            COALESCE(os.estado, '')                          AS estado,
+            COALESCE(os.estatus, '')                         AS estatus,
+            COALESCE(os.modalidad, '')                       AS modalidad,
+            (COALESCE(os.pdf_generado, FALSE)
+               OR COALESCE(os.pdf_url, '') <> ''
+               OR COALESCE(os.pdf_path, '') <> '')           AS tiene_pdf,
+            COALESCE(os.updated_at, NOW())::text             AS updated_at
+        FROM ordenes_servicio os
+        LEFT JOIN cat_clientes       cl  ON os.id_cliente       = cl.id
+        LEFT JOIN cliente_sucursales suc ON os.sucursal_id      = suc.id
+        LEFT JOIN cat_tecnicos       tc  ON os.id_tecnico       = tc.id
+        LEFT JOIN cat_tipo_servicio  ts  ON os.id_tipo_servicio = ts.id
+        WHERE (
+                UPPER(TRIM(COALESCE(os.estado, ''))) IN
+                    ('CERRADO','CERRADA','COMPLETADA','COMPLETADO','COMPLETADA_DIGITAL',
+                     'COMPLETADA_FISICA','ESCANEADA','FIRMADA')
+             OR UPPER(TRIM(COALESCE(os.estatus, ''))) IN ('CERRADO','CERRADA','COMPLETADO','COMPLETADA')
+          )
+          AND (
+                LOWER(""" + tipo_expr + """) LIKE '%%calibraci%%'
+             OR LOWER(""" + tipo_expr + """) LIKE '%%ajuste%%'
+          )
+        ORDER BY os.folio_os, os.updated_at DESC NULLS LAST
+        """.replace("%%", "%"),
+    )
+    data = [dict(r) for r in rows]
+    data.sort(key=lambda r: (r.get("fecha") or "", r.get("folio_os") or ""), reverse=True)
+    logger.info("[CALIBRACIONES CONSULTA] user=%s id_tec=%s → %d registros", username, id_tec, len(data))
+    return data
+
 
 @router.get("", response_model=list[OSCompleta], summary="Sincronización de OS (alias de /pull)", tags=["Sincronización Offline"])
 @router.get("/", response_model=list[OSCompleta], include_in_schema=False)
@@ -319,7 +417,7 @@ async def sync_pull(
             COALESCE(cl.razon_social, os.cliente, '') AS cliente_nombre,
             COALESCE(cl.direccion,       '') AS direccion_cliente,
             COALESCE(suc.nombre_sucursal, '') AS sucursal_nombre,
-            COALESCE(ts.nombre, os.tipo_servicio, '') AS tipo_servicio,
+            """ + _TIPO_SERVICIO_SQL + """ AS tipo_servicio,
             COALESCE(tc.nombre_completo, '') AS tecnico,
             COALESCE(tc.nombre_completo, '') AS tecnico_nombre,
             ce.codigo                        AS clase_exactitud_codigo,
@@ -649,6 +747,14 @@ async def sync_push(
             # Permitir cierre siempre que no esté ya cancelada/completada por admin
             nuevo_estado = "COMPLETADA_DIGITAL"
 
+    # Si la tablet declara la orden Cerrada explícitamente, el estado final es COMPLETADA_DIGITAL
+    if (not estado_protegido
+            and (payload.estatus or "").strip().upper() in ("CERRADO", "CERRADA", "COMPLETADO", "COMPLETADA")):
+        nuevo_estado = "COMPLETADA_DIGITAL"
+
+    _CERRADOS = {"COMPLETADA", "COMPLETADA_DIGITAL", "CERRADO", "CERRADA", "ESCANEADA", "FIRMADA"}
+    nuevo_estatus = "Cerrado" if str(nuevo_estado or "").upper() in _CERRADOS else None
+
     # Resolver clase de exactitud (si viene el código, buscar el ID)
     id_clase = row["id_clase_exactitud"]
     if payload.clase_exactitud_codigo:
@@ -663,10 +769,12 @@ async def sync_push(
     # [FIX] Primer intento con sync_version, sync_at, device_id, pdf_b64, unidad_medida.
     # Si alguna columna no existe (BD sin migrar), reintenta sin ellas.
     try:
-        await db.execute(
+        upd_status = await db.execute(
             """
             UPDATE ordenes_servicio SET
                 estado                = $1,
+                estatus               = COALESCE($21, estatus),
+                modalidad             = COALESCE($22, modalidad),
                 observaciones         = COALESCE($2, observaciones),
                 valor_repetibilidad   = COALESCE($3, valor_repetibilidad),
                 valor_excentricidad   = COALESCE($4, valor_excentricidad),
@@ -719,11 +827,13 @@ async def sync_push(
             payload.dictamen,       # $18
             payload.device_id,      # $19
             os_id,                  # $20
+            nuevo_estatus,          # $21
+            payload.modalidad,      # $22
         )
     except Exception as e_full:
         logger.warning("UPDATE con sync_version falló (%s) — reintentando sin columnas opcionales", e_full)
         # Fallback sin sync_version / sync_at / device_id (BD sin migración)
-        await db.execute(
+        upd_status = await db.execute(
             """
             UPDATE ordenes_servicio SET
                 estado               = $1,
@@ -744,6 +854,7 @@ async def sync_push(
                 puesto_ing           = COALESCE($14, puesto_ing),
                 firma_cliente_nombre = COALESCE($15, firma_cliente_nombre),
                 dictamen             = COALESCE($16, dictamen),
+                estatus              = COALESCE($18, estatus),
                 sync_status          = 'SINCRONIZADO',
                 updated_at           = NOW()
             WHERE id = $17
@@ -762,6 +873,16 @@ async def sync_push(
             payload.firma_cliente_nombre or payload.nombre_ing,
             payload.dictamen,
             os_id,
+            nuevo_estatus,
+        )
+
+    # Nunca devolver 200 si PostgreSQL no registró el cambio (p.ej. id NULL):
+    # la tablet marcaría 'Enviada' mientras macOS sigue viendo 'Proceso'.
+    if str(upd_status or "").strip().endswith(" 0"):
+        logger.error("[SYNC PUSH] UPDATE afectó 0 filas para %s (id=%s)", payload.folio_os, os_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"OS {payload.folio_os!r} no se pudo actualizar en el servidor",
         )
 
     # Upsert de pruebas metrológicas
