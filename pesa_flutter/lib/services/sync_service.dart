@@ -1424,6 +1424,30 @@ class SyncService extends ChangeNotifier {
           else if (tecNorm.contains('ivan')) idTecnicoVal = 2;
         }
 
+        String? partidasVal;
+        final rawPartidas = remota['partidas'] ?? remota['refacciones'] ?? remota['items'];
+        if (rawPartidas is String && rawPartidas.trim().isNotEmpty) {
+          partidasVal = rawPartidas;
+        } else if (rawPartidas is List && rawPartidas.isNotEmpty) {
+          partidasVal = jsonEncode(rawPartidas);
+        } else if (remota['datos_tecnicos_json'] != null) {
+          try {
+            final dtObj = remota['datos_tecnicos_json'] is String
+                ? jsonDecode(remota['datos_tecnicos_json'])
+                : remota['datos_tecnicos_json'];
+            if (dtObj is Map) {
+              final cand = dtObj['partidas'] ?? dtObj['refacciones'] ?? dtObj['items'];
+              if (cand is List) {
+                partidasVal = jsonEncode(cand);
+              } else if (cand is String) {
+                partidasVal = cand;
+              }
+            }
+          } catch (_) {}
+        }
+        final String? tipoDocVal = (remota['tipo_documento'] ?? (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS')))))?.toString();
+        final String? dtVal = remota['datos_tecnicos_json']?.toString();
+
         // 1. UPDATE directo en 'ordenes' (mediante trigger INSTEAD OF UPDATE) exactamente como pide el spec
         try {
           await sqldb.rawUpdate('''
@@ -1461,7 +1485,10 @@ class SyncService extends ChangeNotifier {
               sync_check_status = CASE WHEN ? = 1 THEN 'SUBIDA_SERVIDOR' ELSE sync_check_status END,
               is_synced = 1,
               is_dirty = 0,
-              needs_push = 0
+              needs_push = 0,
+              partidas = COALESCE(?, partidas),
+              tipo_documento = COALESCE(?, tipo_documento),
+              datos_tecnicos_json = COALESCE(?, datos_tecnicos_json)
           WHERE folio_os = ? OR folio = ?
         ''', [
           estatusFinal,
@@ -1473,6 +1500,9 @@ class SyncService extends ChangeNotifier {
           pdfUrlFinal,
           modalidadFinal,
           hasPdfVal,
+          partidasVal,
+          tipoDocVal,
+          dtVal,
           folio,
           folio,
         ]);
@@ -1496,6 +1526,9 @@ class SyncService extends ChangeNotifier {
             'is_synced': 1,
             'is_dirty': 0,
             'needs_push': 0,
+            'partidas': partidasVal,
+            'tipo_documento': tipoDocVal,
+            'datos_tecnicos_json': dtVal,
             'updated_at': remota['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
           });
         }

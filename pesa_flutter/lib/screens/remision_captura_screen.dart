@@ -49,8 +49,10 @@ class _PartidaItem {
 
   Map<String, dynamic> toMap() => {
         'cantidad': cantidadCtrl.text.trim(),
+        'no_parte': parteCtrl.text.trim(),
         'numero_parte': parteCtrl.text.trim(),
         'descripcion': descCtrl.text.trim(),
+        'serie': serieCtrl.text.trim(),
         'numero_serie': serieCtrl.text.trim(),
       };
 }
@@ -112,40 +114,99 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     _puestoReceptorCtrl.text = (o['puesto_ing'] ?? '').toString();
 
     // 3. Cargar refacciones / partidas
-    List<dynamic> rawItems = [];
-    if (o['items'] is List) {
-      rawItems = o['items'] as List;
-    } else if (o['refacciones'] is List) {
-      rawItems = o['refacciones'] as List;
-    } else if (o['partidas'] is List) {
-      rawItems = o['partidas'] as List;
-    } else if (o['datos_captura'] != null) {
+    dynamic rawPartidas = o['partidas'] ?? o['refacciones'] ?? o['items'];
+    List<dynamic> listaPartidas = [];
+
+    if (rawPartidas is String && rawPartidas.trim().isNotEmpty) {
       try {
-        final dc = o['datos_captura'] is String
-            ? jsonDecode(o['datos_captura'] as String)
-            : o['datos_captura'];
-        if (dc is Map && dc['items'] is List) {
-          rawItems = dc['items'] as List;
-        } else if (dc is Map && dc['refacciones'] is List) {
-          rawItems = dc['refacciones'] as List;
+        final decoded = jsonDecode(rawPartidas);
+        if (decoded is List) listaPartidas = decoded;
+      } catch (e) {
+        debugPrint("Error parseando partidas JSON: $e");
+      }
+    } else if (rawPartidas is List) {
+      listaPartidas = rawPartidas;
+    }
+
+    // Fallback: datos_tecnicos_json
+    if (listaPartidas.isEmpty && o['datos_tecnicos_json'] != null) {
+      try {
+        final rawDt = o['datos_tecnicos_json'];
+        final dt = rawDt is String ? jsonDecode(rawDt) : rawDt;
+        if (dt is Map) {
+          final cand = dt['partidas'] ?? dt['refacciones'] ?? dt['items'];
+          if (cand is List) {
+            listaPartidas = cand;
+          } else if (cand is String && cand.trim().isNotEmpty) {
+            final dec = jsonDecode(cand);
+            if (dec is List) listaPartidas = dec;
+          }
+        }
+      } catch (e) {
+        debugPrint("Error parseando datos_tecnicos_json: $e");
+      }
+    }
+
+    // Fallback: datos_captura
+    if (listaPartidas.isEmpty && o['datos_captura'] != null) {
+      try {
+        final rawDc = o['datos_captura'];
+        final dc = rawDc is String ? jsonDecode(rawDc) : rawDc;
+        if (dc is Map) {
+          final cand = dc['partidas'] ?? dc['refacciones'] ?? dc['items'];
+          if (cand is List) {
+            listaPartidas = cand;
+          } else if (cand is String && cand.trim().isNotEmpty) {
+            final dec = jsonDecode(cand);
+            if (dec is List) listaPartidas = dec;
+          }
         }
       } catch (_) {}
     }
 
-    if (rawItems.isNotEmpty) {
-      for (final it in rawItems) {
-        if (it is Map) {
-          _partidas.add(_PartidaItem(
-            cantidad: (it['cantidad'] ?? '1').toString(),
-            parte: (it['numero_parte'] ?? it['parte'] ?? '').toString(),
-            desc: (it['descripcion'] ?? it['desc'] ?? '').toString(),
-            serie: (it['numero_serie'] ?? it['serie'] ?? '').toString(),
-          ));
-        }
+    // Fallback: borrador local guardado en SQLite
+    if (listaPartidas.isEmpty) {
+      final folio = (o['folio_os'] ?? o['folio_rma'] ?? '').toString().trim();
+      if (folio.isNotEmpty) {
+        try {
+          final draft = await LocalDbService.instance.getDraft(folio);
+          if (draft != null) {
+            final cand = draft['partidas'] ?? draft['refacciones'] ?? draft['items'];
+            if (cand is List) {
+              listaPartidas = cand;
+            } else if (cand is String && cand.trim().isNotEmpty) {
+              final dec = jsonDecode(cand);
+              if (dec is List) listaPartidas = dec;
+            }
+          }
+        } catch (_) {}
       }
     }
 
-    // Si no hay partidas previas, agregamos una vacía por defecto
+    if (listaPartidas.isNotEmpty) {
+      _partidas.clear();
+      for (var item in listaPartidas) {
+        if (item is! Map) continue;
+        final desc = (item['descripcion'] ?? item['desc'] ?? '').toString().trim();
+        final np = (item['no_parte'] ?? item['numero_parte'] ?? item['n_parte'] ?? item['parte'] ?? '').toString().trim();
+        final serie = (item['serie'] ?? item['numero_serie'] ?? item['no_serie'] ?? '').toString().trim();
+        final cant = (item['cantidad'] ?? item['cant'] ?? '1').toString().trim();
+
+        // Ignorar filas de plantilla totalmente vacías o valores placeholder
+        if (desc.isEmpty && np.isEmpty) continue;
+        if (desc.toLowerCase() == 'descripción del material' && (np.toLowerCase() == 'rl-000' || np.isEmpty)) continue;
+        if (desc.toLowerCase() == 'descripción del material' && desc == np) continue;
+
+        _partidas.add(_PartidaItem(
+          cantidad: cant.isNotEmpty ? cant : '1',
+          parte: np,
+          desc: desc.toLowerCase() == 'descripción del material' ? '' : desc,
+          serie: (serie.toLowerCase() == 'n° serie (opcional)' || serie.toLowerCase() == 'no_serie') ? '' : serie,
+        ));
+      }
+    }
+
+    // Si no hay partidas previas válidas, agregamos una vacía por defecto
     if (_partidas.isEmpty) {
       _partidas.add(_PartidaItem());
     }
@@ -204,6 +265,8 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
 
     final draft = {
       'items': _partidas.map((p) => p.toMap()).toList(),
+      'partidas': _partidas.map((p) => p.toMap()).toList(),
+      'refacciones': _partidas.map((p) => p.toMap()).toList(),
       'observaciones': _observacionesCtrl.text.trim(),
       'nombre_ing': _nombreReceptorCtrl.text.trim(),
       'puesto_ing': _puestoReceptorCtrl.text.trim(),
@@ -224,7 +287,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     // 1. Validar partidas
     final itemsValidos = _partidas
         .map((p) => p.toMap())
-        .where((m) => (m['descripcion'] as String).isNotEmpty)
+        .where((m) => (m['descripcion'] as String).isNotEmpty || (m['no_parte'] as String).isNotEmpty)
         .toList();
 
     if (itemsValidos.isEmpty) {
@@ -323,9 +386,19 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
           data: {
             'tipo_documento': 'RMA',
             'items': itemsValidos,
+            'partidas': itemsValidos,
+            'refacciones': itemsValidos,
             'nombre_receptor': nombreReceptor,
             'puesto_receptor': _puestoReceptorCtrl.text.trim(),
           },
+        );
+      } catch (_) {}
+
+      try {
+        final db = await LocalDbService.instance.database;
+        await db.rawUpdate(
+          'UPDATE ordenes_servicio SET partidas = ?, tipo_documento = ? WHERE folio_os = ? OR folio = ?',
+          [jsonEncode(itemsValidos), 'RMA', folio, folio],
         );
       } catch (_) {}
 

@@ -3589,12 +3589,16 @@ class BatchGeneratorWidget(QWidget):
             parte = row["parte"].text().strip()
             desc  = row["desc"].text().strip()
             serie = row["serie"].text().strip()
-            # Solo incluir filas que tengan al menos descripción o parte
+            # Ignorar filas de plantilla totalmente vacías o valores por defecto
+            if desc.lower() == "descripción del material" and (not parte or parte.lower() == "rl-000"):
+                continue
             if desc or parte:
                 items.append({
-                    "cantidad":      cant  or "1",
+                    "cantidad":      int(cant) if cant.isdigit() else (cant or "1"),
+                    "no_parte":      parte,
                     "numero_parte":  parte,
                     "descripcion":   desc,
+                    "serie":         serie,
                     "numero_serie":  serie,
                 })
         return items
@@ -3746,6 +3750,8 @@ class BatchGeneratorWidget(QWidget):
             "celda_b_capacidad":  celda_b_capacidad,
             "celda_b_cantidad":   celda_b_cantidad,
             "items":              self._collect_rma_items() if getattr(self, '_tipo_doc', '') == 'RMA' and hasattr(self, '_collect_rma_items') else [],
+            "partidas":           self._collect_rma_items() if getattr(self, '_tipo_doc', '') == 'RMA' and hasattr(self, '_collect_rma_items') else [],
+            "refacciones":        self._collect_rma_items() if getattr(self, '_tipo_doc', '') == 'RMA' and hasattr(self, '_collect_rma_items') else [],
             # ── Datos de Calibración (Inicial J/I/A + Número CCA) ─────────────
             "inicial_calibrador":      self._get_inicial_calibrador(),
             "tipo_calibracion_inicial": self._get_inicial_calibrador(),
@@ -3851,13 +3857,59 @@ class BatchGeneratorWidget(QWidget):
                         consec = consec_base + i
                         folio = f"{prefix}-{consec}"
 
+                        # Serializar datos_tecnicos_json (partidas, refacciones, items y snapshot)
+                        _rma_items = datos.get("items") or datos.get("partidas") or []
+                        _dt_dict = {
+                            "partidas": _rma_items,
+                            "refacciones": _rma_items,
+                            "items": _rma_items,
+                        }
+                        if tipo == "RMA":
+                            _dt_dict["folio_rma"] = folio
+                        for _k, _v in datos.items():
+                            if _k not in ("fecha", "items", "partidas", "refacciones") and _v is not None:
+                                try:
+                                    _dt_dict[_k] = _v
+                                except Exception:
+                                    pass
+                        _dt_json_str = json.dumps(_dt_dict, ensure_ascii=False, default=str)
+
                         # Upsert seguro sin ON CONFLICT: verificar si el folio ya existe
                         cur.execute(
                             "SELECT id FROM ordenes_servicio WHERE folio_os = %s",
                             (folio,)
                         )
                         os_existente = cur.fetchone()
-                        if not os_existente:
+                        if os_existente:
+                            cur.execute(
+                                """
+                                UPDATE ordenes_servicio
+                                SET datos_tecnicos_json = %s,
+                                    tipo_documento      = %s,
+                                    modalidad           = %s,
+                                    id_cliente          = COALESCE(%s, id_cliente),
+                                    id_tecnico          = COALESCE(%s, id_tecnico),
+                                    sucursal_id         = COALESCE(%s, sucursal_id),
+                                    observaciones       = COALESCE(%s, observaciones),
+                                    estado              = %s,
+                                    sync_status         = 'PENDIENTE',
+                                    sync_check_status   = 'ASIGNADA',
+                                    updated_at          = NOW()
+                                WHERE id = %s
+                                """,
+                                (
+                                    _dt_json_str,
+                                    tipo,
+                                    datos.get("modalidad", "Digital"),
+                                    datos.get("id_cliente"),
+                                    datos.get("id_tecnico"),
+                                    datos.get("sucursal_id"),
+                                    datos.get("observaciones_tecnico"),
+                                    estado,
+                                    os_existente[0],
+                                ),
+                            )
+                        else:
                             # ── Extraer datos del primer equipo (instrumento principal) ──
                             _equipos = datos.get("equipos") or []
                             _eq1 = _equipos[0] if _equipos else {}
@@ -3908,7 +3960,7 @@ class BatchGeneratorWidget(QWidget):
                                     alcance_max, div_minima,
                                     instrumento_capacidad, instrumento_division,
                                     num_secciones, sucursal_id,
-                                    sync_status, updated_at
+                                    datos_tecnicos_json, sync_status, updated_at
                                 ) VALUES (
                                     %s, %s, %s, %s, %s,
                                     %s, %s, %s, %s,
@@ -3919,7 +3971,7 @@ class BatchGeneratorWidget(QWidget):
                                     %s, %s,
                                     %s, %s,
                                     %s, %s,
-                                    %s, NOW()
+                                    %s, %s, NOW()
                                 )
                                 """,
                                 (
@@ -3944,6 +3996,7 @@ class BatchGeneratorWidget(QWidget):
                                     _cap_str, _div_str,
                                     _secciones,
                                     datos.get("sucursal_id"),
+                                    _dt_json_str,
                                     datos.get("sync_status", "PENDIENTE"),
                                 ),
                             )

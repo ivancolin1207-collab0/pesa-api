@@ -108,6 +108,9 @@ class LocalDbService {
       needs_push             INTEGER DEFAULT 0,
       is_synced              INTEGER DEFAULT 0,
       is_dirty               INTEGER DEFAULT 0,
+      partidas               TEXT,
+      tipo_documento         TEXT,
+      datos_tecnicos_json    TEXT,
       updated_at             TEXT
     )
   ''';
@@ -282,6 +285,9 @@ class LocalDbService {
             'is_dirty': 'INTEGER DEFAULT 0',
             'needs_push': 'INTEGER DEFAULT 0',
             'sync_status': "TEXT DEFAULT 'SINCRONIZADO'",
+            'partidas': 'TEXT',
+            'tipo_documento': 'TEXT',
+            'datos_tecnicos_json': 'TEXT',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -618,12 +624,38 @@ class LocalDbService {
           'firma_cliente':     (raw['firma_cliente'] ?? raw['firma_cliente_b64'])?.toString(),
           'pdf_path_local':    raw['pdf_path_local']?.toString(),
           'pdf_b64_local':     (raw['pdf_b64_local'] ?? raw['pdf_b64'])?.toString(),
+          'tipo_documento':    (raw['tipo_documento'] ?? (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS')))))?.toString(),
+          'datos_tecnicos_json': raw['datos_tecnicos_json']?.toString(),
+          'partidas':          raw['partidas'] is String
+              ? raw['partidas']
+              : (raw['partidas'] != null
+                  ? jsonEncode(raw['partidas'])
+                  : (raw['refacciones'] is String
+                      ? raw['refacciones']
+                      : (raw['refacciones'] != null
+                          ? jsonEncode(raw['refacciones'])
+                          : (raw['items'] is String
+                              ? raw['items']
+                              : (raw['items'] != null ? jsonEncode(raw['items']) : null))))),
           'sync_check_status': esCerrada ? 'SUBIDA_SERVIDOR' : (raw['sync_check_status']?.toString() ?? 'ASIGNADA'),
           'sync_status':       raw['sync_status']?.toString() ?? 'SINCRONIZADO',
           'is_synced':         1,
           'is_dirty':          0,
           'updated_at':        raw['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
         };
+
+        if (mapped['partidas'] == null && raw['datos_tecnicos_json'] != null) {
+          try {
+            final dtRaw = raw['datos_tecnicos_json'];
+            final dt = dtRaw is String ? jsonDecode(dtRaw) : dtRaw;
+            if (dt is Map) {
+              final p = dt['partidas'] ?? dt['refacciones'] ?? dt['items'];
+              if (p != null) {
+                mapped['partidas'] = p is String ? p : jsonEncode(p);
+              }
+            }
+          } catch (_) {}
+        }
 
         final safeRow = <String, dynamic>{};
         for (final entry in mapped.entries) {

@@ -110,8 +110,10 @@ class OSCompleta(BaseModel):
     filas_excentricidad:   Optional[int]   = 4
     num_secciones:         Optional[int]   = 0
     instrumento_capacidad: Optional[str]   = None
-    instrumento_division:  Optional[str]   = None
     datos_tecnicos_json:   Optional[str]   = '{}'
+    partidas:              Optional[Any]   = None
+    refacciones:           Optional[Any]   = None
+    tipo_documento:        Optional[str]   = None
     pdf_url:               Optional[str]   = None
     # Campos Offline-First v2
     pdf_b64:               Optional[str]   = None   # PDF en Base64 subido por la tablet
@@ -403,6 +405,7 @@ async def sync_pull(
     _SELECT = """
         SELECT DISTINCT ON (os.folio_os)
             os.folio_os,
+            COALESCE(os.tipo_documento, 'OS') AS tipo_documento,
             os.id_tecnico,
             COALESCE(os.estado,    'PROCESO') AS estado,
             COALESCE(os.estatus, os.estado, 'Proceso') AS estatus,
@@ -746,6 +749,20 @@ async def sync_pull(
                 if not is_admin and d.get("sync_check_status") == "ASIGNADA":
                     d["sync_check_status"] = "RECIBIDA_TABLET"
                 d.pop("has_pdf_db", None)
+
+                # Extraer partidas/refacciones de datos_tecnicos_json para entrega directa a la tablet
+                raw_dt = d.get("datos_tecnicos_json")
+                partidas_list = None
+                if raw_dt:
+                    try:
+                        dt_obj = json.loads(raw_dt) if isinstance(raw_dt, str) else raw_dt
+                        if isinstance(dt_obj, dict):
+                            partidas_list = dt_obj.get("partidas") or dt_obj.get("refacciones") or dt_obj.get("items")
+                    except Exception:
+                        pass
+                d["partidas"] = partidas_list
+                d["refacciones"] = partidas_list
+
                 resultado.append(OSCompleta(**d))
             except Exception as e_row:
                 logger.warning("[SYNC PULL] Error serializando OS %s: %s", r.get("folio_os"), e_row)

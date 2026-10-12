@@ -298,7 +298,13 @@ class RmaPdfGenerator:
         ]
 
         # ── Filas de datos ────────────────────────────────────────────────
-        items = rma_data.get("items", []) or []
+        items = rma_data.get("partidas") or rma_data.get("items") or rma_data.get("refacciones") or []
+        if isinstance(items, str):
+            try:
+                import json
+                items = json.loads(items)
+            except Exception:
+                items = []
 
         reserved    = 70 + 28 + 15          # firmas + footer + margen
         available_h = y - self.MB - reserved
@@ -313,16 +319,18 @@ class RmaPdfGenerator:
 
             # Formatear series: "2511037836,2511037884,..." → "2511037836, 2511037884, ..."
             series_raw = str(
-                item.get("numero_serie") or item.get("series") or ""
+                item.get("serie") or item.get("numero_serie") or item.get("series") or ""
             ).strip()
             series_fmt = ", ".join(
                 s.strip() for s in series_raw.split(",") if s.strip()
             ) if series_raw else ""
 
+            parte_raw = str(item.get("no_parte") or item.get("numero_parte") or item.get("parte") or "").strip()
+
             data_rows.append([
                 _p(str(item.get("cantidad",    "") or ""), _st_ctr),
-                _p(str(item.get("numero_parte","") or ""), _st_lft),
-                _p(str(item.get("descripcion", "") or ""), _st_lft),
+                _p(parte_raw,                              _st_lft),
+                _p(str(item.get("descripcion", "") or item.get("desc", "") or ""), _st_lft),
                 _p(series_fmt,                             _st_lft),
             ])
 

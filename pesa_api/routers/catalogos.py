@@ -249,6 +249,8 @@ async def get_ordenes(
     query = """
         SELECT DISTINCT ON (os.folio_os)
             os.folio_os,
+            COALESCE(os.tipo_documento, 'OS') AS tipo_documento,
+            COALESCE(os.datos_tecnicos_json, '{}') AS datos_tecnicos_json,
             os.id_tecnico,
             COALESCE(os.estado, 'PROCESO') AS estado,
             COALESCE(os.modalidad, 'DIGITAL') AS modalidad,
@@ -337,7 +339,22 @@ async def get_ordenes(
 
     try:
         rows = await db.fetch(query, *params)
-        return [dict(r) for r in rows]
+        resultado = []
+        for r in rows:
+            d = dict(r)
+            raw_dt = d.get("datos_tecnicos_json")
+            partidas_list = None
+            if raw_dt:
+                try:
+                    dt_obj = json.loads(raw_dt) if isinstance(raw_dt, str) else raw_dt
+                    if isinstance(dt_obj, dict):
+                        partidas_list = dt_obj.get("partidas") or dt_obj.get("refacciones") or dt_obj.get("items")
+                except Exception:
+                    pass
+            d["partidas"] = partidas_list
+            d["refacciones"] = partidas_list
+            resultado.append(d)
+        return resultado
     except HTTPException:
         raise
     except Exception as e:
