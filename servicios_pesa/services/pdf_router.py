@@ -55,11 +55,11 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
                 if not cliente or str(cliente).lower() in ['cliente', 'none', '--', 'null']:
                     m_cli = re.search(r'CLIENTE:\s*([^\n\r]+)', txt)
                     if m_cli: cliente = m_cli.group(1).strip()
-                if not id_equipo or str(id_equipo).lower() in ['none', 'sn', 'null', '']:
-                    m_id = re.search(r'ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)', txt)
-                    if m_id:
-                        val = m_id.group(1).split()[0].strip()
-                        if val.upper() not in ['TIPO', 'MARCA', 'MODELO', 'SERIE', 'ALCANCE']:
+                m_id = re.search(r'ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)', txt)
+                if m_id:
+                    val = m_id.group(1).split()[0].strip()
+                    if val.upper() not in ['TIPO', 'MARCA', 'MODELO', 'SERIE', 'ALCANCE', 'N/A', 'NONE', 'NULL', '--']:
+                        if not id_equipo or str(id_equipo).lower() in ['none', 'sn', 'null', '', 's-id']:
                             id_equipo = val
                 if not servicio or str(servicio).lower() in ['servicio', 'none', '--', 'null']:
                     m_srv = re.search(r'(?:TIPO DE SERVICIO|SERVICIO):\s*([^\n\r]+)', txt)

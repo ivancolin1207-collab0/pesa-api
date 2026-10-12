@@ -778,6 +778,11 @@ class SyncService extends ChangeNotifier {
         if ((os['nombre_ing']           as String?)?.isNotEmpty == true) 'nombre_ing': os['nombre_ing'],
         if ((os['puesto_ing']           as String?)?.isNotEmpty == true) 'puesto_ing': os['puesto_ing'],
         if ((os['dictamen']             as String?)?.isNotEmpty == true) 'dictamen': os['dictamen'],
+        if ((os['id_equipo']            as String?)?.isNotEmpty == true) 'id_equipo': os['id_equipo'],
+        if ((os['marca']                as String?)?.isNotEmpty == true) 'marca': os['marca'],
+        if ((os['modelo']               as String?)?.isNotEmpty == true) 'modelo': os['modelo'],
+        if ((os['ns']                   as String?)?.isNotEmpty == true) 'ns': os['ns'],
+        if ((os['ubicacion']            as String?)?.isNotEmpty == true) 'ubicacion': os['ubicacion'],
         'unidad_medida': os['unidad_medida'] ?? 'kg',
       };
 

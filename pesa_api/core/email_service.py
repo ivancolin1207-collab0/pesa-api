@@ -81,11 +81,61 @@ def limpiar_texto(c) -> str:
     return re.sub(r"\s+", " ", s).strip(" -")
 
 
+def sanear_nombre_cliente(cliente: str) -> str:
+    """Limpia la razón social dejando el nombre comercial apto para nombres de archivo."""
+    if not cliente or str(cliente).lower() in ["none", "null", "--", "cliente", "empresa"]:
+        return "Empresa"
+    c = re.sub(
+        r"(?i)\s+(S\.?\s*A\.?(\s*DE\s*C\.?V\.?)?|S\.?\s*DE\s*R\.?L\.?(\s*DE\s*C\.?V\.?)?|S\.?C\.?|INC\.?|LLC\.?)$",
+        "",
+        str(cliente).strip(),
+    )
+    c = limpiar_texto(c)
+    if not c or c.lower() in ["cliente", "none", "null", "empresa"]:
+        return "Empresa"
+    return c
+
+
+def extraer_id_equipo_de_pdf_bytes(pdf_bytes: Optional[bytes]) -> str:
+    """Extrae el ID del indicador/equipo directamente del contenido binario del PDF."""
+    if not pdf_bytes or len(pdf_bytes) < 100:
+        return ""
+    # 1. Intentar con fitz (PyMuPDF) si está disponible
+    try:
+        import fitz
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        if len(doc) > 0:
+            txt = doc[0].get_text() or ""
+            m = re.search(r"ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)", txt, re.IGNORECASE)
+            if m:
+                val = m.group(1).split()[0].strip()
+                if val.upper() not in ["TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "N/A", "NONE", "NULL", "--"]:
+                    return val
+    except Exception:
+        pass
+
+    # 2. Intentar con pypdf
+    try:
+        import io
+        from pypdf import PdfReader
+        reader = PdfReader(io.BytesIO(pdf_bytes))
+        if reader.pages:
+            txt = reader.pages[0].extract_text() or ""
+            m = re.search(r"ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)", txt, re.IGNORECASE)
+            if m:
+                val = m.group(1).split()[0].strip()
+                if val.upper() not in ["TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "N/A", "NONE", "NULL", "--"]:
+                    return val
+    except Exception:
+        pass
+
+    return ""
+
+
 def construir_nombre_pdf(folio: str, cliente: str = "", id_equipo: str = "", servicio: str = "") -> str:
     """Construye la nomenclatura formal obligatoria: {FOLIO}-{EMPRESA}-{ID}-{SERVICIO}.pdf"""
     f_limpio = limpiar_texto(folio)
-    c_limpio = re.sub(r"(?i)\s+(S\.?\s*A\.?(\s*DE\s*C\.?V\.?)?|S\.?\s*DE\s*R\.?L\.?(\s*DE\s*C\.?V\.?)?|S\.?C\.?|INC\.?)$", "", cliente or "")
-    c_limpio = limpiar_texto(c_limpio)
+    c_limpio = sanear_nombre_cliente(cliente)
     if not c_limpio or c_limpio.lower() in ["cliente", "none", "null", "empresa"]:
         c_limpio = "Pilgrims Pride" if ("pilgrim" in str(cliente).lower() or "696" in folio or "706" in folio) else "Empresa"
 
@@ -303,19 +353,68 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                         continue
                     folios_agregados.add(f_i)
                     folios_lote.append(f_i)
-                    id_eq = r["id_equipo"] or r["indicador_id"] or ""
-                    if not id_eq and r["datos_tecnicos_json"]:
+
+                    # 1. Obtener registro completo e independiente de esa orden específica desde la base de datos
+                    try:
+                        row_hija = await conn.fetchrow(
+                            """
+                            SELECT os.id, os.folio_os, os.id_lote, os.correo_cliente, os.email_enviado,
+                                   os.pdf_path, os.pdf_b64, os.tipo_servicio, os.id_equipo, os.indicador_id,
+                                   os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
+                                   COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
+                                   COALESCE(cl.razon_social, os.cliente, '') AS cliente,
+                                   COALESCE(ts.nombre, os.tipo_servicio, '') AS srv_nombre
+                            FROM ordenes_servicio os
+                            LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
+                            LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
+                            WHERE os.folio_os = $1
+                            LIMIT 1
+                            """,
+                            f_i,
+                        )
+                        orden_hija = dict(row_hija) if row_hija else dict(r)
+                    except Exception as e_hija:
+                        logger.warning("[EMAIL] Error consultando orden hija %s: %s", f_i, e_hija)
+                        orden_hija = dict(r)
+
+                    # 2. Extraer los datos particulares de ESA orden, NO los datos genéricos del lote
+                    # Prioridad 1: Extracción directa e infalible desde los bytes del PDF de la orden
+                    id_desde_pdf = extraer_id_equipo_de_pdf_bytes(content_pdf)
+
+                    # Prioridad 2: id_indicador / id_equipo de la orden hija
+                    id_desde_db = (
+                        orden_hija.get("id_indicador") or
+                        orden_hija.get("id_equipo") or
+                        orden_hija.get("indicador_id") or
+                        orden_hija.get("no_identificacion") or
+                        ""
+                    )
+
+                    # Prioridad 3: datos_tecnicos_json de la orden hija
+                    if not id_desde_db and orden_hija.get("datos_tecnicos_json"):
                         try:
-                            dj = json.loads(r["datos_tecnicos_json"]) if isinstance(r["datos_tecnicos_json"], str) else r["datos_tecnicos_json"]
+                            dj = json.loads(orden_hija["datos_tecnicos_json"]) if isinstance(orden_hija["datos_tecnicos_json"], str) else orden_hija["datos_tecnicos_json"]
                             if isinstance(dj, dict):
-                                id_eq = dj.get("id_equipo") or dj.get("id_indicador") or ""
+                                id_desde_db = (
+                                    dj.get("id_equipo") or
+                                    dj.get("id_indicador") or
+                                    dj.get("indicador_id") or
+                                    dj.get("no_identificacion") or
+                                    ""
+                                )
                         except Exception:
                             pass
+
+                    id_equipo_real = str(id_desde_pdf or id_desde_db or "S-ID").strip()
+                    servicio_real = str(orden_hija.get("srv_nombre") or orden_hija.get("tipo_servicio") or "Servicio").strip()
+                    empresa_real = sanear_nombre_cliente(orden_hija.get("cliente") or empresa_lote)
+
+                    # 3. Construir la búsqueda y el nombre del archivo con sus metadatos correspondientes
                     nombre_adj = construir_nombre_pdf(
                         folio=f_i,
-                        cliente=r["cliente"],
-                        id_equipo=id_eq,
-                        servicio=r["srv_nombre"] or r["tipo_servicio"],
+                        cliente=empresa_real,
+                        id_equipo=id_equipo_real,
+                        servicio=servicio_real,
                     )
                     adjuntos.append((nombre_adj, content_pdf))
 
@@ -427,21 +526,33 @@ recepcion@basculaspesa.com.mx
         if not content_pdf:
             return {"ok": False, "motivo": f"No se encontró el PDF para la orden {folio}"}
 
+        # Prioridad 1: Extracción directa e infalible desde los bytes del PDF de la orden
+        id_desde_pdf = extraer_id_equipo_de_pdf_bytes(content_pdf)
+
         id_eq = row["id_equipo"] or row["indicador_id"] or ""
         if not id_eq and row["datos_tecnicos_json"]:
             try:
                 dj = json.loads(row["datos_tecnicos_json"]) if isinstance(row["datos_tecnicos_json"], str) else row["datos_tecnicos_json"]
                 if isinstance(dj, dict):
-                    id_eq = dj.get("id_equipo") or dj.get("id_indicador") or ""
+                    id_eq = (
+                        dj.get("id_equipo") or
+                        dj.get("id_indicador") or
+                        dj.get("indicador_id") or
+                        dj.get("no_identificacion") or
+                        ""
+                    )
             except Exception:
                 pass
 
-        empresa = row["cliente"] or "Cliente"
+        id_equipo_real = str(id_desde_pdf or id_eq or "S-ID").strip()
+        empresa = sanear_nombre_cliente(row["cliente"] or "Cliente")
+        servicio_real = str(row["srv_nombre"] or row["tipo_servicio"] or "Calibración").strip()
+
         nombre_adj = construir_nombre_pdf(
             folio=folio,
             cliente=empresa,
-            id_equipo=id_eq,
-            servicio=row["srv_nombre"] or row["tipo_servicio"],
+            id_equipo=id_equipo_real,
+            servicio=servicio_real,
         )
 
         asunto = f"Orden de Servicio {folio} - {empresa} | Básculas PESA"

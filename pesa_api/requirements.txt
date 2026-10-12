@@ -24,6 +24,7 @@ python-dotenv>=1.0.0
 
 # ── Utilidades ────────────────────────────────────────────────
 python-multipart>=0.0.9       # Form data en /auth/login
+pypdf>=5.0.0                  # Extracción de metadatos y texto de PDFs
 
 # ══════════════════════════════════════════════════════════════
 #  Dependencias de desarrollo / test  (no se instalan en Render)

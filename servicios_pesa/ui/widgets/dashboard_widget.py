@@ -94,11 +94,11 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
                 if not cliente or str(cliente).lower() in ['cliente', 'none', '--', 'null']:
                     m_cli = re.search(r'CLIENTE:\s*([^\n\r]+)', txt)
                     if m_cli: cliente = m_cli.group(1).strip()
-                if not id_equipo or str(id_equipo).lower() in ['none', 'sn', 'null', '']:
-                    m_id = re.search(r'ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)', txt)
-                    if m_id:
-                        val = m_id.group(1).split()[0].strip()
-                        if val.upper() not in ['TIPO', 'MARCA', 'MODELO', 'SERIE', 'ALCANCE']:
+                m_id = re.search(r'ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)', txt)
+                if m_id:
+                    val = m_id.group(1).split()[0].strip()
+                    if val.upper() not in ['TIPO', 'MARCA', 'MODELO', 'SERIE', 'ALCANCE', 'N/A', 'NONE', 'NULL', '--']:
+                        if not id_equipo or str(id_equipo).lower() in ['none', 'sn', 'null', '', 's-id']:
                             id_equipo = val
                 if not servicio or str(servicio).lower() in ['servicio', 'none', '--', 'null']:
                     m_srv = re.search(r'(?:TIPO DE SERVICIO|SERVICIO):\s*([^\n\r]+)', txt)
@@ -4507,9 +4507,25 @@ class DashboardWidget(QWidget):
                     try:
                         dj = json.loads(db_info["datos_tecnicos_json"]) if isinstance(db_info["datos_tecnicos_json"], str) else db_info["datos_tecnicos_json"]
                         if isinstance(dj, dict):
-                            id_eq = dj.get("id_equipo") or dj.get("id_indicador") or ""
+                            id_eq = dj.get("id_equipo") or dj.get("id_indicador") or dj.get("indicador_id") or dj.get("no_identificacion") or ""
                     except Exception:
                         pass
+
+                # Extraer del PDF físico directamente para garantizar unicidad e independencia
+                try:
+                    import io
+                    from pypdf import PdfReader
+                    reader = PdfReader(io.BytesIO(pdf_bytes))
+                    if reader.pages:
+                        txt_p = reader.pages[0].extract_text() or ""
+                        m_id = re.search(r"ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)", txt_p, re.IGNORECASE)
+                        if m_id:
+                            val_p = m_id.group(1).split()[0].strip()
+                            if val_p.upper() not in ["TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "N/A", "NONE", "NULL", "--"]:
+                                id_eq = val_p
+                except Exception:
+                    pass
+
                 srv = db_info.get("servicio") or "Servicio"
                 id_part = f"-{id_eq}" if id_eq else ""
                 nombre_pdf = f"{clean_folio}-{empresa_limpia}{id_part}-{srv}.pdf"

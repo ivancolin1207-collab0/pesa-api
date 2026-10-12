@@ -164,6 +164,8 @@ class PushPayload(BaseModel):
     ns:                 Optional[str] = None
     ubicacion:          Optional[str] = None
     id_equipo:          Optional[str] = None
+    id_indicador:       Optional[str] = None
+    no_identificacion:  Optional[str] = None
     unidad_medida:      Optional[str] = None   # kg / g / t / lb
 
     # Vinculación a catálogo de sucursales (v13)
@@ -862,6 +864,11 @@ async def sync_push(
             if clase_row:
                 id_clase = clase_row["id"]
 
+        # Resolver ID de equipo efectivo enviado desde la tablet
+        effective_id_equipo = (payload.id_equipo or payload.id_indicador or payload.no_identificacion or None)
+        if effective_id_equipo:
+            effective_id_equipo = effective_id_equipo.strip()
+
         # Actualizar OS en el servidor
         # [FIX] Primer intento con sync_version, sync_at, device_id, pdf_b64, unidad_medida.
         # Si alguna columna no existe (BD sin migrar), reintenta sin ellas.
@@ -914,7 +921,7 @@ async def sync_push(
                 payload.valor_excentricidad,
                 id_clase,
                 payload.marca, payload.modelo, payload.ns, payload.ubicacion,
-                payload.id_equipo,
+                effective_id_equipo,
                 payload.pdf_b64,        # $11
                 payload.unidad_medida,  # $12
                 payload.firma_tecnico,  # $13
@@ -964,7 +971,7 @@ async def sync_push(
                 payload.valor_excentricidad,
                 id_clase,
                 payload.marca, payload.modelo, payload.ns, payload.ubicacion,
-                payload.id_equipo,
+                effective_id_equipo,
                 payload.firma_tecnico,
                 payload.firma_cliente,
                 payload.nombre_ing or payload.firma_cliente_nombre,
