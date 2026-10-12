@@ -4,6 +4,7 @@ vía SMTP Gmail con adjuntos de Órdenes de Servicio individuales y en Lotes.
 """
 import asyncio
 import base64
+from datetime import datetime, timezone
 import email
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -13,11 +14,15 @@ import logging
 import os
 import re
 import smtplib
-from typing import Optional, Union, List, Dict, Any
+from typing import Optional, Union, List, Dict, Any, Set
 
 from pesa_api.core.config import settings
 
 logger = logging.getLogger("pesa_api.email")
+
+# Cerrojo en memoria para evitar envíos concurrentes simultáneos de la misma orden/lote
+_folios_enviando_email: Set[str] = set()
+_folios_lock = asyncio.Lock()
 
 
 _ESTATUS_FINALIZADOS = {
@@ -214,11 +219,13 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
         except Exception as e_pool:
             return {"ok": False, "error": f"Error adquiriendo conexion BD: {e_pool}"}
 
+    folios_a_bloquear: List[str] = []
     try:
         str_id = str(folio_o_id).strip()
         row = await conn.fetchrow(
             """
             SELECT os.id, os.folio_os, os.id_lote, os.correo_cliente, os.email_enviado,
+                   os.fecha_envio_email,
                    os.pdf_path, os.pdf_b64, os.tipo_servicio, os.id_equipo, os.indicador_id,
                    os.fecha, os.dictamen, os.datos_tecnicos_json,
                    COALESCE(cl.razon_social, os.cliente, '') AS cliente,
@@ -249,6 +256,7 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
             lote_rows = await conn.fetch(
                 """
                 SELECT os.id, os.folio_os, os.correo_cliente, os.email_enviado,
+                       os.fecha_envio_email,
                        os.pdf_path, os.pdf_b64, os.tipo_servicio, os.id_equipo, os.indicador_id,
                        os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
                        COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
@@ -275,6 +283,7 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
             lote_rows = await conn.fetch(
                 """
                 SELECT os.id, os.folio_os, os.correo_cliente, os.email_enviado,
+                       os.fecha_envio_email,
                        os.pdf_path, os.pdf_b64, os.tipo_servicio, os.id_equipo, os.indicador_id,
                        os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
                        COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
@@ -297,6 +306,84 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
             lote_rows = list(lote_rows_dict.values())
             if len(lote_rows) > 1:
                 es_agrupacion_lote = True
+
+        # ── Control de Idempotencia contra envíos duplicados (< 2 minutos) ───────
+        if es_agrupacion_lote:
+            lote_ya_enviado = False
+            if lote_rows:
+                now_ref = datetime.now(timezone.utc)
+                tiempos = []
+                for r in lote_rows:
+                    if not r["email_enviado"]:
+                        break
+                    fe = r["fecha_envio_email"]
+                    if not fe:
+                        break
+                    try:
+                        fe_dt = datetime.fromisoformat(fe) if isinstance(fe, str) else fe
+                        now_c = now_ref if getattr(fe_dt, "tzinfo", None) else datetime.utcnow()
+                        tiempos.append(abs((now_c - fe_dt).total_seconds()))
+                    except Exception:
+                        break
+                if len(tiempos) == len(lote_rows) and all(t <= 120 for t in tiempos):
+                    lote_ya_enviado = True
+
+            if lote_ya_enviado:
+                folios_desc = [str(r["folio_os"]) for r in lote_rows]
+                logger.info(
+                    "[EMAIL IDEMPOTENCIA] Lote %s ya fue enviado hace < 2 minutos. Retornando status=already_sent.",
+                    id_lote or folios_desc,
+                )
+                return {
+                    "ok": True,
+                    "status": "already_sent",
+                    "message": "Correo ya enviado previamente",
+                    "folios": folios_desc,
+                    "lote": True,
+                }
+        else:
+            folio_str = str(folio or "").strip()
+            f_envio = row["fecha_envio_email"]
+            if row["email_enviado"] and f_envio:
+                try:
+                    f_envio_dt = datetime.fromisoformat(f_envio) if isinstance(f_envio, str) else f_envio
+                    now_ref = datetime.now(timezone.utc) if getattr(f_envio_dt, "tzinfo", None) else datetime.utcnow()
+                    diff_seg = abs((now_ref - f_envio_dt).total_seconds())
+                    if diff_seg <= 120:  # Menos de 2 minutos
+                        logger.info(
+                            "[EMAIL IDEMPOTENCIA] Orden %s ya fue enviada hace %.1fs (< 120s). Retornando status=already_sent sin invocar SMTP.",
+                            folio_str,
+                            diff_seg,
+                        )
+                        return {
+                            "ok": True,
+                            "status": "already_sent",
+                            "message": "Correo ya enviado previamente",
+                            "folio": folio_str,
+                            "segundos_desde_envio": round(diff_seg, 1),
+                        }
+                except Exception as e_dt:
+                    logger.debug("[EMAIL] Error evaluando fecha_envio_email: %s", e_dt)
+
+        # ── Cerrojo atómico en memoria contra peticiones simultáneas concurrentes ──
+        folios_a_bloquear = [str(r["folio_os"]).strip() for r in lote_rows] if es_agrupacion_lote else [str(folio).strip()]
+        folios_a_bloquear = [f for f in folios_a_bloquear if f]
+
+        async with _folios_lock:
+            if any(f in _folios_enviando_email for f in folios_a_bloquear):
+                logger.info(
+                    "[EMAIL CONCURRENCIA] Envío para %s ya en curso activo en memoria. Omitiendo llamada duplicada.",
+                    folios_a_bloquear,
+                )
+                return {
+                    "ok": True,
+                    "status": "already_sent",
+                    "message": "Correo ya enviado previamente",
+                    "folios": folios_a_bloquear,
+                    "folio": folios_a_bloquear[0] if folios_a_bloquear else "",
+                }
+            for f in folios_a_bloquear:
+                _folios_enviando_email.add(f)
 
         if es_agrupacion_lote:
                 # REGLA ESTRICTA: solo órdenes FIRMADAS/CERRADAS y con PDF existente.
@@ -627,6 +714,10 @@ recepcion@basculaspesa.com.mx
         logger.error("[EMAIL] Error en enviar_email_orden para %s: %s", folio_o_id, e)
         return {"ok": False, "error": str(e)}
     finally:
+        if folios_a_bloquear:
+            async with _folios_lock:
+                for f in folios_a_bloquear:
+                    _folios_enviando_email.discard(f)
         if release_needed:
             try:
                 from pesa_api.core.database import get_pool

@@ -1692,7 +1692,8 @@ class _OsListScreenState extends State<OsListScreen> {
                               Navigator.of(ctx).pop();
                             }
 
-                            if (res['ok'] != true) {
+                            final bool exitoEnvio = res['ok'] == true || res['status'] == 'already_sent';
+                            if (!exitoEnvio) {
                               throw CorreoRechazadoException((res['motivo'] ?? res['error'] ?? 'Error desconocido').toString());
                             }
 

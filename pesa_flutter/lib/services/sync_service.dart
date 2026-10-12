@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'api_service.dart';
 import 'auth_service.dart';
 import 'local_db_service.dart';
+import 'package:intl/intl.dart';
 
 
 
@@ -52,6 +53,15 @@ class SyncService extends ChangeNotifier {
   int _ultimosCorreosDespachados = 0;
   int get correosDespachadosSeq => _correosDespachadosSeq;
   int get ultimosCorreosDespachados => _ultimosCorreosDespachados;
+
+  // ── Cerrojo estático en memoria contra envíos de correo duplicados ──
+  static bool _procesandoColaEmail = false;
+  static bool get isSyncingEmail => _procesandoColaEmail;
+
+  /// Exposición pública para despachar la cola offline manualmente o desde listeners
+  Future<int> procesarColaCorreosPendientes() async {
+    return await _pushEmailsPendientes();
+  }
 
   SyncService() {
     startNetworkMonitor();
@@ -1104,147 +1114,152 @@ class SyncService extends ChangeNotifier {
   }
 
   /// Despacha correos pendientes al sincronizar (se ejecuta DESPUÉS de subir datos y PDFs):
-  ///  1) Cola explícita offline `cola_correos` (email_status = 'pendiente') — órdenes y lotes.
+  ///  1) Cola explícita offline `cola_correos` (email_status = 'pendiente' / 'cola') — órdenes y lotes.
   ///  2) Órdenes cerradas con correo capturado y email_enviado = 0 (flujo legacy).
-  /// Al confirmar el backend, se marca email_status = 'enviado' / email_enviado = 1.
+  /// Al confirmar el backend (o si ya fue enviado previamente), se marca email_status = 'enviado' / email_enviado = 1.
   Future<int> _pushEmailsPendientes() async {
-    final db = LocalDbService.instance;
-    int enviados = 0;
-    final manejados = <String>{};
-
-    void marcarUi(List<String> folios, String correo) {
-      for (final f in folios) {
-        updateLocalOrder(f, {'email_enviado': 1, 'email_status': 'enviado', 'correo_cliente': correo});
-        manejados.add(f);
-      }
+    if (_procesandoColaEmail) {
+      debugPrint('[Sync PUSH Email] 🔒 Procesamiento de cola de correos ya en curso. Omitiendo llamada duplicada.');
+      return 0;
     }
+    _procesandoColaEmail = true;
 
-    // ── 1) Cola explícita ──
-    List<Map<String, dynamic>> cola = const [];
     try {
-      cola = await db.getCorreosPendientes();
-    } catch (e) {
-      debugPrint('[Sync PUSH Email] No se pudo leer cola_correos: $e');
-    }
-    if (cola.isNotEmpty) debugPrint('[Sync PUSH Email] ${cola.length} envío(s) en cola offline');
+      final db = LocalDbService.instance;
+      int enviados = 0;
+      final manejados = <String>{};
 
-    for (final job in cola) {
-      final int id = (job['id'] as num?)?.toInt() ?? 0;
-      final String tipo = (job['tipo'] ?? 'orden').toString();
-      final String ref = (job['referencia'] ?? '').toString().trim();
-      final String correo = (job['correo'] ?? '').toString().trim();
-      final int intentos = (job['intentos'] as num?)?.toInt() ?? 0;
-      final List<String> folios = (job['folios'] ?? '')
-          .toString()
-          .split(',')
-          .map((s) => s.trim())
-          .where((s) => s.isNotEmpty)
-          .toList();
-      manejados.addAll(folios);
-      manejados.add(ref);
+      void marcarUi(List<String> folios, String correo) {
+        for (final f in folios) {
+          updateLocalOrder(f, {'email_enviado': 1, 'email_status': 'enviado', 'correo_cliente': correo});
+          manejados.add(f);
+        }
+      }
 
-      if (ref.isEmpty || correo.isEmpty) {
-        await db.marcarCorreoFallido(id, 'Datos incompletos', descartar: true);
-        continue;
-      }
-      final foliosAEnviar = folios.isNotEmpty ? folios : [ref];
-      for (final f in foliosAEnviar) {
-        await db.updateEmailStatus(f, enviado: false, status: 'enviando', correo: correo);
-      }
+      // ── 1) Cola explícita ──
+      List<Map<String, dynamic>> cola = const [];
       try {
-        final res = tipo == 'lote'
-            ? await ApiService.instance.enviarEmailLote(ref, correo: correo, forzar: true, folios: folios)
-            : await ApiService.instance.enviarEmailOrden(ref, correo: correo, forzar: true);
-        if (res['ok'] == true) {
-          final confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
-              ? (res['folios'] as List).map((e) => e.toString()).toList()
-              : (folios.isNotEmpty ? folios : [ref]);
-          await db.marcarCorreoEnviado(id, confirmados, correo);
-          for (final f in confirmados) {
-            await db.updateEmailStatus(f, enviado: true, status: 'enviado', correo: correo);
-          }
-          marcarUi(confirmados, correo);
-          enviados++;
-          debugPrint('[Sync PUSH Email] ✅ Cola: $tipo $ref enviado a $correo ($confirmados)');
-        } else {
-          for (final f in foliosAEnviar) {
-            await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
-          }
-          await db.marcarCorreoFallido(id, (res['motivo'] ?? res['error'] ?? 'Respuesta no OK').toString(),
-              descartar: intentos + 1 >= 5);
-        }
-      } on CorreoSinConexionException catch (e) {
-        for (final f in foliosAEnviar) {
-          await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
-        }
-        await db.marcarCorreoFallido(id, e.mensaje);
-        debugPrint('[Sync PUSH Email] Sin conexión, la cola se conserva: $e');
-        return enviados; // sin red: no tiene sentido seguir intentando
-      } on CorreoEndpointNoDisponibleException catch (e) {
-        for (final f in foliosAEnviar) {
-          await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
-        }
-        await db.marcarCorreoFallido(id, e.mensaje);
-        debugPrint('[Sync PUSH Email] Endpoint no disponible, se reintentará: $e');
-      } on CorreoRechazadoException catch (e) {
-        for (final f in foliosAEnviar) {
-          await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
-        }
-        await db.marcarCorreoFallido(id, e.mensaje, descartar: intentos + 1 >= 5);
-        debugPrint('[Sync PUSH Email] Rechazado ($ref): ${e.mensaje}');
+        cola = await db.getCorreosPendientes();
       } catch (e) {
-        for (final f in foliosAEnviar) {
-          await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
-        }
-        await db.marcarCorreoFallido(id, e.toString());
-        debugPrint('[Sync PUSH Email] Error en cola ($ref): $e');
+        debugPrint('[Sync PUSH Email] No se pudo leer cola_correos: $e');
       }
-    }
+      if (cola.isNotEmpty) debugPrint('[Sync PUSH Email] ${cola.length} envío(s) en cola offline');
 
-    // ── 2) Legacy: órdenes cerradas con correo y sin enviar ──
-    List<Map<String, dynamic>> pendientesEmail = const [];
-    try {
-      pendientesEmail = await db.getOsParaEnviarEmail();
-    } catch (e) {
-      debugPrint('[Sync PUSH Email] getOsParaEnviarEmail error: $e');
-    }
-    for (final os in pendientesEmail) {
-      final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
-      final correo = (os['correo_cliente'] as String? ?? '').trim();
-      if (folio.isEmpty || correo.isEmpty || manejados.contains(folio)) continue;
+      for (final job in cola) {
+        final int id = (job['id'] as num?)?.toInt() ?? 0;
+        final String tipo = (job['tipo'] ?? 'orden').toString();
+        final String ref = (job['referencia'] ?? '').toString().trim();
+        final String correo = (job['correo'] ?? '').toString().trim();
+        final int intentos = (job['intentos'] as num?)?.toInt() ?? 0;
+        final List<String> folios = (job['folios'] ?? '')
+            .toString()
+            .split(',')
+            .map((s) => s.trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+        manejados.addAll(folios);
+        manejados.add(ref);
 
-      await db.updateEmailStatus(folio, enviado: false, status: 'enviando', correo: correo);
-      try {
-        final res = await ApiService.instance.enviarEmailOrden(folio, correo: correo, forzar: true);
-        if (res['ok'] == true) {
-          // Si el backend agrupó un lote, marcar todos los folios realmente enviados (evita reenvíos).
-          final confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
-              ? (res['folios'] as List).map((e) => e.toString()).toList()
-              : [folio];
-          for (final f in confirmados) {
-            await db.updateEmailStatus(f, enviado: true, status: 'enviado', correo: correo);
+        if (ref.isEmpty || correo.isEmpty) {
+          await db.marcarCorreoFallido(id, 'Datos incompletos', descartar: true);
+          continue;
+        }
+        final foliosAEnviar = folios.isNotEmpty ? folios : [ref];
+
+        // 2. Marcar INMEDIATAMENTE como 'enviando' en SQLite para que ningún otro hilo lo tome
+        await db.marcarColaCorreoEnviando(id, foliosAEnviar, correo);
+
+        try {
+          final res = tipo == 'lote'
+              ? await ApiService.instance.enviarEmailLote(ref, correo: correo, forzar: true, folios: folios)
+              : await ApiService.instance.enviarEmailOrden(ref, correo: correo, forzar: true);
+          
+          final bool exito = res['ok'] == true || res['status'] == 'already_sent';
+          if (exito) {
+            final confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
+                ? (res['folios'] as List).map((e) => e.toString()).toList()
+                : (folios.isNotEmpty ? folios : [ref]);
+            await db.marcarCorreoEnviado(id, confirmados, correo);
+            marcarUi(confirmados, correo);
+            enviados++;
+            debugPrint('[Sync PUSH Email] ✅ Cola: $tipo $ref enviado a $correo ($confirmados)');
+          } else {
+            // Revertir a cola solo si falló la conexión
+            await db.revertirColaCorreoACola(id, foliosAEnviar, correo);
+            await db.marcarCorreoFallido(id, (res['motivo'] ?? res['error'] ?? 'Respuesta no OK').toString(),
+                descartar: intentos + 1 >= 5);
           }
-          marcarUi(confirmados, correo);
-          enviados++;
-          debugPrint('[Sync PUSH Email] ✅ Correo despachado para $confirmados a $correo');
-        } else {
+        } on CorreoSinConexionException catch (e) {
+          await db.revertirColaCorreoACola(id, foliosAEnviar, correo);
+          await db.marcarCorreoFallido(id, e.mensaje);
+          debugPrint('[Sync PUSH Email] Sin conexión, la cola se conserva: $e');
+          return enviados; // sin red: no tiene sentido seguir intentando
+        } on CorreoEndpointNoDisponibleException catch (e) {
+          await db.revertirColaCorreoACola(id, foliosAEnviar, correo);
+          await db.marcarCorreoFallido(id, e.mensaje);
+          debugPrint('[Sync PUSH Email] Endpoint no disponible, se reintentará: $e');
+        } on CorreoRechazadoException catch (e) {
+          await db.revertirColaCorreoACola(id, foliosAEnviar, correo);
+          await db.marcarCorreoFallido(id, e.mensaje, descartar: intentos + 1 >= 5);
+          debugPrint('[Sync PUSH Email] Rechazado ($ref): ${e.mensaje}');
+        } catch (e) {
+          await db.revertirColaCorreoACola(id, foliosAEnviar, correo);
+          await db.marcarCorreoFallido(id, e.toString());
+          debugPrint('[Sync PUSH Email] Error en cola ($ref): $e');
+        }
+      }
+
+      // ── 2) Legacy: órdenes cerradas con correo y sin enviar ──
+      List<Map<String, dynamic>> pendientesEmail = const [];
+      try {
+        pendientesEmail = await db.getOsParaEnviarEmail();
+      } catch (e) {
+        debugPrint('[Sync PUSH Email] getOsParaEnviarEmail error: $e');
+      }
+      for (final os in pendientesEmail) {
+        final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
+        final correo = (os['correo_cliente'] as String? ?? '').trim();
+        if (folio.isEmpty || correo.isEmpty || manejados.contains(folio)) continue;
+
+        // 2. Marcar INMEDIATAMENTE como 'enviando' para que ningún otro hilo lo tome
+        await db.updateEmailStatus(folio, enviado: false, status: 'enviando', correo: correo);
+        try {
+          final res = await ApiService.instance.enviarEmailOrden(folio, correo: correo, forzar: true);
+          final bool exito = res['ok'] == true || res['status'] == 'already_sent';
+          if (exito) {
+            // Si el backend agrupó un lote, marcar todos los folios realmente enviados (evita reenvíos).
+            final confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
+                ? (res['folios'] as List).map((e) => e.toString()).toList()
+                : [folio];
+            final nowStr = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+            for (final f in confirmados) {
+              await db.updateEmailStatus(f, enviado: true, status: 'enviado', correo: correo, fechaEnvio: nowStr);
+            }
+            marcarUi(confirmados, correo);
+            enviados++;
+            debugPrint('[Sync PUSH Email] ✅ Correo despachado para $confirmados a $correo');
+          } else {
+            // Revertir a cola solo si falló la conexión
+            await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
+          }
+        } on CorreoSinConexionException catch (e) {
           await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
+          debugPrint('[Sync PUSH Email] Sin conexión: $e');
+          break;
+        } on CorreoEndpointNoDisponibleException catch (e) {
+          await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
+          debugPrint('[Sync PUSH Email] Endpoint no disponible: $e');
+          break;
+        } catch (e) {
+          await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
+          debugPrint('[Sync PUSH Email] Error enviando correo para $folio: $e');
         }
-      } on CorreoSinConexionException catch (e) {
-        await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
-        debugPrint('[Sync PUSH Email] Sin conexión: $e');
-        break;
-      } on CorreoEndpointNoDisponibleException catch (e) {
-        await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
-        debugPrint('[Sync PUSH Email] Endpoint no disponible: $e');
-        break;
-      } catch (e) {
-        await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
-        debugPrint('[Sync PUSH Email] Error enviando correo para $folio: $e');
       }
-    }
 
-    return enviados;
+      return enviados;
+    } finally {
+      _procesandoColaEmail = false;
+    }
   }
 
   /// Lee el archivo PDF local y lo convierte a Base64 para el push.

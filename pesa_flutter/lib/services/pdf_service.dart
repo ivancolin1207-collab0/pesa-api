@@ -507,6 +507,72 @@ class PdfService {
     required int divMin,
     required String geo,
   }) {
+    final bool esTanque = _s(osData, 'tipo_instrumento', '').toLowerCase().contains('tanque') ||
+        motivoNo.toLowerCase().contains('tanque');
+    final bool esSustitucion = esTanque ||
+        _parseBool(osData['usa_sustitucion']) ||
+        _parseBool(osData['es_sustitucion']) ||
+        _parseBool(osData['es_enlace_sustitucion']) ||
+        _parseBool(osData['aplica_sustitucion']);
+
+    if (esSustitucion) {
+      final sustitutosRaw = osData['sustitutos'] ?? osData['elementos_sustitucion'];
+      List<Map<String, dynamic>> validSustitutos = [];
+      if (sustitutosRaw is List) {
+        for (final item in sustitutosRaw) {
+          if (item is Map) {
+            final p = _toNum(item['peso']);
+            final n = _s(item as Map<String, dynamic>, 'sustituto', _s(item, 'nombre', ''));
+            if (p != null && p > 0) {
+              validSustitutos.add({
+                'sustituto': n.isNotEmpty ? n : 'Sustituto ${validSustitutos.length + 1}',
+                'peso': p
+              });
+            }
+          }
+        }
+      }
+      if (validSustitutos.isEmpty && osData['peso_sustituto'] != null) {
+        final p = _toNum(osData['peso_sustituto']);
+        if (p != null && p > 0) {
+          validSustitutos.add({'sustituto': 'Sustituto 1', 'peso': p});
+        }
+      }
+      final bool tieneSustitutos = validSustitutos.isNotEmpty;
+
+      return pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          // Col izquierda (200 pt): Repetibilidad + Excentricidad No Apto (Tanque) + Sustituto (si existe)
+          pw.SizedBox(
+            width: 200,
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
+                _buildRepetibilidadTable(repRows, osData, divMin),
+                pw.SizedBox(height: 5),
+                _buildNoAplicaTanqueBox(),
+                if (tieneSustitutos) ...[
+                  pw.SizedBox(height: 5),
+                  _buildSustitutoTable(validSustitutos, osData, divMin),
+                ],
+              ],
+            ),
+          ),
+          pw.SizedBox(width: 8),
+          // Col derecha: Exactitud con sustitución (7 columnas)
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+              children: [
+                _buildExactitudSustitucionTable(exacRows, osData, divMin),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -814,8 +880,375 @@ class PdfService {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // DIAGRAMA 3-PANELES (Plataforma / Circular / Camionera) — fiel a imagen
+  // NO APTO TANQUE (EXCENTRICIDAD)
   // ══════════════════════════════════════════════════════════════════════════
+  pw.Widget _buildNoAplicaTanqueBox() {
+    const borderColor = PdfColor.fromInt(0xFFFFCCCC);
+    const bgColor = PdfColor.fromInt(0xFFFFF8F8);
+    const iconColor = PdfColor.fromInt(0xFFC8102E);
+    const textColor = PdfColor.fromInt(0xFF7A0010);
+    const subColor = PdfColor.fromInt(0xFF555555);
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Container(
+          height: 14,
+          color: borderColor,
+          child: pw.Center(
+            child: pw.Text(
+              'EXCENTRICIDAD',
+              style: pw.TextStyle(fontSize: 7.0, fontWeight: pw.FontWeight.bold, color: textColor),
+            ),
+          ),
+        ),
+        pw.Container(
+          height: 61,
+          decoration: pw.BoxDecoration(
+            color: bgColor,
+            border: pw.Border.all(color: borderColor, width: 1.0),
+          ),
+          child: pw.Column(
+            mainAxisAlignment: pw.MainAxisAlignment.center,
+            children: [
+              pw.SizedBox(
+                width: 32,
+                height: 25,
+                child: pw.CustomPaint(painter: _dibujarTanque),
+              ),
+              pw.SizedBox(height: 2),
+              pw.Text(
+                'INSTRUMENTO NO APTO PARA PRUEBA DE EXCENTRICIDAD',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: iconColor),
+              ),
+              pw.SizedBox(height: 1.5),
+              pw.Text(
+                'Báscula tipo: Tanque — pesaje de carga estática',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 5.5, fontStyle: pw.FontStyle.italic, color: subColor),
+              ),
+              pw.SizedBox(height: 1),
+              pw.Text(
+                'No aplica prueba de excentricidad.',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 5.5, fontStyle: pw.FontStyle.italic, color: subColor),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TABLA SUSTITUTO / PESO (Solo si peso > 0)
+  // ══════════════════════════════════════════════════════════════════════════
+  pw.Widget _buildSustitutoTable(
+      List<Map<String, dynamic>> sustitutos, Map<String, dynamic> os, int dec) {
+    const hdrColor = PdfColor.fromInt(0xFFD9E2F3);
+    const borderColor = PdfColor.fromInt(0xFF333333);
+    const rowH = 13.0;
+    const hdrH = 14.0;
+
+    double totalPeso = 0;
+    for (final s in sustitutos) {
+      final p = _toNum(s['peso']) ?? 0;
+      totalPeso += p;
+    }
+
+    final displayRows = List<Map<String, dynamic>>.from(sustitutos);
+    while (displayRows.length < 4) {
+      displayRows.add({});
+    }
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Container(
+          height: hdrH,
+          decoration: pw.BoxDecoration(
+            color: hdrColor,
+            border: pw.Border.all(color: borderColor, width: 0.5),
+          ),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                flex: 70,
+                child: pw.Center(
+                  child: pw.Text('SUSTITUTO',
+                      style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                ),
+              ),
+              pw.Container(width: 0.5, color: borderColor, height: hdrH),
+              pw.Expanded(
+                flex: 30,
+                child: pw.Center(
+                  child: pw.Text('PESO',
+                      style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        ...displayRows.map((r) {
+          final nom = (r['sustituto'] ?? '').toString();
+          final pesoNum = _toNum(r['peso']);
+          final pesoStr = pesoNum != null ? formatoMilesEspacio(_fmtDec(pesoNum, dec)) : '';
+          return pw.Container(
+            height: rowH,
+            decoration: const pw.BoxDecoration(
+              color: PdfColors.white,
+              border: pw.Border(
+                left: pw.BorderSide(color: borderColor, width: 0.5),
+                right: pw.BorderSide(color: borderColor, width: 0.5),
+                bottom: pw.BorderSide(color: borderColor, width: 0.5),
+              ),
+            ),
+            child: pw.Row(
+              children: [
+                pw.Expanded(
+                  flex: 70,
+                  child: pw.Padding(
+                    padding: const pw.EdgeInsets.only(left: 4),
+                    child: pw.Align(
+                      alignment: pw.Alignment.centerLeft,
+                      child: pw.Text(nom, style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.black)),
+                    ),
+                  ),
+                ),
+                pw.Container(width: 0.5, color: borderColor, height: rowH),
+                pw.Expanded(
+                  flex: 30,
+                  child: pw.Padding(
+                    padding: const pw.EdgeInsets.only(right: 4),
+                    child: pw.Align(
+                      alignment: pw.Alignment.centerRight,
+                      child: pw.Text(pesoStr, style: const pw.TextStyle(fontSize: 6.5, color: PdfColors.black)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }),
+        pw.Container(
+          height: rowH,
+          decoration: const pw.BoxDecoration(
+            color: PdfColors.white,
+            border: pw.Border(
+              left: pw.BorderSide(color: borderColor, width: 0.5),
+              right: pw.BorderSide(color: borderColor, width: 0.5),
+              bottom: pw.BorderSide(color: borderColor, width: 0.5),
+            ),
+          ),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                flex: 70,
+                child: pw.Padding(
+                  padding: const pw.EdgeInsets.only(left: 4),
+                  child: pw.Align(
+                    alignment: pw.Alignment.centerLeft,
+                    child: pw.Text('TOTAL',
+                        style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                  ),
+                ),
+              ),
+              pw.Container(width: 0.5, color: borderColor, height: rowH),
+              pw.Expanded(
+                flex: 30,
+                child: pw.Padding(
+                  padding: const pw.EdgeInsets.only(right: 4),
+                  child: pw.Align(
+                    alignment: pw.Alignment.centerRight,
+                    child: pw.Text(formatoMilesEspacio(_fmtDec(totalPeso, dec)),
+                        style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TABLA EXACTITUD CON SUSTITUCIÓN (7 COLUMNAS)
+  // ══════════════════════════════════════════════════════════════════════════
+  pw.Widget _buildExactitudSustitucionTable(
+      List<Map<String, dynamic>> rows, Map<String, dynamic> os, int dec) {
+    const hdrColor = PdfColor.fromInt(0xFF1C1C1C);
+    const borderColor = PdfColor.fromInt(0xFF333333);
+    const rowH = 14.0;
+    const hdrH = 15.0;
+
+    final display = List<Map<String, dynamic>>.from(rows);
+    while (display.length < 5) {
+      display.add({});
+    }
+
+    final colWidths = [
+      0.06, // N
+      0.15, // PESAS
+      0.15, // AGUA
+      0.20, // AGUA + PESAS
+      0.16, // INDICACIÓN
+      0.14, // REGRESO
+      0.14, // ERROR
+    ];
+
+    final headers = ['N', 'PESAS', 'AGUA', 'AGUA + PESAS', 'INDICACIÓN', 'REGRESO', 'ERROR'];
+
+    double maxErr = 0;
+    for (final r in display) {
+      final p = _toNum(r['pesas']);
+      final a = _toNum(r['agua']);
+      double? ap = _toNum(r['agua_pesas']);
+      if (ap == null && (p != null || a != null)) {
+        ap = (p ?? 0) + (a ?? 0);
+      }
+      final ind = _toNum(r['indicacion'] ?? r['lectura_inicial']);
+      double? err;
+      if (ind != null && ap != null) {
+        err = ind - ap;
+      } else if (r['error'] != null) {
+        err = _toNum(r['error']);
+      }
+      if (err != null && err.abs() > maxErr) {
+        maxErr = err.abs();
+      }
+    }
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        pw.Container(
+          height: hdrH,
+          color: hdrColor,
+          child: pw.Row(
+            children: headers.asMap().entries.map((e) {
+              final w = colWidths[e.key];
+              return pw.Expanded(
+                flex: (w * 100).toInt(),
+                child: pw.Center(
+                  child: pw.Text(
+                    e.value,
+                    style: pw.TextStyle(
+                      fontSize: 6.5,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.white,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        ...display.asMap().entries.map((e) {
+          final idx = e.key;
+          final r = e.value;
+          final n = '${idx + 1}';
+          final p = _toNum(r['pesas']);
+          final a = _toNum(r['agua']);
+          double? ap = _toNum(r['agua_pesas']);
+          if (ap == null && (p != null || a != null)) {
+            ap = (p ?? 0) + (a ?? 0);
+          }
+          final ind = _toNum(r['indicacion'] ?? r['lectura_inicial']);
+          final reg = _toNum(r['regreso'] ?? r['lectura_final']);
+          double? err;
+          if (ind != null && ap != null) {
+            err = ind - ap;
+          } else if (r['error'] != null) {
+            err = _toNum(r['error']);
+          }
+
+          final bool hasData = p != null || a != null || ind != null || ap != null;
+
+          final vals = [
+            n,
+            p != null ? formatoMilesEspacio(_fmtDec(p, dec)) : '',
+            a != null ? formatoMilesEspacio(_fmtDec(a, dec)) : '',
+            ap != null ? formatoMilesEspacio(_fmtDec(ap, dec)) : '',
+            ind != null ? formatoMilesEspacio(_fmtDec(ind, dec)) : '',
+            reg != null ? formatoMilesEspacio(_fmtDec(reg, dec)) : '',
+            err != null ? formatoMilesEspacio(_fmtDec(err, dec)) : (hasData ? '0' : ''),
+          ];
+
+          return pw.Container(
+            height: rowH,
+            decoration: pw.BoxDecoration(
+              color: idx % 2 == 1 ? const PdfColor.fromInt(0xFFF9F9F9) : PdfColors.white,
+              border: const pw.Border(
+                left: pw.BorderSide(color: borderColor, width: 0.4),
+                right: pw.BorderSide(color: borderColor, width: 0.4),
+                bottom: pw.BorderSide(color: borderColor, width: 0.4),
+              ),
+            ),
+            child: pw.Row(
+              children: vals.asMap().entries.map((ve) {
+                final cIdx = ve.key;
+                final val = ve.value;
+                final w = colWidths[cIdx];
+                return pw.Expanded(
+                  flex: (w * 100).toInt(),
+                  child: pw.Container(
+                    decoration: pw.BoxDecoration(
+                      border: cIdx > 0
+                          ? const pw.Border(left: pw.BorderSide(color: borderColor, width: 0.3))
+                          : null,
+                    ),
+                    child: pw.Center(
+                      child: pw.Text(
+                        val,
+                        style: pw.TextStyle(
+                          fontSize: 7.0,
+                          fontWeight: cIdx == 0 ? pw.FontWeight.bold : pw.FontWeight.normal,
+                          color: PdfColors.black,
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          );
+        }),
+        pw.Container(
+          height: rowH,
+          decoration: const pw.BoxDecoration(
+            color: PdfColors.white,
+            border: pw.Border(
+              left: pw.BorderSide(color: borderColor, width: 0.4),
+              right: pw.BorderSide(color: borderColor, width: 0.4),
+              bottom: pw.BorderSide(color: borderColor, width: 0.4),
+            ),
+          ),
+          child: pw.Row(
+            children: [
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(left: 6),
+                child: pw.Text(
+                  'ERROR MÁXIMO ENCONTRADO:',
+                  style: pw.TextStyle(fontSize: 7.0, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
+                ),
+              ),
+              pw.Spacer(),
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(right: 6),
+                child: pw.Text(
+                  formatoMilesEspacio(_fmtDec(maxErr, dec)),
+                  style: pw.TextStyle(fontSize: 7.0, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
   pw.Widget _buildDiagrama3Paneles(Map<String, dynamic> os, String geo) {
     final tipo = _s(os, 'tipo_instrumento', '').toLowerCase();
     final rawGeo = (_s(os, 'geometria_excentricidad', '').isNotEmpty)
@@ -1313,6 +1746,59 @@ void _dibujarCircular(PdfGraphics c, PdfPoint size) {
   c.setLineWidth(0.5);
   c.moveTo(cx - rx, cy); c.lineTo(cx + rx, cy); c.strokePath();
   c.moveTo(cx, cy - ry); c.lineTo(cx, cy + ry); c.strokePath();
+}
+
+/// Vector dibujo Tanque para recuadro No Aplica Excentricidad
+void _dibujarTanque(PdfGraphics c, PdfPoint size) {
+  final cx = size.x / 2;
+  final cy = size.y / 2 - 1;
+  const col = PdfColor.fromInt(0xFFC8102E);
+  const fillCol = PdfColor.fromInt(0xFFFFE5E5);
+
+  c.saveContext();
+  c.setStrokeColor(col);
+  c.setFillColor(fillCol);
+  c.setLineWidth(1.0);
+
+  // Cuerpo cilíndrico
+  c.drawRect(cx - 8, cy - 4, 16, 12);
+  c.fillPath();
+  c.drawRect(cx - 8, cy - 4, 16, 12);
+  c.strokePath();
+
+  // Tapa superior elipse
+  c.drawEllipse(cx, cy + 8, 8, 2.5);
+  c.strokePath();
+
+  // Fondo inferior elipse
+  c.drawEllipse(cx, cy - 4, 8, 2);
+  c.strokePath();
+
+  // 3 patas de soporte con celdas de carga
+  c.setLineWidth(1.2);
+  for (final dx in [-7.0, 0.0, 7.0]) {
+    c.moveTo(cx + dx, cy - 4);
+    c.lineTo(cx + dx - 1.5, cy - 9);
+    c.strokePath();
+    c.moveTo(cx + dx, cy - 4);
+    c.lineTo(cx + dx + 1.5, cy - 9);
+    c.strokePath();
+    c.moveTo(cx + dx - 2.5, cy - 9);
+    c.lineTo(cx + dx + 2.5, cy - 9);
+    c.strokePath();
+  }
+
+  // Tubo superior de entrada
+  c.setLineWidth(1.5);
+  c.moveTo(cx, cy + 10.5);
+  c.lineTo(cx, cy + 14);
+  c.strokePath();
+  c.setLineWidth(1.0);
+  c.moveTo(cx - 3, cy + 14);
+  c.lineTo(cx + 3, cy + 14);
+  c.strokePath();
+
+  c.restoreContext();
 }
 
 // ══════════════════════════════════════════════════════════════════════════

@@ -100,8 +100,15 @@ class _CapturaScreenState extends State<CapturaScreen>
     final v = double.tryParse(_factorSustCtrl.text.trim().replaceAll(',', '.'));
     return (v != null && v > 0) ? v : null;
   }
+  bool get _hasValidSustitutos {
+    for (final s in _sustitutosRows) {
+      final p = double.tryParse((s['peso'] ?? '').toString().replaceAll(',', '.').replaceAll(' ', ''));
+      if (p != null && p > 0) return true;
+    }
+    return false;
+  }
   bool get _aplicaSustitucion =>
-      _usaSustitucion && (_pesoSustituto != null || _factorSustituto != null);
+      _usaSustitucion && (_hasValidSustitutos || _pesoSustituto != null || _factorSustituto != null);
 
   // ── Controladores Paso 0 — Instrumento ───────────────────────────────────
   final _marcaCtrl      = TextEditingController();
@@ -136,6 +143,7 @@ class _CapturaScreenState extends State<CapturaScreen>
   List<Map<String, dynamic>> _repRows  = [];
   List<Map<String, dynamic>> _excRows  = [];
   List<Map<String, dynamic>> _exacRows = [];
+  List<Map<String, dynamic>> _sustitutosRows = [];
   final _obsCtrl                = TextEditingController();
   final _obsFocusNode           = FocusNode();
   final _firmaClienteNombreCtrl = TextEditingController();  // nombre cliente — obligatorio
@@ -334,17 +342,35 @@ class _CapturaScreenState extends State<CapturaScreen>
       _unidadMedida = u;
     }
 
-    // Carga de sustitución: herencia estricta desde Logística
+    // Carga de sustitución: herencia estricta desde Logística o Tanque
+    final bool isTanque = (_tipoInstrumento ?? '').toLowerCase().contains('tanque');
     _usaSustitucion = _asBool(_os['usa_sustitucion']) ||
                       _asBool(_os['es_sustitucion']) ||
-                      _asBool(_os['es_enlace_sustitucion']);
+                      _asBool(_os['es_enlace_sustitucion']) ||
+                      _asBool(_os['aplica_sustitucion']) ||
+                      isTanque;
+
+    if (isTanque) {
+      _aplExcOverride = false;
+      _os['aplica_excentricidad'] = false;
+      _os['motivo_no_aplica'] = 'Tanque';
+    }
+
+    if (_os['sustitutos'] is List) {
+      _sustitutosRows = List<Map<String, dynamic>>.from(
+        (_os['sustitutos'] as List).map((x) => Map<String, dynamic>.from(x as Map)),
+      );
+    }
   }
 
   /// Determina si aplica excentricidad:
   ///   1. Flag asignado por Logística (`aplica_excentricidad`)
   ///   2. Override manual si aplicara
-  ///   3. Inferencia por tipo de instrumento
+  ///   3. Inferencia por tipo de instrumento (Tanque nunca aplica)
   bool get _aplExc {
+    if ((_tipoInstrumento ?? '').toLowerCase().contains('tanque')) {
+      return false;
+    }
     final raw = _os['aplica_excentricidad'];
     if (raw != null) {
       if (raw is bool)   return raw;
@@ -484,6 +510,11 @@ class _CapturaScreenState extends State<CapturaScreen>
           }
           if (draft['usa_sustitucion'] != null) {
             _usaSustitucion = draft['usa_sustitucion'] == true;
+          }
+          if (draft['sustitutos'] is List) {
+            _sustitutosRows = List<Map<String, dynamic>>.from(
+              (draft['sustitutos'] as List).map((x) => Map<String, dynamic>.from(x as Map)),
+            );
           }
           if (draft['unidad_medida'] != null && draft['unidad_medida'].toString().isNotEmpty) {
             _unidadMedida = draft['unidad_medida'].toString();
@@ -868,6 +899,16 @@ class _CapturaScreenState extends State<CapturaScreen>
           onChanged: (v) => setState(() {
             _tipoInstrumento = v;
             _os['tipo_instrumento'] = v;
+            final isTanque = (v ?? '').toLowerCase().contains('tanque');
+            if (isTanque) {
+              _usaSustitucion = true;
+              _aplExcOverride = false;
+              _os['aplica_excentricidad'] = false;
+              _os['motivo_no_aplica'] = 'Tanque';
+              _os['usa_sustitucion'] = true;
+              _os['es_sustitucion'] = true;
+              _os['es_enlace_sustitucion'] = true;
+            }
             _puntosApoyo = getPuntosApoyoPorDefecto(v, fallback: _puntosApoyo);
             _os['puntos_apoyo'] = _puntosApoyo;
             _geometriaExcentricidad = getGeometriaPorDefecto(v);
@@ -1317,7 +1358,10 @@ class _CapturaScreenState extends State<CapturaScreen>
         numEnlaces: 5,
         rows: _exacRows,
         divMin: _dValue,
+        sustitutos: _sustitutosRows,
+        unidadMedida: _unidadMedida,
         onChanged: (r) => _exacRows = r,
+        onSustitutosChanged: (s) => _sustitutosRows = s,
         footer: _buildExactitudFooter(folio),
       );
     }
@@ -1613,6 +1657,8 @@ class _CapturaScreenState extends State<CapturaScreen>
       _os['peso_sustituto']         = null;
       _os['factor_sustitucion']     = null;
     }
+    _os['sustitutos']             = _sustitutosRows;
+    _os['aplica_sustituto']       = _hasValidSustitutos;
 
     final maxV = double.tryParse(_capMaxCtrl.text.replaceAll(',', '.'));
     final divV = double.tryParse(_divMinCtrl.text.replaceAll(',', '.'));
@@ -1732,6 +1778,8 @@ class _CapturaScreenState extends State<CapturaScreen>
         'aplica_excentricidad':  _aplExc,
         'apl_exc_override':      _aplExcOverride,
         'usa_sustitucion':       _usaSustitucion,
+        'aplica_sustituto':      _hasValidSustitutos,
+        'sustitutos':            _sustitutosRows,
         'masa_patron':           _masaPatronCtrl.text.trim(),
         'factor_sustitucion':    _factorSustCtrl.text.trim(),
         'rep_rows':              _repRows,
@@ -1961,6 +2009,8 @@ class _CapturaScreenState extends State<CapturaScreen>
         'holograma_nuevo':       _holoActEf,
         'usa_sustitucion':       _aplicaSustitucion,
         'aplica_sustitucion':    _aplicaSustitucion,
+        'aplica_sustituto':      _hasValidSustitutos,
+        'sustitutos':            _sustitutosRows,
         'peso_sustituto':        _aplicaSustitucion ? _pesoSustituto : null,
         'factor_sustitucion':    _aplicaSustitucion ? _factorSustituto : null,
         'tipo_instrumento':      _tipoInstrumento ?? '',

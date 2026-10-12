@@ -2297,6 +2297,49 @@ class LocalDbService {
     }
   }
 
+  /// Marca el registro de cola_correos y sus órdenes asociadas como 'enviando'
+  /// para que ningún otro hilo o llamada concurrente intente despacharlos.
+  Future<void> marcarColaCorreoEnviando(int id, List<String> folios, String correo) async {
+    final db = await _ensureInit();
+    await _ensureColaCorreos(db);
+    final now = DateTime.now().toIso8601String();
+    await db.update(
+      'cola_correos',
+      {'email_status': 'enviando', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    for (final f in folios) {
+      await db.update(
+        'ordenes_servicio',
+        {'email_status': 'enviando', 'correo_cliente': correo.trim()},
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [f, f],
+      );
+    }
+  }
+
+  /// Revierte el estado a 'cola' si falló la conexión para reintento posterior.
+  Future<void> revertirColaCorreoACola(int id, List<String> folios, String correo) async {
+    final db = await _ensureInit();
+    await _ensureColaCorreos(db);
+    final now = DateTime.now().toIso8601String();
+    await db.update(
+      'cola_correos',
+      {'email_status': 'cola', 'updated_at': now},
+      where: 'id = ?',
+      whereArgs: [id],
+    );
+    for (final f in folios) {
+      await db.update(
+        'ordenes_servicio',
+        {'email_status': 'cola', 'correo_cliente': correo.trim()},
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [f, f],
+      );
+    }
+  }
+
   /// Registra un intento fallido. Con [descartar] = true sale de la cola (estado 'error').
   Future<void> marcarCorreoFallido(int id, String error, {bool descartar = false}) async {
     final db = await _ensureInit();

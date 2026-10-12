@@ -990,9 +990,16 @@ class TomDigitalDialog(QDialog):
         self._tbl_rep = TouchTableWidget("Repetibilidad", self._HEADERS_REP, rows=3, color=_RED)
         self._tabs.addTab(self._tbl_rep, "2. REPETIBILIDAD")
 
-        # Detectar enlaces
-        _es_enlaces  = bool(self._os_data.get("es_enlace_sustitucion"))
-        _n_enlaces   = int(self._os_data.get("num_enlaces_sustitucion") or 4)
+        # Detectar enlaces / sustitución
+        _tipo_inst = str(self._os_data.get("tipo_instrumento") or "").lower()
+        _es_enlaces  = (
+            bool(self._os_data.get("es_enlace_sustitucion")) or
+            bool(self._os_data.get("usa_sustitucion")) or
+            bool(self._os_data.get("es_sustitucion")) or
+            bool(self._os_data.get("aplica_sustitucion")) or
+            "tanque" in _tipo_inst
+        )
+        _n_enlaces   = int(self._os_data.get("num_enlaces_sustitucion") or self._os_data.get("num_enlaces") or 5)
 
         if _es_enlaces:
             self._tbl_exc = None

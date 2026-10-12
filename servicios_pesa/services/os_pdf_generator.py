@@ -224,6 +224,20 @@ def _inferir_tipo_no_aplica(os_data: dict) -> str:
         return "tolva"
     return "tolva"  # fallback con dibujo disponible
 
+def _es_modo_sustitucion(os_data: dict) -> bool:
+    """Detecta si la orden tiene activo el modo sustitución (Tanque o flag de sustitución)."""
+    if not os_data:
+        return False
+    if (os_data.get("es_enlace_sustitucion") or
+        os_data.get("usa_sustitucion") or
+        os_data.get("es_sustitucion") or
+        os_data.get("aplica_sustitucion")):
+        return True
+    tipo = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or os_data.get("motivo_no_aplica") or "").lower()
+    if "tanque" in tipo or "tolva" in tipo or "silo" in tipo:
+        return True
+    return False
+
 def _es_servicio_calibracion(os_data: dict) -> bool:
     """
     Retorna True SOLO si el tipo de servicio contiene explícitamente 'calibraci'.
@@ -964,6 +978,12 @@ class OsPdfGenerator:
         _motivo_directo = str(os_data.get("motivo_no_aplica") or "").strip()
         tipo_no = _motivo_directo if _motivo_directo else _inferir_tipo_no_aplica(os_data)
 
+        tipo_inst = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or "").lower()
+        if "tanque" in tipo_inst or "tanque" in tipo_no or _es_modo_sustitucion(os_data):
+            aplica_exc = False
+            if "tanque" in tipo_inst or "tanque" in tipo_no:
+                tipo_no = "tanque"
+
         if aplica_exc:
             # ── Layout 2 columnas: MITADES IGUALES para que los encabezados se alineen exactamente
             GAP     = 8                         # separacion entre columnas
@@ -1013,7 +1033,8 @@ class OsPdfGenerator:
             # Recuadro NO APTO para excentricidad con dibujo vectorial del tipo de instrumento
             y_left = self._draw_no_aplica_exc_box(c, left_x, y_left, left_w, tipo_no)
 
-            if os_data and os_data.get("es_enlace_sustitucion"):
+            # Tabla SUSTITUTO | PESO únicamente si existen registros con peso > 0
+            if os_data and self._tiene_sustitutos_validos(os_data):
                 y_left -= 6
                 y_left = self._draw_elementos_sustitucion(c, left_x, y_left, left_w, os_data)
 
@@ -1839,7 +1860,7 @@ class OsPdfGenerator:
 
     def _draw_exactitud_table(self, c, x, y, w, data, os_data=None) -> float:
         # ── Modo especial: Calibración por Enlaces de Sustitución ──────────────────────
-        if os_data and os_data.get("es_enlace_sustitucion"):
+        if os_data and _es_modo_sustitucion(os_data):
             return self._draw_exactitud_enlaces(c, x, y, w, data, os_data)
         # ── Modo estándar ─────────────────────────────────────────────
 
@@ -1974,39 +1995,100 @@ class OsPdfGenerator:
         y -= row_h
         return y
 
+    def _tiene_sustitutos_validos(self, os_data: dict) -> bool:
+        """Retorna True solo si existen registros con sustituto y peso > 0."""
+        if not os_data:
+            return False
+        sustitutos_raw = os_data.get("sustitutos") or os_data.get("elementos_sustitucion") or []
+        if isinstance(sustitutos_raw, str):
+            try:
+                import json
+                sustitutos_raw = json.loads(sustitutos_raw)
+            except Exception:
+                sustitutos_raw = []
+        if isinstance(sustitutos_raw, list):
+            for s in sustitutos_raw:
+                if isinstance(s, dict):
+                    if self._seguro_float(s.get("peso")) > 0:
+                        return True
+        if self._seguro_float(os_data.get("peso_sustituto")) > 0:
+            return True
+        return False
+
     def _draw_elementos_sustitucion(self, c, x: float, y: float, w: float, os_data: dict) -> float:
-        """Tabla para Elementos de Carga Sustituta (Canastas, Cadenas, etc.)"""
+        """Tabla para Elementos de Carga Sustituta (Sustituto | Peso). Solo se dibuja si peso > 0."""
+        sustitutos_raw = os_data.get("sustitutos") or os_data.get("elementos_sustitucion") or []
+        if isinstance(sustitutos_raw, str):
+            try:
+                import json
+                sustitutos_raw = json.loads(sustitutos_raw)
+            except Exception:
+                sustitutos_raw = []
+
+        valid_sustitutos = []
+        if isinstance(sustitutos_raw, list):
+            for s in sustitutos_raw:
+                if isinstance(s, dict):
+                    p = self._seguro_float(s.get("peso"))
+                    nom = str(s.get("sustituto") or s.get("nombre") or "").strip()
+                    if p > 0:
+                        valid_sustitutos.append({"sustituto": nom or f"Sustituto {len(valid_sustitutos)+1}", "peso": p})
+
+        if not valid_sustitutos and os_data.get("peso_sustituto"):
+            p = self._seguro_float(os_data.get("peso_sustituto"))
+            if p > 0:
+                valid_sustitutos.append({"sustituto": "Sustituto 1", "peso": p})
+
+        if not valid_sustitutos:
+            return y
+
         from reportlab.lib.colors import HexColor
         _HDR = HexColor("#D9E2F3")
         
         row_h = 13
         hdr_h = 14
-        
+        w_sust = w * 0.70
+        w_peso = w * 0.30
+
         c.setFillColor(_HDR)
         c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=1)
         c.setFillColor(HexColor("#000000"))
         c.setFont("Helvetica-Bold", 6.5)
         
-        c.drawCentredString(x + w * 0.35, y - hdr_h + 4, "SUSTITUTO")
-        c.drawCentredString(x + w * 0.85, y - hdr_h + 4, "PESO")
+        c.drawCentredString(x + w_sust / 2, y - hdr_h + 4, "SUSTITUTO")
+        c.drawCentredString(x + w_sust + w_peso / 2, y - hdr_h + 4, "PESO")
         
         c.setStrokeColor(HexColor("#333333"))
         c.setLineWidth(0.3)
-        c.line(x + w * 0.7, y, x + w * 0.7, y - hdr_h)
+        c.line(x + w_sust, y, x + w_sust, y - hdr_h)
         y -= hdr_h
         
-        for i in range(3):
+        n_rows = max(len(valid_sustitutos), 4)
+        total_peso = sum(s["peso"] for s in valid_sustitutos)
+        
+        c.setFont("Helvetica", 6.5)
+        for i in range(n_rows):
             c.setFillColor(HexColor("#FFFFFF"))
             c.rect(x, y - row_h, w, row_h, fill=1, stroke=1)
-            c.line(x + w * 0.7, y, x + w * 0.7, y - row_h)
+            c.line(x + w_sust, y, x + w_sust, y - row_h)
+            
+            if i < len(valid_sustitutos):
+                s = valid_sustitutos[i]
+                c.setFillColor(HexColor("#000000"))
+                c.drawString(x + 5, y - row_h + 3.5, str(s["sustituto"]))
+                peso_str = self._fmt(s["peso"])
+                c.drawRightString(x + w - 5, y - row_h + 3.5, peso_str)
+                
             y -= row_h
             
         c.setFillColor(HexColor("#FFFFFF"))
         c.rect(x, y - row_h, w, row_h, fill=1, stroke=1)
-        c.line(x + w * 0.7, y, x + w * 0.7, y - row_h)
+        c.line(x + w_sust, y, x + w_sust, y - row_h)
         c.setFillColor(HexColor("#000000"))
         c.setFont("Helvetica-Bold", 6.5)
         c.drawString(x + 5, y - row_h + 4, "TOTAL")
+        total_str = self._fmt(total_peso)
+        c.drawRightString(x + w - 5, y - row_h + 4, total_str)
         y -= row_h
         
         return y
@@ -2014,39 +2096,33 @@ class OsPdfGenerator:
     def _draw_exactitud_enlaces(self, c, x: float, y: float, w: float, data: list, os_data: dict) -> float:
         """
         Tabla de Exactitud en modo 'Calibración por Enlaces de Sustitución' (7 columnas).
-        El número de filas se determina dinámicamente por os_data['num_enlaces_sustitucion'].
-        Soporta 5, 8 o 10 enlaces con row_h adaptativo para no romper la hoja Carta.
+        Columnas: [ N | PESAS | AGUA | AGUA + PESAS | INDICACIÓN | REGRESO | ERROR ]
         """
         _ROW_BG    = _WHITE
         _LBL       = _BLACK
 
         hdr_h     = 16
 
-        # ── Número de filas dinámico (prioridad: num_enlaces_sustitucion → num_enlaces → fallback 8) ──
-        num_enlaces = int(
-            os_data.get("num_enlaces_sustitucion")
-            or os_data.get("num_enlaces")
-            or 8
+        # Inicializar con al menos 5 filas por defecto
+        num_enlaces = max(
+            5,
+            len(data) if data else 0,
+            int(os_data.get("num_enlaces_sustitucion") or os_data.get("num_enlaces") or os_data.get("puntos_exactitud") or 5)
         )
-        num_enlaces = max(1, num_enlaces)  # al menos 1 fila
 
-        # ── Altura de fila adaptativa según cantidad de enlaces ────────────────
         if num_enlaces <= 5:
             row_h = 16
         elif num_enlaces <= 8:
             row_h = 13
-        else:  # 9-10+ enlaces: reducir para que quepan en el espacio vertical disponible
+        else:
             row_h = 11
 
-        # ── Padding vertical adaptativo para filas muy densas ─────────────────
         data_font_size = 8 if num_enlaces <= 8 else 7
-        y_offset_text  = 4 if row_h >= 13 else 3   # offset vertical del texto dentro de celda
+        y_offset_text  = 4 if row_h >= 13 else 3
 
-        # Anchos de columna basados en la solicitud exacta sumando 327 pt (redistribuidos al ancho w de 340pt)
-        col_w = [w * (16/327), w * (48/327), w * (48/327), w * (65/327), w * (55/327), w * (50/327), w * (45/327)]
+        col_w = [w * (18/342), w * (52/342), w * (52/342), w * (66/342), w * (56/342), w * (50/342), w * (48/342)]
         col_hdrs = ["N", "PESAS", "AGUA", "AGUA + PESAS", "INDICACIÓN", "REGRESO", "ERROR"]
 
-        # ── Título y Cabecera Combinados (estilo Pesa ERP) ────────────
         c.setFillColor(_DARK_HDR)
         c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=1)
         c.setFillColor(_WHITE)
@@ -2061,42 +2137,68 @@ class OsPdfGenerator:
         c.setStrokeColor(_TBL_BORDER)
         c.setLineWidth(0.3)
 
-        # Filas dinámicas: exactamente num_enlaces filas numeradas
+        errors = []
+        _sf = self._seguro_float
+
         for n in range(1, num_enlaces + 1):
-            c.setFillColor(_ROW_BG)
+            bg = _ROW_BG if n % 2 != 0 else _GRAY_LIGHT
+            c.setFillColor(bg)
             c.rect(x, y - row_h, w, row_h, fill=1, stroke=1)
             
             row = data[n - 1] if data and (n - 1) < len(data) else {}
             
-            # Mapeo flexible de datos de la toma
-            pesas       = row.get("pesas")
-            agua        = row.get("agua")
-            agua_pesas  = row.get("agua_pesas")
-            indicacion  = row.get("indicacion") or row.get("lectura_inicial")
-            regreso     = row.get("regreso")    or row.get("lectura_final")
-            error       = row.get("error")
-            
-            # Para renglones no utilizados, defaults según especificación
-            is_empty = not any(v is not None and str(v).strip() != "" for v in [pesas, agua, indicacion])
-            if is_empty:
-                agua_pesas = ""
-                error = ""
+            pesas_raw      = row.get("pesas")
+            agua_raw       = row.get("agua")
+            agua_pesas_raw = row.get("agua_pesas")
+            indicacion_raw = row.get("indicacion") if row.get("indicacion") is not None else row.get("lectura_inicial")
+            regreso_raw    = row.get("regreso") if row.get("regreso") is not None else row.get("lectura_final")
+            error_raw      = row.get("error")
+
+            has_pesas = pesas_raw is not None and str(pesas_raw).strip() != ""
+            has_agua  = agua_raw is not None and str(agua_raw).strip() != ""
+            has_ap    = agua_pesas_raw is not None and str(agua_pesas_raw).strip() != ""
+            has_ind   = indicacion_raw is not None and str(indicacion_raw).strip() != ""
+
+            p_val = _sf(pesas_raw) if has_pesas else None
+            a_val = _sf(agua_raw) if has_agua else None
+
+            # (AGUA + PESAS) = Pesas + Agua
+            if has_ap:
+                ap_val = _sf(agua_pesas_raw)
+            elif has_pesas or has_agua:
+                ap_val = (p_val or 0.0) + (a_val or 0.0)
+            else:
+                ap_val = None
+
+            ind_val = _sf(indicacion_raw) if has_ind else None
+            reg_val = _sf(regreso_raw) if (regreso_raw is not None and str(regreso_raw).strip() != "") else None
+
+            # ERROR = INDICACIÓN - (AGUA + PESAS)
+            if ind_val is not None and ap_val is not None:
+                err_val = ind_val - ap_val
+            elif error_raw is not None and str(error_raw).strip() != "":
+                err_val = _sf(error_raw)
+            else:
+                err_val = None
+
+            if err_val is not None:
+                errors.append(abs(err_val))
 
             vals = [
                 str(n),
-                self._fmt(pesas) if pesas is not None else "",
-                self._fmt(agua) if agua is not None else "",
-                self._fmt(agua_pesas) if agua_pesas is not None else "",
-                self._fmt(indicacion) if indicacion is not None else "",
-                self._fmt(regreso) if regreso is not None else "",
-                self._fmt(error) if error is not None else ""
+                self._fmt(p_val) if p_val is not None else "",
+                self._fmt(a_val) if a_val is not None else "",
+                self._fmt(ap_val) if ap_val is not None else "",
+                self._fmt(ind_val) if ind_val is not None else "",
+                self._fmt(reg_val) if reg_val is not None else "",
+                self._fmt(err_val) if err_val is not None else ""
             ]
             
             c.setFillColor(_LBL)
             cx_ = x
             for i, (v, cw_) in enumerate(zip(vals, col_w)):
                 if i == 0:
-                    c.setFont("Helvetica-BoldOblique", min(7.5, data_font_size))
+                    c.setFont("Helvetica-Bold", min(7.5, data_font_size))
                 else:
                     c.setFont("Helvetica", data_font_size)
                 c.drawCentredString(cx_ + cw_ / 2, y - row_h + y_offset_text, v)
@@ -2105,25 +2207,15 @@ class OsPdfGenerator:
             self._draw_col_lines(c, x, y, row_h, col_w)
             y -= row_h
 
-
-        # Fila base de Error Encontrado para consistencia (opcional, o se maneja arriba)
-        # La plantilla original tenía la barra de error abajo.
+        # Fila base de Error Encontrado
         c.setFillColor(_WHITE)
         c.rect(x, y - row_h, w, row_h, fill=1, stroke=1)
         c.setFillColor(_BLACK)
         c.setFont("Helvetica-Bold", 7.5)
-        c.drawString(x + 3, y - row_h + 4, "ERROR MÁXIMO ENCONTRADO:")
+        c.drawString(x + 5, y - row_h + 4, "ERROR MÁXIMO ENCONTRADO:")
         
-        # Calcular error máximo real si hay datos
-        errors = []
-        _sf = self._seguro_float
-        if data:
-            for r in data:
-                e_val = r.get("error")
-                if e_val is not None and str(e_val).strip() not in ("", "None"):
-                    errors.append(abs(_sf(e_val)))
         if errors:
-            c.drawRightString(x + w - 3, y - row_h + 4, self._fmt(max(errors)))
+            c.drawRightString(x + w - 5, y - row_h + 4, self._fmt(max(errors)))
             
         y -= row_h
         return y

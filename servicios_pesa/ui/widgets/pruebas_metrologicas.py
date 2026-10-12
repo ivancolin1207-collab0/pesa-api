@@ -39,6 +39,12 @@ except ImportError:
     def calc_emt(m, e, clase=3): return e
     def emt_para_fila(m, d): return d
 
+try:
+    from services.os_pdf_generator import formato_miles_espacio
+except ImportError:
+    def formato_miles_espacio(val):
+        return str(val)
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QDoubleSpinBox,
@@ -1260,11 +1266,16 @@ class ExcentricidadCondicionalWidget(QWidget):
 # ══════════════════════════════════════════════════════════════════════════════
 class ExactitudWidget(MetrologicaTableWidget):
     """
-    Tabla de Exactitud + Clase de Exactitud + indicadores J/I/A.
-
-    Columnas: N | VALOR NOMINAL | LECTURA INICIAL | LECTURA FINAL
-    Error por fila = |Lectura Final − Valor Nominal|
-    10 puntos por defecto. Filas con todos los valores en None son ignoradas.
+    Tabla de Exactitud estándar y con Cargas de Sustitución (Báscula tipo Tanque).
+    - Modo Estándar: N | VALOR NOMINAL | LECTURA INICIAL | LECTURA FINAL | ERROR
+    - Modo Sustitución (Tanque): N | PESAS | AGUA | AGUA + PESAS | INDICACIÓN | REGRESO | ERROR
+      5 puntos por defecto, expandibles dinámicamente con + Agregar Carga / Fila.
+      Cálculo automático en tiempo real:
+        (AGUA + PESAS) = Pesas + Agua
+        ERROR = INDICACIÓN - (AGUA + PESAS)
+        ERROR MÁXIMO ENCONTRADO = max(|ERROR|)
+      Formato con espacio para separación de miles.
+      Bloque inferior de SUSTITUTO y PESO con TOTAL condicional.
     """
     TITLE        = "EXACTITUD"
     HEADERS      = ["N", "NOMINAL (kg)", "L. INICIAL", "L. FINAL", "ERROR"]
@@ -1277,8 +1288,94 @@ class ExactitudWidget(MetrologicaTableWidget):
 
     clase_changed = pyqtSignal(str)
 
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        self._modo_sustitucion = False
+        super().__init__(parent)
+
     def _build_extra(self, layout) -> None:
-        pass  # CLASE y J/I/A eliminados según reglas PESA v2.5
+        """Bloque condicional para registro de Cargas / Materiales Sustitutos."""
+        self._wgt_sustitutos = QGroupBox("CARGAS / MATERIALES SUSTITUTOS (BÁSCULA TIPO TANQUE)")
+        self._wgt_sustitutos.setStyleSheet(f"""
+            QGroupBox {{
+                font-size: 11px;
+                font-weight: 800;
+                color: {_RED};
+                border: 1px solid {_LGRAY};
+                border-radius: 8px;
+                margin-top: 10px;
+                padding-top: 14px;
+                background: {_WHITE};
+            }}
+        """)
+        sust_lay = QVBoxLayout(self._wgt_sustitutos)
+        sust_lay.setContentsMargins(10, 10, 10, 10)
+        sust_lay.setSpacing(6)
+
+        hint = QLabel("Registre los materiales sustitutos (ej. Agua 1, Bloque A, etc.) y su peso equivalente. Si no se registran sustitutos con peso > 0, este bloque no aparecerá en el PDF final.")
+        hint.setStyleSheet(f"font-size: 11px; color: {_GRAY};")
+        hint.setWordWrap(True)
+        sust_lay.addWidget(hint)
+
+        self._tbl_sust = QTableWidget(0, 2)
+        self._tbl_sust.setHorizontalHeaderLabels(["SUSTITUTO", "PESO (kg)"])
+        self._tbl_sust.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._tbl_sust.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Fixed)
+        self._tbl_sust.setColumnWidth(1, 140)
+        self._tbl_sust.setStyleSheet(_TABLE_STYLE)
+        sust_lay.addWidget(self._tbl_sust)
+
+        btn_row = QHBoxLayout()
+        btn_add_s = QPushButton("+ Agregar sustituto")
+        btn_add_s.setStyleSheet(_MINI_BTN_STYLE)
+        btn_add_s.clicked.connect(self._add_sustituto_row)
+        btn_row.addWidget(btn_add_s)
+
+        btn_del_s = QPushButton("− Eliminar sustituto")
+        btn_del_s.setStyleSheet(_MINI_BTN_STYLE)
+        btn_del_s.clicked.connect(self._remove_sustituto_row)
+        btn_row.addWidget(btn_del_s)
+
+        btn_row.addStretch()
+
+        self._lbl_total_sust = QLabel("TOTAL: 0 kg")
+        self._lbl_total_sust.setStyleSheet(f"font-size: 12px; font-weight: 800; color: {_DARK};")
+        btn_row.addWidget(self._lbl_total_sust)
+        sust_lay.addLayout(btn_row)
+
+        self._wgt_sustitutos.setVisible(False)
+        layout.addWidget(self._wgt_sustitutos)
+
+    def is_modo_sustitucion(self) -> bool:
+        return self._modo_sustitucion
+
+    def set_modo_sustitucion(self, enabled: bool) -> None:
+        if self._modo_sustitucion == enabled:
+            return
+        self._modo_sustitucion = enabled
+        self._wgt_sustitutos.setVisible(enabled)
+
+        self._blocking = True
+        try:
+            self._table.setRowCount(0)
+            u = getattr(self, '_unit', 'kg')
+            if enabled:
+                headers = ["N", f"PESAS ({u})", f"AGUA ({u})", f"AGUA + PESAS ({u})",
+                           f"INDICACIÓN ({u})", f"REGRESO ({u})", f"ERROR ({u})"]
+                self._table.setColumnCount(7)
+                self._table.setHorizontalHeaderLabels(headers)
+                for _ in range(5):
+                    self._insert_row_sustitucion()
+            else:
+                headers = ["N", f"NOMINAL ({u})", f"L. INICIAL ({u})", f"L. FINAL ({u})", f"ERROR ({u})"]
+                self._table.setColumnCount(5)
+                self._table.setHorizontalHeaderLabels(headers)
+                for _ in range(self.DEFAULT_ROWS):
+                    self._insert_row_standard()
+        finally:
+            self._blocking = False
+            self._update_table_height()
+            self._recalculate()
+            self.data_changed.emit()
 
     def get_clase_exactitud(self) -> Optional[str]:
         return None
@@ -1293,11 +1390,15 @@ class ExactitudWidget(MetrologicaTableWidget):
         pass
 
     def _insert_row(self) -> None:
-        """Override: N | NOMINAL(sb) | L.INI(sb) | L.FIN(sb) | ERROR(item)."""
+        if self._modo_sustitucion:
+            self._insert_row_sustitucion()
+        else:
+            self._insert_row_standard()
+
+    def _insert_row_standard(self) -> None:
         row = self._table.rowCount()
         self._table.insertRow(row)
         self._table.setRowHeight(row, 36)
-        # Col 0: Número
         it0 = QTableWidgetItem(str(row + 1))
         it0.setFlags(Qt.ItemFlag.ItemIsEnabled)
         it0.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -1310,59 +1411,118 @@ class ExactitudWidget(MetrologicaTableWidget):
 
         for col in [1, 2, 3]:  # NOMINAL, L.INI, L.FIN
             sb = _make_cell_spinbox(dec)
-            if col == 1:  # NOMINAL
+            if col == 1:
                 sb.editingFinished.connect(lambda r=row: self._on_nominal_changed(r))
             else:
                 sb.editingFinished.connect(lambda r=row: self._on_lectura_changed(r))
             self._table.setCellWidget(row, col, sb)
 
-        # Col 4: ERROR (read-only) — sin EMT
         err_it = QTableWidgetItem("—")
         err_it.setFlags(Qt.ItemFlag.ItemIsEnabled)
         err_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         self._table.setItem(row, 4, err_it)
 
+    def _insert_row_sustitucion(self) -> None:
+        row = self._table.rowCount()
+        self._table.insertRow(row)
+        self._table.setRowHeight(row, 36)
+        it0 = QTableWidgetItem(str(row + 1))
+        it0.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        it0.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        f0 = QFont(); f0.setBold(True); it0.setFont(f0)
+        it0.setForeground(QBrush(QColor(_DARK)))
+        self._table.setItem(row, 0, it0)
+
+        d = getattr(self, '_d', None)
+        dec = decimals_from_d(d) if d else 4
+
+        # Col 1: PESAS, Col 2: AGUA, Col 3: AGUA+PESAS, Col 4: INDICACIÓN, Col 5: REGRESO
+        for col in range(1, 6):
+            sb = _make_cell_spinbox(dec)
+            sb.editingFinished.connect(lambda r=row, c=col: self._on_sustitucion_changed(r, c))
+            self._table.setCellWidget(row, col, sb)
+
+        # Col 6: ERROR
+        err_it = QTableWidgetItem("—")
+        err_it.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        err_it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._table.setItem(row, 6, err_it)
+
+    def _on_sustitucion_changed(self, row: int, col: int) -> None:
+        if self._blocking:
+            return
+        d = getattr(self, '_d', None)
+        decimals = decimals_from_d(d) if d else 4
+
+        sb_pesas = self._table.cellWidget(row, 1)
+        sb_agua  = self._table.cellWidget(row, 2)
+        sb_ap    = self._table.cellWidget(row, 3)
+        sb_ind   = self._table.cellWidget(row, 4)
+        err_it   = self._table.item(row, 6)
+        if not all([sb_pesas, sb_agua, sb_ap, sb_ind, err_it]):
+            return
+
+        p_v = _val_or_none(sb_pesas)
+        a_v = _val_or_none(sb_agua)
+
+        if col in (1, 2):
+            if p_v is not None or a_v is not None:
+                total_ap = (p_v or 0.0) + (a_v or 0.0)
+                sb_ap.setValue(total_ap)
+
+        ap_v  = _val_or_none(sb_ap)
+        ind_v = _val_or_none(sb_ind)
+
+        if ind_v is not None and ap_v is not None:
+            err_v = ind_v - ap_v
+            txt = formato_miles_espacio(f"{err_v:.{decimals}f}")
+            err_it.setText(txt)
+            color = _RED if abs(err_v) > 0 else _GREEN
+            err_it.setForeground(QBrush(QColor(color)))
+        else:
+            err_it.setText("—")
+
+        self._recalculate()
+        self.data_changed.emit()
+
     def _on_nominal_changed(self, row: int) -> None:
-        """Recalcula ERROR cuando cambia el valor nominal."""
         if self._blocking:
             return
         d = getattr(self, '_d', None)
         decimals = decimals_from_d(d) if d else 4
         sb_nom = self._table.cellWidget(row, 1)
         sb_fin = self._table.cellWidget(row, 3)
-        err_item = self._table.item(row, 4)   # ERROR en col 4
+        err_item = self._table.item(row, 4)
         if not all([sb_nom, err_item]):
             return
         nom   = _val_or_none(sb_nom)
         fin_v = _val_or_none(sb_fin) if sb_fin else None
-        # ERROR = L.Final − Nominal
         if fin_v is not None and nom is not None:
             error_v = fin_v - nom
-            err_txt = f"{error_v:.{decimals}f}"  # 0.000 cuando son iguales
+            err_txt = formato_miles_espacio(f"{error_v:.{decimals}f}")
             color = _RED if abs(error_v) > 0 else _GREEN
             err_item.setText(err_txt)
             err_item.setForeground(QBrush(QColor(color)))
         else:
-            err_item.setText("—")  # sin datos todavía
+            err_item.setText("—")
         self._recalculate()
         self.data_changed.emit()
 
     def _on_lectura_changed(self, row: int) -> None:
-        """Recalcula ERROR cuando cambia L.Final o L.Inicial."""
         if self._blocking:
             return
         d = getattr(self, '_d', None)
         decimals = decimals_from_d(d) if d else 4
         sb_nom = self._table.cellWidget(row, 1)
         sb_fin = self._table.cellWidget(row, 3)
-        err_item = self._table.item(row, 4)   # ERROR en col 4
+        err_item = self._table.item(row, 4)
         if not all([sb_nom, sb_fin, err_item]):
             return
         nom   = _val_or_none(sb_nom)
         fin_v = _val_or_none(sb_fin)
         if fin_v is not None and nom is not None:
             error_v = fin_v - nom
-            err_txt = f"{error_v:.{decimals}f}"  # 0.000 si son iguales
+            err_txt = formato_miles_espacio(f"{error_v:.{decimals}f}")
             color = _RED if abs(error_v) > 0 else _GREEN
             err_item.setText(err_txt)
             err_item.setForeground(QBrush(QColor(color)))
@@ -1372,96 +1532,223 @@ class ExactitudWidget(MetrologicaTableWidget):
         self.data_changed.emit()
 
     def _recalculate(self) -> None:
-        """Override: errores = |L.Final − Nominal| ignorando filas sin datos."""
         d = getattr(self, '_d', None)
         decimals = decimals_from_d(d) if d else 4
         errors = []
-        for row in range(self._table.rowCount()):
-            sb_nom = self._table.cellWidget(row, 1)
-            sb_fin = self._table.cellWidget(row, 3)
-            nom   = _val_or_none(sb_nom) if sb_nom else None
-            fin_v = _val_or_none(sb_fin) if sb_fin else None
-            if nom is not None and fin_v is not None:
-                errors.append(abs(fin_v - nom))
+        if self._modo_sustitucion:
+            for row in range(self._table.rowCount()):
+                sb_ap  = self._table.cellWidget(row, 3)
+                sb_ind = self._table.cellWidget(row, 4)
+                ap_v   = _val_or_none(sb_ap) if sb_ap else None
+                ind_v  = _val_or_none(sb_ind) if sb_ind else None
+                if ap_v is not None and ind_v is not None:
+                    errors.append(abs(ind_v - ap_v))
+        else:
+            for row in range(self._table.rowCount()):
+                sb_nom = self._table.cellWidget(row, 1)
+                sb_fin = self._table.cellWidget(row, 3)
+                nom   = _val_or_none(sb_nom) if sb_nom else None
+                fin_v = _val_or_none(sb_fin) if sb_fin else None
+                if nom is not None and fin_v is not None:
+                    errors.append(abs(fin_v - nom))
+
         if errors:
             max_err = max(errors)
             style = _ERROR_MAX_VALUE_STYLE if max_err > 0 else _ERROR_MAX_OK_STYLE
-            self._lbl_error_max.setText(f"{max_err:.{decimals}f}")
+            self._lbl_error_max.setText(formato_miles_espacio(f"{max_err:.{decimals}f}"))
             self._lbl_error_max.setStyleSheet(style)
         else:
             self._lbl_error_max.setText("—")
             self._lbl_error_max.setStyleSheet(_ERROR_MAX_VALUE_STYLE)
 
     def set_division_minima(self, d: float) -> None:
-        """Override para recalcular EMT+ERROR al cambiar d."""
         self._d = d
         decimals = decimals_from_d(d)
-        # Actualizar spinboxes existentes
         for row in range(self._table.rowCount()):
-            for col in [1, 2, 3]:
+            max_col = 6 if self._modo_sustitucion else 4
+            for col in range(1, max_col):
                 sb = self._table.cellWidget(row, col)
                 if isinstance(sb, QDoubleSpinBox):
                     current_val = sb.value() if sb.value() != sb.minimum() else None
                     sb.setDecimals(decimals)
                     if current_val is not None:
                         sb.setValue(current_val)
-            self._on_nominal_changed(row)
+            if self._modo_sustitucion:
+                self._on_sustitucion_changed(row, 4)
+            else:
+                self._on_nominal_changed(row)
         self._recalculate()
 
     def update_unidad(self, unit: str = "kg") -> None:
-        """Actualiza dinámicamente los encabezados de columna con la unidad."""
-        headers = ["N", f"NOMINAL ({unit})", f"L. INICIAL ({unit})",
-                   f"L. FINAL ({unit})", f"ERROR ({unit})"]
+        self._unit = unit
+        if self._modo_sustitucion:
+            headers = ["N", f"PESAS ({unit})", f"AGUA ({unit})", f"AGUA + PESAS ({unit})",
+                       f"INDICACIÓN ({unit})", f"REGRESO ({unit})", f"ERROR ({unit})"]
+        else:
+            headers = ["N", f"NOMINAL ({unit})", f"L. INICIAL ({unit})",
+                       f"L. FINAL ({unit})", f"ERROR ({unit})"]
         for i, h in enumerate(headers):
             item = self._table.horizontalHeaderItem(i)
             if item:
                 item.setText(h)
             else:
                 self._table.setHorizontalHeaderItem(i, QTableWidgetItem(h))
+        if hasattr(self, '_tbl_sust'):
+            self._tbl_sust.setHorizontalHeaderLabels(["SUSTITUTO", f"PESO ({unit})"])
+            self._recalc_sustitutos()
+
+    def _add_sustituto_row(self, nombre: str = "", peso: float = 0.0) -> None:
+        r = self._tbl_sust.rowCount()
+        self._tbl_sust.insertRow(r)
+        self._tbl_sust.setRowHeight(r, 30)
+        from PyQt6.QtWidgets import QLineEdit
+        le = QLineEdit(nombre if nombre else f"Sustituto {r + 1}")
+        le.setStyleSheet("border: 1px solid #D1D1D6; border-radius: 4px; padding: 2px 6px; font-size: 11px;")
+        le.textChanged.connect(self._recalc_sustitutos)
+        self._tbl_sust.setCellWidget(r, 0, le)
+
+        sb = _make_cell_spinbox(2)
+        if peso > 0:
+            sb.setValue(peso)
+        sb.editingFinished.connect(self._recalc_sustitutos)
+        self._tbl_sust.setCellWidget(r, 1, sb)
+        self._recalc_sustitutos()
+
+    def _remove_sustituto_row(self) -> None:
+        r = self._tbl_sust.rowCount()
+        if r > 0:
+            self._tbl_sust.removeRow(r - 1)
+            self._recalc_sustitutos()
+
+    def _recalc_sustitutos(self) -> None:
+        total = 0.0
+        for i in range(self._tbl_sust.rowCount()):
+            sb = self._tbl_sust.cellWidget(i, 1)
+            if sb:
+                v = _val_or_none(sb) or 0.0
+                total += v
+        u = getattr(self, '_unit', 'kg')
+        self._lbl_total_sust.setText(f"TOTAL: {formato_miles_espacio(f'{total:.2f}')} {u}")
+        self.data_changed.emit()
+
+    def get_sustitutos(self) -> list[dict]:
+        res = []
+        for i in range(self._tbl_sust.rowCount()):
+            le = self._tbl_sust.cellWidget(i, 0)
+            sb = self._tbl_sust.cellWidget(i, 1)
+            nom = le.text().strip() if le else f"Sustituto {i+1}"
+            p = _val_or_none(sb) or 0.0
+            if p > 0:
+                res.append({"sustituto": nom, "peso": p})
+        return res
+
+    def set_sustitutos(self, items: list[dict]) -> None:
+        self._tbl_sust.setRowCount(0)
+        if not items:
+            return
+        for item in items:
+            if isinstance(item, dict):
+                nom = str(item.get("sustituto") or item.get("nombre") or "").strip()
+                p = float(item.get("peso") or 0.0)
+                self._add_sustituto_row(nom, p)
+
+    def get_aplica_sustituto(self) -> bool:
+        return any(s.get("peso", 0) > 0 for s in self.get_sustitutos())
 
     def get_data(self) -> list[dict]:
-        """Retorna filas con al menos un valor; L.Inicial=None significa no capturada."""
         rows = []
-        for i in range(self._table.rowCount()):
-            sb_nom = self._table.cellWidget(i, 1)
-            sb_ini = self._table.cellWidget(i, 2)
-            sb_fin = self._table.cellWidget(i, 3)
-            nom = _val_or_none(sb_nom)
-            ini = _val_or_none(sb_ini)
-            fin = _val_or_none(sb_fin)
-            if any(v is not None for v in [nom, ini, fin]):
-                rows.append({
-                    "punto_id":        i + 1,
-                    "valor_nominal":   nom,
-                    "lectura_inicial": ini,   # None si no se capturó (PDF imprime '/')
-                    "lectura_final":   fin,
-                })
+        if self._modo_sustitucion:
+            for i in range(self._table.rowCount()):
+                p   = _val_or_none(self._table.cellWidget(i, 1))
+                a   = _val_or_none(self._table.cellWidget(i, 2))
+                ap  = _val_or_none(self._table.cellWidget(i, 3))
+                ind = _val_or_none(self._table.cellWidget(i, 4))
+                reg = _val_or_none(self._table.cellWidget(i, 5))
+                err_it = self._table.item(i, 6)
+                err = None
+                if err_it and err_it.text() != "—":
+                    try:
+                        err = float(err_it.text().replace(' ', ''))
+                    except ValueError:
+                        err = None
+                if err is None and ind is not None and ap is not None:
+                    err = ind - ap
+                if any(v is not None for v in [p, a, ap, ind, reg]):
+                    rows.append({
+                        "punto_id":        i + 1,
+                        "pesas":           p,
+                        "agua":            a,
+                        "agua_pesas":      ap,
+                        "indicacion":      ind,
+                        "regreso":         reg,
+                        "error":           err,
+                        "valor_nominal":   ap,
+                        "lectura_final":   ind,
+                        "lectura_inicial": reg,
+                    })
+        else:
+            for i in range(self._table.rowCount()):
+                sb_nom = self._table.cellWidget(i, 1)
+                sb_ini = self._table.cellWidget(i, 2)
+                sb_fin = self._table.cellWidget(i, 3)
+                nom = _val_or_none(sb_nom)
+                ini = _val_or_none(sb_ini)
+                fin = _val_or_none(sb_fin)
+                if any(v is not None for v in [nom, ini, fin]):
+                    rows.append({
+                        "punto_id":        i + 1,
+                        "valor_nominal":   nom,
+                        "lectura_inicial": ini,
+                        "lectura_final":   fin,
+                    })
         return rows
 
     def set_data(self, rows: list[dict]) -> None:
         if not rows:
             return
+        is_sust = any(("pesas" in r or "agua" in r or "agua_pesas" in r) for r in rows if isinstance(r, dict))
+        if is_sust and not self._modo_sustitucion:
+            self.set_modo_sustitucion(True)
+
         self._blocking = True
         try:
             while self._table.rowCount() < len(rows):
                 self._insert_row()
-            for i, r in enumerate(rows):
-                if i >= self._table.rowCount():
-                    break
-                for col, key in [
-                    (1, "valor_nominal"),
-                    (2, "lectura_inicial"),
-                    (3, "lectura_final"),
-                ]:
-                    sb = self._table.cellWidget(i, col)
-                    if sb:
-                        v = r.get(key)
-                        sb.setValue(float(v) if v is not None else sb.minimum())
+            if self._modo_sustitucion:
+                for i, r in enumerate(rows):
+                    if i >= self._table.rowCount():
+                        break
+                    for col, key in [
+                        (1, "pesas"),
+                        (2, "agua"),
+                        (3, "agua_pesas"),
+                        (4, "indicacion"),
+                        (5, "regreso"),
+                    ]:
+                        sb = self._table.cellWidget(i, col)
+                        if sb:
+                            v = r.get(key)
+                            sb.setValue(float(v) if v is not None else sb.minimum())
+                    self._on_sustitucion_changed(i, 4)
+            else:
+                for i, r in enumerate(rows):
+                    if i >= self._table.rowCount():
+                        break
+                    for col, key in [
+                        (1, "valor_nominal"),
+                        (2, "lectura_inicial"),
+                        (3, "lectura_final"),
+                    ]:
+                        sb = self._table.cellWidget(i, col)
+                        if sb:
+                            v = r.get(key)
+                            sb.setValue(float(v) if v is not None else sb.minimum())
+                    self._on_nominal_changed(i)
         finally:
             self._blocking = False
             self._update_table_height()
-            for row in range(self._table.rowCount()):
-                self._on_nominal_changed(row)
+            self._recalculate()
+
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1544,17 +1831,6 @@ class PruebasMetrologicasWidget(QWidget):
     def get_all_data(self) -> dict:
         """
         Retorna todos los datos de prueba en un solo diccionario.
-
-        Returns:
-            {
-                "tipo_instrumento":    str | None,
-                "repetibilidad":       [{...}, ...],
-                "excentricidad":       [{...}, ...],
-                "exactitud":           [{...}, ...],
-                "valor_repetibilidad": float | None,
-                "id_clase_exactitud":  str | None,   # "I","II","III","IV"
-                "indicadores_jia":     {"J":bool, "I":bool, "A":bool},
-            }
         """
         return {
             "tipo_instrumento":    self.excentricidad.get_tipo_instrumento() or None,
@@ -1563,6 +1839,9 @@ class PruebasMetrologicasWidget(QWidget):
             "repetibilidad":       self.repetibilidad.get_data(),
             "excentricidad":       self.excentricidad.get_data(),
             "exactitud":           self.exactitud.get_data(),
+            "sustitutos":          self.exactitud.get_sustitutos(),
+            "aplica_sustituto":    self.exactitud.get_aplica_sustituto(),
+            "usa_sustitucion":     self.exactitud.is_modo_sustitucion(),
             "valor_repetibilidad": self.repetibilidad.get_valor(),
             "id_clase_exactitud":  self.exactitud.get_clase_exactitud(),
             "indicadores_jia":     self.exactitud.get_indicadores_jia(),
@@ -1581,25 +1860,38 @@ class PruebasMetrologicasWidget(QWidget):
         indicadores_jia:     Optional[dict]  = None,
         aplica_excentricidad: Optional[bool] = None,
         filas_excentricidad: Optional[int]   = None,
+        sustitutos:          Optional[list]  = None,
+        usa_sustitucion:     Optional[bool]  = None,
     ) -> None:
         """Carga todos los datos de prueba desde la BD."""
-        if aplica_excentricidad is not None:
-            self.excentricidad.set_excentricidad_config(aplica_excentricidad, filas_excentricidad or 5)
-            self._tabs.setTabEnabled(1, aplica_excentricidad)
-        elif tipo_instrumento:
-            self.excentricidad.set_tipo_instrumento(tipo_instrumento, numero_celdas)
-        
+        es_tanque = "tanque" in (tipo_instrumento or "").lower()
+        if usa_sustitucion or es_tanque:
+            self.exactitud.set_modo_sustitucion(True)
+            if sustitutos:
+                self.exactitud.set_sustitutos(sustitutos)
+            if es_tanque:
+                self.excentricidad.set_excentricidad_config(False, 0)
+                self._tabs.setTabEnabled(1, False)
+
+        if not es_tanque:
+            if aplica_excentricidad is not None:
+                self.excentricidad.set_excentricidad_config(aplica_excentricidad, filas_excentricidad or 5)
+                self._tabs.setTabEnabled(1, aplica_excentricidad)
+            elif tipo_instrumento:
+                self.excentricidad.set_tipo_instrumento(tipo_instrumento, numero_celdas)
+
         self.repetibilidad.set_data(repetibilidad)
         self.excentricidad.set_data(excentricidad)
         self.exactitud.set_data(exactitud)
+        if sustitutos:
+            self.exactitud.set_sustitutos(sustitutos)
         if valor_repetibilidad is not None:
             self.repetibilidad.set_valor(valor_repetibilidad)
         if clase_exactitud:
             self.exactitud.set_clase_exactitud(clase_exactitud)
         if indicadores_jia:
             self.exactitud.set_indicadores_jia(indicadores_jia)
-        # valor_excentricidad se acepta para compatibilidad con el formulario
-        # de OS pero ExcentricidadWidget no expone un set_valor independiente.
+
 
     def set_division_minima(self, d: float) -> None:
         """Propaga la resolución d a los tres sub-widgets."""
