@@ -857,6 +857,8 @@ async def api_enviar_email_lote(
     override = body.correo if body else None
     forzar = body.forzar if body else True
     folios_in = body.folios if (body and body.folios) else None
+    if folios_in:
+        folios_in = list(dict.fromkeys([str(f).strip() for f in folios_in if str(f).strip()]))
 
     # Si vienen folios específicos en el body, usarlos directamente para agrupar el lote
     if folios_in and len(folios_in) > 0:
@@ -916,6 +918,8 @@ async def api_enviar_correo_universal(
     forzar = True if body.forzar is None else body.forzar
     folio_ref = (body.folio or "").strip()
     folios_in = body.folios if (body.folios and len(body.folios) > 0) else None
+    if folios_in:
+        folios_in = list(dict.fromkeys([str(f).strip() for f in folios_in if str(f).strip()]))
 
     if folios_in and len(folios_in) > 0 and not folio_ref:
         folio_ref = folios_in[0].strip()

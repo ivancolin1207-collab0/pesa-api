@@ -1142,6 +1142,10 @@ class SyncService extends ChangeNotifier {
         await db.marcarCorreoFallido(id, 'Datos incompletos', descartar: true);
         continue;
       }
+      final foliosAEnviar = folios.isNotEmpty ? folios : [ref];
+      for (final f in foliosAEnviar) {
+        await db.updateEmailStatus(f, enviado: false, status: 'enviando', correo: correo);
+      }
       try {
         final res = tipo == 'lote'
             ? await ApiService.instance.enviarEmailLote(ref, correo: correo, forzar: true, folios: folios)
@@ -1152,27 +1156,41 @@ class SyncService extends ChangeNotifier {
               : (folios.isNotEmpty ? folios : [ref]);
           await db.marcarCorreoEnviado(id, confirmados, correo);
           for (final f in confirmados) {
-            await db.updateEmailStatus(f, enviado: true, correo: correo);
+            await db.updateEmailStatus(f, enviado: true, status: 'enviado', correo: correo);
           }
           marcarUi(confirmados, correo);
           enviados++;
           debugPrint('[Sync PUSH Email] ✅ Cola: $tipo $ref enviado a $correo ($confirmados)');
         } else {
+          for (final f in foliosAEnviar) {
+            await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
+          }
           await db.marcarCorreoFallido(id, (res['motivo'] ?? res['error'] ?? 'Respuesta no OK').toString(),
               descartar: intentos + 1 >= 5);
         }
       } on CorreoSinConexionException catch (e) {
+        for (final f in foliosAEnviar) {
+          await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
+        }
         await db.marcarCorreoFallido(id, e.mensaje);
         debugPrint('[Sync PUSH Email] Sin conexión, la cola se conserva: $e');
         return enviados; // sin red: no tiene sentido seguir intentando
       } on CorreoEndpointNoDisponibleException catch (e) {
+        for (final f in foliosAEnviar) {
+          await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
+        }
         await db.marcarCorreoFallido(id, e.mensaje);
         debugPrint('[Sync PUSH Email] Endpoint no disponible, se reintentará: $e');
       } on CorreoRechazadoException catch (e) {
-        // p. ej. lote aún sin órdenes firmadas con PDF: reintentar en próximos syncs (máx. 5)
+        for (final f in foliosAEnviar) {
+          await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
+        }
         await db.marcarCorreoFallido(id, e.mensaje, descartar: intentos + 1 >= 5);
         debugPrint('[Sync PUSH Email] Rechazado ($ref): ${e.mensaje}');
       } catch (e) {
+        for (final f in foliosAEnviar) {
+          await db.updateEmailStatus(f, enviado: false, status: 'cola', correo: correo);
+        }
         await db.marcarCorreoFallido(id, e.toString());
         debugPrint('[Sync PUSH Email] Error en cola ($ref): $e');
       }
@@ -1190,6 +1208,7 @@ class SyncService extends ChangeNotifier {
       final correo = (os['correo_cliente'] as String? ?? '').trim();
       if (folio.isEmpty || correo.isEmpty || manejados.contains(folio)) continue;
 
+      await db.updateEmailStatus(folio, enviado: false, status: 'enviando', correo: correo);
       try {
         final res = await ApiService.instance.enviarEmailOrden(folio, correo: correo, forzar: true);
         if (res['ok'] == true) {
@@ -1198,19 +1217,24 @@ class SyncService extends ChangeNotifier {
               ? (res['folios'] as List).map((e) => e.toString()).toList()
               : [folio];
           for (final f in confirmados) {
-            await db.updateEmailStatus(f, enviado: true, correo: correo);
+            await db.updateEmailStatus(f, enviado: true, status: 'enviado', correo: correo);
           }
           marcarUi(confirmados, correo);
           enviados++;
           debugPrint('[Sync PUSH Email] ✅ Correo despachado para $confirmados a $correo');
+        } else {
+          await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
         }
       } on CorreoSinConexionException catch (e) {
+        await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
         debugPrint('[Sync PUSH Email] Sin conexión: $e');
         break;
       } on CorreoEndpointNoDisponibleException catch (e) {
+        await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
         debugPrint('[Sync PUSH Email] Endpoint no disponible: $e');
         break;
       } catch (e) {
+        await db.updateEmailStatus(folio, enviado: false, status: 'cola', correo: correo);
         debugPrint('[Sync PUSH Email] Error enviando correo para $folio: $e');
       }
     }

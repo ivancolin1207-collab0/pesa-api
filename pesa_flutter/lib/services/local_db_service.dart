@@ -2537,6 +2537,7 @@ class LocalDbService {
           )
         )
       )
+      AND (email_status IS NULL OR email_status NOT IN ('enviando', 'enviado'))
       AND correo_cliente IS NOT NULL
       AND TRIM(correo_cliente) != ''
       AND LOWER(TRIM(correo_cliente)) != 'ivancolin1207@gmail.com'

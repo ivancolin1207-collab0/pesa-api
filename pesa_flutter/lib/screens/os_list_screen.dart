@@ -92,17 +92,70 @@ class _OsListScreenState extends State<OsListScreen> {
   bool _loading = true;
   bool _syncDialogOpen = false;
 
+  // ── Cerrojo de Despacho de Correo (Debounce) ──────────────────────────────
+  bool _estaEnviandoEmail = false;
+
   // ── Filters ───────────────────────────────────────────────────────────────
   String  _periodo   = 'Todo';
   String  _modalidad = 'Todas las Modalidades';
   String? _tecnico;
   String? _estado;
+  String  _filtroTipoServicio = 'Todos los Servicios';
+  String  _filtroEmpresa = 'Todas las Empresas';
+  List<String> _listaEmpresas = ['Todas las Empresas'];
+  List<String> _listaTiposServicio = ['Todos los Servicios'];
   String  _query     = '';
   final   _searchCtrl = TextEditingController();
 
   // ── Vista: Mis Órdenes vs Repositorio de Calibraciones (solo supervisión) ──
   bool _vistaRepositorio = false;
   int _seqCorreosVisto = 0;
+
+  void _actualizarListasFiltros() {
+    final empresasSet = <String>{};
+    final tiposSet = <String>{
+      'Calibración + Ajuste',
+      'Ajuste',
+      'Revisión',
+      'Remisión',
+      'Inspección',
+      'Levantamiento',
+      'Calibración',
+      'Mantenimiento',
+    };
+
+    for (final o in _all) {
+      final cli = (o['cliente'] ?? '').toString().trim();
+      if (cli.isNotEmpty &&
+          cli.toLowerCase() != 'none' &&
+          cli.toLowerCase() != 'null' &&
+          cli.toLowerCase() != '--' &&
+          cli.toLowerCase() != 'cliente' &&
+          cli.toLowerCase() != 'empresa') {
+        empresasSet.add(cli);
+      }
+      final ts = (o['tipo_servicio'] ?? '').toString().trim();
+      if (ts.isNotEmpty &&
+          ts.toLowerCase() != 'none' &&
+          ts.toLowerCase() != 'null' &&
+          ts.toLowerCase() != '--') {
+        tiposSet.add(ts);
+      }
+    }
+
+    final listaEmpresasSorted = empresasSet.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final listaTiposSorted = tiposSet.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+    _listaEmpresas = ['Todas las Empresas', ...listaEmpresasSorted];
+    _listaTiposServicio = ['Todos los Servicios', ...listaTiposSorted];
+
+    if (!_listaEmpresas.contains(_filtroEmpresa)) {
+      _filtroEmpresa = 'Todas las Empresas';
+    }
+    if (!_listaTiposServicio.contains(_filtroTipoServicio)) {
+      _filtroTipoServicio = 'Todos los Servicios';
+    }
+  }
 
   @override
   void initState() {
@@ -123,6 +176,7 @@ class _OsListScreenState extends State<OsListScreen> {
     if (sync.orders.isNotEmpty) {
       _all = List<Map<String, dynamic>>.from(sync.orders);
       _loading = false;
+      _actualizarListasFiltros();
       _applyFilters();
     } else {
       _loadLocal();
@@ -391,6 +445,7 @@ class _OsListScreenState extends State<OsListScreen> {
         _all = List<Map<String, dynamic>>.from(ordersToShow);
         _loading = false;
       });
+      _actualizarListasFiltros();
       _applyFilters();
     } else if (sync.state == SyncState.success || sync.state == SyncState.error) {
       _loadLocal();
@@ -470,16 +525,20 @@ class _OsListScreenState extends State<OsListScreen> {
         final mutableList = list.map((m) => Map<String, dynamic>.from(m)).toList();
         if (mutableList.isNotEmpty) {
           setState(() { _all = mutableList; _loading = false; });
+          _actualizarListasFiltros();
           await _applyFilters();
         } else if (memFiltered.isNotEmpty) {
           setState(() { _all = memFiltered.map((m) => Map<String, dynamic>.from(m)).toList(); _loading = false; });
+          _actualizarListasFiltros();
           await _applyFilters();
         } else if (_all.isNotEmpty) {
           // Resguardo de base local: no vaciar si ya tenemos datos en memoria
           setState(() { _loading = false; });
+          _actualizarListasFiltros();
           await _applyFilters();
         } else {
           setState(() { _all = []; _loading = false; });
+          _actualizarListasFiltros();
         }
       }
     } catch (e) {
@@ -487,12 +546,15 @@ class _OsListScreenState extends State<OsListScreen> {
       if (mounted) {
         if (memFiltered.isNotEmpty) {
           setState(() { _all = memFiltered.map((m) => Map<String, dynamic>.from(m)).toList(); _loading = false; });
+          _actualizarListasFiltros();
           await _applyFilters();
         } else if (_all.isNotEmpty) {
           setState(() { _loading = false; });
+          _actualizarListasFiltros();
           await _applyFilters();
         } else {
           setState(() { _all = []; _loading = false; });
+          _actualizarListasFiltros();
         }
       }
     }
@@ -513,6 +575,8 @@ class _OsListScreenState extends State<OsListScreen> {
       modalidad: _modalidad,
       tecnico: _tecnico,
       estado: _estado,
+      tipoServicio: _filtroTipoServicio,
+      empresa: _filtroEmpresa,
       query: _query,
       nowYear: now.year,
       nowMonth: now.month,
@@ -1250,6 +1314,11 @@ class _OsListScreenState extends State<OsListScreen> {
 
   /// Función universal de captura y envío de correo para órdenes individuales y lotes
   Future<void> _procesarEnvioCorreo({required dynamic item, required bool esLote}) async {
+    if (_estaEnviandoEmail) {
+      debugPrint('[ENVIO CORREO] Clic ignorado: despacho de correo en progreso.');
+      return;
+    }
+    setState(() => _estaEnviandoEmail = true);
     try {
       await _procesarEnvioCorreoImpl(item: item, esLote: esLote);
     } catch (e, st) {
@@ -1261,6 +1330,12 @@ class _OsListScreenState extends State<OsListScreen> {
             content: Text('No se pudo procesar el envío de correo: $e'),
           ),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _estaEnviandoEmail = false);
+      } else {
+        _estaEnviandoEmail = false;
       }
     }
   }
@@ -1370,9 +1445,15 @@ class _OsListScreenState extends State<OsListScreen> {
     // Las OS pendientes o sin formato del lote se ignoran por completo (ni se citan ni se adjuntan).
     final List<Map<String, dynamic>> itemsBase =
         esLote ? await _hijasLoteDesdeSqlite(loteId, items) : items;
-    final List<Map<String, dynamic>> itemsEnvio =
-        esLote ? itemsBase.where((o) => tieneDocumento(o)).toList() : itemsBase;
-    final int omitidas = itemsBase.length - itemsEnvio.length;
+    final vistosFoliosEnvio = <String>{};
+    final List<Map<String, dynamic>> itemsEnvio = [];
+    for (final o in (esLote ? itemsBase.where((o) => tieneDocumento(o)) : itemsBase)) {
+      final f = folioDe(o);
+      if (f.isNotEmpty && vistosFoliosEnvio.add(f)) {
+        itemsEnvio.add(o);
+      }
+    }
+    final int omitidas = itemsBase.map(folioDe).where((f) => f.isNotEmpty).toSet().length - itemsEnvio.length;
     final List<String> foliosEnvio = itemsEnvio.map(folioDe).where((f) => f.isNotEmpty).toList();
 
     if (esLote && itemsEnvio.isEmpty) {
@@ -1497,12 +1578,14 @@ class _OsListScreenState extends State<OsListScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             icon: const Icon(Icons.send, size: 16),
-            label: Text(esLote ? 'Enviar Lote' : 'Enviar Ahora'),
-            onPressed: () {
-              if (formKey.currentState?.validate() ?? true) {
-                Navigator.of(ctx).pop(true);
-              }
-            },
+            label: Text(_estaEnviandoEmail ? 'Enviando...' : (esLote ? 'Enviar Lote' : 'Enviar Ahora')),
+            onPressed: _estaEnviandoEmail
+                ? null
+                : () {
+                    if (formKey.currentState?.validate() ?? true) {
+                      Navigator.of(ctx).pop(true);
+                    }
+                  },
           ),
         ],
       ),
@@ -1511,6 +1594,15 @@ class _OsListScreenState extends State<OsListScreen> {
     if (confirmar != true) return;
     final destino = emailCtrl.text.trim();
     if (!mounted) return;
+
+    // Cerrojo inmediato para evitar doble despacho por múltiples clics
+    if (_estaEnviandoEmail) return;
+    setState(() => _estaEnviandoEmail = true);
+
+    // Marcar en SQLite email_status = 'enviando' inmediatamente
+    for (final f in foliosEnvio) {
+      await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'enviando', correo: destino);
+    }
 
     // 2. Encolado offline en SQLite (email_status = 'cola') — copia mutable y sin bloquear al técnico.
     Future<void> encolarLocal(String motivo) async {
@@ -1590,10 +1682,10 @@ class _OsListScreenState extends State<OsListScreen> {
       }
 
       final List<String> confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
-          ? (res['folios'] as List).map((e) => e.toString()).toList()
-          : foliosEnvio;
+          ? (res['folios'] as List).map((e) => e.toString()).toSet().toList()
+          : foliosEnvio.toSet().toList();
       for (final f in confirmados) {
-        await LocalDbService.instance.updateEmailStatus(f, enviado: true, correo: destino);
+        await LocalDbService.instance.updateEmailStatus(f, enviado: true, status: 'enviado', correo: destino);
         if (mounted) {
           context.read<SyncService>().updateLocalOrder(f, {
             'email_enviado': 1,
@@ -1635,6 +1727,9 @@ class _OsListScreenState extends State<OsListScreen> {
       await encolarLocal(e.mensaje);
     } on CorreoRechazadoException catch (e) {
       debugPrint('[ENVIO CORREO] Rechazado por servidor: ${e.mensaje}');
+      for (final f in foliosEnvio) {
+        await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1644,7 +1739,9 @@ class _OsListScreenState extends State<OsListScreen> {
         );
       }
     } catch (e) {
-      // Cualquier otra falla de red/servidor: no bloquear al técnico, se reintenta al sincronizar.
+      for (final f in foliosEnvio) {
+        await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+      }
       await encolarLocal(e.toString());
     }
   }
@@ -1822,6 +1919,8 @@ class _FilterParams {
   final String modalidad;
   final String? tecnico;
   final String? estado;
+  final String tipoServicio;
+  final String empresa;
   final String query;
   final int nowYear, nowMonth, nowDay;
   final bool isTecnico;
@@ -1834,6 +1933,8 @@ class _FilterParams {
     required this.modalidad,
     required this.tecnico,
     required this.estado,
+    this.tipoServicio = 'Todos los Servicios',
+    this.empresa = 'Todas las Empresas',
     required this.query,
     required this.nowYear,
     required this.nowMonth,
@@ -1900,6 +2001,34 @@ bool coincidePeriodo(String fechaStr, String periodo, [DateTime? ahoraRef]) {
 
 List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
   final now = DateTime(p.nowYear, p.nowMonth, p.nowDay);
+
+  // Pre-computar IDs de lotes que coinciden con los filtros de Tipo de Servicio y Empresa
+  final matchingLoteIds = <String>{};
+  final bool filtrarTipo = p.tipoServicio.isNotEmpty && p.tipoServicio != 'Todos los Servicios';
+  final bool filtrarEmpresa = p.empresa.isNotEmpty && p.empresa != 'Todas las Empresas';
+
+  if (filtrarTipo || filtrarEmpresa) {
+    for (final os in p.all) {
+      String lid = (os['id_lote'] ?? os['lote'])?.toString().trim() ?? '';
+      if (lid.isEmpty) {
+        final c = (os['cliente'] as String? ?? '').trim();
+        final s = (os['sucursal'] as String? ?? '').trim();
+        final f = (os['fecha_servicio'] as String? ?? os['fecha_os'] as String? ?? os['fecha'] as String? ?? '').split('T').first.trim();
+        if (c.isNotEmpty && f.isNotEmpty) {
+          lid = 'grp_${c}_${s}_$f';
+        }
+      }
+      if (lid.isEmpty) continue;
+      final matchServicio = !filtrarTipo ||
+          (os['tipo_servicio']?.toString().trim().toLowerCase() == p.tipoServicio.trim().toLowerCase());
+      final matchEmpresa = !filtrarEmpresa ||
+          (os['cliente']?.toString().trim().toLowerCase() == p.empresa.trim().toLowerCase());
+      if (matchServicio && matchEmpresa) {
+        matchingLoteIds.add(lid);
+      }
+    }
+  }
+
   final filtered = p.all.where((os) {
     // 1. REGLA ESTRICTA DE AISLAMIENTO POR TÉCNICO:
     // No mostrar bajo ninguna circunstancia órdenes de otros técnicos en la vista del técnico
@@ -1973,6 +2102,29 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
 
     if (p.estado != null && p.estado!.isNotEmpty &&
         (os['estado'] as String? ?? '') != p.estado) return false;
+
+    // 3. Filtros por Tipo de Servicio y Empresa / Cliente (con soporte de Lotes)
+    String lid = (os['id_lote'] ?? os['lote'])?.toString().trim() ?? '';
+    if (lid.isEmpty) {
+      final c = (os['cliente'] as String? ?? '').trim();
+      final s = (os['sucursal'] as String? ?? '').trim();
+      final f = (os['fecha_servicio'] as String? ?? os['fecha_os'] as String? ?? os['fecha'] as String? ?? '').split('T').first.trim();
+      if (c.isNotEmpty && f.isNotEmpty) {
+        lid = 'grp_${c}_${s}_$f';
+      }
+    }
+    final perteneceALoteCoincidente = lid.isNotEmpty && matchingLoteIds.contains(lid);
+
+    if (!perteneceALoteCoincidente) {
+      if (filtrarTipo &&
+          (os['tipo_servicio']?.toString().trim().toLowerCase() != p.tipoServicio.trim().toLowerCase())) {
+        return false;
+      }
+      if (filtrarEmpresa &&
+          (os['cliente']?.toString().trim().toLowerCase() != p.empresa.trim().toLowerCase())) {
+        return false;
+      }
+    }
 
     if (p.query.isNotEmpty) {
       final q = normalizarTexto(p.query);
@@ -2170,6 +2322,24 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       items: ['Todas las Modalidades', 'Solo Físicos', 'Solo Digitales'],
                       onSelected: (val) {
                         state.setState(() => state._modalidad = val);
+                        state._applyFilters();
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                    _buildMobileChipDropdown(
+                      label: state._filtroTipoServicio,
+                      items: state._listaTiposServicio,
+                      onSelected: (val) {
+                        state.setState(() => state._filtroTipoServicio = val);
+                        state._applyFilters();
+                      },
+                    ),
+                    const SizedBox(width: 6),
+                    _buildMobileChipDropdown(
+                      label: state._filtroEmpresa,
+                      items: state._listaEmpresas,
+                      onSelected: (val) {
+                        state.setState(() => state._filtroEmpresa = val);
                         state._applyFilters();
                       },
                     ),
@@ -2624,22 +2794,28 @@ class _MobileOsCard extends StatelessWidget {
                         final String estCorreo = estadoCorreoOs(item);
                         final bool correoEnviado = estCorreo == 'enviado';
                         final bool enCola = estCorreo == 'cola';
+                        final st = context.findAncestorStateOfType<_OsListScreenState>();
+                        final bool enviando = st != null && st._estaEnviandoEmail;
                         return ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0)),
-                            foregroundColor: correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100)),
-                            side: BorderSide(color: correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D))),
+                            backgroundColor: enviando
+                                ? const Color(0xFFE0E0E0)
+                                : (correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
+                            foregroundColor: enviando
+                                ? const Color(0xFF757575)
+                                : (correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
+                            side: BorderSide(color: enviando ? Colors.transparent : (correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                           ),
-                          icon: Icon(correoEnviado ? Icons.check_circle_outline : (enCola ? Icons.schedule_send : Icons.mail_outline), size: 14),
+                          icon: Icon(enviando ? Icons.hourglass_top_rounded : (correoEnviado ? Icons.check_circle_outline : (enCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                           label: Text(
-                            correoEnviado ? "✓ Enviado" : (enCola ? "⏳ En cola" : "✉ Correo"),
+                            enviando ? "⏳ Enviando..." : (correoEnviado ? "✓ Enviado" : (enCola ? "⏳ En cola" : "✉ Correo")),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                           ),
-                          onPressed: () => onEmail(context, os),
+                          onPressed: enviando ? null : () => onEmail(context, os),
                         );
                       },
                     ),
@@ -2878,20 +3054,25 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                       final String estLote = estadoCorreoLote(widget.group.items);
                       final bool loteEnviado = estLote == 'enviado';
                       final bool loteEnCola = estLote == 'cola';
+                      final bool enviando = widget.state._estaEnviandoEmail;
                       return ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: loteEnviado ? const Color(0xFF2E7D32) : (loteEnCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0)),
-                          foregroundColor: loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100)),
-                          side: BorderSide(color: loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D))),
+                          backgroundColor: enviando
+                              ? const Color(0xFFE0E0E0)
+                              : (loteEnviado ? const Color(0xFF2E7D32) : (loteEnCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
+                          foregroundColor: enviando
+                              ? const Color(0xFF757575)
+                              : (loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
+                          side: BorderSide(color: enviando ? Colors.transparent : (loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                         ),
-                        icon: Icon(loteEnviado ? Icons.check_circle_outline : (loteEnCola ? Icons.schedule_send : Icons.mail_outline), size: 14),
+                        icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.check_circle_outline : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                         label: Text(
-                          loteEnviado ? "✓ Lote Enviado" : (loteEnCola ? "⏳ En cola" : "✉ Enviar Lote"),
+                          enviando ? "⏳ Enviando..." : (loteEnviado ? "✓ Lote Enviado" : (loteEnCola ? "⏳ En cola" : "✉ Enviar Lote")),
                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                         ),
-                        onPressed: () => widget.state._procesarEnvioCorreo(item: item, esLote: true),
+                        onPressed: enviando ? null : () => widget.state._procesarEnvioCorreo(item: item, esLote: true),
                       );
                     },
                   ),
@@ -2964,21 +3145,27 @@ class _TabletDesktopDashboard extends StatelessWidget {
         ),
         // Filter Bar
         _FilterBar(
-          periodo:    state._periodo,
-          modalidad:  state._modalidad,
-          tecnico:    state._tecnico,
-          estado:     state._estado,
-          tecnicos:   state._tecnicos,
-          estados:    state._estados,
-          searchCtrl: state._searchCtrl,
-          query:      state._query,
-          hideTecnico: hideTecnico,
-          onPeriodo:   (v) { state.setState(() => state._periodo = v); state._applyFilters(); },
-          onModalidad: (v) { state.setState(() => state._modalidad = v); state._applyFilters(); },
-          onTecnico:   (v) { state.setState(() => state._tecnico = v); state._applyFilters(); },
-          onEstado:    (v) { state.setState(() => state._estado = v); state._applyFilters(); },
-          onSearch:    (v) { state.setState(() => state._query = v); state._applyFilters(); },
-          onClear:     ()  { state._searchCtrl.clear(); state.setState(() => state._query = ''); state._applyFilters(); },
+          periodo:        state._periodo,
+          modalidad:      state._modalidad,
+          tecnico:        state._tecnico,
+          estado:         state._estado,
+          tipoServicio:   state._filtroTipoServicio,
+          empresa:        state._filtroEmpresa,
+          tecnicos:       state._tecnicos,
+          estados:        state._estados,
+          tiposServicio:  state._listaTiposServicio,
+          empresas:       state._listaEmpresas,
+          searchCtrl:     state._searchCtrl,
+          query:          state._query,
+          hideTecnico:    hideTecnico,
+          onPeriodo:      (v) { state.setState(() => state._periodo = v); state._applyFilters(); },
+          onModalidad:    (v) { state.setState(() => state._modalidad = v); state._applyFilters(); },
+          onTecnico:      (v) { state.setState(() => state._tecnico = v); state._applyFilters(); },
+          onEstado:       (v) { state.setState(() => state._estado = v); state._applyFilters(); },
+          onTipoServicio: (v) { state.setState(() => state._filtroTipoServicio = v); state._applyFilters(); },
+          onEmpresa:      (v) { state.setState(() => state._filtroEmpresa = v); state._applyFilters(); },
+          onSearch:       (v) { state.setState(() => state._query = v); state._applyFilters(); },
+          onClear:        ()  { state._searchCtrl.clear(); state.setState(() => state._query = ''); state._applyFilters(); },
         ),
         // Table Header & Rows con Scroll Horizontal y Ancho Mínimo Garantizado
         Expanded(
@@ -3029,7 +3216,7 @@ class _TabletDesktopDashboard extends StatelessWidget {
         if (group.isLote) {
           return _LoteRow(
             group: group,
-            onEnviarLote: () => state._procesarEnvioCorreo(item: group, esLote: true),
+            onEnviarLote: state._estaEnviandoEmail ? null : () => state._procesarEnvioCorreo(item: group, esLote: true),
             hideTecnico: hideTecnico,
             onCaptura: (os) => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
           );
@@ -3321,12 +3508,17 @@ class _FilterBar extends StatelessWidget {
   final String periodo;
   final String modalidad;
   final String? tecnico, estado;
+  final String tipoServicio;
+  final String empresa;
   final List<String> tecnicos, estados;
+  final List<String> tiposServicio, empresas;
   final TextEditingController searchCtrl;
   final String query;
   final ValueChanged<String> onPeriodo;
   final ValueChanged<String> onModalidad;
   final ValueChanged<String?> onTecnico, onEstado;
+  final ValueChanged<String> onTipoServicio;
+  final ValueChanged<String> onEmpresa;
   final ValueChanged<String> onSearch;
   final VoidCallback onClear;
   final bool hideTecnico;
@@ -3336,8 +3528,12 @@ class _FilterBar extends StatelessWidget {
     required this.modalidad,
     required this.tecnico,
     required this.estado,
+    required this.tipoServicio,
+    required this.empresa,
     required this.tecnicos,
     required this.estados,
+    required this.tiposServicio,
+    required this.empresas,
     required this.searchCtrl,
     required this.query,
     this.hideTecnico = false,
@@ -3345,6 +3541,8 @@ class _FilterBar extends StatelessWidget {
     required this.onModalidad,
     required this.onTecnico,
     required this.onEstado,
+    required this.onTipoServicio,
+    required this.onEmpresa,
     required this.onSearch,
     required this.onClear,
   });
@@ -3353,56 +3551,89 @@ class _FilterBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       color: _kCardBg,
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              for (final p in ['Hoy', 'Semana', 'Mes', 'Todo'])
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: FilterChip(
-                    label: Text(
-                      p,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: periodo == p ? _kCarmineRed : _kTextSec,
-                        fontWeight: periodo == p ? FontWeight.w700 : FontWeight.w400,
+              // 1. Período
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (final p in ['Hoy', 'Semana', 'Mes', 'Todo'])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: FilterChip(
+                        label: Text(
+                          p,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: periodo == p ? _kCarmineRed : _kTextSec,
+                            fontWeight: periodo == p ? FontWeight.w700 : FontWeight.w500,
+                          ),
+                        ),
+                        selected: periodo == p,
+                        selectedColor: Colors.red.shade50,
+                        checkmarkColor: _kCarmineRed,
+                        side: BorderSide(color: periodo == p ? _kCarmineRed : _kBorder),
+                        backgroundColor: _kCardBg,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+                        onSelected: (_) => onPeriodo(p),
                       ),
                     ),
-                    selected: periodo == p,
-                    selectedColor: Colors.red.shade50,
-                    checkmarkColor: _kCarmineRed,
-                    side: BorderSide(color: periodo == p ? _kCarmineRed : _kBorder),
-                    backgroundColor: _kCardBg,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                    onSelected: (_) => onPeriodo(p),
-                  ),
-                ),
-              const Spacer(),
-              if (!hideTecnico) ...[
-                _DropdownFilter(
-                  hint: 'Todos los Técnicos',
-                  value: tecnico,
-                  items: tecnicos,
-                  onChanged: onTecnico,
-                ),
-                const SizedBox(width: 8),
-              ],
-              _ModalidadDropdownFilter(
+                ],
+              ),
+              // 2. Tipo de Servicio
+              _buildDropdownFilter(
+                label: 'Tipo de Servicio',
+                value: tipoServicio,
+                items: tiposServicio,
+                onChanged: onTipoServicio,
+                width: 175,
+              ),
+              // 3. Empresa / Cliente
+              _buildDropdownFilter(
+                label: 'Empresa / Cliente',
+                value: empresa,
+                items: empresas,
+                onChanged: onEmpresa,
+                width: 215,
+              ),
+              // 4. Modalidad
+              _buildDropdownFilter(
+                label: 'Modalidad',
                 value: modalidad,
+                items: const ['Todas las Modalidades', 'Solo Físicos', 'Solo Digitales'],
                 onChanged: onModalidad,
+                width: 165,
               ),
-              const SizedBox(width: 8),
-              _DropdownFilter(
-                hint: 'Todos los Estados',
-                value: estado,
-                items: estados,
-                onChanged: onEstado,
+              // 5. Estado
+              _buildDropdownFilter(
+                label: 'Estado',
+                value: estado ?? 'Todos los Estados',
+                items: ['Todos los Estados', ...estados],
+                onChanged: (v) => onEstado(v == 'Todos los Estados' ? null : v),
+                width: 165,
               ),
+              // 6. Técnico
+              if (!hideTecnico)
+                _buildDropdownFilter(
+                  label: 'Técnico',
+                  value: tecnico ?? 'Todos los Técnicos',
+                  items: ['Todos los Técnicos', ...tecnicos],
+                  onChanged: (v) => onTecnico(v == 'Todos los Técnicos' ? null : v),
+                  width: 170,
+                ),
             ],
           ),
           const SizedBox(height: 8),
@@ -3438,81 +3669,46 @@ class _FilterBar extends StatelessWidget {
       ),
     );
   }
-}
 
-class _ModalidadDropdownFilter extends StatelessWidget {
-  final String value;
-  final ValueChanged<String> onChanged;
-  const _ModalidadDropdownFilter({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        border: Border.all(color: _kBorder),
-        borderRadius: BorderRadius.circular(6),
-        color: _kCardBg,
-      ),
-      child: DropdownButton<String>(
-        value: value,
+  Widget _buildDropdownFilter({
+    required String label,
+    required String value,
+    required List<String> items,
+    required ValueChanged<String> onChanged,
+    required double width,
+  }) {
+    final effectiveValue = items.contains(value) ? value : (items.isNotEmpty ? items.first : '');
+    return SizedBox(
+      width: width,
+      child: DropdownButtonFormField<String>(
+        value: effectiveValue.isNotEmpty ? effectiveValue : null,
         isDense: true,
-        underline: const SizedBox(),
-        style: const TextStyle(fontSize: 12, color: _kTextPrim),
-        items: const [
-          DropdownMenuItem(
-            value: 'Todas las Modalidades',
-            child: Text('Todas las Modalidades', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-          ),
-          DropdownMenuItem(
-            value: 'Solo Físicos',
-            child: Text('Solo Físicos', style: TextStyle(fontSize: 12, color: Color(0xFF7C3AED), fontWeight: FontWeight.w600)),
-          ),
-          DropdownMenuItem(
-            value: 'Solo Digitales',
-            child: Text('Solo Digitales', style: TextStyle(fontSize: 12, color: Color(0xFF2563EB), fontWeight: FontWeight.w600)),
-          ),
-        ],
-        onChanged: (v) {
-          if (v != null) onChanged(v);
+        isExpanded: true,
+        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSec),
+        style: const TextStyle(fontSize: 12, color: _kTextPrim, fontWeight: FontWeight.w500),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(fontSize: 11, color: _kTextSec, fontWeight: FontWeight.w600),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _kBorder)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _kBorder)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _kCarmineRed)),
+          filled: true,
+          fillColor: _kCardBg,
+        ),
+        items: items.map((item) {
+          return DropdownMenuItem<String>(
+            value: item,
+            child: Text(
+              item,
+              style: const TextStyle(fontSize: 12, color: _kTextPrim),
+              overflow: TextOverflow.ellipsis,
+            ),
+          );
+        }).toList(),
+        onChanged: (val) {
+          if (val != null) onChanged(val);
         },
-      ),
-    );
-  }
-}
-
-class _DropdownFilter extends StatelessWidget {
-  final String hint;
-  final String? value;
-  final List<String> items;
-  final ValueChanged<String?> onChanged;
-  const _DropdownFilter({
-    required this.hint,
-    required this.value,
-    required this.items,
-    required this.onChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10),
-      decoration: BoxDecoration(
-        border: Border.all(color: _kBorder),
-        borderRadius: BorderRadius.circular(6),
-        color: _kCardBg,
-      ),
-      child: DropdownButton<String>(
-        value: value,
-        hint: Text(hint, style: const TextStyle(fontSize: 12, color: _kTextSec)),
-        isDense: true,
-        underline: const SizedBox(),
-        style: const TextStyle(fontSize: 12, color: _kTextPrim),
-        items: [
-          DropdownMenuItem<String>(value: null, child: Text(hint, style: const TextStyle(color: _kTextSec))),
-          ...items.map((t) => DropdownMenuItem<String>(value: t, child: Text(t))),
-        ],
-        onChanged: onChanged,
       ),
     );
   }
@@ -3611,7 +3807,7 @@ class _OsRow extends StatelessWidget {
     required String label,
     required IconData icon,
     required Color color,
-    required VoidCallback onPressed,
+    required VoidCallback? onPressed,
     Color fg = Colors.white,
     BorderSide side = BorderSide.none,
   }) {
@@ -3881,14 +4077,23 @@ class _OsRow extends StatelessWidget {
                         final String estCorreo = estadoCorreoOs(item);
                         final bool correoEnviado = estCorreo == 'enviado';
                         final bool enCola = estCorreo == 'cola';
+                        final st = context.findAncestorStateOfType<_OsListScreenState>();
+                        final bool enviando = st != null && st._estaEnviandoEmail;
                         return _buildBtnAccion(
-                          label: correoEnviado ? "✓ Enviado" : (enCola ? "⏳ En cola (Offline)" : "✉ Enviar Correo"),
-                          icon: correoEnviado ? Icons.check_circle_outline : (enCola ? Icons.schedule_send : Icons.mail_outline),
-                          color: correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0)),
-                          fg: correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100)),
-                          side: BorderSide(color: correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D))),
-                          onPressed: () {
-                            final st = context.findAncestorStateOfType<_OsListScreenState>();
+                          label: enviando
+                              ? "⏳ Enviando..."
+                              : (correoEnviado ? "✓ Enviado" : (enCola ? "⏳ En cola (Offline)" : "✉ Enviar Correo")),
+                          icon: enviando
+                              ? Icons.hourglass_top_rounded
+                              : (correoEnviado ? Icons.check_circle_outline : (enCola ? Icons.schedule_send : Icons.mail_outline)),
+                          color: enviando
+                              ? const Color(0xFFE0E0E0)
+                              : (correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
+                          fg: enviando
+                              ? const Color(0xFF757575)
+                              : (correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
+                          side: BorderSide(color: enviando ? Colors.transparent : (correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
+                          onPressed: enviando ? null : () {
                             if (st != null) {
                               st._procesarEnvioCorreo(item: item, esLote: false);
                             } else {
@@ -4095,30 +4300,37 @@ class _LoteRowState extends State<_LoteRow> {
                           final String estLote = estadoCorreoLote(widget.group.items);
                           final bool loteEnviado = estLote == 'enviado';
                           final bool loteEnCola = estLote == 'cola';
+                          final st = context.findAncestorStateOfType<_OsListScreenState>();
+                          final bool enviando = st != null && st._estaEnviandoEmail;
                           return SizedBox(
                             height: 29,
                             child: ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: loteEnviado ? const Color(0xFF2E7D32) : (loteEnCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0)),
-                                foregroundColor: loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100)),
-                                side: BorderSide(color: loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D))),
+                                backgroundColor: enviando
+                                    ? const Color(0xFFE0E0E0)
+                                    : (loteEnviado ? const Color(0xFF2E7D32) : (loteEnCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
+                                foregroundColor: enviando
+                                    ? const Color(0xFF757575)
+                                    : (loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
+                                side: BorderSide(color: enviando ? Colors.transparent : (loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 minimumSize: const Size(0, 29),
                                 visualDensity: VisualDensity.compact,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                               ),
-                              icon: Icon(loteEnviado ? Icons.check_circle_outline : (loteEnCola ? Icons.schedule_send : Icons.mail_outline), size: 14),
+                              icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.check_circle_outline : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                               label: Text(
-                                loteEnviado ? "✓ Lote Enviado" : (loteEnCola ? "⏳ Lote en cola (Offline)" : "✉ Enviar Lote por Correo"),
+                                enviando
+                                    ? "⏳ Enviando..."
+                                    : (loteEnviado ? "✓ Lote Enviado" : (loteEnCola ? "⏳ Lote en cola (Offline)" : "✉ Enviar Lote por Correo")),
                                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                               ),
-                              onPressed: () {
+                              onPressed: enviando ? null : () {
                                 if (widget.onEnviarLote != null) {
                                   widget.onEnviarLote!();
                                   return;
                                 }
-                                final st = context.findAncestorStateOfType<_OsListScreenState>();
                                 if (st != null) {
                                   st._procesarEnvioCorreo(item: item, esLote: true);
                                 } else {

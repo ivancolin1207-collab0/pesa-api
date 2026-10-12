@@ -188,6 +188,10 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
         folio = row["folio_os"]
         id_lote = row["id_lote"]
 
+        # Deduplicar lista de folios recibida preservando orden
+        if folios_lista:
+            folios_lista = list(dict.fromkeys([str(f).strip() for f in folios_lista if str(f).strip()]))
+
         # Si pertenece a un Lote o se pasó lista de folios, agrupar las órdenes del lote
         es_agrupacion_lote = False
         lote_rows = []
@@ -208,6 +212,13 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 """,
                 folios_lista,
             )
+            # Deduplicar registros devueltos por folio preservando orden
+            lote_rows_dict = {}
+            for r in lote_rows:
+                fk = str(r["folio_os"] or "").strip()
+                if fk and fk not in lote_rows_dict:
+                    lote_rows_dict[fk] = r
+            lote_rows = list(lote_rows_dict.values())
             if len(lote_rows) > 1:
                 es_agrupacion_lote = True
         elif id_lote and str(id_lote).strip():
@@ -227,6 +238,13 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 """,
                 id_lote,
             )
+            # Deduplicar registros devueltos por folio preservando orden
+            lote_rows_dict = {}
+            for r in lote_rows:
+                fk = str(r["folio_os"] or "").strip()
+                if fk and fk not in lote_rows_dict:
+                    lote_rows_dict[fk] = r
+            lote_rows = list(lote_rows_dict.values())
             if len(lote_rows) > 1:
                 es_agrupacion_lote = True
 
@@ -234,12 +252,17 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 # REGLA ESTRICTA: solo órdenes FIRMADAS/CERRADAS y con PDF existente.
                 ordenes_validas = []   # [(row, pdf_bytes)]
                 no_listas = []
+                adjuntos_procesados = set()
                 for r in lote_rows:
-                    pdf_bytes = _cargar_pdf_bytes(r, r["folio_os"]) if _es_finalizada(r) else None
+                    f_i = str(r["folio_os"] or "").strip()
+                    if not f_i or f_i in adjuntos_procesados:
+                        continue
+                    pdf_bytes = _cargar_pdf_bytes(r, f_i) if _es_finalizada(r) else None
                     if pdf_bytes:
+                        adjuntos_procesados.add(f_i)
                         ordenes_validas.append((r, pdf_bytes))
                     else:
-                        no_listas.append(r["folio_os"])
+                        no_listas.append(f_i)
 
                 # Envío automático (no forzado): esperar a que el lote esté completo.
                 if no_listas and not forzar:
@@ -270,11 +293,15 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     return {"ok": False, "motivo": "No se ha capturado el correo del cliente para este lote"}
 
                 adjuntos = []
-                folios_lote = []   # SOLO folios válidos (las no realizadas no se mencionan)
+                folios_lote = []   # SOLO folios válidos únicos
                 empresa_lote = ordenes_validas[0][0]["cliente"] or lote_rows[0]["cliente"] or "Cliente"
+                folios_agregados = set()
 
                 for r, content_pdf in ordenes_validas:
-                    f_i = r["folio_os"]
+                    f_i = str(r["folio_os"] or "").strip()
+                    if not f_i or f_i in folios_agregados:
+                        continue
+                    folios_agregados.add(f_i)
                     folios_lote.append(f_i)
                     id_eq = r["id_equipo"] or r["indicador_id"] or ""
                     if not id_eq and r["datos_tecnicos_json"]:
@@ -292,7 +319,10 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     )
                     adjuntos.append((nombre_adj, content_pdf))
 
+                folios_unicos = list(dict.fromkeys([f.strip() for f in folios_lote if f]))
+                folios_lote = folios_unicos
                 n = len(adjuntos)
+                total_ordenes = len(folios_unicos)
                 txt_ordenes = "orden" if n == 1 else "órdenes"
                 folios_str = _unir_folios(folios_lote)
                 asunto = f"Reporte de Servicio - Lote {folios_str} ({n} {txt_ordenes}) - {empresa_lote} | Básculas PESA"
@@ -311,9 +341,8 @@ recepcion@basculaspesa.com.mx
                 cuerpo_html = f"""
                 <html>
                 <body style="font-family: Arial, sans-serif; color: #1D1D1F; line-height: 1.5;">
-                    <div style="background-color: #B81D24; padding: 18px 24px; border-radius: 8px 8px 0 0;">
-                        <h2 style="color: #FFFFFF; margin: 0; font-size: 20px;">Básculas PESA</h2>
-                        <p style="color: #FEE2E2; margin: 4px 0 0 0; font-size: 13px;">Entrega Oficial de Servicios Metrológicos</p>
+                    <div style="background-color: #B71C1C; padding: 20px; text-align: left; border-radius: 8px 8px 0 0;">
+                        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Básculas PESA</h1>
                     </div>
                     <div style="padding: 24px; border: 1px solid #E5E5EA; border-top: none; border-radius: 0 0 8px 8px; background-color: #FFFFFF;">
                         <p>Estimado cliente <strong>{empresa_lote}</strong>,</p>
@@ -420,7 +449,6 @@ recepcion@basculaspesa.com.mx
 
 Adjuntamos el reporte oficial correspondiente a la Orden de Servicio {folio}.
 Servicio: {row['srv_nombre'] or row['tipo_servicio'] or 'Calibración'}
-Dictamen: {row['dictamen'] or 'APTO'}
 
 El documento cuenta con validez y firmas digitales.
 
@@ -431,9 +459,8 @@ recepcion@basculaspesa.com.mx
         cuerpo_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; color: #1D1D1F; line-height: 1.5;">
-            <div style="background-color: #B81D24; padding: 18px 24px; border-radius: 8px 8px 0 0;">
-                <h2 style="color: #FFFFFF; margin: 0; font-size: 20px;">Básculas PESA</h2>
-                <p style="color: #FEE2E2; margin: 4px 0 0 0; font-size: 13px;">Comprobante de Servicio Finalizado</p>
+            <div style="background-color: #B71C1C; padding: 20px; text-align: left; border-radius: 8px 8px 0 0;">
+                <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Básculas PESA</h1>
             </div>
             <div style="padding: 24px; border: 1px solid #E5E5EA; border-top: none; border-radius: 0 0 8px 8px; background-color: #FFFFFF;">
                 <p>Estimado cliente <strong>{empresa}</strong>,</p>
@@ -446,10 +473,6 @@ recepcion@basculaspesa.com.mx
                     <tr style="border-bottom: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0; color: #64748B;">Tipo de Servicio:</td>
                         <td style="padding: 8px 0; font-weight: 600;">{row['srv_nombre'] or row['tipo_servicio'] or 'Calibración'}</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0; color: #64748B;">Dictamen:</td>
-                        <td style="padding: 8px 0; font-weight: 600; color: #16A34A;">{row['dictamen'] or 'APTO'}</td>
                     </tr>
                 </table>
                 <p>Adjunto a este correo encontrará el reporte completo en formato PDF con firmas electrónicas.</p>
