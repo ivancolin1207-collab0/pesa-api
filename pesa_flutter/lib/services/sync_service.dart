@@ -127,7 +127,7 @@ class SyncService extends ChangeNotifier {
   /// Asigna directamente la lista de órdenes recibidas en memoria
   /// y actualiza de inmediato las variables reactivas de los contadores.
   void setOrdersFromPull(List<Map<String, dynamic>> osList) {
-    _orders = List<Map<String, dynamic>>.from(osList);
+    _orders = osList.map((m) => Map<String, dynamic>.from(m)).toList();
     _updateCounters(_orders);
     notifyListeners();
   }

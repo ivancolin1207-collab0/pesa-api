@@ -1279,7 +1279,7 @@ class _OsListScreenState extends State<OsListScreen> {
 
     if (esLote) {
       if (item is _OsGroup) {
-        items = List<Map<String, dynamic>>.from(item.items);
+        items = item.items.map((m) => Map<String, dynamic>.from(m)).toList();
         final rawLote = items.isNotEmpty
             ? (items.first['id_lote'] ?? items.first['lote'])?.toString().trim()
             : null;
@@ -1288,26 +1288,30 @@ class _OsListScreenState extends State<OsListScreen> {
         } else if (item.loteKey.isNotEmpty && !item.loteKey.startsWith('solo_')) {
           loteId = item.loteKey;
         }
-      } else if (item is Map<String, dynamic>) {
-        final rawLote = (item['id_lote'] ?? item['lote'] ?? item['id'] ?? item['lote_id'])?.toString().trim();
+      } else if (item is Map) {
+        final itemMap = Map<String, dynamic>.from(item);
+        final rawLote = (itemMap['id_lote'] ?? itemMap['lote'] ?? itemMap['id'] ?? itemMap['lote_id'])?.toString().trim();
         if (rawLote != null && rawLote.isNotEmpty) {
           loteId = rawLote;
         }
-        if (item['ordenes'] is List) {
-          items = (item['ordenes'] as List)
-              .map((e) => e is Map<String, dynamic> ? e : (e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()}))
+        if (itemMap['ordenes'] is List) {
+          items = (itemMap['ordenes'] as List)
+              .map((e) => e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()})
               .toList();
-        } else if (item['hijos'] is List) {
-          items = (item['hijos'] as List)
-              .map((e) => e is Map<String, dynamic> ? e : (e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()}))
+        } else if (itemMap['hijos'] is List) {
+          items = (itemMap['hijos'] as List)
+              .map((e) => e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()})
               .toList();
-        } else if (item['items'] is List) {
-          items = (item['items'] as List)
-              .map((e) => e is Map<String, dynamic> ? e : (e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()}))
+        } else if (itemMap['items'] is List) {
+          items = (itemMap['items'] as List)
+              .map((e) => e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()})
               .toList();
         }
         if (items.isEmpty && loteId.isNotEmpty) {
-          items = _filtered.where((o) => (o['id_lote'] ?? o['lote'])?.toString().trim() == loteId).toList();
+          items = _filtered
+              .where((o) => (o['id_lote'] ?? o['lote'])?.toString().trim() == loteId)
+              .map((m) => Map<String, dynamic>.from(m))
+              .toList();
         }
       }
 
@@ -1329,7 +1333,7 @@ class _OsListScreenState extends State<OsListScreen> {
           fecha: fecha,
         );
         if (sqlRows.isNotEmpty) {
-          items = sqlRows;
+          items = sqlRows.map((m) => Map<String, dynamic>.from(m)).toList();
           folios = items.map(folioDe).where((f) => f.isNotEmpty).toList();
         }
       }
@@ -1349,14 +1353,14 @@ class _OsListScreenState extends State<OsListScreen> {
       }
     } else {
       final Map<String, dynamic> osMap;
-      if (item is Map<String, dynamic>) {
-        osMap = item;
+      if (item is Map) {
+        osMap = Map<String, dynamic>.from(item);
       } else if (item is _OsGroup && item.items.isNotEmpty) {
-        osMap = item.items.first;
+        osMap = Map<String, dynamic>.from(item.items.first);
       } else {
         return;
       }
-      items = [osMap];
+      items = [Map<String, dynamic>.from(osMap)];
       folio = ((osMap['folio_os'] ?? osMap['folio']) as String? ?? '').trim();
       loteId = '';
       if (folio.isEmpty) return;
@@ -1508,7 +1512,7 @@ class _OsListScreenState extends State<OsListScreen> {
     final destino = emailCtrl.text.trim();
     if (!mounted) return;
 
-    // 2. Encolado offline en SQLite (email_status = 'pendiente') — nunca bloquea al técnico.
+    // 2. Encolado offline en SQLite (email_status = 'cola') — copia mutable y sin bloquear al técnico.
     Future<void> encolarLocal(String motivo) async {
       debugPrint('[ENVIO CORREO] Encolando localmente (${esLote ? 'lote $loteId' : folio}): $motivo');
       await LocalDbService.instance.encolarCorreo(
@@ -1528,16 +1532,29 @@ class _OsListScreenState extends State<OsListScreen> {
             'correo_cliente': destino,
           });
         }
-        it['email_enviado'] = 0;
-        it['email_status'] = 'cola';
-        it['correo_cliente'] = destino;
       }
       if (mounted) {
-        setState(() {});
+        final foliosSet = foliosEnvio.toSet();
+        setState(() {
+          _all = _all.map((m) {
+            final f = folioDe(m);
+            if (foliosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
+              return {...m, 'email_enviado': 0, 'email_status': 'cola', 'correo_cliente': destino};
+            }
+            return m;
+          }).toList();
+          _filtered = _filtered.map((m) {
+            final f = folioDe(m);
+            if (foliosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
+              return {...m, 'email_enviado': 0, 'email_status': 'cola', 'correo_cliente': destino};
+            }
+            return m;
+          }).toList();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Color(0xFFD97706),
-            content: Text('⏳ Guardado en cola offline. Se enviará automáticamente al sincronizar con internet.'),
+            content: Text('⏳ Guardado en cola offline. Se enviará al sincronizar con internet.'),
           ),
         );
         await _loadLocal();
@@ -1585,22 +1602,29 @@ class _OsListScreenState extends State<OsListScreen> {
           });
         }
       }
-      for (final it in itemsEnvio) {
-        if (confirmados.contains(folioDe(it))) {
-          it['email_enviado'] = 1;
-          it['email_status'] = 'enviado';
-          it['correo_cliente'] = destino;
-        }
-      }
 
       if (mounted) {
-        setState(() {});
+        final confirmadosSet = confirmados.toSet();
+        setState(() {
+          _all = _all.map((m) {
+            final f = folioDe(m);
+            if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
+              return {...m, 'email_enviado': 1, 'email_status': 'enviado', 'correo_cliente': destino};
+            }
+            return m;
+          }).toList();
+          _filtered = _filtered.map((m) {
+            final f = folioDe(m);
+            if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
+              return {...m, 'email_enviado': 1, 'email_status': 'enviado', 'correo_cliente': destino};
+            }
+            return m;
+          }).toList();
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF2E7D32),
-            content: Text(esLote
-                ? '✓ Lote enviado a $destino: ${confirmados.join(', ')} (${confirmados.length} órdenes). CC: recepcion@basculaspesa.com.mx'
-                : '✓ Correo enviado exitosamente a $destino (CC: recepcion@basculaspesa.com.mx)'),
+            content: Text('✓ Correo enviado con éxito a $destino' + (esLote ? ' (${confirmados.length} órdenes en lote)' : '')),
           ),
         );
         await _loadLocal();
@@ -1643,8 +1667,8 @@ class _OsListScreenState extends State<OsListScreen> {
       } else {
         rows = [];
       }
-      if (rows.isEmpty) return enMemoria;
-      final porFolio = <String, Map<String, dynamic>>{for (final m in enMemoria) fol(m): m};
+      if (rows.isEmpty) return enMemoria.map((m) => Map<String, dynamic>.from(m)).toList();
+      final porFolio = <String, Map<String, dynamic>>{for (final m in enMemoria) fol(m): Map<String, dynamic>.from(m)};
       final vistos = <String>{};
       final out = <Map<String, dynamic>>[];
       for (final r in rows) {
@@ -1654,28 +1678,28 @@ class _OsListScreenState extends State<OsListScreen> {
         r.forEach((k, v) {
           if (v != null && v.toString().isNotEmpty) merged[k] = v;
         });
-        out.add(merged);
+        out.add(Map<String, dynamic>.from(merged));
       }
       for (final m in enMemoria) {
         final f = fol(m);
-        if (f.isNotEmpty && !vistos.contains(f)) out.add(m);
+        if (f.isNotEmpty && !vistos.contains(f)) out.add(Map<String, dynamic>.from(m));
       }
       debugPrint('[ENVIO CORREO] Lote $loteId: ${out.length} órdenes hijas (SQLite: ${rows.length})');
       return out;
     } catch (e) {
       debugPrint('[ENVIO CORREO] No se pudieron leer hijas del lote $loteId en SQLite: $e');
-      return enMemoria;
+      return enMemoria.map((m) => Map<String, dynamic>.from(m)).toList();
     }
   }
 
   Future<void> _manejarAccionEmail(BuildContext context, Map<String, dynamic> os) =>
-      _procesarEnvioCorreo(item: os, esLote: false);
+      _procesarEnvioCorreo(item: Map<String, dynamic>.from(os), esLote: false);
 
   Future<void> _manejarEnvioCorreoOrden(Map<String, dynamic> orden) =>
-      _procesarEnvioCorreo(item: orden, esLote: false);
+      _procesarEnvioCorreo(item: Map<String, dynamic>.from(orden), esLote: false);
 
   Future<void> _manejarEnvioCorreoLote(dynamic lote) =>
-      _procesarEnvioCorreo(item: lote, esLote: true);
+      _procesarEnvioCorreo(item: (lote is Map) ? Map<String, dynamic>.from(lote) : lote, esLote: true);
 
   @override
   Widget build(BuildContext context) {
