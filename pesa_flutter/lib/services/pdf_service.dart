@@ -1084,10 +1084,14 @@ class PdfService {
     const rowH = 14.0;
     const hdrH = 15.0;
 
-    final display = List<Map<String, dynamic>>.from(rows);
-    while (display.length < 5) {
-      display.add({});
-    }
+    // Filtrar únicamente los renglones que tengan datos capturados (omite renglones vacíos)
+    final puntosValidos = rows.where((p) {
+      final pesas = p['pesas']?.toString().trim() ?? '';
+      final agua  = p['agua']?.toString().trim() ?? '';
+      final ind   = (p['indicacion'] ?? p['lectura_inicial'])?.toString().trim() ?? '';
+      return pesas.isNotEmpty || agua.isNotEmpty || ind.isNotEmpty;
+    }).toList();
+    final display = puntosValidos.isNotEmpty ? puntosValidos : (rows.isNotEmpty ? [rows.first] : []);
 
     final colWidths = [
       0.06, // N

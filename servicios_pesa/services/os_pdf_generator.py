@@ -2103,12 +2103,23 @@ class OsPdfGenerator:
 
         hdr_h     = 16
 
-        # Inicializar con al menos 5 filas por defecto
-        num_enlaces = max(
-            5,
-            len(data) if data else 0,
-            int(os_data.get("num_enlaces_sustitucion") or os_data.get("num_enlaces") or os_data.get("puntos_exactitud") or 5)
-        )
+        # Filtrar únicamente los renglones que tengan datos capturados (omite renglones vacíos)
+        puntos_validos = []
+        for r in (data or []):
+            if not isinstance(r, dict):
+                continue
+            pesas_raw      = r.get("pesas")
+            agua_raw       = r.get("agua")
+            indicacion_raw = r.get("indicacion") if r.get("indicacion") is not None else r.get("lectura_inicial")
+            if (
+                (pesas_raw is not None and str(pesas_raw).strip() != "") or
+                (agua_raw is not None and str(agua_raw).strip() != "") or
+                (indicacion_raw is not None and str(indicacion_raw).strip() != "")
+            ):
+                puntos_validos.append(r)
+
+        display_data = puntos_validos if puntos_validos else (data[:1] if data else [])
+        num_enlaces = len(display_data)
 
         if num_enlaces <= 5:
             row_h = 16
@@ -2140,12 +2151,11 @@ class OsPdfGenerator:
         errors = []
         _sf = self._seguro_float
 
-        for n in range(1, num_enlaces + 1):
+        for idx_row, row in enumerate(display_data):
+            n = idx_row + 1
             bg = _ROW_BG if n % 2 != 0 else _GRAY_LIGHT
             c.setFillColor(bg)
             c.rect(x, y - row_h, w, row_h, fill=1, stroke=1)
-            
-            row = data[n - 1] if data and (n - 1) < len(data) else {}
             
             pesas_raw      = row.get("pesas")
             agua_raw       = row.get("agua")

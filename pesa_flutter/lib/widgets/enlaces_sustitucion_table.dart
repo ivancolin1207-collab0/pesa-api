@@ -487,27 +487,25 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                     ],
                   ),
                   const SizedBox(height: 12),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: SizedBox(
-                      width: 760,
-                      child: Table(
-                        border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
-                        columnWidths: const {
-                          0: FlexColumnWidth(0.5), // N
-                          1: FlexColumnWidth(1.2), // PESAS
-                          2: FlexColumnWidth(1.2), // AGUA
-                          3: FlexColumnWidth(1.4), // AGUA + PESAS
-                          4: FlexColumnWidth(1.3), // INDICACIÓN
-                          5: FlexColumnWidth(1.2), // REGRESO
-                          6: FlexColumnWidth(1.1), // ERROR
-                          7: FlexColumnWidth(0.5), // ACCIONES
-                        },
-                        children: [
-                          _hdr(['N', 'PESAS', 'AGUA', 'AGUA + PESAS', 'INDICACIÓN', 'REGRESO', 'ERROR', '']),
-                          for (int i = 0; i < _pesasCtrls.length; i++) _row(i),
-                        ],
-                      ),
+                  SizedBox(
+                    width: double.infinity,
+                    child: Table(
+                      border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
+                      columnWidths: const {
+                        0: FlexColumnWidth(0.8), // N
+                        1: FlexColumnWidth(2.0), // PESAS
+                        2: FlexColumnWidth(2.0), // AGUA
+                        3: FlexColumnWidth(2.0), // AGUA + PESAS
+                        4: FlexColumnWidth(2.0), // INDICACIÓN
+                        5: FlexColumnWidth(2.0), // REGRESO
+                        6: FlexColumnWidth(1.8), // ERROR
+                        7: FlexColumnWidth(0.6), // ACCIONES
+                      },
+                      defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                      children: [
+                        _hdr(['N', 'PESAS', 'AGUA', 'AGUA + PESAS', 'INDICACIÓN', 'REGRESO', 'ERROR', '']),
+                        for (int i = 0; i < _pesasCtrls.length; i++) _row(i),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -553,11 +551,11 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
         decoration: const BoxDecoration(color: Color(0xFF1C1C1C)),
         children: l
             .map((s) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+                  padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
                   child: Text(
                     s,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w700, color: Colors.white),
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
                   ),
                 ))
             .toList(),
@@ -591,7 +589,8 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
         Container(
           key: key,
           padding: const EdgeInsets.all(8),
-          child: Text('${i + 1}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11)),
+          alignment: Alignment.center,
+          child: Text('${i + 1}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
         ),
         _input(_pesasCtrls[i], focusNode: fns != null ? fns[0] : null, onTap: () => _scrollToRow(i)),
         _input(_aguaCtrls[i], focusNode: fns != null ? fns[1] : null, onTap: () => _scrollToRow(i)),
@@ -605,14 +604,14 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontWeight: FontWeight.w700,
-              fontSize: 11,
+              fontSize: 12,
               color: err != null ? (err.abs() > (widget.divMin ?? 0) * 3 ? _kRed : Colors.green.shade700) : Colors.black87,
             ),
           ),
         ),
         if (_pesasCtrls.length > 5)
           IconButton(
-            icon: const Icon(Icons.remove_circle_outline, size: 16, color: Colors.grey),
+            icon: const Icon(Icons.remove_circle_outline, size: 18, color: Colors.grey),
             onPressed: () => _removePoint(i),
             tooltip: 'Eliminar punto',
           )
@@ -630,23 +629,23 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
   }) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: SizedBox(
-          height: 30,
+          height: 38,
           child: TextField(
             controller: c,
             focusNode: focusNode,
             onTap: onTap,
             textAlign: TextAlign.center,
             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(fontSize: 10, color: Colors.grey.shade400),
-              contentPadding: EdgeInsets.zero,
+              hintStyle: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
               filled: true,
               fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.grey.shade300)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.grey.shade300)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: _kRed, width: 1.5)),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Colors.grey.shade300)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Colors.grey.shade300)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _kRed, width: 1.5)),
             ),
           ),
         ),
