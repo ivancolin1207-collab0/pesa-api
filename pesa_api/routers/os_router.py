@@ -17,12 +17,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, File, Form, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, File, Form, UploadFile, Request, status
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from pesa_api.core.database import get_db
-from pesa_api.core.security import get_current_user, require_roles, _normalizar_rol
+from pesa_api.core.security import (
+    get_current_user,
+    get_optional_user,
+    require_roles,
+    tiene_visibilidad_global,
+    verificar_acceso_os,
+    _normalizar_rol,
+)
 
 router = APIRouter()
 logger = logging.getLogger("pesa_api.os_router")
@@ -261,14 +268,19 @@ async def download_pdf(
     force_regenerate: bool = False,
     force: bool = False,
     db            = Depends(get_db),
+    current_user: Optional[dict] = Depends(get_optional_user),
 ):
     """
     Busca el PDF de la OS en el directorio UPLOAD_DIR o lo reconstruye desde pdf_b64 en PostgreSQL.
     Si force_regenerate=True o force=True, invalida la caché en disco y reconstruye desde la BD.
     """
+    # TODO(security): el ERP de escritorio (Windows) descarga sin token; cuando envíe
+    # Bearer, cambiar get_optional_user por get_current_user para cerrar el acceso anónimo.
+    if not isinstance(current_user, dict):
+        current_user = None
     clean_folio = folio_os.strip()
     row = await db.fetchrow(
-        "SELECT id, folio_os, pdf_path, pdf_url, pdf_b64 FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        "SELECT id, folio_os, pdf_path, pdf_url, pdf_b64, id_tecnico FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
         clean_folio,
     )
     if row is None:
@@ -277,21 +289,28 @@ async def download_pdf(
             detail=f"OS '{folio_os}' no encontrada",
         )
 
+    # Privilegios mínimos: con token de técnico solo sus propias OS.
+    es_tecnico = current_user is not None and not tiene_visibilidad_global(current_user)
+    if es_tecnico:
+        verificar_acceso_os(current_user, row["id_tecnico"])
+
     # Marcar Estado 4: Doble palomita verde (Auditada / Abierta en Windows)
-    try:
-        await db.execute(
-            """
-            UPDATE ordenes_servicio
-            SET sync_check_status = 'AUDITADA_ADMIN',
-                fecha_apertura_admin = COALESCE(fecha_apertura_admin, NOW()),
-                pdf_descargado = TRUE,
-                auditoria_digital = 'Recibido'
-            WHERE id = $1
-            """,
-            row["id"],
-        )
-    except Exception as e_audit:
-        logger.warning("[DOWNLOAD PDF] Error actualizando auditoria a AUDITADA_ADMIN: %s", e_audit)
+    # Solo administración audita; la descarga del propio técnico no cuenta.
+    if not es_tecnico:
+        try:
+            await db.execute(
+                """
+                UPDATE ordenes_servicio
+                SET sync_check_status = 'AUDITADA_ADMIN',
+                    fecha_apertura_admin = COALESCE(fecha_apertura_admin, NOW()),
+                    pdf_descargado = TRUE,
+                    auditoria_digital = 'Recibido'
+                WHERE id = $1
+                """,
+                row["id"],
+            )
+        except Exception as e_audit:
+            logger.warning("[DOWNLOAD PDF] Error actualizando auditoria a AUDITADA_ADMIN: %s", e_audit)
 
     upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
     candidate  = Path(upload_dir) / f"{folio_os}.pdf"
@@ -362,6 +381,7 @@ async def auditar_orden_endpoint(
     folio_os: str,
     db=Depends(get_db),
 ):
+    # TODO(security): el ERP de escritorio llama sin token; exigir rol admin cuando envíe Bearer.
     """
     Registra que un usuario del ERP en Windows abrió o confirmó la OS / PDF.
     Actualiza sync_check_status a 'AUDITADA_ADMIN' y fecha_apertura_admin = NOW().
@@ -388,23 +408,66 @@ async def auditar_orden_endpoint(
 @_safe_endpoint("PDF UPLOAD")
 async def upload_pdf_tablet_os(
     folio_os: str,
-    file: Optional[UploadFile] = File(None),
-    archivo: Optional[UploadFile] = File(None),
-    folio: Optional[str] = Form(None),
-    data: Optional[str] = Form(None),
+    request: Request,
     db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
-    target_file = file or archivo
-    if not target_file:
-        raise HTTPException(status_code=400, detail="No se proporcionó ningún archivo PDF")
+    content: Optional[bytes] = None
+    folio_val: Optional[str] = None
+    data: Optional[str] = None
+    content_type = request.headers.get("content-type", "").lower()
 
-    clean_folio = (folio or folio_os).strip()
+    correo_cliente: Optional[str] = None
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="JSON mal formado")
+        folio_val = body.get("folio") or body.get("folio_os")
+        correo_cliente = body.get("correo_cliente") or body.get("email_cliente") or body.get("correo")
+        b64_str = body.get("pdf_base64") or body.get("pdf_b64") or body.get("file_base64")
+        if b64_str:
+            try:
+                content = base64.b64decode(b64_str.strip())
+            except Exception as e_dec:
+                raise HTTPException(status_code=400, detail=f"Base64 inválido: {e_dec}")
+        data_val = body.get("data")
+        if isinstance(data_val, dict):
+            data = json.dumps(data_val)
+            if not correo_cliente:
+                correo_cliente = data_val.get("correo_cliente") or data_val.get("email_cliente") or data_val.get("correo")
+        elif isinstance(data_val, str):
+            data = data_val
+    else:
+        form = await request.form()
+        target_file = form.get("file") or form.get("archivo")
+        if target_file and hasattr(target_file, "read"):
+            content = await target_file.read()
+        folio_val = form.get("folio") or form.get("folio_os")
+        correo_cliente = form.get("correo_cliente") or form.get("email_cliente") or form.get("correo")
+        data_val = form.get("data")
+        if isinstance(data_val, str):
+            data = data_val
+            if not correo_cliente:
+                try:
+                    import json as _j
+                    dj = _j.loads(data_val)
+                    if isinstance(dj, dict):
+                        correo_cliente = dj.get("correo_cliente") or dj.get("email_cliente") or dj.get("correo")
+                except Exception:
+                    pass
+
+    if not content:
+        raise HTTPException(status_code=400, detail="No se proporcionó ningún archivo o base64 de PDF")
+
+    clean_folio = (folio_val or folio_os).strip()
     row = await db.fetchrow(
-        "SELECT id, folio_os, estado FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        "SELECT id, folio_os, estado, id_tecnico FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
         clean_folio,
     )
     if row is None:
         raise HTTPException(status_code=404, detail=f"OS '{clean_folio}' no encontrada")
+    verificar_acceso_os(current_user, row["id_tecnico"])
 
     actual_folio = row["folio_os"]
     actual_id = row["id"]
@@ -414,7 +477,6 @@ async def upload_pdf_tablet_os(
     filename = f"{actual_folio}.pdf"
     filepath = os.path.join(upload_dir, filename)
 
-    content = await target_file.read()
     with open(filepath, "wb") as f:
         f.write(content)
 
@@ -427,10 +489,12 @@ async def upload_pdf_tablet_os(
             SET estado            = 'Cerrado',
                 estatus           = 'Cerrado',
                 pdf_b64           = $1,
+                pdf_base64        = $1,
                 pdf_url           = $2,
                 pdf_path          = $3,
                 pdf_descargado    = FALSE,
                 pdf_generado      = TRUE,
+                has_pdf           = TRUE,
                 sync_check_status = 'SUBIDA_SERVIDOR',
                 fecha_subida_servidor = NOW(),
                 sync_status       = 'SINCRONIZADO',
@@ -558,6 +622,23 @@ async def upload_pdf_tablet_os(
         except Exception as e_json:
             logger.warning("[UPLOAD-PDF OS] Error procesando payload JSON: %s", e_json)
 
+    if correo_cliente and str(correo_cliente).strip():
+        try:
+            await db.execute(
+                "UPDATE ordenes_servicio SET correo_cliente = $1 WHERE id = $2",
+                str(correo_cliente).strip(), actual_id,
+            )
+        except Exception as e_cc:
+            logger.warning("[UPLOAD-PDF OS] No se pudo guardar correo_cliente: %s", e_cc)
+
+    try:
+        import asyncio
+        from pesa_api.core.email_service import enviar_email_orden
+        asyncio.create_task(enviar_email_orden(None, actual_folio, correo_override=correo_cliente))
+        logger.info("[UPLOAD-PDF OS] Envío automático de correo programado para %s", actual_folio)
+    except Exception as e_mail:
+        logger.warning("[UPLOAD-PDF OS] Error programando envío de correo: %s", e_mail)
+
     return {
         "ok": True,
         "folio_os": actual_folio,
@@ -576,14 +657,16 @@ async def sync_data_os(
     folio_os: str,
     payload: dict,
     db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     clean_folio = folio_os.strip()
     row = await db.fetchrow(
-        "SELECT id, folio_os FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        "SELECT id, folio_os, id_tecnico FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
         clean_folio,
     )
     if row is None:
         raise HTTPException(status_code=404, detail=f"OS '{clean_folio}' no encontrada")
+    verificar_acceso_os(current_user, row["id_tecnico"])
 
     actual_id = row["id"]
     actual_folio = row["folio_os"]
@@ -682,8 +765,9 @@ async def sync_data_os(
 async def reset_toma_endpoint(
     folio_os: str,
     db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     from pesa_api.routers.catalogos import reset_toma_orden
-    return await reset_toma_orden(folio=folio_os, db=db)
+    return await reset_toma_orden(folio=folio_os, db=db, current_user=current_user)
 
 

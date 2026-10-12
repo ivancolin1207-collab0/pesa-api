@@ -195,3 +195,75 @@ def require_roles(*roles: str):
         )
 
     return role_checker
+
+
+# ---------------------------------------------------------------------------
+# Privilegios mínimos por orden de servicio (v3.1.20+78)
+# ---------------------------------------------------------------------------
+# Roles con visibilidad GLOBAL de la papelería (consulta de todas las OS).
+# Cualquier otro rol (técnicos) solo accede a las OS con su propio id_tecnico.
+_ROLES_VISIBILIDAD_GLOBAL = frozenset({
+    "admin", "superadmin", "gerencia", "direccion", "logistica", "recepcion",
+})
+_USUARIOS_VISIBILIDAD_GLOBAL = frozenset({"ivancolin1207"})
+
+oauth2_scheme_optional = OAuth2PasswordBearer(
+    tokenUrl="/auth/login",
+    auto_error=False,
+)
+
+
+async def get_optional_user(
+    token: Optional[str] = Depends(oauth2_scheme_optional),
+    db=Depends(get_db),
+) -> Optional[dict]:
+    """Usuario autenticado si se envía un Bearer válido; None en caso contrario.
+
+    Solo para endpoints de lectura que el ERP de escritorio consume sin token
+    (descarga de PDF). Con token de técnico se aplica el filtro de propietario.
+    """
+    if not token:
+        return None
+    try:
+        return await get_current_user(token=token, db=db)
+    except HTTPException:
+        return None
+
+
+def tiene_visibilidad_global(user: Optional[dict]) -> bool:
+    """True para Administrador / Logística / Recepción (y la cuenta ivancolin1207)."""
+    if not user:
+        return False
+    username = str(user.get("username") or "").strip().lower()
+    if username in _USUARIOS_VISIBILIDAD_GLOBAL:
+        return True
+    rol = _normalizar_rol(str(user.get("role") or ""))
+    rol_canon = _ROL_MAP.get(rol, rol)
+    return rol_canon in _ROLES_VISIBILIDAD_GLOBAL or "admin" in rol_canon
+
+
+def id_tecnico_de(user: Optional[dict]) -> Optional[int]:
+    if not user:
+        return None
+    try:
+        val = int(user.get("id_tecnico") or user.get("id") or 0)
+    except (TypeError, ValueError):
+        return None
+    return val or None
+
+
+def verificar_acceso_os(user: Optional[dict], id_tecnico_os) -> None:
+    """Falla cerrado (403) si un técnico intenta operar una OS que no es suya."""
+    if tiene_visibilidad_global(user):
+        return
+    mi_id = id_tecnico_de(user)
+    try:
+        dueno = int(id_tecnico_os) if id_tecnico_os is not None else None
+    except (TypeError, ValueError):
+        dueno = None
+    if mi_id is None or dueno is None or dueno != mi_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Esta orden de servicio no está asignada a tu usuario",
+        )
+

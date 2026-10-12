@@ -5,13 +5,26 @@ Endpoints de perfil de usuario:
   GET  /api/v1/usuarios/{id}/firma  → Verifica si el técnico tiene firma registrada
 """
 from __future__ import annotations
+import logging
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from pesa_api.core.database import get_db
-from pesa_api.core.security import get_current_user
+from pesa_api.core.security import get_current_user, id_tecnico_de, tiene_visibilidad_global
 
 router = APIRouter()
+logger = logging.getLogger("pesa_api.usuarios")
+
+
+def _verificar_propietario(current_user: dict, id_tecnico: int) -> None:
+    """Un técnico solo puede leer/escribir SU firma; administración, cualquiera."""
+    if tiene_visibilidad_global(current_user):
+        return
+    if id_tecnico_de(current_user) != id_tecnico:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo puedes administrar tu propia firma.",
+        )
 
 
 class FirmaPayload(BaseModel):
@@ -39,6 +52,7 @@ async def guardar_firma_tecnico(
     Guarda la firma de perfil del técnico en cat_tecnicos.firma_digital.
     La firma se reutiliza en todos los PDFs que genere el técnico.
     """
+    _verificar_propietario(current_user, id_tecnico)
     firma_b64 = (payload.firma_digital or "").strip()
     if not firma_b64:
         raise HTTPException(
@@ -70,7 +84,7 @@ async def guardar_firma_tecnico(
         logger.error("[USUARIOS FIRMA ERROR] Falla al guardar firma para id=%s: %s", id_tecnico, exc, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al guardar firma: {exc}",
+            detail="Error al guardar firma",
         ) from exc
 
     if not row:
@@ -92,6 +106,7 @@ async def verificar_firma_tecnico(
     db=Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
+    _verificar_propietario(current_user, id_tecnico)
     try:
         row = await db.fetchrow(
             "SELECT COALESCE(firma_digital, '') AS firma FROM cat_tecnicos WHERE id = $1",

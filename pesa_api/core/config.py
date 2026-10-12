@@ -122,5 +122,12 @@ class Settings:
     # ── Logging ───────────────────────────────────────────────────────────────
     LOG_LEVEL: str = os.getenv("PESA_LOG_LEVEL", "INFO")
 
+    # ── SMTP Gmail ────────────────────────────────────────────────────────────
+    SMTP_HOST:  str = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    SMTP_PORT:  int = int(os.getenv("SMTP_PORT", "587"))
+    EMAIL_USER: str = os.getenv("EMAIL_USER", os.getenv("SMTP_USER", "ivancolin1207@gmail.com"))
+    EMAIL_PASS: str = os.getenv("EMAIL_PASS", os.getenv("SMTP_PASS", "kqavslorcqmepzww"))
+    EMAIL_CC:   str = os.getenv("EMAIL_CC", os.getenv("SMTP_CC", "recepcion@basculaspesa.com.mx"))
+
 
 settings = Settings()

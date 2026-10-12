@@ -11,6 +11,7 @@ Expone:
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import uuid
@@ -19,11 +20,18 @@ import logging
 from datetime import date
 from typing import Optional, Union
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request, status
 from pydantic import BaseModel
 
+from pesa_api.core.config import settings
 from pesa_api.core.database import get_db
-from pesa_api.core.security import get_current_user
+from pesa_api.core.security import (
+    get_current_user,
+    get_optional_user,
+    id_tecnico_de,
+    tiene_visibilidad_global,
+    verificar_acceso_os,
+)
 
 logger = logging.getLogger("pesa_api.catalogos")
 router = APIRouter()
@@ -264,7 +272,26 @@ async def get_ordenes(
             os.id_tipo_servicio,
             COALESCE(ts.nombre, '') AS tipo_servicio,
             os.sucursal_id,
-            COALESCE(cs.nombre_sucursal, '') AS sucursal_nombre
+            COALESCE(cs.nombre_sucursal, '') AS sucursal_nombre,
+            COALESCE(os.estatus, '') AS estatus,
+            COALESCE(os.sync_check_status, 'ASIGNADA') AS sync_check_status,
+            CASE
+                WHEN os.has_pdf IS TRUE
+                  OR UPPER(os.modalidad) = 'FISICO'
+                  OR COALESCE(os.pdf_b64,  '') <> ''
+                  OR COALESCE(os.pdf_url,  '') <> ''
+                  OR COALESCE(os.pdf_path, '') <> ''
+                THEN TRUE
+                ELSE FALSE
+            END AS has_pdf,
+            CASE
+                WHEN UPPER(os.modalidad) = 'FISICO'
+                  OR COALESCE(os.pdf_b64,  '') <> ''
+                  OR COALESCE(os.pdf_url,  '') <> ''
+                  OR COALESCE(os.pdf_path, '') <> ''
+                THEN '/api/v1/os/' || os.folio_os || '/pdf'
+                ELSE NULL
+            END AS pdf_url
         FROM ordenes_servicio os
         LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
         LEFT JOIN cat_tecnicos tc ON os.id_tecnico = tc.id
@@ -275,11 +302,12 @@ async def get_ordenes(
     params = []
 
     # Privacidad: un técnico solo recibe sus propias OS (mismo criterio que /sync/pull).
-    _role = str(current_user.get("role", "")).lower()
-    _es_admin = any(k in _role for k in ("admin", "logist", "recep", "gerencia", "direcc")) \
-        or str(current_user.get("username", "")).strip().lower() == "ivancolin1207"
-    if not _es_admin and current_user.get("id_tecnico"):
-        params.append(int(current_user["id_tecnico"]))
+    if not tiene_visibilidad_global(current_user):
+        mi_id = id_tecnico_de(current_user)
+        if not mi_id:
+            # Fail-closed: sin id de técnico no se expone papelería ajena.
+            return []
+        params.append(mi_id)
         query += f" AND os.id_tecnico = ${len(params)}"
         tecnico_nombre = None
         tecnico_id = None
@@ -304,7 +332,8 @@ async def get_ordenes(
         except Exception:
             pass
 
-    query += " ORDER BY os.folio_os DESC, os.updated_at DESC LIMIT 200"
+    params.append(int(settings.SYNC_MAX_BATCH_SIZE))
+    query += f" ORDER BY os.folio_os DESC, os.updated_at DESC LIMIT ${len(params)}"
 
     try:
         rows = await db.fetch(query, *params)
@@ -315,7 +344,7 @@ async def get_ordenes(
         logger.error(f"[ORDENES GET ERROR] Falla al listar órdenes: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error en servidor al obtener órdenes: {str(e)}",
+            detail="Error en servidor al obtener órdenes",
         )
 
 
@@ -339,6 +368,11 @@ async def crear_orden(
     # Generar folio/s
     today = date.today()
     year_short = today.strftime("%y")
+
+    # [SEC] Un técnico solo puede crear OS asignadas a sí mismo.
+    id_tecnico_asignado = body.id_tecnico
+    if not tiene_visibilidad_global(current_user):
+        id_tecnico_asignado = id_tecnico_de(current_user)
 
     # Obtener el siguiente número de secuencia
     seq_row = await db.fetchrow(
@@ -377,7 +411,7 @@ async def crear_orden(
             folio,
             body.modalidad.upper(),
             body.id_cliente,
-            body.id_tecnico,
+            id_tecnico_asignado,
             body.id_tipo_servicio,
             body.observaciones or "",
         )
@@ -418,7 +452,7 @@ async def adjuntar_escaneo(
     modalidad: Optional[str] = Form(None),
     estatus:   Optional[str] = Form(None),
     db=Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Recibe un archivo (imagen/PDF) y lo adjunta como escaneo a la OS indicada.
@@ -430,16 +464,17 @@ async def adjuntar_escaneo(
     row = None
     if clean_folio:
         row = await db.fetchrow(
-            "SELECT id, folio_os FROM ordenes_servicio WHERE folio_os = $1",
+            "SELECT id, folio_os, id_tecnico FROM ordenes_servicio WHERE folio_os = $1",
             clean_folio,
         )
     if row is None and os_id and os_id > 0:
         row = await db.fetchrow(
-            "SELECT id, folio_os FROM ordenes_servicio WHERE id = $1",
+            "SELECT id, folio_os, id_tecnico FROM ordenes_servicio WHERE id = $1",
             os_id,
         )
     if row is None:
         raise HTTPException(status_code=404, detail="Orden de servicio no encontrada")
+    verificar_acceso_os(current_user, row["id_tecnico"])
 
     folio = row["folio_os"]
     actual_id = row["id"]
@@ -512,9 +547,10 @@ async def adjuntar_escaneo(
 async def download_pdf_orden(
     folio: str,
     db=Depends(get_db),
+    current_user: Optional[dict] = Depends(get_optional_user),
 ):
     from pesa_api.routers.os_router import download_pdf
-    resp = await download_pdf(folio_os=folio, db=db)
+    resp = await download_pdf(folio_os=folio, db=db, current_user=current_user)
     # Siempre la versión vigente (p. ej. tras re-estampar la firma del técnico)
     try:
         resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -533,35 +569,88 @@ async def download_pdf_orden(
 )
 async def upload_pdf_tablet(
     folio: str,
-    file: Optional[UploadFile] = File(None),
-    archivo: Optional[UploadFile] = File(None),
-    folio_os: Optional[str] = Form(None),
-    os_id: Optional[int] = Form(None),
-    data: Optional[str] = Form(None),
+    request: Request,
     db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     """
     Recibe el archivo binario PDF generado por la tablet al finalizar el servicio.
-    Guarda el archivo en el servidor, actualiza pdf_b64, pdf_url y pdf_path en PostgreSQL,
-    y marca la OS como COMPLETADA y SINCRONIZADA para que Windows habilite
+    Soporta multipart/form-data (archivos directos) o JSON con payload base64.
+    Guarda el archivo en el servidor, actualiza pdf_b64, pdf_base64, has_pdf, pdf_url y pdf_path en PostgreSQL,
+    y marca la OS como COMPLETADA y SINCRONIZADA para que Windows/Mac habiliten
     de inmediato 'Ver PDF' / 'Descargar PDF'.
     """
-    target_file = file or archivo
-    if not target_file:
-        raise HTTPException(status_code=400, detail="No se proporcionó ningún archivo PDF")
+    content: Optional[bytes] = None
+    folio_os: Optional[str] = None
+    os_id: Optional[int] = None
+    data: Optional[str] = None
+    content_type = request.headers.get("content-type", "").lower()
 
-    clean_folio = (folio_os or folio).strip()
+    correo_cliente: Optional[str] = None
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="JSON mal formado")
+        folio_os = body.get("folio") or body.get("folio_os")
+        correo_cliente = body.get("correo_cliente") or body.get("email_cliente") or body.get("correo")
+        if body.get("os_id"):
+            try:
+                os_id = int(body["os_id"])
+            except Exception:
+                pass
+        b64_str = body.get("pdf_base64") or body.get("pdf_b64") or body.get("file_base64")
+        if b64_str:
+            try:
+                content = base64.b64decode(b64_str.strip())
+            except Exception as e_dec:
+                raise HTTPException(status_code=400, detail=f"Base64 inválido: {e_dec}")
+        data_val = body.get("data")
+        if isinstance(data_val, dict):
+            data = json.dumps(data_val)
+            if not correo_cliente:
+                correo_cliente = data_val.get("correo_cliente") or data_val.get("email_cliente") or data_val.get("correo")
+        elif isinstance(data_val, str):
+            data = data_val
+    else:
+        form = await request.form()
+        target_file = form.get("file") or form.get("archivo")
+        if target_file and hasattr(target_file, "read"):
+            content = await target_file.read()
+        folio_os = form.get("folio_os") or form.get("folio")
+        correo_cliente = form.get("correo_cliente") or form.get("email_cliente") or form.get("correo")
+        if form.get("os_id"):
+            try:
+                os_id = int(form.get("os_id"))
+            except Exception:
+                pass
+        data_val = form.get("data")
+        if isinstance(data_val, str):
+            data = data_val
+            if not correo_cliente:
+                try:
+                    dj = json.loads(data_val)
+                    if isinstance(dj, dict):
+                        correo_cliente = dj.get("correo_cliente") or dj.get("email_cliente") or dj.get("correo")
+                except Exception:
+                    pass
+
+    if not content:
+        raise HTTPException(status_code=400, detail="No se proporcionó ningún archivo o base64 de PDF")
+
+    clean_folio = str(folio_os or folio).strip()
     row = await db.fetchrow(
-        "SELECT id, folio_os, estado FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        "SELECT id, folio_os, estado, id_tecnico FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
         clean_folio,
     )
     if row is None and os_id:
         row = await db.fetchrow(
-            "SELECT id, folio_os, estado FROM ordenes_servicio WHERE id = $1",
+            "SELECT id, folio_os, estado, id_tecnico FROM ordenes_servicio WHERE id = $1",
             os_id,
         )
     if row is None:
         raise HTTPException(status_code=404, detail=f"OS '{clean_folio}' no encontrada")
+    verificar_acceso_os(current_user, row["id_tecnico"])
 
     actual_folio = row["folio_os"]
     actual_id = row["id"]
@@ -571,23 +660,24 @@ async def upload_pdf_tablet(
     filename = f"{actual_folio}.pdf"
     filepath = os.path.join(upload_dir, filename)
 
-    content = await target_file.read()
     with open(filepath, "wb") as f:
         f.write(content)
 
     pdf_b64 = base64.b64encode(content).decode("ascii")
 
-    # Actualizar estado, pdf_b64, pdf_url y sync_status en PostgreSQL
+    # Actualizar estado, pdf_b64, pdf_base64, has_pdf, pdf_url y sync_status en PostgreSQL
     upd_status = await db.execute(
         """
         UPDATE ordenes_servicio
         SET estado            = 'Cerrado',
             estatus           = 'Cerrado',
             pdf_b64           = $1,
+            pdf_base64        = $1,
             pdf_url           = $2,
             pdf_path          = $3,
             pdf_descargado    = FALSE,
             pdf_generado      = TRUE,
+            has_pdf           = TRUE,
             sync_check_status = 'SUBIDA_SERVIDOR',
             fecha_subida_servidor = NOW(),
             sync_status       = 'SINCRONIZADO',
@@ -690,6 +780,23 @@ async def upload_pdf_tablet(
         except Exception as e_json:
             logger.warning("[UPLOAD-PDF] Error procesando payload JSON: %s", e_json)
 
+    if correo_cliente and str(correo_cliente).strip():
+        try:
+            await db.execute(
+                "UPDATE ordenes_servicio SET correo_cliente = $1 WHERE id = $2",
+                str(correo_cliente).strip(), actual_id,
+            )
+        except Exception as e_cc:
+            logger.warning("[UPLOAD-PDF] No se pudo guardar correo_cliente: %s", e_cc)
+
+    # Disparar envío de correo vía Gmail SMTP (asíncrono tolerante a fallos)
+    try:
+        from pesa_api.core.email_service import enviar_email_orden
+        asyncio.create_task(enviar_email_orden(None, actual_folio, correo_override=correo_cliente))
+        logger.info("[UPLOAD-PDF] Envío automático de correo programado para %s", actual_folio)
+    except Exception as e_mail:
+        logger.warning("[UPLOAD-PDF] Error programando envío de correo: %s", e_mail)
+
     logger.info("[UPLOAD-PDF] PDF guardado y sincronizado para %s (%d bytes)", actual_folio, len(content))
     return {
         "ok": True,
@@ -698,6 +805,144 @@ async def upload_pdf_tablet(
         "size_bytes": len(content),
         "sync_status": "SINCRONIZADO",
     }
+
+
+# ── Envío manual / reintento de correo electrónico ──────────────────────────
+
+class EnviarEmailBody(BaseModel):
+    correo: Optional[str] = None
+    forzar: Optional[bool] = False
+    folios: Optional[List[str]] = None
+
+
+@router.post(
+    "/ordenes/{folio}/enviar-email",
+    summary="Enviar o reintentar el envío por correo del PDF de la orden",
+    tags=["Email", "Órdenes de Servicio"],
+)
+@router.post("/ordenes/{folio}/enviar-correo", include_in_schema=True, tags=["Email"])
+async def api_enviar_email_orden(
+    folio: str,
+    body: Optional[EnviarEmailBody] = None,
+    db = Depends(get_db),
+    current_user: dict = Depends(get_optional_user),
+):
+    from pesa_api.core.email_service import enviar_email_orden
+    override = body.correo if body else None
+    forzar = body.forzar if body else False
+    resultado = await enviar_email_orden(db, folio, correo_override=override, forzar=forzar)
+    if not resultado.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=resultado.get("motivo") or resultado.get("error") or "Error enviando correo",
+        )
+    return resultado
+
+
+@router.post(
+    "/lotes/{lote_id}/enviar-email",
+    summary="Enviar o reintentar el envío agrupado por correo de todas las órdenes de un lote",
+    tags=["Email", "Lotes"],
+)
+@router.post("/lotes/{lote_id}/enviar-correo", include_in_schema=True, tags=["Email"])
+async def api_enviar_email_lote(
+    lote_id: str,
+    body: Optional[EnviarEmailBody] = None,
+    db = Depends(get_db),
+    current_user: dict = Depends(get_optional_user),
+):
+    from pesa_api.core.email_service import enviar_email_orden
+    override = body.correo if body else None
+    forzar = body.forzar if body else True
+    folios_in = body.folios if (body and body.folios) else None
+
+    # Si vienen folios específicos en el body, usarlos directamente para agrupar el lote
+    if folios_in and len(folios_in) > 0:
+        resultado = await enviar_email_orden(
+            db, folios_in[0], correo_override=override, forzar=forzar, folios_lista=folios_in
+        )
+        if not resultado.get("ok"):
+            raise HTTPException(
+                status_code=400,
+                detail=resultado.get("motivo") or resultado.get("error") or "Error enviando correo del lote",
+            )
+        return resultado
+
+    row = await db.fetchrow(
+        "SELECT folio_os FROM ordenes_servicio WHERE id_lote = $1 LIMIT 1",
+        lote_id,
+    )
+    if not row:
+        clean = lote_id.replace("LOTE-", "").strip()
+        row = await db.fetchrow(
+            "SELECT folio_os FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1 LIMIT 1",
+            clean,
+        )
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Lote '{lote_id}' no encontrado")
+
+    resultado = await enviar_email_orden(db, row["folio_os"], correo_override=override, forzar=forzar)
+    if not resultado.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=resultado.get("motivo") or resultado.get("error") or "Error enviando correo del lote",
+        )
+    return resultado
+
+
+class EnviarCorreoUniversalBody(BaseModel):
+    folio: Optional[str] = None
+    lote_id: Optional[str] = None
+    correo: Optional[str] = None
+    forzar: Optional[bool] = True
+    folios: Optional[List[str]] = None
+
+
+@router.post(
+    "/correos/enviar",
+    summary="Endpoint universal de envío de correo (orden individual o lote)",
+    tags=["Email"],
+)
+async def api_enviar_correo_universal(
+    body: EnviarCorreoUniversalBody,
+    db = Depends(get_db),
+    current_user: dict = Depends(get_optional_user),
+):
+    from pesa_api.core.email_service import enviar_email_orden
+    forzar = True if body.forzar is None else body.forzar
+    folio_ref = (body.folio or "").strip()
+    folios_in = body.folios if (body.folios and len(body.folios) > 0) else None
+
+    if folios_in and len(folios_in) > 0 and not folio_ref:
+        folio_ref = folios_in[0].strip()
+
+    if body.lote_id and str(body.lote_id).strip() and not folio_ref:
+        lid = str(body.lote_id).strip()
+        row = await db.fetchrow(
+            "SELECT folio_os FROM ordenes_servicio WHERE id_lote = $1 LIMIT 1",
+            lid,
+        )
+        if not row:
+            clean = lid.replace("LOTE-", "").strip()
+            row = await db.fetchrow(
+                "SELECT folio_os FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1 LIMIT 1",
+                clean,
+            )
+        if row:
+            folio_ref = row["folio_os"]
+
+    if not folio_ref:
+        raise HTTPException(status_code=422, detail="Debe indicar 'folio', 'lote_id' o 'folios'")
+
+    resultado = await enviar_email_orden(
+        db, folio_ref, correo_override=body.correo, forzar=forzar, folios_lista=folios_in
+    )
+    if not resultado.get("ok"):
+        raise HTTPException(
+            status_code=400,
+            detail=resultado.get("motivo") or resultado.get("error") or "Error enviando correo",
+        )
+    return resultado
 
 
 # ── Reset / Eliminar toma metrológica desde cero ──────────────────────────────
@@ -715,14 +960,16 @@ async def upload_pdf_tablet(
 async def reset_toma_orden(
     folio: str,
     db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
 ):
     clean_folio = folio.strip()
     row = await db.fetchrow(
-        "SELECT id, folio_os, estado FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        "SELECT id, folio_os, estado, id_tecnico FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
         clean_folio,
     )
     if row is None:
         raise HTTPException(status_code=404, detail=f"OS '{clean_folio}' no encontrada")
+    verificar_acceso_os(current_user, row["id_tecnico"])
 
     actual_folio = row["folio_os"]
     actual_id = row["id"]

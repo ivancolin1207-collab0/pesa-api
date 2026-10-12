@@ -58,3 +58,6 @@ pesa_flutter/android/app/.cxx/
 pesa_flutter/ios/Flutter/ephemeral/
 pesa_flutter/ios/Pods/
 pesa_flutter/ios/.symlinks/
+
+._*
+**/._*

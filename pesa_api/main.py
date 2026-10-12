@@ -133,6 +133,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 app.include_router(auth.router,             prefix="/auth",             tags=["Autenticación"])
 app.include_router(os_router.router,        prefix="/api/v1/os",        tags=["Órdenes de Servicio"])
 app.include_router(sync.router,             prefix="/api/v1/sync",      tags=["Sincronización Offline"])
+app.include_router(sync.router,             prefix="/api/ordenes",      tags=["Sincronización Ordenes Legacy"])
+app.include_router(sync.router,             prefix="/api/v1/ordenes",   tags=["Sincronización Ordenes V1"])
 app.include_router(equipos.router,          prefix="/api/v1/equipos",   tags=["Catálogo de Equipos"])
 app.include_router(entrega_semanal.router,  prefix="/api/v1/entregas",  tags=["Entregas Semanales"])
 # ── Catálogos y Ordenes desde Tablet ────────────────────────────────────────────

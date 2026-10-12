@@ -23,6 +23,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import traceback
 from datetime import datetime, timezone
 from typing   import Optional, Union
@@ -71,6 +72,8 @@ class OSCompleta(BaseModel):
     folio_os:              str
     id_tecnico:            Optional[int]   = None
     estado:                Optional[str]   = 'PROCESO'
+    estatus:               Optional[str]   = None
+    has_pdf:               Optional[bool]  = None
     modalidad:             Optional[str]   = 'DIGITAL'
     fecha:                 Optional[str]   = None
     cliente:               Optional[str]   = None
@@ -128,6 +131,9 @@ class OSCompleta(BaseModel):
     nombre_ing:            Optional[str]   = None
     puesto_ing:            Optional[str]   = None
     dictamen:              Optional[str]   = None
+    correo_cliente:        Optional[str]   = None
+    email_enviado:         Optional[bool]  = False
+    fecha_envio_email:     Optional[datetime] = None
     sync_version:          Optional[int]   = 1
     updated_at:            Optional[datetime] = None
 
@@ -168,6 +174,9 @@ class PushPayload(BaseModel):
     repetibilidad:  list[PushDetalle] = Field(default_factory=list)
     excentricidad:  list[PushDetalle] = Field(default_factory=list)
     exactitud:      list[PushDetalle] = Field(default_factory=list)
+    datos_captura:  Optional[str] = None
+    usa_sustitucion: Optional[bool] = None
+    factor_sustitucion: Optional[str] = None
 
     # Estado solicitado por la tablet
     nuevo_estado:   Optional[str] = None
@@ -183,6 +192,9 @@ class PushPayload(BaseModel):
     puesto_ing:           Optional[str] = None
     firma_cliente_nombre: Optional[str] = None
     dictamen:             Optional[str] = None
+    correo_cliente:       Optional[str] = None
+    email_enviado:        Optional[bool] = None
+    fecha_envio_email:    Optional[datetime] = None
 
 
 class PushResponse(BaseModel):
@@ -201,6 +213,7 @@ class FirmasPayload(BaseModel):
     nombre_ing:           Optional[str] = None
     puesto_ing:           Optional[str] = None
     firma_cliente_nombre: Optional[str] = None
+    correo_cliente:       Optional[str] = None
 
     @field_validator("firma_tecnico_png", "firma_cliente_png", "firma_tecnico", "firma_cliente", mode="before")
     @classmethod
@@ -295,10 +308,7 @@ async def calibraciones_consulta(
                          'COMPLETADA_FISICA','ESCANEADA','FIRMADA')
                  OR UPPER(TRIM(COALESCE(os.estatus, ''))) IN ('CERRADO','CERRADA','COMPLETADO','COMPLETADA')
               )
-              AND (
-                    LOWER(""" + tipo_expr + """) LIKE '%%calibraci%%'
-                 OR LOWER(""" + tipo_expr + """) LIKE '%%ajuste%%'
-              )
+              AND LOWER(""" + tipo_expr + """) LIKE '%%calibraci%%'
             ORDER BY os.folio_os, os.updated_at DESC NULLS LAST
             """.replace("%%", "%"),
         )
@@ -393,6 +403,11 @@ async def sync_pull(
             os.folio_os,
             os.id_tecnico,
             COALESCE(os.estado,    'PROCESO') AS estado,
+            COALESCE(os.estatus, os.estado, 'Proceso') AS estatus,
+            (COALESCE(os.pdf_generado, FALSE)
+               OR COALESCE(os.pdf_url, '') <> ''
+               OR COALESCE(os.pdf_path, '') <> ''
+               OR COALESCE(os.pdf_b64, '') <> '') AS has_pdf,
             COALESCE(os.modalidad, 'DIGITAL') AS modalidad,
             os.fecha::text,
             os.observaciones,
@@ -446,8 +461,22 @@ async def sync_pull(
             os.fecha_descarga_tablet,
             os.fecha_subida_servidor,
             os.fecha_apertura_admin,
+            (CASE 
+                WHEN (COALESCE(os.pdf_b64, '') <> '' 
+                      OR COALESCE(os.pdf_base64, '') <> '' 
+                      OR COALESCE(os.has_pdf, false) = true 
+                      OR (COALESCE(os.pdf_url, '') <> '' AND os.pdf_url NOT LIKE '%/api/v1/os/%')) 
+                THEN true 
+                ELSE false 
+             END) AS has_pdf_db,
+            COALESCE(os.correo_cliente, '')         AS correo_cliente,
+            COALESCE(os.email_enviado, FALSE)       AS email_enviado,
+            os.fecha_envio_email,
             CASE
-                WHEN UPPER(os.modalidad) = 'FISICO'
+                WHEN COALESCE(os.pdf_b64,  '') <> ''
+                  OR COALESCE(os.pdf_base64, '') <> ''
+                  OR (COALESCE(os.pdf_url,  '') <> '' AND os.pdf_url NOT LIKE '%/api/v1/os/%')
+                  OR (COALESCE(os.pdf_path, '') <> '' AND os.pdf_path NOT LIKE '%.tmp%')
                 THEN '/api/v1/os/' || os.folio_os || '/pdf'
                 ELSE NULL
             END AS pdf_url
@@ -519,16 +548,20 @@ async def sync_pull(
             username_jwt = str(current_user.get("username") or "").strip()
             nombre_jwt   = str(current_user.get("nombre_completo") or current_user.get("nombre") or username_jwt).strip()
 
-            if param_tecnico_id:
-                if not id_tecnico or id_tecnico == param_tecnico_id:
-                    id_tecnico = param_tecnico_id
+            # [SEC] Un técnico NUNCA puede ampliar su alcance con tecnico_id /
+            # tecnico_nombre: solo se usa el id del propio JWT.
+            if param_tecnico_id and id_tecnico and int(id_tecnico) != param_tecnico_id:
+                logger.warning(
+                    "[SYNC PULL] Técnico %s pidió tecnico_id=%s ajeno — ignorado.",
+                    username_jwt, param_tecnico_id,
+                )
 
-            # [FIX-DEFENSIVO] Si id_tecnico es None o inválido, buscarlo en BD por username o param_tecnico_nombre
-            if not id_tecnico and (username_jwt or param_tecnico_nombre):
-                busq = param_tecnico_nombre or username_jwt
+            # [FIX-DEFENSIVO] Si id_tecnico falta en el token, resolverlo SOLO por
+            # el username exacto del JWT (nunca por parámetros del cliente).
+            if not id_tecnico and username_jwt:
                 tec_lookup = await db.fetchrow(
-                    "SELECT id, nombre_completo FROM cat_tecnicos WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1)) OR LOWER(TRIM(nombre_completo)) LIKE LOWER(TRIM($2))",
-                    username_jwt, f"%{busq}%",
+                    "SELECT id, nombre_completo FROM cat_tecnicos WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1)) LIMIT 1",
+                    username_jwt,
                 )
                 if tec_lookup:
                     id_tecnico = int(tec_lookup["id"])
@@ -665,12 +698,52 @@ async def sync_pull(
             except Exception as e_pull_tr:
                 logger.warning("[SYNC PULL] Error actualizando trazabilidad RECIBIDA_TABLET: %s", e_pull_tr)
 
+        upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
         resultado = []
         for r in rows:
             try:
                 d = dict(r)
+                folio = (d.get("folio_os") or "").strip()
+
+                # Comprobar si realmente existe un archivo binario en base de datos o en disco del servidor
+                has_pdf_binary = bool(
+                    d.get("has_pdf_db") or
+                    (d.get("pdf_b64") and len(str(d["pdf_b64"]).strip()) > 100) or
+                    (folio and os.path.exists(os.path.join(upload_dir, f"{folio}.pdf")))
+                )
+
+                # Comprobar si cuenta con captura finalizada (firmas, dictamen, pruebas metrologicas, o datos tecnicos)
+                has_capture = bool(
+                    (d.get("firma_tecnico") and len(str(d["firma_tecnico"]).strip()) > 20) or
+                    (d.get("firma_cliente") and len(str(d["firma_cliente"]).strip()) > 20) or
+                    (d.get("valor_repetibilidad") is not None) or
+                    (d.get("valor_excentricidad") is not None) or
+                    (d.get("dictamen") and str(d["dictamen"]).strip().upper() not in ("", "PENDIENTE")) or
+                    (d.get("datos_tecnicos_json") and str(d["datos_tecnicos_json"]).strip() not in ("{}", "null", ""))
+                )
+
+                tiene_terminacion_real = has_pdf_binary or has_capture
+
+                # Regla Estricta: Si no existe binario en disco ni BD, has_pdf es False y pdf_url es None
+                if has_pdf_binary:
+                    d["has_pdf"] = True
+                    d["pdf_url"] = f"/api/v1/os/{folio}/pdf"
+                else:
+                    d["has_pdf"] = False
+                    d["pdf_url"] = None
+
+                # Si no se ha capturado en campo ni existe PDF generado, su estatus debe ser 'Asignada' o 'En Proceso'
+                estatus_actual = str(d.get("estatus") or d.get("estado") or "").strip().upper()
+                if not tiene_terminacion_real:
+                    if estatus_actual in ("CERRADO", "CERRADA", "COMPLETADO", "COMPLETADA", "COMPLETADA_DIGITAL", "COMPLETADA_FISICA", "FIRMADA", "ESCANEADA"):
+                        d["estatus"] = "Asignada"
+                        d["estado"] = "PROCESO"
+                        if d.get("sync_check_status") in ("ENVIADA", "SUBIDA_SERVIDOR"):
+                            d["sync_check_status"] = "ASIGNADA"
+
                 if not is_admin and d.get("sync_check_status") == "ASIGNADA":
                     d["sync_check_status"] = "RECIBIDA_TABLET"
+                d.pop("has_pdf_db", None)
                 resultado.append(OSCompleta(**d))
             except Exception as e_row:
                 logger.warning("[SYNC PULL] Error serializando OS %s: %s", r.get("folio_os"), e_row)
@@ -693,6 +766,11 @@ async def sync_pull(
     "/push",
     response_model = PushResponse,
     summary        = "Subir cambios de la tablet al servidor",
+)
+@router.post(
+    "/sync",
+    response_model = PushResponse,
+    summary        = "Subir cambios de la tablet al servidor (alias)",
 )
 async def sync_push(
     payload:      PushPayload,
@@ -813,6 +891,7 @@ async def sync_push(
                     puesto_ing            = COALESCE($16, puesto_ing),
                     firma_cliente_nombre  = COALESCE($17, firma_cliente_nombre),
                     dictamen              = COALESCE($18, dictamen),
+                    correo_cliente        = COALESCE($23, correo_cliente),
                     sync_status           = 'SINCRONIZADO',
                     sync_version          = COALESCE(sync_version, 0) + 1,
                     sync_at               = NOW(),
@@ -848,6 +927,7 @@ async def sync_push(
                 os_id,                  # $20
                 nuevo_estatus,          # $21
                 payload.modalidad,      # $22
+                payload.correo_cliente, # $23
             )
         except Exception as e_full:
             logger.warning("UPDATE con sync_version falló (%s) — reintentando sin columnas opcionales", e_full)
@@ -935,6 +1015,14 @@ async def sync_push(
                     f"/uploads/{p_filename}", p_filepath, os_id, payload.pdf_b64,
                 )
                 logger.info("[SYNC PUSH] PDF guardado en disco y PostgreSQL para %s (%d bytes)", payload.folio_os, len(p_bytes))
+                # Disparar envío automático de correo vía Gmail SMTP
+                try:
+                    import asyncio
+                    from pesa_api.core.email_service import enviar_email_orden
+                    asyncio.create_task(enviar_email_orden(None, payload.folio_os, correo_override=payload.correo_cliente))
+                    logger.info("[SYNC PUSH] Envío de correo programado para %s", payload.folio_os)
+                except Exception as e_em:
+                    logger.warning("[SYNC PUSH] Error programando correo: %s", e_em)
             except Exception as e_pdf_disk:
                 logger.warning("[SYNC PUSH] Error guardando PDF en disco: %s", e_pdf_disk)
 
@@ -1099,6 +1187,16 @@ async def upload_firmas(
         f_cli = payload.firma_cliente or payload.firma_cliente_png
         nom_ing = payload.nombre_ing or payload.firma_cliente_nombre
         puesto_ing = payload.puesto_ing
+        correo_cli = payload.correo_cliente
+
+        if correo_cli and str(correo_cli).strip():
+            try:
+                await db.execute(
+                    "UPDATE ordenes_servicio SET correo_cliente = $1 WHERE id = $2",
+                    str(correo_cli).strip(), row["id"],
+                )
+            except Exception:
+                pass
 
         # [FIX] Intenta con sync_version y sync_at; si no existen, usa fallback
         try:
