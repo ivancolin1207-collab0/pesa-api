@@ -86,17 +86,18 @@ class AppShell extends StatefulWidget {
 
   /// Dispara la apertura del Drawer nativo (móvil) o alterna el estado del menú (tablet/desktop)
   static void toggleMenu(BuildContext context) {
+    // Preferir el AppShell: abre el Drawer flotante (< 700dp) o colapsa la barra lateral (≥ 700dp).
+    final shell = context.findAncestorStateOfType<_AppShellState>();
+    if (shell != null) {
+      shell.alternarMenu();
+      return;
+    }
     final scaffold = Scaffold.maybeOf(context);
     if (scaffold != null && scaffold.hasDrawer) {
       if (scaffold.isDrawerOpen) {
         Navigator.of(context).pop();
       } else {
         scaffold.openDrawer();
-      }
-    } else {
-      final state = context.findAncestorStateOfType<_AppShellState>();
-      if (state != null) {
-        state.toggleSidebar();
       }
     }
   }
@@ -108,6 +109,27 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   StreamSubscription? _sessionSub;
   bool _isSidebarOpen = true;
+  bool _sidebarAutoAjustado = false;
+  bool _usaDrawer = false;
+  final GlobalKey<ScaffoldState> _shellScaffoldKey = GlobalKey<ScaffoldState>();
+
+  /// < 700dp (Samsung Fold doblado / celular) → Drawer hamburguesa flotante.
+  /// ≥ 700dp (Fold desplegado / Tablets) → barra lateral colapsable.
+  static const double kBreakpointDrawer = 700;
+
+  void alternarMenu() {
+    if (_usaDrawer) {
+      final s = _shellScaffoldKey.currentState;
+      if (s == null) return;
+      if (s.isDrawerOpen) {
+        s.closeDrawer();
+      } else {
+        s.openDrawer();
+      }
+    } else {
+      toggleSidebar();
+    }
+  }
 
   void toggleSidebar() {
     setState(() {
@@ -175,7 +197,14 @@ class _AppShellState extends State<AppShell> {
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
-    final isTabletOrDesktop = media.size.width >= 768 || media.orientation == Orientation.landscape;
+    final bool esPantallaAngosta = media.size.width < kBreakpointDrawer;
+    _usaDrawer = esPantallaAngosta;
+    final isTabletOrDesktop = !esPantallaAngosta;
+    // Pantallas intermedias (Fold desplegado): iniciar con la barra colapsada para dar ancho a la tabla.
+    if (!_sidebarAutoAjustado) {
+      _sidebarAutoAjustado = true;
+      if (media.size.width < 900) _isSidebarOpen = false;
+    }
 
     if (isTabletOrDesktop) {
       return Scaffold(
@@ -213,6 +242,7 @@ class _AppShellState extends State<AppShell> {
       );
     } else {
       return Scaffold(
+        key: _shellScaffoldKey,
         backgroundColor: _bgGeneral,
         drawer: Drawer(
           backgroundColor: Colors.white,

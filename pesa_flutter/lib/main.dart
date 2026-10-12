@@ -22,6 +22,10 @@ import 'screens/catalogos_screen.dart';
 import 'screens/nuevo_doc_screen.dart';
 import 'screens/mi_firma_screen.dart';
 import 'screens/pdf_viewer_screen.dart';
+import 'screens/remision_captura_screen.dart';
+import 'screens/revision_bascula_screen.dart';
+import 'screens/levantamiento_proyecto_screen.dart';
+import 'screens/levantamiento_metrologico_screen.dart';
 import 'widgets/captura_firma_tecnico_dialog.dart';
 
 void main() async {
@@ -117,8 +121,23 @@ final _router = GoRouter(
       path: '/captura/:osId',
       builder: (ctx, state) {
         final osId = int.tryParse(state.pathParameters['osId'] ?? '') ?? 0;
-        final extra = state.extra as Map<String, dynamic>?;
-        return CapturaScreen(osId: osId, osData: extra ?? {});
+        final extra = state.extra as Map<String, dynamic>? ?? {'local_id': osId};
+        final tipoDoc = (extra['tipo_documento'] ?? '').toString().toUpperCase();
+        final tipoSrv = (extra['tipo_servicio'] ?? '').toString().toUpperCase();
+        final folio = (extra['folio_os'] ?? extra['folio_rma'] ?? '').toString().toUpperCase();
+        final tipo = '$tipoDoc $tipoSrv $folio';
+
+        if (tipo.contains('RMA') || tipo.contains('REMISI')) {
+          return RemisionCapturaScreen(orden: extra);
+        } else if (tipo.contains('REVISI') || tipoDoc == 'RE' || folio.startsWith('RE-')) {
+          return RevisionBasculaScreen(orden: extra);
+        } else if (tipo.contains('PROYECTO') || tipoDoc == 'LP' || folio.startsWith('LP-')) {
+          return LevantamientoProyectoScreen(orden: extra);
+        } else if (tipo.contains('METROL') || tipoDoc == 'LV' || folio.startsWith('LV-')) {
+          return LevantamientoMetrologicoScreen(orden: extra);
+        } else {
+          return CapturaScreen(osId: osId, osData: extra);
+        }
       },
     ),
     GoRoute(

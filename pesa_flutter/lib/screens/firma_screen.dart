@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import '../widgets/nombre_recibe.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import 'package:signature/signature.dart';
@@ -397,16 +398,15 @@ class _FirmaScreenState extends State<FirmaScreen>
               child: TextFormField(
                 controller: _nombreIngCtrl,
                 textCapitalization: TextCapitalization.words,
+                autovalidateMode: AutovalidateMode.onUserInteraction,
                 decoration: const InputDecoration(
-                  labelText: 'Nombre completo *',
+                  labelText: 'Nombre de quien recibe *',
                   hintText: 'Ing. Juan Pérez',
                   prefixIcon: Icon(Icons.badge_outlined),
                   border: OutlineInputBorder(),
                   isDense: true,
                 ),
-                validator: (v) => (v == null || v.trim().isEmpty)
-                    ? 'Ingresa el nombre del responsable'
-                    : null,
+                validator: validarNombreRecibe,
               ),
             ),
             const SizedBox(width: 12),
@@ -781,11 +781,88 @@ class _FirmaScreenState extends State<FirmaScreen>
       return;
     }
 
-    // Validar campos del ingeniero / cliente (el nombre es obligatorio siempre)
-    if (!_formKey.currentState!.validate()) {
+    // NOMBRE DE QUIEN RECIBE: ESTRICTAMENTE OBLIGATORIO (la firma del cliente es opcional).
+    final String nombreRecibe = _nombreIngCtrl.text.trim();
+    if (!exigirNombreRecibe(context, nombreRecibe)) {
+      _tabCtrl.animateTo(1);
+      // Resaltar el campo cuando la pestaña termine de construirse.
+      WidgetsBinding.instance.addPostFrameCallback((_) => _formKey.currentState?.validate());
+      return;
+    }
+    if (_formKey.currentState?.validate() == false) {
       _tabCtrl.animateTo(1);
       return;
     }
+
+    // ── MODAL: Solicitar Correo del Cliente para envío automático de la OS ──
+    final String? emailPrevio = (widget.capturaData['correo_cliente'] ?? widget.capturaData['email_cliente'])?.toString().trim();
+    final emailTextCtrl = TextEditingController(text: emailPrevio ?? '');
+
+    final bool? procedio = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.mark_email_read_rounded, color: Color(0xFFB81D24), size: 26),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Envío por Correo Electrónico',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Ingresa el correo electrónico del cliente para el envío automático del reporte en PDF al sincronizar:',
+              style: TextStyle(fontSize: 13, color: Color(0xFF374151), height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: emailTextCtrl,
+              keyboardType: TextInputType.emailAddress,
+              autofocus: true,
+              decoration: InputDecoration(
+                labelText: 'Correo del Cliente',
+                hintText: 'ejemplo@empresa.com',
+                prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFFB81D24)),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'CC obligatorio: recepcion@basculaspesa.com.mx\n(Funciona en modo Offline: se enviará al conectar a internet).',
+              style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Omitir', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFB81D24),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Continuar y Guardar'),
+          ),
+        ],
+      ),
+    );
+
+    if (procedio != true) return;
+    final correoCapturado = emailTextCtrl.text.trim();
 
     setState(() => _saving = true);
     String? pdfPath;
@@ -847,7 +924,7 @@ class _FirmaScreenState extends State<FirmaScreen>
       final excRows  = _castList(widget.capturaData['exc_rows']);
       final exacRows = _castList(widget.capturaData['exac_rows']);
 
-      // 3. Guardar ambas firmas + nombre/puesto del ingeniero
+      // 3. Guardar ambas firmas + nombre/puesto del ingeniero + correo_cliente
       await LocalDbService.instance.saveFirmas(
         localId:        widget.osId,
         folio:          folio,
@@ -855,6 +932,7 @@ class _FirmaScreenState extends State<FirmaScreen>
         firmaCliBase64: cliBase64,
         nombreIng:      nombreIng,
         puestoIng:      puestoIng,
+        correoCliente:  correoCapturado.isNotEmpty ? correoCapturado : null,
       );
 
       // 4. Generar PDF con ambas firmas y nombre del responsable
@@ -870,7 +948,19 @@ class _FirmaScreenState extends State<FirmaScreen>
         'nombre_ing':    nombreIng,
         'puesto_ing':    puestoIng,
         'firma_cliente_nombre': nombreIng,
+        'correo_cliente': correoCapturado.isNotEmpty ? correoCapturado : (osData['correo_cliente'] ?? ''),
+        'email_enviado': 0,
       };
+
+      if ((enrichedOs['direccion'] == null || enrichedOs['direccion'].toString().trim().isEmpty || enrichedOs['direccion'] == '-') &&
+          (enrichedOs['sucursal'] == null || enrichedOs['sucursal'].toString().trim().isEmpty || enrichedOs['sucursal'] == '-')) {
+        final cli = (enrichedOs['cliente'] ?? enrichedOs['cliente_nombre'] ?? '').toString();
+        final histDir = await LocalDbService.instance.getDireccionCliente(cli);
+        if (histDir != null && histDir.isNotEmpty) {
+          enrichedOs['direccion'] = histDir;
+          enrichedOs['sucursal'] = histDir;
+        }
+      }
 
       await LocalDbService.instance.saveLecturas(
         localId:       widget.osId,
@@ -924,7 +1014,9 @@ class _FirmaScreenState extends State<FirmaScreen>
           'pdf_path_local': pdfPath,
           'estado': 'COMPLETADA_DIGITAL',
           'estatus': 'Cerrado',
-          'sync_check_status': isOnline ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET',
+          'sync_check_status': 'PENDIENTE_SUBIDA',
+          'sync_status': 'Pendiente',
+          'needs_push': 1,
         });
       }
 
@@ -970,15 +1062,25 @@ class _FirmaScreenState extends State<FirmaScreen>
                 ((enrichedOs['sync_version'] as int? ?? 0) + 1),
                 folio: folio,
               );
+              if (correoCapturado.isNotEmpty) {
+                await LocalDbService.instance.updateEmailStatus(
+                  folio,
+                  enviado: true,
+                  correo: correoCapturado,
+                );
+              }
               if (mounted) {
                 context.read<SyncService>().updateLocalOrder(folio, {
                   'pdf_path_local': pdfPath,
                   'estado': 'COMPLETADA_DIGITAL',
                   'estatus': 'Cerrado',
                   'sync_check_status': 'SUBIDA_SERVIDOR',
-                  'sync_status': 'SINCRONIZADO',
+                  'sync_status': 'Enviada',
+                  'needs_push': 0,
                   'is_synced': 1,
                   'pdf_subido': 1,
+                  'correo_cliente': correoCapturado,
+                  'email_enviado': 1,
                 });
               }
               debugPrint('[Firma] ✅ Orden $folio sincronizada en SQLite y en Render');

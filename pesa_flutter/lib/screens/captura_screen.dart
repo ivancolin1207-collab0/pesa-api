@@ -11,7 +11,23 @@ import '../services/metrology_helper.dart';
 import '../widgets/repetibilidad_table.dart';
 import '../widgets/excentricidad_table.dart';
 import '../widgets/exactitud_table.dart';
+import '../widgets/enlaces_sustitucion_table.dart';
 import '../widgets/sync_check_badge.dart';
+import 'remision_captura_screen.dart';
+import 'revision_bascula_screen.dart';
+import 'levantamiento_proyecto_screen.dart';
+import 'levantamiento_metrologico_screen.dart';
+
+class CalibracionAjusteScreen extends StatelessWidget {
+  final Map<String, dynamic> orden;
+  const CalibracionAjusteScreen({super.key, required this.orden});
+
+  @override
+  Widget build(BuildContext context) {
+    final osId = orden['local_id'] as int? ?? 0;
+    return CapturaScreen(osId: osId, osData: orden);
+  }
+}
 
 // ── Constantes de estilo ───────────────────────────────────────────────────
 const _kRed  = Color(0xFFC8102E);
@@ -54,6 +70,15 @@ class _CapturaScreenState extends State<CapturaScreen>
   bool get _aplicaCCA => _rules.tieneCalibracion;
   /// DVE + Hologramas solo si el tipo contiene "DVE", "Inspección" o "Verificación".
   bool get _aplicaDVE => _rules.tieneInspeccion;
+
+  String get _anioDosDigitos => (DateTime.now().year % 100).toString().padLeft(2, '0');
+  String get _prefijoCca => "CCA.$_anioDosDigitos.";
+  String get _prefijoDve => "DVE.$_anioDosDigitos.";
+  String get _prefijoActivo {
+    final bool esDve = (!_rules.tieneCalibracion && _rules.tieneInspeccion) ||
+        (_os['tipo_servicio']?.toString().toLowerCase().contains('dve') ?? false);
+    return esDve ? _prefijoDve : _prefijoCca;
+  }
 
   // Valores efectivos: si la sección no aplica se envían vacíos (no se
   // arrastran datos precargados ni bloquean el guardado / PDF).
@@ -203,7 +228,19 @@ class _CapturaScreenState extends State<CapturaScreen>
     _nsCtrl.text         = _str('ns').isNotEmpty ? _str('ns') : _str('serie');
     _idEquipoCtrl.text   = _str('id_equipo');
     _ubicCtrl.text       = _str('ubicacion');
-    _ccaCtrl.text        = _str('numero_cca');
+
+    final rawCca = _str('numero_cca').isNotEmpty
+        ? _str('numero_cca')
+        : (_str('cca').isNotEmpty ? _str('cca') : _str('numero_dve'));
+    if (rawCca.trim().isEmpty) {
+      final pfx = _prefijoActivo;
+      _ccaCtrl.text = pfx;
+      _ccaCtrl.selection = TextSelection.fromPosition(TextPosition(offset: pfx.length));
+    } else {
+      _ccaCtrl.text = rawCca;
+      _ccaCtrl.selection = TextSelection.fromPosition(TextPosition(offset: rawCca.length));
+    }
+
     _holoAntCtrl.text    = _str('holograma_anterior');
     _holoActCtrl.text    = _str('holograma_actualizado');
 
@@ -397,9 +434,13 @@ class _CapturaScreenState extends State<CapturaScreen>
             _divVerCtrl.text = draft['div_ver'].toString();
             _os['div_verificacion'] = _divVerCtrl.text;
           }
-          if (draft['numero_cca'] != null && draft['numero_cca'].toString().isNotEmpty) {
+          if (draft['numero_cca'] != null && draft['numero_cca'].toString().trim().isNotEmpty) {
             _ccaCtrl.text = draft['numero_cca'].toString();
             _os['numero_cca'] = _ccaCtrl.text;
+          } else if (_ccaCtrl.text.trim().isEmpty) {
+            final pfx = _prefijoActivo;
+            _ccaCtrl.text = pfx;
+            _ccaCtrl.selection = TextSelection.fromPosition(TextPosition(offset: pfx.length));
           }
           if (draft['holograma_anterior'] != null && draft['holograma_anterior'].toString().isNotEmpty) {
             _holoAntCtrl.text = draft['holograma_anterior'].toString();
@@ -644,6 +685,22 @@ class _CapturaScreenState extends State<CapturaScreen>
           child: CircularProgressIndicator(color: _kRed),
         ),
       );
+    }
+
+    final docData = _os.isNotEmpty ? _os : widget.osData;
+    final tipoDoc = (docData['tipo_documento'] ?? '').toString().toUpperCase();
+    final tipoSrv = (docData['tipo_servicio'] ?? '').toString().toUpperCase();
+    final folioStr = (docData['folio_os'] ?? docData['folio_rma'] ?? '').toString().toUpperCase();
+    final tipoComp = '$tipoDoc $tipoSrv $folioStr';
+
+    if (tipoComp.contains('RMA') || tipoComp.contains('REMISI')) {
+      return RemisionCapturaScreen(orden: docData);
+    } else if (tipoComp.contains('REVISI') || tipoDoc == 'RE' || folioStr.startsWith('RE-')) {
+      return RevisionBasculaScreen(orden: docData);
+    } else if (tipoComp.contains('PROYECTO') || tipoDoc == 'LP' || folioStr.startsWith('LP-')) {
+      return LevantamientoProyectoScreen(orden: docData);
+    } else if (tipoComp.contains('METROL') || tipoDoc == 'LV' || folioStr.startsWith('LV-')) {
+      return LevantamientoMetrologicoScreen(orden: docData);
     }
 
     final folio   = _os['folio_os'] ?? widget.osId.toString();
@@ -936,33 +993,46 @@ class _CapturaScreenState extends State<CapturaScreen>
         ),
         const SizedBox(height: 16),
 
-        // ── CASO B: Sección CCA (solo si incluye Calibración) ─────────────
-        if (rules.tieneCalibracion) ...[
-          _SectionTitle('Certificado de Calibración Acreditada (CCA)'),
+        // ── CASO B: Sección CCA / DVE ─────────────────────────────────────
+        if (rules.tieneCalibracion || rules.tieneInspeccion) ...[
+          _SectionTitle(rules.tieneCalibracion
+              ? 'Certificado de Calibración Acreditada (CCA)'
+              : 'Dictamen de Verificación (DVE)'),
           const SizedBox(height: 10),
-          _Field('Número de CCA', _ccaCtrl,
-              hint: 'CCA.26.001', required: true),
-          const SizedBox(height: 10),
-          const Text('Inicial del Calibrador (NOM-010-SCFI-2020):',
-              style: TextStyle(fontSize: 12, color: Color(0xFF374151),
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 6),
-          Row(children: [
-            _JiaToggle('J', _jChecked, (v) => setState(() => _jChecked = v)),
-            const SizedBox(width: 8),
-            _JiaToggle('I', _iChecked, (v) => setState(() => _iChecked = v)),
-            const SizedBox(width: 8),
-            _JiaToggle('A', _aChecked, (v) => setState(() => _aChecked = v)),
-            const SizedBox(width: 12),
-            Flexible(child: Text(
-              _jChecked ? 'Jefe Laboratorio'
-                  : _iChecked ? 'Inspector EMA'
-                  : _aChecked ? 'Auxiliar'
-                  : '— Sin selección',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-              overflow: TextOverflow.ellipsis,
-            )),
-          ]),
+          _Field(
+            rules.tieneCalibracion ? 'Número de CCA' : 'Número de DVE',
+            _ccaCtrl,
+            hint: rules.tieneCalibracion ? '${_prefijoCca}001' : '${_prefijoDve}001',
+            required: true,
+            keyboardType: TextInputType.text,
+            textCapitalization: TextCapitalization.characters,
+            inputFormatters: [
+              CcaDvePrefixFormatter(defaultPrefix: _prefijoActivo),
+            ],
+          ),
+          if (rules.tieneCalibracion) ...[
+            const SizedBox(height: 10),
+            const Text('Inicial del Calibrador (NOM-010-SCFI-2020):',
+                style: TextStyle(fontSize: 12, color: Color(0xFF374151),
+                    fontWeight: FontWeight.w600)),
+            const SizedBox(height: 6),
+            Row(children: [
+              _JiaToggle('J', _jChecked, (v) => setState(() => _jChecked = v)),
+              const SizedBox(width: 8),
+              _JiaToggle('I', _iChecked, (v) => setState(() => _iChecked = v)),
+              const SizedBox(width: 8),
+              _JiaToggle('A', _aChecked, (v) => setState(() => _aChecked = v)),
+              const SizedBox(width: 12),
+              Flexible(child: Text(
+                _jChecked ? 'Jefe Laboratorio'
+                    : _iChecked ? 'Inspector EMA'
+                    : _aChecked ? 'Auxiliar'
+                    : '— Sin selección',
+                style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+                overflow: TextOverflow.ellipsis,
+              )),
+            ]),
+          ],
           const SizedBox(height: 16),
         ],
 
@@ -1241,6 +1311,16 @@ class _CapturaScreenState extends State<CapturaScreen>
 
   // ── Tab 3: Exactitud (Fin de las pruebas) ──────────────────────────────────
   Widget _buildExactitudTab(int nPuntos, String folio) {
+    if (_usaSustitucion) {
+      return EnlacesSustitucionTable(
+        key: ValueKey('exac_${_dataVersion}_$_dValue'),
+        numEnlaces: 5,
+        rows: _exacRows,
+        divMin: _dValue,
+        onChanged: (r) => _exacRows = r,
+        footer: _buildExactitudFooter(folio),
+      );
+    }
     return ExactitudTable(
       key: ValueKey('exac_${_dataVersion}_$_dValue'),
       numPuntos: nPuntos,
@@ -1774,9 +1854,14 @@ class _CapturaScreenState extends State<CapturaScreen>
     // ── Validaciones obligatorias de servicio (solo si la sección aplica) ──
     //  !_aplicaCCA → se omiten "Número de CCA" e "Inicial del Calibrador".
     //  !_aplicaDVE → se omiten "División de Verificación" y hologramas.
-    if (_aplicaCCA && _ccaCtrl.text.trim().isEmpty) {
+    if (_aplicaCCA && (_ccaCtrl.text.trim().isEmpty || _ccaCtrl.text.trim() == _prefijoCca)) {
       _tabCtrl.animateTo(0);
-      _showError('El Número de CCA es obligatorio para este tipo de servicio.');
+      _showError('Ingresa el Número de CCA completo (ej: ${_prefijoCca}001).');
+      return;
+    }
+    if (_aplicaDVE && !_aplicaCCA && (_ccaCtrl.text.trim().isEmpty || _ccaCtrl.text.trim() == _prefijoDve)) {
+      _tabCtrl.animateTo(0);
+      _showError('Ingresa el Número de DVE completo (ej: ${_prefijoDve}001).');
       return;
     }
     if (_aplicaDVE && _holoAntCtrl.text.trim().isEmpty) {
@@ -1812,7 +1897,13 @@ class _CapturaScreenState extends State<CapturaScreen>
         ? _os['fecha'].toString().split(' ')[0]
         : DateTime.now().toIso8601String().substring(0, 10);
     final String clienteFinal = (_os['cliente'] ?? _os['cliente_nombre'] ?? _os['razon_social'] ?? '').toString();
-    final String direccionFinal = (_os['direccion'] ?? _os['direccion_cliente'] ?? _os['sucursal'] ?? _os['planta'] ?? _os['sucursal_nombre'] ?? '').toString();
+    String direccionFinal = (_os['direccion'] ?? _os['direccion_cliente'] ?? _os['sucursal'] ?? _os['planta'] ?? _os['sucursal_nombre'] ?? '').toString().trim();
+    if (direccionFinal.isEmpty || direccionFinal == '-') {
+      final histDir = await LocalDbService.instance.getDireccionCliente(clienteFinal);
+      if (histDir != null && histDir.isNotEmpty) {
+        direccionFinal = histDir;
+      }
+    }
 
     if (mounted) {
       context.push('/firma/${widget.osId}', extra: {
@@ -2132,6 +2223,67 @@ class _AutocompleteField extends StatelessWidget {
   }
 }
 
+/// Formateador que protege el prefijo del Certificado de Calibración o Dictamen (ej. "CCA.26." / "DVE.26.")
+class CcaDvePrefixFormatter extends TextInputFormatter {
+  final String defaultPrefix;
+
+  CcaDvePrefixFormatter({required this.defaultPrefix});
+
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    final matchOld = RegExp(r'^(CCA|DVE)\.\d{2}\.').firstMatch(oldValue.text);
+    final matchNew = RegExp(r'^(CCA|DVE)\.\d{2}\.').firstMatch(newValue.text);
+
+    String prefix = defaultPrefix;
+    if (matchOld != null) {
+      prefix = matchOld.group(0)!;
+    } else if (matchNew != null) {
+      prefix = matchNew.group(0)!;
+    }
+
+    if (newValue.text.isEmpty) {
+      return TextEditingValue(
+        text: prefix,
+        selection: TextSelection.collapsed(offset: prefix.length),
+      );
+    }
+
+    if (newValue.text.startsWith(prefix)) {
+      if (newValue.selection.baseOffset < prefix.length) {
+        return newValue.copyWith(
+          selection: TextSelection.collapsed(offset: prefix.length),
+        );
+      }
+      return newValue;
+    }
+
+    String cleanContent = newValue.text.toUpperCase();
+    if (cleanContent.startsWith('CCA') || cleanContent.startsWith('DVE')) {
+      cleanContent = cleanContent.replaceFirst(RegExp(r'^(CCA|DVE)(\.\d{0,2})?\.?'), '');
+    }
+    if (cleanContent.isEmpty) {
+      if (oldValue.text.startsWith(prefix) &&
+          oldValue.text.length > prefix.length &&
+          oldValue.selection.baseOffset > prefix.length) {
+        cleanContent = oldValue.text.substring(prefix.length);
+      }
+    }
+
+    final newText = '$prefix$cleanContent';
+    final offset = (newValue.selection.baseOffset < prefix.length)
+        ? prefix.length
+        : (newValue.selection.baseOffset > newText.length ? newText.length : newValue.selection.baseOffset);
+
+    return TextEditingValue(
+      text: newText,
+      selection: TextSelection.collapsed(offset: offset),
+    );
+  }
+}
+
 class _Field extends StatelessWidget {
   final String                  label;
   final TextEditingController   ctrl;
@@ -2139,6 +2291,9 @@ class _Field extends StatelessWidget {
   final bool                    required;
   final bool                    hasError;
   final ValueChanged<String>?   onChanged;
+  final List<TextInputFormatter>? inputFormatters;
+  final TextInputType?          keyboardType;
+  final TextCapitalization      textCapitalization;
   const _Field(
     this.label,
     this.ctrl, {
@@ -2146,12 +2301,18 @@ class _Field extends StatelessWidget {
     this.required = false,
     this.hasError = false,
     this.onChanged,
+    this.inputFormatters,
+    this.keyboardType,
+    this.textCapitalization = TextCapitalization.none,
   });
 
   @override
   Widget build(BuildContext context) => TextFormField(
     controller: ctrl,
     onChanged: onChanged,
+    inputFormatters: inputFormatters,
+    keyboardType: keyboardType,
+    textCapitalization: textCapitalization,
     decoration: _kInputDeco(label + (required ? ' *' : ''), hint: hint, hasError: hasError),
     style: const TextStyle(fontSize: 13),
   );

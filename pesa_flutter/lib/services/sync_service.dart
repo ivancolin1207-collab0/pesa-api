@@ -10,11 +10,23 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:http/http.dart' as http;
 import 'api_service.dart';
 import 'auth_service.dart';
 import 'local_db_service.dart';
 
 
+
+/// Función auxiliar de normalización de cadenas (remover diacríticos/acentos y minúsculas)
+String normalizarTexto(String texto) {
+  var conAcentos = 'ÁÉÍÓÚáéíóúÀÈÌÒÙàèìòùÄËÏÖÜäëïöüÑñ';
+  var sinAcentos = 'AEIOUaeiouAEIOUaeiouAEIOUaeiouNn';
+  String resultado = texto.trim().toLowerCase();
+  for (int i = 0; i < conAcentos.length; i++) {
+    resultado = resultado.replaceAll(conAcentos[i], sinAcentos[i]);
+  }
+  return resultado;
+}
 
 /// Evento global que dispara cuando el servidor responde 401 (sesión expirada).
 /// El AppShell o el Router escuchan este stream para redirigir al Login.
@@ -34,6 +46,16 @@ class SyncService extends ChangeNotifier {
   Timer?    _syncWatchdog;  // [FIX-CUELGUE] Watchdog: libera el lock si sync excede 90s
 
   String? get errorMessage => _errorMessage;
+
+  // ── Aviso de correos despachados desde la cola offline ──
+  int _correosDespachadosSeq = 0;
+  int _ultimosCorreosDespachados = 0;
+  int get correosDespachadosSeq => _correosDespachadosSeq;
+  int get ultimosCorreosDespachados => _ultimosCorreosDespachados;
+
+  SyncService() {
+    startNetworkMonitor();
+  }
 
   List<Map<String, dynamic>> _orders = [];
   List<Map<String, dynamic>> get orders => _orders;
@@ -74,13 +96,16 @@ class SyncService extends ChangeNotifier {
       if (localDbOrders.isEmpty && isTecnicoUser && !isAdmin) {
         final all = await db.getAllOs();
         if (all.isNotEmpty) {
-          final myNom = (currentNombre ?? '').toLowerCase().trim();
+          final userNorm = normalizarTexto(currentNombre ?? '');
           localDbOrders = all.where((o) {
             final oId = int.tryParse(o['id_tecnico']?.toString() ?? '');
             if (oId != null && oId > 0 && idTecnico != null && idTecnico > 0 && oId == idTecnico) return true;
-            final t = (o['tecnico']?.toString() ?? '').toLowerCase().trim();
-            if (t.isNotEmpty && myNom.isNotEmpty) {
-              return t == myNom || t.contains(myNom) || myNom.contains(t);
+            final bool esMiOrden = normalizarTexto(o['tecnico']?.toString() ?? '') == userNorm ||
+                                   normalizarTexto(o['tecnico_nombre']?.toString() ?? '') == userNorm;
+            if (esMiOrden) return true;
+            final t = normalizarTexto(o['tecnico']?.toString() ?? o['tecnico_nombre']?.toString() ?? '');
+            if (t.isNotEmpty && userNorm.isNotEmpty) {
+              return t == userNorm || t.contains(userNorm) || userNorm.contains(t);
             }
             return false;
           }).toList();
@@ -176,10 +201,12 @@ class SyncService extends ChangeNotifier {
   // ── Iniciar monitor de red ────────────────────────────────────────────────
 
   void startNetworkMonitor() {
+    _connSub?.cancel();
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final online = results.any((r) => r != ConnectivityResult.none);
-      if (online && _state != SyncState.syncing) {
-        performSync();
+      if (online && _state != SyncState.syncing && !isSyncing) {
+        debugPrint('[Sync] 🌐 Red detectada activa (Wi-Fi/Datos móviles) — sincronizando automáticamente en segundo plano');
+        sincronizarTodo();
       } else if (!online) {
         _setState(SyncState.offline, 'Sin conexión a la red');
       }
@@ -226,13 +253,48 @@ class SyncService extends ChangeNotifier {
     }
   }
 
-  Future<void> performSync() async {
+  /// Forzar reenvío de órdenes cerradas:
+  /// cambia en SQLite sync_status = 'PENDIENTE', needs_push = 1 para todas las órdenes que tengan
+  /// estatus = 'Cerrado' y reejecuta el PUSH hacia PostgreSQL para que lo que esté atorado en la tablet
+  /// se suba forzosamente.
+  Future<int> forzarReenvioOrdenesCerradas() async {
+    final count = await LocalDbService.instance.forzarReenvioOrdenesCerradas();
+    debugPrint('[Sync] 🚀 Reenvío forzado de $count órdenes cerradas iniciado...');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('last_sync_timestamp');
+      await LocalDbService.instance.resetLastSyncTime();
+    } catch (_) {}
+    await performSync(forceFull: true);
+    return count;
+  }
+
+  /// Resincronización completa (PULL total):
+  /// Elimina last_sync_timestamp y descarga todas las órdenes del servidor.
+  Future<void> resincronizacionCompleta() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('last_sync_timestamp');
+      await LocalDbService.instance.resetLastSyncTime();
+    } catch (_) {}
+    await performSync(forceFull: true);
+  }
+
+  Future<void> performSync({bool forceFull = false}) async {
     // ═══════════════════════════════════════════════════════════════════════
     //  GUARD: un solo sync activo a la vez; el watchdog libera si se cuelga.
     // ═══════════════════════════════════════════════════════════════════════
     if (_state == SyncState.syncing) {
       debugPrint('[Sync] Ya en curso — ignorando solicitud duplicada');
       return;
+    }
+
+    if (forceFull) {
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.remove('last_sync_timestamp');
+        await LocalDbService.instance.resetLastSyncTime();
+      } catch (_) {}
     }
 
     // Marcar estado Y bandera de forma atómica ANTES de cualquier await
@@ -359,10 +421,23 @@ class SyncService extends ChangeNotifier {
 
       try {
         final pdfsPushed = await _subirPdfsPendientes()
-            .timeout(const Duration(seconds: 15), onTimeout: () => 0);
+            .timeout(const Duration(seconds: 90), onTimeout: () => 0);
         debugPrint('[Sync PUSH PDF] $pdfsPushed PDFs subidos');
       } catch (e) {
         debugPrint('[Sync PUSH PDF] Error ignorado: $e');
+      }
+
+      try {
+        final emailsPushed = await _pushEmailsPendientes()
+            .timeout(const Duration(seconds: 180), onTimeout: () => 0);
+        if (emailsPushed > 0) {
+          debugPrint('[Sync PUSH Email] $emailsPushed correos despachados');
+          _ultimosCorreosDespachados = emailsPushed;
+          _correosDespachadosSeq++;
+          notifyListeners();
+        }
+      } catch (e) {
+        debugPrint('[Sync PUSH Email] Error ignorado: $e');
       }
 
       // ── Catálogos: solo si han pasado > 24h desde la última descarga ──────
@@ -654,9 +729,6 @@ class SyncService extends ChangeNotifier {
     if (folio.isEmpty) return false;
 
     try {
-      bool pdfUploadedOk  = false;
-      bool dataUploadedOk = false;
-
       // Resolver PDF físico en disco con máxima tolerancia de rutas
       final pdfFile = await _resolveLocalPdfFile(os);
       String? pdfB64;
@@ -693,6 +765,9 @@ class SyncService extends ChangeNotifier {
         'estatus':           cerradaLocal ? 'Cerrado' : (os['estatus'] ?? 'Proceso'),
         if ((os['modalidad'] as String?)?.isNotEmpty == true) 'modalidad': os['modalidad'],
         'observaciones':     os['observaciones'],
+        'datos_captura':     os['datos_captura'],
+        'usa_sustitucion':   os['usa_sustitucion'] == 1 || os['usa_sustitucion'] == 'true' || os['usa_sustitucion'] == true,
+        'factor_sustitucion': os['factor_sustitucion']?.toString(),
         'repetibilidad':     _decodeJson(os['rep_json']),
         'excentricidad':     _decodeJson(os['exc_json']),
         'exactitud':         _decodeJson(os['exac_json']),
@@ -706,54 +781,91 @@ class SyncService extends ChangeNotifier {
         'unidad_medida': os['unidad_medida'] ?? 'kg',
       };
 
-      Map<String, dynamic>? result;
+      final backendUrl = ApiService.instance.baseUrl;
+      final token = ApiService.instance.token;
+      final headers = <String, String>{
+        'Content-Type': 'application/json',
+        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+      };
+
+      http.Response? response;
       try {
-        result = await ApiService.instance.syncPush(payload).timeout(
-          const Duration(seconds: 15),
-          onTimeout: () => throw TimeoutException('syncPush timeout $folio'),
-        );
-        dataUploadedOk = true;
+        response = await http.post(
+          Uri.parse('$backendUrl/api/ordenes/sync'),
+          headers: headers,
+          body: jsonEncode(payload),
+        ).timeout(const Duration(seconds: 30));
       } catch (e) {
-        debugPrint('[PUSH] JSON falló para $folio: $e');
+        debugPrint('[PUSH] Intento /api/ordenes/sync para $folio: $e');
       }
 
-      try {
-        if (pdfFile != null && await pdfFile.exists()) {
-          pdfUploadedOk = await ApiService.instance.uploadPdf(
-            folio, pdfFile,
-            osId: os['local_id'] as int?,
-            data: payload,
-          ).timeout(const Duration(seconds: 20), onTimeout: () => false);
-        } else {
-          final est = (os['estado'] as String? ?? '').toUpperCase();
-          if (!{'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO'}.contains(est)) {
-            pdfUploadedOk = true;
-          }
+      if (response == null || response.statusCode == 404) {
+        try {
+          response = await http.post(
+            Uri.parse('$backendUrl/api/v1/sync/push'),
+            headers: headers,
+            body: jsonEncode(payload),
+          ).timeout(const Duration(seconds: 30));
+        } catch (e) {
+          debugPrint('[PUSH] Intento /api/v1/sync/push para $folio: $e');
         }
-      } catch (e) {
-        debugPrint('[PUSH] PDF upload falló para $folio: $e');
       }
 
-      final estUpper    = (os['estado']  as String? ?? '').toUpperCase().trim();
-      final estatusUp   = (os['estatus'] as String? ?? '').toUpperCase().trim();
-      final isCerrada   = {'CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA'}.contains(estUpper)
-                       || {'CERRADO','CERRADA','COMPLETADA'}.contains(estatusUp);
-      final canMark     = isCerrada ? (dataUploadedOk && pdfUploadedOk) : (dataUploadedOk || pdfUploadedOk);
+      if (response != null && (response.statusCode == 200 || response.statusCode == 201)) {
+        bool pdfUploadedOk = false;
+        if (pdfFile != null && await pdfFile.exists()) {
+          try {
+            pdfUploadedOk = await ApiService.instance.uploadPdf(
+              folio, pdfFile,
+              osId: os['local_id'] as int?,
+              data: payload,
+            ).timeout(const Duration(seconds: 25), onTimeout: () => false);
+          } catch (_) {}
+        }
 
-      if (canMark) {
-        final osId  = os['local_id'] as int? ?? 0;
-        final newVer = (result?['sync_version'] as int?) ?? ((os['sync_version'] as int? ?? 0) + 1);
-        await db.markOsSincronizada(osId, newVer, folio: folio);
-        if (pdfUploadedOk) await db.markPdfSubido(osId, folio: folio);
-        await db.clearDirty(folio);
+        final sqldb = await db.database;
+        // Solo aquí marcar como enviada en vista 'ordenes'
+        try {
+          await sqldb.update(
+            'ordenes',
+            {'sync_status': 'Enviada', 'needs_push': 0},
+            where: 'folio = ?',
+            whereArgs: [folio],
+          );
+        } catch (e) {
+          debugPrint('[PUSH] sqldb.update ordenes: $e');
+        }
+
+        // Y en tabla ordenes_servicio
+        await sqldb.update(
+          'ordenes_servicio',
+          {
+            'sync_status': 'Enviada',
+            'needs_push': 0,
+            'is_dirty': 0,
+            'is_synced': 1,
+            'sync_check_status': 'SUBIDA_SERVIDOR',
+            if (pdfUploadedOk) 'pdf_subido': 1,
+          },
+          where: 'folio_os = ? OR folio = ?',
+          whereArgs: [folio, folio],
+        );
+
         updateLocalOrder(folio, {
-          'is_dirty': 0, 'sync_check_status': 'SUBIDA_SERVIDOR',
-          'is_synced': 1, 'sync_status': 'ENVIADO',
+          'is_dirty': 0,
+          'sync_check_status': 'SUBIDA_SERVIDOR',
+          'is_synced': 1,
+          'sync_status': 'Enviada',
+          'needs_push': 0,
           if (pdfUploadedOk) 'pdf_subido': 1,
         });
+        debugPrint('[PUSH] ✅ Folio $folio confirmado por backend (HTTP ${response.statusCode}) → Marcada como Enviada');
         return true;
+      } else {
+        // Mantener en pendiente y arrojar log
+        debugPrint('Error sincronizando folio $folio: ${response?.statusCode} - ${response?.body}');
+        return false;
       }
-      return false;
     } catch (e) {
       debugPrint('[PUSH] Error al subir $folio: $e');
       return false;
@@ -838,11 +950,13 @@ class SyncService extends ChangeNotifier {
 
   /// Encuentra o reconstruye el archivo binario PDF en el disco de la tablet.
   Future<File?> _resolveLocalPdfFile(Map<String, dynamic> os) async {
-    final folio = (os['folio_os'] as String? ?? '').trim();
+    final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     if (folio.isEmpty) return null;
 
-    // 1. Ruta registrada en la BD
-    final pathLocal = os['pdf_path_local'] as String?;
+    // 1. Ruta registrada en la BD (pdf_path o pdf_path_local)
+    final pathLocal = (os['pdf_path'] as String?)?.isNotEmpty == true
+        ? os['pdf_path'] as String?
+        : (os['pdf_path_local'] as String?);
     if (pathLocal != null && pathLocal.isNotEmpty) {
       final f = File(pathLocal);
       if (await f.exists() && await f.length() > 500) {
@@ -934,8 +1048,8 @@ class SyncService extends ChangeNotifier {
           continue;
         }
 
-        final osId = os['local_id'] as int?;
-        debugPrint('[Sync] Subiendo binario PDF multipart para $folio (${await pdfFile.length()} bytes)...');
+        final osId = os['local_id'] as int? ?? os['id'] as int?;
+        debugPrint('[Sync] Subiendo binario PDF para $folio (${await pdfFile.length()} bytes)...');
         final uploadOk = await ApiService.instance.uploadPdf(
           folio,
           pdfFile,
@@ -955,9 +1069,9 @@ class SyncService extends ChangeNotifier {
             'unidad_medida': os['unidad_medida'] ?? 'kg',
           },
         ).timeout(
-          const Duration(seconds: 15),
+          const Duration(seconds: 30),
           onTimeout: () {
-            debugPrint('[Sync] ⏱ TIMEOUT 15s al subir PDF para $folio');
+            debugPrint('[Sync] ⏱ TIMEOUT 30s al subir PDF para $folio');
             return false;
           },
         );
@@ -982,6 +1096,126 @@ class SyncService extends ChangeNotifier {
     }
 
     return subidos;
+  }
+
+  /// Despacha correos pendientes al sincronizar (se ejecuta DESPUÉS de subir datos y PDFs):
+  ///  1) Cola explícita offline `cola_correos` (email_status = 'pendiente') — órdenes y lotes.
+  ///  2) Órdenes cerradas con correo capturado y email_enviado = 0 (flujo legacy).
+  /// Al confirmar el backend, se marca email_status = 'enviado' / email_enviado = 1.
+  Future<int> _pushEmailsPendientes() async {
+    final db = LocalDbService.instance;
+    int enviados = 0;
+    final manejados = <String>{};
+
+    void marcarUi(List<String> folios, String correo) {
+      for (final f in folios) {
+        updateLocalOrder(f, {'email_enviado': 1, 'email_status': 'enviado', 'correo_cliente': correo});
+        manejados.add(f);
+      }
+    }
+
+    // ── 1) Cola explícita ──
+    List<Map<String, dynamic>> cola = const [];
+    try {
+      cola = await db.getCorreosPendientes();
+    } catch (e) {
+      debugPrint('[Sync PUSH Email] No se pudo leer cola_correos: $e');
+    }
+    if (cola.isNotEmpty) debugPrint('[Sync PUSH Email] ${cola.length} envío(s) en cola offline');
+
+    for (final job in cola) {
+      final int id = (job['id'] as num?)?.toInt() ?? 0;
+      final String tipo = (job['tipo'] ?? 'orden').toString();
+      final String ref = (job['referencia'] ?? '').toString().trim();
+      final String correo = (job['correo'] ?? '').toString().trim();
+      final int intentos = (job['intentos'] as num?)?.toInt() ?? 0;
+      final List<String> folios = (job['folios'] ?? '')
+          .toString()
+          .split(',')
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
+      manejados.addAll(folios);
+      manejados.add(ref);
+
+      if (ref.isEmpty || correo.isEmpty) {
+        await db.marcarCorreoFallido(id, 'Datos incompletos', descartar: true);
+        continue;
+      }
+      try {
+        final res = tipo == 'lote'
+            ? await ApiService.instance.enviarEmailLote(ref, correo: correo, forzar: true, folios: folios)
+            : await ApiService.instance.enviarEmailOrden(ref, correo: correo, forzar: true);
+        if (res['ok'] == true) {
+          final confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
+              ? (res['folios'] as List).map((e) => e.toString()).toList()
+              : (folios.isNotEmpty ? folios : [ref]);
+          await db.marcarCorreoEnviado(id, confirmados, correo);
+          for (final f in confirmados) {
+            await db.updateEmailStatus(f, enviado: true, correo: correo);
+          }
+          marcarUi(confirmados, correo);
+          enviados++;
+          debugPrint('[Sync PUSH Email] ✅ Cola: $tipo $ref enviado a $correo ($confirmados)');
+        } else {
+          await db.marcarCorreoFallido(id, (res['motivo'] ?? res['error'] ?? 'Respuesta no OK').toString(),
+              descartar: intentos + 1 >= 5);
+        }
+      } on CorreoSinConexionException catch (e) {
+        await db.marcarCorreoFallido(id, e.mensaje);
+        debugPrint('[Sync PUSH Email] Sin conexión, la cola se conserva: $e');
+        return enviados; // sin red: no tiene sentido seguir intentando
+      } on CorreoEndpointNoDisponibleException catch (e) {
+        await db.marcarCorreoFallido(id, e.mensaje);
+        debugPrint('[Sync PUSH Email] Endpoint no disponible, se reintentará: $e');
+      } on CorreoRechazadoException catch (e) {
+        // p. ej. lote aún sin órdenes firmadas con PDF: reintentar en próximos syncs (máx. 5)
+        await db.marcarCorreoFallido(id, e.mensaje, descartar: intentos + 1 >= 5);
+        debugPrint('[Sync PUSH Email] Rechazado ($ref): ${e.mensaje}');
+      } catch (e) {
+        await db.marcarCorreoFallido(id, e.toString());
+        debugPrint('[Sync PUSH Email] Error en cola ($ref): $e');
+      }
+    }
+
+    // ── 2) Legacy: órdenes cerradas con correo y sin enviar ──
+    List<Map<String, dynamic>> pendientesEmail = const [];
+    try {
+      pendientesEmail = await db.getOsParaEnviarEmail();
+    } catch (e) {
+      debugPrint('[Sync PUSH Email] getOsParaEnviarEmail error: $e');
+    }
+    for (final os in pendientesEmail) {
+      final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
+      final correo = (os['correo_cliente'] as String? ?? '').trim();
+      if (folio.isEmpty || correo.isEmpty || manejados.contains(folio)) continue;
+
+      try {
+        final res = await ApiService.instance.enviarEmailOrden(folio, correo: correo, forzar: true);
+        if (res['ok'] == true) {
+          // Si el backend agrupó un lote, marcar todos los folios realmente enviados (evita reenvíos).
+          final confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
+              ? (res['folios'] as List).map((e) => e.toString()).toList()
+              : [folio];
+          for (final f in confirmados) {
+            await db.updateEmailStatus(f, enviado: true, correo: correo);
+          }
+          marcarUi(confirmados, correo);
+          enviados++;
+          debugPrint('[Sync PUSH Email] ✅ Correo despachado para $confirmados a $correo');
+        }
+      } on CorreoSinConexionException catch (e) {
+        debugPrint('[Sync PUSH Email] Sin conexión: $e');
+        break;
+      } on CorreoEndpointNoDisponibleException catch (e) {
+        debugPrint('[Sync PUSH Email] Endpoint no disponible: $e');
+        break;
+      } catch (e) {
+        debugPrint('[Sync PUSH Email] Error enviando correo para $folio: $e');
+      }
+    }
+
+    return enviados;
   }
 
   /// Lee el archivo PDF local y lo convierte a Base64 para el push.
@@ -1075,16 +1309,23 @@ class SyncService extends ChangeNotifier {
       }
 
       // Filtrar por técnico en memoria (solo si es técnico y no admin)
+      final userNorm = normalizarTexto(currentNombre ?? '');
       final filteredList = (isTecnicoUser && !isAdmin)
           ? osList.where((o) {
               final oId = int.tryParse(o['id_tecnico']?.toString() ?? '');
               if (oId != null && oId > 0 && idTecnico != null && idTecnico > 0) {
-                if (oId != idTecnico) return false;
+                if (oId == idTecnico) return true;
+                return false;
               }
-              final tec   = (o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '').toLowerCase().trim();
-              final myNom = (currentNombre ?? '').toLowerCase().trim();
-              if (tec.isNotEmpty && myNom.isNotEmpty) {
-                return tec == myNom || tec.contains(myNom) || myNom.contains(tec);
+              final bool esMiOrden = normalizarTexto(o['tecnico'] as String? ?? '') == userNorm ||
+                                     normalizarTexto(o['tecnico_nombre'] as String? ?? '') == userNorm;
+              if (esMiOrden) return true;
+              final tec = normalizarTexto(o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '');
+              if (tec.isNotEmpty && userNorm.isNotEmpty) {
+                final tp = tec.split(RegExp(r'\s+'));
+                final mp = userNorm.split(RegExp(r'\s+'));
+                if (tp.length >= 2 && mp.length >= 2 && tp[0] == mp[0] && tp[1] != mp[1]) return false;
+                return tec.contains(userNorm) || userNorm.contains(tec);
               }
               return true;
             }).toList()
@@ -1093,6 +1334,128 @@ class SyncService extends ChangeNotifier {
       // ── Inserción en bloque con transacción atómica en SQLite ──────────────
       final insertedCount = await db.insertOrdenesBatch(filteredList);
       debugPrint('[Sync PULL] ✅ Guardadas $insertedCount órdenes en bloque atómico en SQLite');
+
+      // ── UPDATE directo obligatorio en SQLite local (PULL) ────────────────
+      final sqldb = await db.database;
+      for (final remota in filteredList) {
+        final folio = (remota['folio_os'] ?? remota['folio'])?.toString().trim();
+        if (folio == null || folio.isEmpty) continue;
+
+        final String estatusRemoto = (remota['estatus'] ?? remota['estado'] ?? 'Asignada').toString();
+        final String? pdfUrl = remota['pdf_url']?.toString().trim();
+        final String? pdfB64 = (remota['pdf_base64'] ?? remota['pdf_b64'])?.toString().trim();
+
+        final localPdf = await db.resolvePdfPathFromDisk(folio);
+        final bool localPdfFile = localPdf != null && File(localPdf).existsSync() && File(localPdf).lengthSync() > 500;
+
+        // Comprobar existencia real de PDF
+        final bool tienePdfRemoto = (pdfB64 != null && pdfB64.isNotEmpty && pdfB64.length > 100) ||
+            (pdfUrl != null && pdfUrl.isNotEmpty && !pdfUrl.contains('null') && !pdfUrl.contains('404'));
+        final bool tienePdf = localPdfFile || tienePdfRemoto || (remota['has_pdf'] == true || remota['has_pdf'] == 1);
+
+        final int hasPdfVal = tienePdf ? 1 : 0;
+        final String estatusFinal = tienePdf
+            ? (estatusRemoto.isNotEmpty ? estatusRemoto : 'Cerrado')
+            : (estatusRemoto.isNotEmpty ? estatusRemoto : 'Asignada');
+        final String estadoFinal = tienePdf
+            ? 'COMPLETADA_DIGITAL'
+            : (remota['estado']?.toString().isNotEmpty == true ? remota['estado'].toString() : 'PROCESO');
+        final String tecnicoFinal = (remota['tecnico'] ?? remota['tecnico_nombre'] ?? '').toString();
+        final String modalidadFinal = (remota['modalidad'] ?? 'Digital').toString();
+        final String? pdfUrlFinal = tienePdf ? pdfUrl : null;
+
+        final rawIdTec = int.tryParse(remota['id_tecnico']?.toString() ?? remota['tecnico_id']?.toString() ?? '');
+        int? idTecnicoVal = rawIdTec;
+        if (idTecnicoVal == null || idTecnicoVal <= 0) {
+          final tecNorm = normalizarTexto(tecnicoFinal);
+          if (tecNorm.contains('nestor')) idTecnicoVal = 9;
+          else if (tecNorm.contains('terrazas')) idTecnicoVal = 10;
+          else if (tecNorm.contains('guevara') || tecNorm.contains('daikki')) idTecnicoVal = 8;
+          else if (tecNorm.contains('fernando')) idTecnicoVal = 4;
+          else if (tecNorm.contains('segovia') || tecNorm.contains('alessandro')) idTecnicoVal = 7;
+          else if (tecNorm.contains('jimenez') || tecNorm.contains('jhonny')) idTecnicoVal = 44;
+          else if (tecNorm.contains('landaverde')) idTecnicoVal = 171;
+          else if (tecNorm.contains('adriana')) idTecnicoVal = 11;
+          else if (tecNorm.contains('jessica')) idTecnicoVal = 1;
+          else if (tecNorm.contains('ivan')) idTecnicoVal = 2;
+        }
+
+        // 1. UPDATE directo en 'ordenes' (mediante trigger INSTEAD OF UPDATE) exactamente como pide el spec
+        try {
+          await sqldb.rawUpdate('''
+            UPDATE ordenes 
+            SET estatus = ?, 
+                tecnico = ?, 
+                has_pdf = ?, 
+                pdf_url = ?, 
+                modalidad = ?,
+                sync_status = 'Sincronizado'
+            WHERE folio = ?
+          ''', [
+            estatusFinal,
+            tecnicoFinal,
+            hasPdfVal,
+            pdfUrlFinal,
+            modalidadFinal,
+            folio,
+          ]);
+        } catch (e) {
+          debugPrint('[Sync PULL rawUpdate ordenes] Error: $e');
+        }
+
+        // 2. UPDATE directo en ordenes_servicio
+        final updatedCount = await sqldb.rawUpdate('''
+          UPDATE ordenes_servicio 
+          SET estatus = ?, 
+              estado = CASE WHEN ? = 1 THEN 'COMPLETADA_DIGITAL' ELSE COALESCE(?, estado) END,
+              tecnico = ?, 
+              id_tecnico = COALESCE(?, id_tecnico),
+              has_pdf = ?, 
+              pdf_url = ?, 
+              modalidad = ?,
+              sync_status = 'Sincronizado',
+              sync_check_status = CASE WHEN ? = 1 THEN 'SUBIDA_SERVIDOR' ELSE sync_check_status END,
+              is_synced = 1,
+              is_dirty = 0,
+              needs_push = 0
+          WHERE folio_os = ? OR folio = ?
+        ''', [
+          estatusFinal,
+          hasPdfVal,
+          estadoFinal,
+          tecnicoFinal,
+          idTecnicoVal,
+          hasPdfVal,
+          pdfUrlFinal,
+          modalidadFinal,
+          hasPdfVal,
+          folio,
+          folio,
+        ]);
+
+        if (updatedCount == 0) {
+          await sqldb.insert('ordenes_servicio', {
+            'folio_os': folio,
+            'folio': folio,
+            'estatus': estatusFinal,
+            'estado': estadoFinal,
+            'tecnico': tecnicoFinal,
+            'id_tecnico': idTecnicoVal,
+            'cliente': (remota['cliente'] ?? remota['cliente_nombre'] ?? '').toString(),
+            'sucursal': (remota['sucursal'] ?? remota['sucursal_nombre'] ?? '').toString(),
+            'tipo_servicio': (remota['tipo_servicio'] ?? remota['tipo_servicio_nombre'] ?? '').toString(),
+            'has_pdf': hasPdfVal,
+            'pdf_url': pdfUrlFinal,
+            'modalidad': modalidadFinal,
+            'sync_status': 'Sincronizado',
+            'sync_check_status': tienePdf ? 'SUBIDA_SERVIDOR' : 'ASIGNADA',
+            'is_synced': 1,
+            'is_dirty': 0,
+            'needs_push': 0,
+            'updated_at': remota['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
+          });
+        }
+      }
 
       // Solo DESPUÉS de confirmar que se insertaron registros con éxito, actualizar:
       if (insertedCount > 0) {

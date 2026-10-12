@@ -1,5 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pesa_tablet/services/tipo_servicio_rules.dart';
+import 'package:pesa_tablet/services/local_db_service.dart';
+import 'package:pesa_tablet/screens/os_list_screen.dart';
 
 void main() {
   group('Regla estricta de tipos de servicio', () {
@@ -51,5 +53,21 @@ void main() {
       expect(re.pideCca, isFalse);
       expect(re.pideDve, isFalse);
     });
+
+    test('Modalidad: normalización y respeto de Digital para folios RMA', () {
+      expect(LocalDbService.normalizarModalidad('Digital'), 'Digital');
+      expect(LocalDbService.normalizarModalidad('DIGITAL'), 'Digital');
+      expect(LocalDbService.normalizarModalidad('Fisico'), 'Fisico');
+      expect(LocalDbService.normalizarModalidad('FÍSICO'), 'Fisico');
+      expect(LocalDbService.normalizarModalidad(''), 'Digital');
+      expect(LocalDbService.normalizarModalidad(null), 'Digital');
+
+      // Remisión RMA Digital NO debe ser identificada como formato físico
+      expect(esModalidadFisica('Digital'), isFalse);
+      expect(esModalidadFisica('DIGITAL'), isFalse);
+      expect(esModalidadFisica('Fisico'), isTrue);
+      expect(esModalidadFisica('FÍSICA'), isTrue);
+    });
   });
 }
+

@@ -233,11 +233,13 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
                           ),
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Propagada a los 3 puntos\n(d=${widget.divMin ?? '?'})',
-                        style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
-                        textAlign: TextAlign.right,
+                      const SizedBox(width: 8),
+                      Flexible(
+                        child: Text(
+                          'Propagada a los 3 puntos\n(d=${widget.divMin ?? '?'})',
+                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                          textAlign: TextAlign.right,
+                        ),
                       ),
                     ],
                   ),

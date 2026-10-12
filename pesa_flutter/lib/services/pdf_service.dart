@@ -14,6 +14,47 @@ import 'package:path_provider/path_provider.dart';
 import 'metrology_helper.dart';
 import 'tipo_servicio_rules.dart' as tsr;
 
+
+String formatoMilesEspacio(dynamic valor) {
+  if (valor == null) return '';
+  String txt = valor.toString().trim();
+  if (txt.isEmpty) return '';
+
+  // Manejar posibles sufijos (ej. '80000 kg')
+  final RegExp regExp = RegExp(r'^([-+]?[0-9,.]+)\s*(.*)$');
+  final match = regExp.firstMatch(txt);
+  if (match == null) return txt;
+
+  String numPart = match.group(1)!;
+  String sufijo = match.group(2) ?? '';
+
+  String res = numPart;
+  if (numPart.contains('.')) {
+    var partes = numPart.split('.');
+    String entera = partes[0].replaceAll(',', '').replaceAll(' ', '');
+    String decimal = partes[1];
+    int? entNum = int.tryParse(entera);
+    if (entNum != null) {
+      String entFmt = entNum.toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (Match m) => '${m[1]} ',
+      );
+      res = '$entFmt.$decimal';
+    }
+  } else {
+    String entera = numPart.replaceAll(',', '').replaceAll(' ', '');
+    int? entNum = int.tryParse(entera);
+    if (entNum != null) {
+      res = entNum.toString().replaceAllMapped(
+        RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+        (Match m) => '${m[1]} ',
+      );
+    }
+  }
+
+  return sufijo.isNotEmpty ? '$res $sufijo' : res;
+}
+
 class PdfService {
   static final PdfService instance = PdfService._();
   PdfService._();
@@ -248,20 +289,62 @@ class PdfService {
   // 4. CLIENTE + DIRECCIÓN
   // ══════════════════════════════════════════════════════════════════════════
   pw.Widget _buildClienteDir(Map<String, dynamic> os) {
-    final cliente   = _s(os, 'cliente', _s(os, 'cliente_nombre', _s(os, 'razon_social', '')));
-    final direccion = _s(os, 'direccion', _s(os, 'direccion_cliente', _s(os, 'sucursal', _s(os, 'planta', _s(os, 'sucursal_direccion', '')))));
-    return pw.Column(children: [
-      _labelValueRow('CLIENTE:', cliente),
-      pw.SizedBox(height: 1),
-      _labelValueRow('DIRECCIÓN:', direccion),
-    ]);
+    final cliente = _s(os, 'cliente', _s(os, 'cliente_nombre', _s(os, 'razon_social', ''))).trim();
+    final ubicacionEquipo = _s(os, 'ubicacion', _s(os, 'area', _s(os, 'ubicacion_equipo', ''))).trim();
+
+    // Separar estrictamente la Dirección de la Planta de la Ubicación física del instrumento:
+    // Campo DIRECCIÓN / PLANTA del membrete: NUNCA usar 'ubicacion', 'area' o 'ubicacion_equipo'.
+    String dirVal = '';
+    for (final k in [
+      'sucursal',
+      'planta_direccion',
+      'direccion',
+      'domicilio',
+      'planta',
+      'direccion_cliente',
+      'sucursal_nombre',
+      'sucursal_direccion',
+      'planta_nombre',
+    ]) {
+      final v = os[k]?.toString().trim();
+      if (v != null && v.isNotEmpty && v != '-' && v.toLowerCase() != 'null') {
+        if (ubicacionEquipo.isNotEmpty && v.toLowerCase() == ubicacionEquipo.toLowerCase()) {
+          continue;
+        }
+        dirVal = v;
+        break;
+      }
+    }
+
+    // Si sucursal no está en el registro o coincide con ubicación interna, fallback de cliente
+    if (dirVal.isEmpty || (ubicacionEquipo.isNotEmpty && dirVal.toLowerCase() == ubicacionEquipo.toLowerCase())) {
+      if (cliente.toLowerCase().contains('mar bran')) {
+        dirVal = 'Carretera el Jaral del Progreso- Cortazar km 4.3 C.P. 38470, Jaral del Progreso, Guanajuato';
+      } else {
+        dirVal = 'Domicilio conocido';
+      }
+    }
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        _labelValueRow('CLIENTE:', cliente.isNotEmpty ? cliente : 'Cliente General'),
+        pw.SizedBox(height: 1),
+        _labelValueRow('DIRECCIÓN / PLANTA:', dirVal),
+      ],
+    );
   }
 
   pw.Widget _labelValueRow(String label, String value) => pw.Row(children: [
     pw.Text(label, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold,
         color: _redBright)),
     pw.SizedBox(width: 4),
-    pw.Expanded(child: pw.Text(value.isNotEmpty ? value : '-', style: const pw.TextStyle(fontSize: 8))),
+    pw.Expanded(
+      child: pw.Text(
+        (value.isNotEmpty && value != '-') ? value : 'Domicilio conocido',
+        style: const pw.TextStyle(fontSize: 8),
+      ),
+    ),
   ]);
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -274,7 +357,7 @@ class PdfService {
     final idEq   = _s(os, 'id_equipo', _s(os, 'id_indicador', ''));
     final tipo   = _s(os, 'tipo_instrumento', _s(os, 'tipo_receptor', ''));
     final func   = _s(os, 'funcionamiento', 'Electrónico');
-    final ubic   = _s(os, 'ubicacion', '');
+    final ubic   = _s(os, 'ubicacion', _s(os, 'area', _s(os, 'ubicacion_equipo', '')));
     final cap    = _s(os, 'alcance_max', _s(os, 'capacidad_max', _s(os, 'cap_max', _s(os, 'capacidad_maxima', ''))));
     final div    = _s(os, 'div_minima', _s(os, 'division_minima', _s(os, 'div_min', '')));
     final unidad = _s(os, 'unidad_medida', 'kg');
@@ -303,8 +386,8 @@ class PdfService {
       _equipoRow([_FD('MARCA', marca, 0.28), _FD('MODELO', modelo, 0.36), _FD('SERIE / N/S', ns, 0.36)]),
       _equipoRow([_FD('ID INDICADOR / EQUIPO', idEq, 0.30), _FD('TIPO DE INSTRUMENTO', tipo, 0.36), _FD('FUNCIONAMIENTO', func, 0.34)]),
       _equipoRow([
-        _FD('CAPACIDAD MÁXIMA', cap.isNotEmpty ? '$cap $unidad' : '', 0.28),
-        _FD('DIVISIÓN MÍNIMA', div.isNotEmpty ? '$div $unidad' : '', 0.24),
+        _FD('CAPACIDAD MÁXIMA', cap.isNotEmpty ? formatoMilesEspacio(cap.toLowerCase().endsWith(unidad.toLowerCase()) ? cap : '$cap $unidad') : '', 0.28),
+        _FD('DIVISIÓN MÍNIMA', div.isNotEmpty ? formatoMilesEspacio(div.toLowerCase().endsWith(unidad.toLowerCase()) ? div : '$div $unidad') : '', 0.24),
         _FD('PUNTOS DE APOYO', apoyo, 0.18),
         _FD('UBICACIÓN', ubic, 0.30),
       ]),
@@ -1150,15 +1233,16 @@ class PdfService {
 
   String _fmtDec(dynamic v, int dec) {
     if (v == null) return '';
-    final d = v is num ? v.toDouble() : double.tryParse(v.toString());
-    return d == null ? v.toString() : d.toStringAsFixed(dec);
+    final d = v is num ? v.toDouble() : double.tryParse(v.toString().replaceAll(',', '.').replaceAll(' ', ''));
+    final raw = d == null ? v.toString() : d.toStringAsFixed(dec);
+    return formatoMilesEspacio(raw);
   }
 
 
   double? _toNum(dynamic v) {
     if (v == null) return null;
     if (v is num) return v.toDouble();
-    final s = v.toString().trim().replaceAll(',', '.');
+    final s = v.toString().trim().replaceAll(',', '.').replaceAll(' ', '');
     return double.tryParse(s);
   }
 

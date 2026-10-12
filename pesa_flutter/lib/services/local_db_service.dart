@@ -21,6 +21,25 @@ class LocalDbService {
 
   String? lastUpsertError;
 
+  /// Función auxiliar de normalización de cadenas (remover diacríticos/acentos y minúsculas)
+  static String normalizarTexto(String texto) {
+    var conAcentos = 'ÁÉÍÓÚáéíóúÀÈÌÒÙàèìòùÄËÏÖÜäëïöüÑñ';
+    var sinAcentos = 'AEIOUaeiouAEIOUaeiouAEIOUaeiouNn';
+    String resultado = texto.trim().toLowerCase();
+    for (int i = 0; i < conAcentos.length; i++) {
+      resultado = resultado.replaceAll(conAcentos[i], sinAcentos[i]);
+    }
+    return resultado;
+  }
+
+  /// Normaliza la modalidad respetando estrictamente el valor recibido del backend.
+  static String normalizarModalidad(dynamic rawVal) {
+    final String rem = (rawVal ?? '').toString().trim().toLowerCase();
+    if (rem.contains('digital')) return 'Digital';
+    if (rem.contains('fisic') || rem.contains('físic')) return 'Fisico';
+    return 'Digital';
+  }
+
   static const _createTableOrdenesSql = '''
     CREATE TABLE IF NOT EXISTS ordenes_servicio (
       local_id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,6 +50,7 @@ class LocalDbService {
       fecha                  TEXT,
       cliente                TEXT,
       sucursal               TEXT,
+      direccion              TEXT,
       tecnico                TEXT,
       tipo_servicio          TEXT,
       id_tipo_servicio       INTEGER,
@@ -76,12 +96,16 @@ class LocalDbService {
       rango_lote             TEXT,
       firma_cliente_nombre   TEXT,
       pdf_subido             INTEGER DEFAULT 0,
+      correo_cliente         TEXT,
+      email_enviado          INTEGER DEFAULT 0,
+      fecha_envio_email      TEXT,
       sync_check_status      TEXT DEFAULT 'ASIGNADA',
       fecha_descarga_tablet  TEXT,
       fecha_subida_servidor  TEXT,
       fecha_apertura_admin   TEXT,
       sync_version           INTEGER DEFAULT 0,
       sync_status            TEXT DEFAULT 'SINCRONIZADO',
+      needs_push             INTEGER DEFAULT 0,
       is_synced              INTEGER DEFAULT 0,
       is_dirty               INTEGER DEFAULT 0,
       updated_at             TEXT
@@ -108,6 +132,41 @@ class LocalDbService {
         await db.execute(_createTableOrdenesSql);
         try {
           await db.execute('CREATE VIEW IF NOT EXISTS ordenes AS SELECT *, folio_os AS folio, estado AS estatus FROM ordenes_servicio');
+          await db.execute('''
+            CREATE TRIGGER IF NOT EXISTS tr_update_ordenes_view
+            INSTEAD OF UPDATE ON ordenes
+            BEGIN
+              UPDATE ordenes_servicio
+              SET 
+                estatus = COALESCE(NEW.estatus, ordenes_servicio.estatus),
+                estado = CASE 
+                  WHEN NEW.estatus IN ('Cerrado', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL') THEN 'COMPLETADA_DIGITAL'
+                  WHEN NEW.estado IS NOT NULL AND NEW.estado != '' THEN NEW.estado
+                  ELSE ordenes_servicio.estado
+                END,
+                tecnico = COALESCE(NEW.tecnico, ordenes_servicio.tecnico),
+                has_pdf = COALESCE(NEW.has_pdf, ordenes_servicio.has_pdf),
+                pdf_url = COALESCE(NEW.pdf_url, ordenes_servicio.pdf_url),
+                modalidad = COALESCE(NEW.modalidad, ordenes_servicio.modalidad),
+                sync_status = COALESCE(NEW.sync_status, ordenes_servicio.sync_status),
+                sync_check_status = CASE
+                  WHEN NEW.sync_status IN ('Enviada', 'ENVIADA', 'Sincronizado', 'SINCRONIZADO') THEN 'SUBIDA_SERVIDOR'
+                  WHEN NEW.sync_check_status IS NOT NULL AND NEW.sync_check_status != '' THEN NEW.sync_check_status
+                  ELSE ordenes_servicio.sync_check_status
+                END,
+                needs_push = COALESCE(NEW.needs_push, ordenes_servicio.needs_push),
+                is_dirty = CASE
+                  WHEN NEW.needs_push = 0 OR NEW.sync_status IN ('Enviada', 'ENVIADA', 'Sincronizado', 'SINCRONIZADO') THEN 0
+                  ELSE ordenes_servicio.is_dirty
+                END,
+                is_synced = CASE
+                  WHEN NEW.sync_status IN ('Enviada', 'ENVIADA', 'Sincronizado', 'SINCRONIZADO') THEN 1
+                  ELSE ordenes_servicio.is_synced
+                END,
+                updated_at = datetime('now')
+              WHERE folio_os = OLD.folio_os OR folio_os = OLD.folio OR folio = OLD.folio;
+            END;
+          ''');
         } catch (_) {}
         await db.execute('''
           CREATE TABLE IF NOT EXISTS firmas_pendientes (
@@ -207,6 +266,9 @@ class LocalDbService {
             'calibrado_por': 'TEXT',
             'cca_aplica': 'INTEGER DEFAULT 0',
             'pdf_subido': 'INTEGER DEFAULT 0',
+            'correo_cliente': 'TEXT',
+            'email_enviado': 'INTEGER DEFAULT 0',
+            'fecha_envio_email': 'TEXT',
             'sync_check_status': "TEXT DEFAULT 'ASIGNADA'",
             'fecha_descarga_tablet': 'TEXT',
             'fecha_subida_servidor': 'TEXT',
@@ -218,6 +280,8 @@ class LocalDbService {
             'metrologia_data': 'TEXT',
             'is_synced': 'INTEGER DEFAULT 0',
             'is_dirty': 'INTEGER DEFAULT 0',
+            'needs_push': 'INTEGER DEFAULT 0',
+            'sync_status': "TEXT DEFAULT 'SINCRONIZADO'",
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -230,9 +294,44 @@ class LocalDbService {
             }
           }
 
-          // Crear vista 'ordenes' para compatibilidad si no existe
+          // Crear vista 'ordenes' y trigger INSTEAD OF UPDATE para compatibilidad total
           try {
             await db.execute('CREATE VIEW IF NOT EXISTS ordenes AS SELECT *, folio_os AS folio, estado AS estatus FROM ordenes_servicio');
+            await db.execute('''
+              CREATE TRIGGER IF NOT EXISTS tr_update_ordenes_view
+              INSTEAD OF UPDATE ON ordenes
+              BEGIN
+                UPDATE ordenes_servicio
+                SET 
+                  estatus = COALESCE(NEW.estatus, ordenes_servicio.estatus),
+                  estado = CASE 
+                    WHEN NEW.estatus IN ('Cerrado', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL') THEN 'COMPLETADA_DIGITAL'
+                    WHEN NEW.estado IS NOT NULL AND NEW.estado != '' THEN NEW.estado
+                    ELSE ordenes_servicio.estado
+                  END,
+                  tecnico = COALESCE(NEW.tecnico, ordenes_servicio.tecnico),
+                  has_pdf = COALESCE(NEW.has_pdf, ordenes_servicio.has_pdf),
+                  pdf_url = COALESCE(NEW.pdf_url, ordenes_servicio.pdf_url),
+                  modalidad = COALESCE(NEW.modalidad, ordenes_servicio.modalidad),
+                  sync_status = COALESCE(NEW.sync_status, ordenes_servicio.sync_status),
+                  sync_check_status = CASE
+                    WHEN NEW.sync_status IN ('Enviada', 'ENVIADA', 'Sincronizado', 'SINCRONIZADO') THEN 'SUBIDA_SERVIDOR'
+                    WHEN NEW.sync_check_status IS NOT NULL AND NEW.sync_check_status != '' THEN NEW.sync_check_status
+                    ELSE ordenes_servicio.sync_check_status
+                  END,
+                  needs_push = COALESCE(NEW.needs_push, ordenes_servicio.needs_push),
+                  is_dirty = CASE
+                    WHEN NEW.needs_push = 0 OR NEW.sync_status IN ('Enviada', 'ENVIADA', 'Sincronizado', 'SINCRONIZADO') THEN 0
+                    ELSE ordenes_servicio.is_dirty
+                  END,
+                  is_synced = CASE
+                    WHEN NEW.sync_status IN ('Enviada', 'ENVIADA', 'Sincronizado', 'SINCRONIZADO') THEN 1
+                    ELSE ordenes_servicio.is_synced
+                  END,
+                  updated_at = datetime('now')
+                WHERE folio_os = OLD.folio_os OR folio_os = OLD.folio OR folio = OLD.folio;
+              END;
+            ''');
           } catch (_) {}
 
           // Backfill de id_tecnico en ordenes_servicio si está en NULL
@@ -258,6 +357,10 @@ class LocalDbService {
                 [entry.value, '%${entry.key}%'],
               );
             }
+            // Actualización correctiva para orden OS-26-701
+            await db.rawUpdate(
+              "UPDATE ordenes_servicio SET id_tecnico = 9, tecnico = 'Néstor Arias', sync_status = 'Asignada' WHERE (folio_os = 'OS-26-701' OR folio = 'OS-26-701')",
+            );
           } catch (e) {
             debugPrint('[LocalDB] Backfill id_tecnico error: $e');
           }
@@ -431,7 +534,10 @@ class LocalDbService {
         final tecnico   = (raw['tecnico'] ?? raw['tecnico_nombre'] ?? '').toString();
         final tipoSvc   = (raw['tipo_servicio'] ?? raw['tipo_servicio_nombre'] ?? raw['tipo'] ?? '').toString().trim();
         final idTipoSvc = _toIntOrNull(raw['id_tipo_servicio'] ?? raw['tipo_servicio_id']);
-        final direccion = (raw['direccion'] ?? raw['direccion_cliente'] ?? raw['sucursal_direccion'] ?? raw['planta'] ?? '').toString();
+        final direccion = (raw['direccion'] ?? raw['direccion_cliente'] ?? raw['sucursal_direccion'] ?? raw['planta'] ?? raw['domicilio'] ?? '').toString();
+
+        final String finalSucursal = sucursal.trim().isNotEmpty ? sucursal.trim() : (direccion.trim().isNotEmpty ? direccion.trim() : '');
+        final String finalDireccion = direccion.trim().isNotEmpty ? direccion.trim() : (sucursal.trim().isNotEmpty ? sucursal.trim() : '');
 
         final rawIdTec = _toIntOrNull(raw['id_tecnico'] ?? raw['tecnico_id']);
         int? idTecnicoFinal = rawIdTec;
@@ -449,17 +555,32 @@ class LocalDbService {
           else if (tecLow.contains('iván') || tecLow.contains('ivan')) idTecnicoFinal = 2;
         }
 
+        final String modNorm = normalizarModalidad(raw['modalidad']);
+
+        final String? pdfUrlRaw = raw['pdf_url']?.toString().trim();
+        final String? pdfB64Raw = (raw['pdf_base64'] ?? raw['pdf_b64'] ?? raw['pdf_b64_local'])?.toString().trim();
+        final String? pdfPathRaw = (raw['pdf_path_local'] ?? raw['pdf_path'])?.toString().trim();
+
+        final bool hasPdfRemoto = (pdfUrlRaw != null && pdfUrlRaw.isNotEmpty && !pdfUrlRaw.contains('null') && !pdfUrlRaw.contains('404')) ||
+                                  (pdfB64Raw != null && pdfB64Raw.isNotEmpty && pdfB64Raw.length > 100) ||
+                                  (pdfPathRaw != null && pdfPathRaw.isNotEmpty && File(pdfPathRaw).existsSync() && File(pdfPathRaw).lengthSync() > 500);
+
+        final bool esCerrada = hasPdfRemoto;
+        final String finalEstatus = esCerrada ? 'Cerrado' : 'Asignada';
+        final String finalEstado = esCerrada ? 'COMPLETADA_DIGITAL' : 'PROCESO';
+
         final mapped = <String, dynamic>{
           'folio_os':          folio,
           'folio':             folio,
           'id_tecnico':        idTecnicoFinal,
-          'estado':            (raw['estado'] ?? raw['estatus'] ?? 'PROCESO').toString(),
-          'estatus':           (raw['estado'] ?? raw['estatus'] ?? 'PROCESO').toString(),
-          'modalidad':         (raw['modalidad'] ?? 'DIGITAL').toString(),
+          'estado':            finalEstado,
+          'estatus':           finalEstatus,
+          'has_pdf':           esCerrada ? 1 : 0,
+          'modalidad':         modNorm,
           'fecha':             raw['fecha']?.toString(),
           'cliente':           cliente,
-          'sucursal':          sucursal,
-          'direccion':         direccion,
+          'sucursal':          finalSucursal,
+          'direccion':         finalDireccion,
           'tecnico':           tecnico,
           'tipo_servicio':     tipoSvc,
           if (idTipoSvc != null && idTipoSvc > 0) 'id_tipo_servicio': idTipoSvc,
@@ -478,6 +599,8 @@ class LocalDbService {
           'div_verificacion':  (raw['div_verificacion'] ?? raw['folio_dve'] ?? raw['numero_dve'] ?? raw['div_ver'])?.toString(),
           'numero_cca':        (raw['numero_cca'] ?? raw['cca'])?.toString(),
           'holograma_anterior': raw['holograma_anterior']?.toString(),
+          'usa_sustitucion': _toBoolInt(raw['usa_sustitucion']) > 0 || (raw['datos_tecnicos_json'] != null && raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion":true')) || (raw['datos_tecnicos_json'] != null && raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion": true')) ? 1 : 0,
+          'factor_sustitucion': _toDouble(raw['factor_sustitucion']),
           'holograma_actualizado': (raw['holograma_actualizado'] ?? raw['holograma_nuevo'])?.toString(),
           'pdf_url':           raw['pdf_url']?.toString(),
           'instrumento_capacidad': raw['instrumento_capacidad']?.toString(),
@@ -495,7 +618,7 @@ class LocalDbService {
           'firma_cliente':     (raw['firma_cliente'] ?? raw['firma_cliente_b64'])?.toString(),
           'pdf_path_local':    raw['pdf_path_local']?.toString(),
           'pdf_b64_local':     (raw['pdf_b64_local'] ?? raw['pdf_b64'])?.toString(),
-          'sync_check_status': raw['sync_check_status']?.toString() ?? 'ASIGNADA',
+          'sync_check_status': esCerrada ? 'SUBIDA_SERVIDOR' : (raw['sync_check_status']?.toString() ?? 'ASIGNADA'),
           'sync_status':       raw['sync_status']?.toString() ?? 'SINCRONIZADO',
           'is_synced':         1,
           'is_dirty':          0,
@@ -509,8 +632,15 @@ class LocalDbService {
           }
         }
 
-        batch.insert('ordenes_servicio', safeRow,
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        batch.insert('ordenes_servicio', safeRow, conflictAlgorithm: ConflictAlgorithm.replace);
+        final dt = raw['datos_tecnicos_json'];
+        if (dt != null && dt.toString().trim() != '{}' && dt.toString().trim().isNotEmpty) {
+           batch.insert('borradores_captura', {
+             'folio_os': folio,
+             'draft_json': dt.toString(),
+             'updated_at': DateTime.now().toUtc().toIso8601String()
+           }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
         count++;
       }
       await batch.commit(noResult: true);
@@ -525,6 +655,37 @@ class LocalDbService {
       }
     }
     return count;
+  }
+
+  /// Actualiza estrictamente el estatus remoto, PDF y técnico de una orden
+  Future<void> updateEstatusYPdfRemoto({
+    required String folio,
+    required String tecnico,
+    required String estatus,
+    required String estado,
+    required int hasPdf,
+    required String modalidad,
+  }) async {
+    final db = await _ensureInit();
+    final updateMap = <String, dynamic>{
+      if (tecnico.isNotEmpty) 'tecnico': tecnico,
+      'estatus': estatus,
+      'estado': estado,
+      'has_pdf': hasPdf,
+      'modalidad': modalidad,
+      'sync_status': 'Sincronizado',
+      'is_synced': 1,
+    };
+    try {
+      await db.update(
+        'ordenes_servicio',
+        updateMap,
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [folio, folio],
+      );
+    } catch (e) {
+      debugPrint('[LocalDB] updateEstatusYPdfRemoto error: $e');
+    }
   }
 
   /// Reconciliación única: re-encola para PUSH las órdenes cerradas en la tablet
@@ -581,9 +742,15 @@ class LocalDbService {
 
   /// Lógica unificada para determinar si una orden cuenta con documento generado/adjunto o metrología
   bool tieneDocumento(Map<String, dynamic> o) {
+    final String estatus = (o['estatus'] ?? o['estado'] ?? '').toString().toUpperCase().trim();
+    final bool isCerrado = estatus == 'CERRADO' || estatus == 'CERRADA' || estatus == 'COMPLETADA' || estatus == 'COMPLETADA_DIGITAL' || estatus == 'COMPLETADA_FISICA' || estatus == 'FIRMADA';
+    if (isCerrado) return true;
+
     final String? pdfPath = o['pdf_path']?.toString() ?? o['pdf_path_local']?.toString();
     final String? pdfUrl = o['pdf_url']?.toString();
     final bool hasPdfFlag = (o['has_pdf'] == 1 || o['has_pdf'] == '1' || o['has_pdf'] == true || o['pdf_subido'] == 1);
+    if (hasPdfFlag) return true;
+
     final metro = o['metrologia_data'] ?? o['rep_json'] ?? o['exac_json'];
     final bool tieneMetrologia = metro != null && 
                                  metro.toString().trim().isNotEmpty && 
@@ -604,9 +771,9 @@ class LocalDbService {
       fileExiste = checkPdfExistsOnDiskSync(folioStr, pdfPath);
     }
     
-    final bool hasB64 = (o['pdf_b64_local']?.toString().length ?? 0) > 100;
+    final bool hasB64 = (o['pdf_b64_local']?.toString().length ?? 0) > 100 || (o['pdf_base64']?.toString().length ?? 0) > 100;
     
-    return hasPdfFlag || (pdfUrl != null && pdfUrl.isNotEmpty) || tieneMetrologia || fileExiste || hasB64;
+    return isCerrado || hasPdfFlag || (pdfUrl != null && pdfUrl.isNotEmpty) || tieneMetrologia || fileExiste || hasB64;
   }
 
   /// Verifica síncronamente si el archivo PDF de un folio existe en el disco usando la ruta base de documentos.
@@ -707,12 +874,15 @@ class LocalDbService {
       return false;
     }
 
-    final sucursal = (data['sucursal_nombre'] ?? data['sucursal'] ?? '').toString();
-    final cliente  = (data['cliente'] ?? data['cliente_nombre'] ?? '').toString();
-    final tecnico  = (data['tecnico'] ?? data['tecnico_nombre'] ?? '').toString();
+    final sucursal = (data['sucursal_nombre'] ?? data['sucursal'] ?? '').toString().trim();
+    final cliente  = (data['cliente'] ?? data['cliente_nombre'] ?? '').toString().trim();
+    final tecnico  = (data['tecnico'] ?? data['tecnico_nombre'] ?? '').toString().trim();
     final tipoSvc  = (data['tipo_servicio'] ?? data['tipo_servicio_nombre'] ?? data['tipo'] ?? '').toString().trim();
     final idTipoSvc = _toIntOrNull(data['id_tipo_servicio'] ?? data['tipo_servicio_id']);
-    final direccion = (data['direccion'] ?? data['direccion_cliente'] ?? data['sucursal_direccion'] ?? data['planta'] ?? '').toString();
+    final direccion = (data['direccion'] ?? data['direccion_cliente'] ?? data['sucursal_direccion'] ?? data['planta'] ?? data['domicilio'] ?? '').toString().trim();
+
+    final String finalSucursal = sucursal.isNotEmpty ? sucursal : (direccion.isNotEmpty ? direccion : '');
+    final String finalDireccion = direccion.isNotEmpty ? direccion : (sucursal.isNotEmpty ? sucursal : '');
 
     final rawIdTec = _toIntOrNull(data['id_tecnico'] ?? data['tecnico_id']);
     int? idTecnicoFinal = rawIdTec;
@@ -730,15 +900,17 @@ class LocalDbService {
       else if (tecLow.contains('iván') || tecLow.contains('ivan')) idTecnicoFinal = 2;
     }
 
+    final String modNorm = normalizarModalidad(data['modalidad']);
+
     final row = <String, dynamic>{
       'folio_os':          folio,
       'id_tecnico':        idTecnicoFinal,
       'estado':            data['estado']?.toString() ?? 'PROCESO',
-      'modalidad':         data['modalidad']?.toString() ?? 'DIGITAL',
+      'modalidad':         modNorm,
       'fecha':             data['fecha']?.toString(),
       'cliente':           cliente,
-      'sucursal':          sucursal,
-      'direccion':         direccion,
+      'sucursal':          finalSucursal,
+      'direccion':         finalDireccion,
       'tecnico':           tecnico,
       'tipo_servicio':     tipoSvc,
       if (idTipoSvc != null && idTipoSvc > 0) 'id_tipo_servicio': idTipoSvc,
@@ -816,7 +988,6 @@ class LocalDbService {
         final int localIsDirty = _toInt(ex['is_dirty'], 0);
         final String? pdfPath = ex['pdf_path_local'] as String?;
         final String? pdfB64 = ex['pdf_b64_local'] as String?;
-        final String syncCheckSt = (ex['sync_check_status'] as String? ?? '').toUpperCase().trim();
         final String exEstatus = (ex['estatus'] as String? ?? '').toUpperCase().trim();
         final String exEstado = (ex['estado'] as String? ?? '').toUpperCase().trim();
 
@@ -828,7 +999,7 @@ class LocalDbService {
         final bool hasPdfPath = pdfPath != null && pdfPath.isNotEmpty;
         final bool hasPdfB64 = pdfB64 != null && pdfB64.isNotEmpty;
         final bool pdfDiskExists = await checkPdfExistsOnDisk(folio, pdfPath);
-        final bool hasLocalChanges = localIsDirty == 1 || (syncCheckSt != 'SUBIDA_SERVIDOR' && syncCheckSt != 'AUDITADA_ADMIN' && syncCheckSt != 'ABIERTO');
+        final bool hasLocalChanges = localIsDirty == 1;
 
         final bool localIsClosed = statusIsClosed || hasPdfPath || hasPdfB64 || pdfDiskExists || hasLocalChanges;
 
@@ -843,6 +1014,8 @@ class LocalDbService {
             validPdfPath = await resolvePdfPathFromDisk(folio);
           }
 
+          final String modSafe = normalizarModalidad(data['modalidad'] ?? ex['modalidad']);
+
           final safeUpdate = <String, dynamic>{
             'cliente': cliente.isNotEmpty ? cliente : ex['cliente'],
             'sucursal': sucursal.isNotEmpty ? sucursal : ex['sucursal'],
@@ -851,6 +1024,7 @@ class LocalDbService {
             'tipo_servicio': tipoSvc.isNotEmpty ? tipoSvc : ex['tipo_servicio'],
             if (idTipoSvc != null && idTipoSvc > 0) 'id_tipo_servicio': idTipoSvc,
             if (idTecnicoFinal != null && idTecnicoFinal > 0) 'id_tecnico': idTecnicoFinal,
+            'modalidad': modSafe,
 
             // Mantener intactos: estatus 'Cerrado', estado local, mediciones, firmas y pdf_path_local
             'estado': (ex['estado'] != null && ex['estado'].toString().isNotEmpty && ex['estado'] != 'PROCESO')
@@ -1021,55 +1195,36 @@ class LocalDbService {
     int? idTecnico,
   }) async {
     final db = await _ensureInit();
-    final nombreLow = (nombreTecnico ?? '').toLowerCase().trim();
+    final userNorm = normalizarTexto(nombreTecnico ?? '');
 
     // Admin: (idTecnico null o <= 0 Y nombreTecnico vacío) -> devuelve todas
-    if ((idTecnico == null || idTecnico <= 0) && nombreLow.isEmpty) {
+    if ((idTecnico == null || idTecnico <= 0) && userNorm.isEmpty) {
       return await db.rawQuery(
         "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
       );
     }
 
-    // Regla estricta de aislamiento por técnico:
-    // La consulta base SIEMPRE debe incluir WHERE LOWER(tecnico) = LOWER('${usuario.nombre}')
-    if (nombreLow.isNotEmpty) {
-      final likePattern = '%$nombreLow%';
-      if (idTecnico != null && idTecnico > 0) {
-        return await db.rawQuery(
-          """
-          SELECT * FROM ordenes_servicio 
-          WHERE LOWER(TRIM(COALESCE(tecnico, ''))) = LOWER(?) 
-             OR LOWER(TRIM(COALESCE(tecnico, ''))) LIKE LOWER(?)
-             OR id_tecnico = ?
-          ORDER BY local_id DESC, fecha DESC
-          """,
-          [nombreLow, likePattern, idTecnico],
-        );
-      } else {
-        return await db.rawQuery(
-          """
-          SELECT * FROM ordenes_servicio 
-          WHERE LOWER(TRIM(COALESCE(tecnico, ''))) = LOWER(?)
-             OR LOWER(TRIM(COALESCE(tecnico, ''))) LIKE LOWER(?)
-          ORDER BY local_id DESC, fecha DESC
-          """,
-          [nombreLow, likePattern],
-        );
+    final all = await db.rawQuery(
+      "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
+    );
+    return all.where((o) {
+      final oId = int.tryParse(o['id_tecnico']?.toString() ?? '');
+      if (oId != null && oId > 0 && idTecnico != null && idTecnico > 0) {
+        if (oId == idTecnico) return true;
+        return false;
       }
-    }
-
-    if (idTecnico != null && idTecnico > 0) {
-      return await db.rawQuery(
-        """
-        SELECT * FROM ordenes_servicio 
-        WHERE id_tecnico = ?
-        ORDER BY local_id DESC, fecha DESC
-        """,
-        [idTecnico],
-      );
-    }
-
-    return [];
+      final bool esMiOrden = normalizarTexto(o['tecnico']?.toString() ?? '') == userNorm ||
+                             normalizarTexto(o['tecnico_nombre']?.toString() ?? '') == userNorm;
+      if (esMiOrden) return true;
+      final tecNorm = normalizarTexto(o['tecnico']?.toString() ?? o['tecnico_nombre']?.toString() ?? '');
+      if (tecNorm.isNotEmpty && userNorm.isNotEmpty) {
+        final tp = tecNorm.split(RegExp(r'\s+'));
+        final mp = userNorm.split(RegExp(r'\s+'));
+        if (tp.length >= 2 && mp.length >= 2 && tp[0] == mp[0] && tp[1] != mp[1]) return false;
+        return tecNorm.contains(userNorm) || userNorm.contains(tecNorm);
+      }
+      return false;
+    }).toList();
   }
 
   // ── Repositorio de Calibraciones (consulta read-only) ──────────────────────
@@ -1118,6 +1273,9 @@ class LocalDbService {
       for (final r in rows) {
         final folio = (r['folio_os'] ?? '').toString().trim();
         if (folio.isEmpty) continue;
+        final tipo = (r['tipo_servicio'] ?? '').toString().toLowerCase();
+        // Estricto: Solo Calibración, Calibración + Ajuste, Calibración + Ajuste + Inspección
+        if (!tipo.contains('calibraci')) continue;
         final tienePdf = r['tiene_pdf'];
         await txn.insert(
           'calibraciones_consulta',
@@ -1150,19 +1308,16 @@ class LocalDbService {
         where: 'folio_os = ?', whereArgs: [folio]);
   }
 
-  /// Órdenes de calibración/ajuste concluidas (Cerrado / Completado) para
+  /// Órdenes de calibración concluidas (Cerrado / Completado) para
   /// consulta. Combina la caché del servidor con las propias órdenes cerradas
   /// locales (la caché tiene prioridad por folio). Solo lectura.
+  /// Incluye ÚNICAMENTE registros cuyo tipo_servicio contenga 'calibraci'.
   Future<List<Map<String, dynamic>>> getCalibracionesFinalizadasConsulta() async {
     final db = await _ensureInit();
     await _ensureCalibracionesTable(db);
 
     final cache = await db.rawQuery('''
       SELECT * FROM calibraciones_consulta
-      WHERE (
-          LOWER(COALESCE(tipo_servicio, '')) LIKE '%calibraci%'
-          OR LOWER(COALESCE(tipo_servicio, '')) LIKE '%ajuste%'
-        )
     ''');
 
     final propias = await db.rawQuery('''
@@ -1176,10 +1331,6 @@ class LocalDbService {
           LOWER(COALESCE(estatus, '')) IN ('cerrado', 'cerrada', 'completado', 'completada')
           OR UPPER(COALESCE(estado, '')) IN ('CERRADO', 'CERRADA', 'COMPLETADA',
              'COMPLETADO', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'ESCANEADA', 'FIRMADA')
-        )
-        AND (
-          LOWER(COALESCE(tipo_servicio, '')) LIKE '%calibraci%'
-          OR LOWER(COALESCE(tipo_servicio, '')) LIKE '%ajuste%'
         )
     ''');
 
@@ -1241,10 +1392,7 @@ class LocalDbService {
 
       // 2. Para órdenes restantes, verificar que el nombre del técnico coincida
       if (currentNombre != null && currentNombre.trim().isNotEmpty) {
-        String _norm(String s) => s
-            .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
-            .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ü','u');
-        final nombreLow = _norm(currentNombre.toLowerCase().trim());
+        final userNorm = normalizarTexto(currentNombre);
         final rows = await db.query(
           'ordenes_servicio',
           columns: ['local_id', 'folio_os', 'tecnico', 'is_dirty', 'id_tecnico'],
@@ -1252,8 +1400,7 @@ class LocalDbService {
         );
 
         for (final r in rows) {
-          final tecRaw = (r['tecnico'] as String? ?? '').toLowerCase().trim();
-          final tecNorm = _norm(tecRaw);
+          final tecNorm = normalizarTexto(r['tecnico']?.toString() ?? '');
           final rId = int.tryParse(r['id_tecnico']?.toString() ?? '');
           final localId = r['local_id'] as int;
 
@@ -1261,12 +1408,14 @@ class LocalDbService {
           if (currentIdTecnico != null && currentIdTecnico > 0 && rId == currentIdTecnico) {
             continue;
           }
-          // Si coincide por nombre completo exacto, conservar
-          if (tecNorm.isNotEmpty && tecNorm == nombreLow) continue;
+          // Si coincide por nombre normalizado exacto, conservar
+          if (tecNorm.isNotEmpty && tecNorm == userNorm) continue;
+
+          if (tecNorm.isEmpty) continue;
 
           // Verificación con apellido: si primer nombre igual pero apellido distinto → purgar
           final tecParts = tecNorm.split(RegExp(r'\s+'));
-          final myParts  = nombreLow.split(RegExp(r'\s+'));
+          final myParts  = userNorm.split(RegExp(r'\s+'));
           if (tecParts.length >= 2 && myParts.length >= 2 &&
               tecParts[0] == myParts[0] && tecParts[1] != myParts[1]) {
             // Mismo primer nombre, apellido distinto → es otro técnico → purgar
@@ -1276,7 +1425,7 @@ class LocalDbService {
           }
 
           // Coincidencia parcial de nombre completo
-          if (tecNorm.isNotEmpty && (tecNorm.contains(nombreLow) || nombreLow.contains(tecNorm))) {
+          if (tecNorm.contains(userNorm) || userNorm.contains(tecNorm)) {
             continue; // conservar
           }
 
@@ -1924,19 +2073,24 @@ class LocalDbService {
     required String firmaCliBase64,
     String nombreIng = '',
     String puestoIng = '',
+    String? correoCliente,
   }) async {
     final db = await _ensureInit();
     final whereClause = (localId > 0) ? 'local_id = ?' : 'folio_os = ?';
     final whereArg = (localId > 0) ? localId : folio;
+    final Map<String, dynamic> upd = {
+      'firma_tecnico': firmaTecBase64,
+      'firma_cliente': firmaCliBase64,
+      'nombre_ing':    nombreIng,
+      'puesto_ing':    puestoIng,
+      'is_dirty':      1,
+    };
+    if (correoCliente != null && correoCliente.trim().isNotEmpty) {
+      upd['correo_cliente'] = correoCliente.trim();
+    }
     await db.update(
       'ordenes_servicio',
-      {
-        'firma_tecnico': firmaTecBase64,
-        'firma_cliente': firmaCliBase64,
-        'nombre_ing':    nombreIng,
-        'puesto_ing':    puestoIng,
-        'is_dirty':      1,
-      },
+      upd,
       where: whereClause, whereArgs: [whereArg],
     );
     await db.insert('firmas_pendientes', {
@@ -1947,6 +2101,195 @@ class LocalDbService {
       'puesto_ing':    puestoIng,
       'sincronizado':  0,
     });
+  }
+
+  /// Actualiza el estado de envío de correo en la base de datos SQLite local
+  Future<void> updateEmailStatus(String folio, {required bool enviado, String? status, String? correo}) async {
+    final db = await _ensureInit();
+    await _ensureColaCorreos(db);
+    final String emailSt = status ?? (enviado ? 'enviado' : 'cola');
+    final Map<String, dynamic> data = {
+      'email_enviado': enviado ? 1 : 0,
+      'email_status': emailSt,
+      if (enviado) 'fecha_envio_email': DateTime.now().toIso8601String(),
+    };
+    if (correo != null && correo.trim().isNotEmpty) {
+      data['correo_cliente'] = correo.trim();
+    }
+    await db.update(
+      'ordenes_servicio',
+      data,
+      where: 'folio_os = ? OR folio = ?',
+      whereArgs: [folio, folio],
+    );
+  }
+
+  /// Busca folios u órdenes en SQLite local por lote_id o coincidencia de cliente y fecha.
+  Future<List<Map<String, dynamic>>> obtenerFoliosPorLoteOCliente({
+    String? loteId,
+    String? cliente,
+    String? fecha,
+  }) async {
+    final db = await _ensureInit();
+    final cleanLote = (loteId ?? '').trim();
+    final cleanCli = (cliente ?? '').trim();
+    final cleanFecha = (fecha ?? '').split('T').first.trim();
+
+    if (cleanLote.isNotEmpty &&
+        !cleanLote.startsWith('grp_') &&
+        !cleanLote.startsWith('LOTE-') &&
+        !cleanLote.startsWith('solo_')) {
+      final rows = await db.query(
+        'ordenes_servicio',
+        where: 'id_lote = ? OR lote = ?',
+        whereArgs: [cleanLote, cleanLote],
+      );
+      if (rows.isNotEmpty) return rows;
+    }
+
+    if (cleanCli.isNotEmpty) {
+      if (cleanFecha.isNotEmpty) {
+        final rows = await db.query(
+          'ordenes_servicio',
+          where: 'cliente LIKE ? AND (fecha_servicio LIKE ? OR fecha_os LIKE ? OR fecha LIKE ?)',
+          whereArgs: ['%$cleanCli%', '%$cleanFecha%', '%$cleanFecha%', '%$cleanFecha%'],
+        );
+        if (rows.isNotEmpty) return rows;
+      }
+      final rowsCli = await db.query(
+        'ordenes_servicio',
+        where: 'cliente LIKE ?',
+        whereArgs: ['%$cleanCli%'],
+      );
+      if (rowsCli.isNotEmpty) return rowsCli;
+    }
+    return [];
+  }
+
+  Future<List<String>> obtenerListaFoliosPorLoteOCliente({
+    String? loteId,
+    String? cliente,
+    String? fecha,
+  }) async {
+    final rows = await obtenerFoliosPorLoteOCliente(loteId: loteId, cliente: cliente, fecha: fecha);
+    return rows.map((r) => ((r['folio_os'] ?? r['folio']) ?? '').toString().trim()).where((f) => f.isNotEmpty).toList();
+  }
+
+  // ── Cola local offline de correos (SQLite) ────────────────────────────────
+  bool _colaCorreosReady = false;
+
+  Future<void> _ensureColaCorreos(Database db) async {
+    if (_colaCorreosReady) return;
+    await db.execute("""
+      CREATE TABLE IF NOT EXISTS cola_correos (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        tipo         TEXT NOT NULL,
+        referencia   TEXT NOT NULL,
+        correo       TEXT NOT NULL,
+        folios       TEXT,
+        email_status TEXT DEFAULT 'pendiente',
+        intentos     INTEGER DEFAULT 0,
+        ultimo_error TEXT,
+        created_at   TEXT,
+        updated_at   TEXT
+      )
+    """);
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+      final cols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+      if (!cols.contains('email_status')) {
+        await db.execute("ALTER TABLE ordenes_servicio ADD COLUMN email_status TEXT");
+      }
+    } catch (e) {
+      debugPrint('[LocalDB] email_status column: $e');
+    }
+    _colaCorreosReady = true;
+  }
+
+  /// Encola un envío de correo (orden o lote) con email_status IN ('pendiente','cola').
+  /// Si ya existe uno pendiente para la misma referencia, se actualiza (sin duplicar).
+  Future<void> encolarCorreo({
+    required String tipo,
+    required String referencia,
+    required String correo,
+    List<String> folios = const [],
+  }) async {
+    final db = await _ensureInit();
+    await _ensureColaCorreos(db);
+    final now = DateTime.now().toIso8601String();
+    final listaFolios = folios.isNotEmpty ? folios : [referencia];
+    final existing = await db.query(
+      'cola_correos',
+      where: "tipo = ? AND referencia = ? AND email_status IN ('pendiente','cola')",
+      whereArgs: [tipo, referencia],
+      limit: 1,
+    );
+    final data = <String, dynamic>{
+      'tipo': tipo,
+      'referencia': referencia,
+      'correo': correo.trim(),
+      'folios': listaFolios.join(','),
+      'email_status': 'cola',
+      'updated_at': now,
+    };
+    if (existing.isNotEmpty) {
+      await db.update('cola_correos', data, where: 'id = ?', whereArgs: [existing.first['id']]);
+    } else {
+      data['created_at'] = now;
+      data['intentos'] = 0;
+      await db.insert('cola_correos', data);
+    }
+    for (final f in listaFolios) {
+      await db.update(
+        'ordenes_servicio',
+        {'correo_cliente': correo.trim(), 'email_enviado': 0, 'email_status': 'cola'},
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [f, f],
+      );
+    }
+    debugPrint('[LocalDB] 📥 Correo encolado ($tipo $referencia → $correo) folios: $listaFolios');
+  }
+
+  /// Envíos pendientes de la cola (FIFO).
+  Future<List<Map<String, dynamic>>> getCorreosPendientes() async {
+    final db = await _ensureInit();
+    await _ensureColaCorreos(db);
+    return db.query('cola_correos', where: "email_status IN ('pendiente','cola')", orderBy: 'id ASC');
+  }
+
+  Future<int> contarCorreosPendientes() async {
+    final db = await _ensureInit();
+    await _ensureColaCorreos(db);
+    final r = await db.rawQuery("SELECT COUNT(*) AS c FROM cola_correos WHERE email_status IN ('pendiente','cola')");
+    return _toInt(r.first['c'], 0);
+  }
+
+  /// Marca el envío como despachado y las órdenes como enviadas (email_enviado = 1).
+  Future<void> marcarCorreoEnviado(int id, List<String> folios, String correo) async {
+    final db = await _ensureInit();
+    await _ensureColaCorreos(db);
+    final now = DateTime.now().toIso8601String();
+    await db.update('cola_correos', {'email_status': 'enviado', 'ultimo_error': null, 'updated_at': now},
+        where: 'id = ?', whereArgs: [id]);
+    for (final f in folios) {
+      await db.update(
+        'ordenes_servicio',
+        {'email_enviado': 1, 'email_status': 'enviado', 'fecha_envio_email': now, 'correo_cliente': correo},
+        where: 'folio_os = ? OR folio = ?',
+        whereArgs: [f, f],
+      );
+    }
+  }
+
+  /// Registra un intento fallido. Con [descartar] = true sale de la cola (estado 'error').
+  Future<void> marcarCorreoFallido(int id, String error, {bool descartar = false}) async {
+    final db = await _ensureInit();
+    await _ensureColaCorreos(db);
+    await db.rawUpdate(
+      "UPDATE cola_correos SET intentos = COALESCE(intentos,0) + 1, ultimo_error = ?, updated_at = ?, "
+      "email_status = CASE WHEN ? = 1 THEN 'error' ELSE email_status END WHERE id = ?",
+      [error, DateTime.now().toIso8601String(), descartar ? 1 : 0, id],
+    );
   }
 
   Future<void> markOsSincronizada(int localId, int newVersion, {String? folio}) async {
@@ -2165,8 +2508,41 @@ class LocalDbService {
     final db = await _ensureInit();
     return await db.rawQuery('''
       SELECT * FROM ordenes_servicio 
-      WHERE (estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA'))
-        AND (pdf_subido IS NULL OR pdf_subido = 0)
+      WHERE (
+        estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA')
+        OR estatus = 'Cerrado'
+        OR has_pdf = 1
+        OR (pdf_path_local IS NOT NULL AND pdf_path_local != '')
+        OR (pdf_path IS NOT NULL AND pdf_path != '')
+      )
+      AND (pdf_subido IS NULL OR pdf_subido = 0)
+    ''');
+  }
+
+  /// Obtiene órdenes completadas/cerradas cuyo correo electrónico está pendiente de envío
+  /// y ya cuentan con correo de cliente válido para ser despachadas al sincronizar.
+  Future<List<Map<String, dynamic>>> getOsParaEnviarEmail() async {
+    final db = await _ensureInit();
+    return await db.rawQuery('''
+      SELECT * FROM ordenes_servicio 
+      WHERE (
+        email_status IN ('cola', 'pendiente')
+        OR (
+          (email_enviado IS NULL OR email_enviado = 0)
+          AND (
+            estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA')
+            OR estatus IN ('Cerrado', 'FIRMADA', 'Cerrada')
+            OR has_pdf = 1
+            OR pdf_subido = 1
+          )
+        )
+      )
+      AND correo_cliente IS NOT NULL
+      AND TRIM(correo_cliente) != ''
+      AND LOWER(TRIM(correo_cliente)) != 'ivancolin1207@gmail.com'
+      AND LOWER(TRIM(correo_cliente)) != 'sin registrar'
+      AND LOWER(TRIM(correo_cliente)) != 'none'
+      AND LOWER(TRIM(correo_cliente)) != 'null'
     ''');
   }
 
@@ -2186,12 +2562,31 @@ class LocalDbService {
     return await db.rawQuery('''
       SELECT * FROM ordenes_servicio 
       WHERE is_dirty = 1 
-         OR sync_status = 'PENDIENTE'
-         OR sync_status = 'PENDIENTE_ACTUALIZAR'
+         OR needs_push = 1
+         OR UPPER(TRIM(COALESCE(sync_status, ''))) IN ('PENDIENTE', 'PENDIENTE_ACTUALIZAR', 'PENDIENTE_SUBIDA')
          OR (pdf_path_local IS NOT NULL AND (pdf_subido = 0 OR pdf_subido IS NULL) AND (estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA') OR estatus = 'Cerrado'))
          OR (sync_check_status IN ('RECIBIDA_TABLET', 'PENDIENTE_SUBIDA', 'ASIGNADA') 
              AND (estado IN ('COMPLETADA', 'COMPLETADA_DIGITAL', 'CERRADA', 'CERRADO', 'FIRMADA') OR estatus = 'Cerrado'))
     ''');
+  }
+
+  /// Forzar reenvío de órdenes cerradas:
+  /// Actualiza en SQLite local sync_status = 'PENDIENTE', needs_push = 1, is_dirty = 1, pdf_subido = 0
+  /// para todas las órdenes cerradas y retorna cuántas fueron encoladas.
+  Future<int> forzarReenvioOrdenesCerradas() async {
+    final db = await _ensureInit();
+    final count = await db.rawUpdate('''
+      UPDATE ordenes_servicio
+      SET sync_status = 'PENDIENTE',
+          needs_push = 1,
+          is_dirty = 1,
+          pdf_subido = 0,
+          sync_check_status = 'PENDIENTE_SUBIDA'
+      WHERE UPPER(TRIM(COALESCE(estatus, ''))) IN ('CERRADO', 'CERRADA', 'COMPLETADA', 'COMPLETADA_DIGITAL')
+         OR UPPER(TRIM(COALESCE(estado, ''))) IN ('CERRADO', 'CERRADA', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'FIRMADA')
+    ''');
+    debugPrint('[LocalDB] 🚀 Se marcaron $count órdenes cerradas para reenvío obligatorio');
+    return count;
   }
 
   /// Retorna todas las OSs que tengan un `sync_status` específico.
@@ -2205,6 +2600,34 @@ class LocalDbService {
       where: 'sync_status = ?',
       whereArgs: [status],
     );
+  }
+
+  /// Comprueba si existen lecturas de metrología, firmas o archivo PDF localmente guardados para este folio.
+  Future<bool> hasLecturasGuardadas(String folio) async {
+    final db = await _ensureInit();
+    final rows = await db.query(
+      'ordenes_servicio',
+      columns: ['rep_json', 'exc_json', 'exac_json', 'firma_tecnico', 'firma_cliente', 'pdf_path_local', 'pdf_b64_local'],
+      where: 'folio_os = ? OR folio = ?',
+      whereArgs: [folio, folio],
+      limit: 1,
+    );
+    if (rows.isEmpty) return false;
+    final r = rows.first;
+    for (final col in ['rep_json', 'exc_json', 'exac_json', 'firma_tecnico', 'firma_cliente', 'pdf_b64_local']) {
+      final val = r[col]?.toString().trim() ?? '';
+      if (val.isNotEmpty && val != '{}' && val != '[]' && val != 'null') {
+        return true;
+      }
+    }
+    final pdfLocal = r['pdf_path_local']?.toString().trim() ?? '';
+    if (pdfLocal.isNotEmpty) {
+      try {
+        final f = File(pdfLocal);
+        if (f.existsSync() && f.lengthSync() > 500) return true;
+      } catch (_) {}
+    }
+    return false;
   }
 
   Future<List<Map<String, dynamic>>> getFirmasPendientes() async {
@@ -2332,6 +2755,34 @@ class LocalDbService {
     } catch (e) {
       debugPrint('[LocalDB] Error al guardar contacto de planta: $e');
     }
+  }
+
+  /// Obtiene la dirección histórica conocida de un cliente en la base local
+  Future<String?> getDireccionCliente(String cliente) async {
+    final cli = cliente.trim();
+    if (cli.isEmpty) return null;
+    try {
+      final db = await _ensureInit();
+      final res = await db.rawQuery('''
+        SELECT COALESCE(NULLIF(TRIM(direccion), ''), NULLIF(TRIM(sucursal), '')) AS dir
+        FROM ordenes_servicio
+        WHERE LOWER(TRIM(cliente)) = LOWER(?) AND (
+          (direccion IS NOT NULL AND TRIM(direccion) != '' AND TRIM(direccion) != '-') OR
+          (sucursal IS NOT NULL AND TRIM(sucursal) != '' AND TRIM(sucursal) != '-')
+        )
+        ORDER BY local_id DESC LIMIT 1
+      ''', [cli]);
+      if (res.isNotEmpty && res.first['dir'] != null) {
+        final d = res.first['dir'].toString().trim();
+        if (d.isNotEmpty && d != '-' && !d.toLowerCase().contains('aseguramiento') && !d.toLowerCase().contains('calidad')) {
+          return d;
+        }
+      }
+    } catch (_) {}
+    if (cli.toLowerCase().contains('mar bran')) {
+      return 'Carretera el Jaral del Progreso- Cortazar km 4.3 C.P. 38470, Jaral del Progreso, Guanajuato';
+    }
+    return null;
   }
 
   /// Obtiene los contactos históricos asociados a una planta o cliente,

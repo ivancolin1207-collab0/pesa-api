@@ -51,9 +51,13 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   Future<void> _cargarLocal() async {
     try {
       final rows = await LocalDbService.instance.getCalibracionesFinalizadasConsulta();
+      final filtrados = rows.where((r) {
+        final tipo = (r['tipo_servicio'] ?? '').toString().toLowerCase();
+        return tipo.contains('calibraci');
+      }).toList();
       if (!mounted) return;
       setState(() {
-        _all = rows;
+        _all = filtrados;
         _loading = false;
       });
     } catch (e) {
@@ -96,9 +100,13 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   }
 
   List<Map<String, dynamic>> get _filtered {
+    final base = _all.where((r) {
+      final tipo = (r['tipo_servicio'] ?? '').toString().toLowerCase();
+      return tipo.contains('calibraci');
+    }).toList();
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return _all;
-    return _all.where((r) {
+    if (q.isEmpty) return base;
+    return base.where((r) {
       final hay = [
         r['folio_os'], r['cliente'], r['sucursal'], r['tecnico'], r['tipo_servicio'], r['fecha'],
       ].map((e) => (e ?? '').toString().toLowerCase()).join(' ');
@@ -413,8 +421,9 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   Widget _filaTabla(Map<String, dynamic> r) {
     const cell = TextStyle(fontSize: 12.5, color: _kTextPrim);
     final folio = (r['folio_os'] ?? '').toString();
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+    return Container(
+      constraints: const BoxConstraints(minHeight: 48, maxHeight: 56),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(children: [
         Expanded(
           flex: 2,
@@ -442,7 +451,16 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
           child: Text((r['tipo_servicio'] ?? '—').toString(),
               style: cell.copyWith(color: _kTextSec), maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
-        Expanded(flex: 4, child: _acciones(r, compact: false)),
+        Expanded(
+          flex: 4,
+          child: Align(
+            alignment: Alignment.centerLeft,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: _acciones(r, compact: false),
+            ),
+          ),
+        ),
       ]),
     );
   }
@@ -500,46 +518,64 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
 
     final btnStyle = OutlinedButton.styleFrom(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      minimumSize: const Size(0, 34),
+      minimumSize: const Size(0, 32),
       visualDensity: VisualDensity.compact,
       textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
     );
 
-    return Wrap(
-      spacing: 6,
-      runSpacing: 4,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        OutlinedButton.icon(
-          key: Key('calib_ver_pdf_$folio'),
-          style: btnStyle.copyWith(
-            foregroundColor: const WidgetStatePropertyAll(_kMetroPurple),
-            side: const WidgetStatePropertyAll(BorderSide(color: _kMetroPurple)),
-          ),
-          onPressed: busy ? null : () => _verPdf(r),
-          icon: busy
-              ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
-              : const Text('📄', style: TextStyle(fontSize: 13)),
-          label: const Text('Ver PDF'),
+    final botones = [
+      OutlinedButton.icon(
+        key: Key('calib_ver_pdf_$folio'),
+        style: btnStyle.copyWith(
+          foregroundColor: const WidgetStatePropertyAll(_kMetroPurple),
+          side: const WidgetStatePropertyAll(BorderSide(color: _kMetroPurple)),
         ),
-        OutlinedButton.icon(
-          key: Key('calib_descargar_$folio'),
-          style: btnStyle.copyWith(
-            foregroundColor: const WidgetStatePropertyAll(_kMetroBlue),
-            side: const WidgetStatePropertyAll(BorderSide(color: _kMetroBlue)),
-          ),
-          onPressed: busy ? null : () => _descargar(r),
-          icon: const Text('📥', style: TextStyle(fontSize: 13)),
-          label: const Text('Descargar'),
+        onPressed: busy ? null : () => _verPdf(r),
+        icon: busy
+            ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
+            : const Text('📄', style: TextStyle(fontSize: 13)),
+        label: const Text('Ver PDF'),
+      ),
+      const SizedBox(width: 6),
+      OutlinedButton.icon(
+        key: Key('calib_descargar_$folio'),
+        style: btnStyle.copyWith(
+          foregroundColor: const WidgetStatePropertyAll(_kMetroBlue),
+          side: const WidgetStatePropertyAll(BorderSide(color: _kMetroBlue)),
         ),
-        if (!tienePdf)
-          const Tooltip(
-            message: 'El servidor no reporta PDF para esta orden; se intentará descargar igualmente.',
-            child: Text('Sin PDF en servidor',
-                style: TextStyle(fontSize: 10.5, color: Color(0xFFB7791F), fontStyle: FontStyle.italic)),
-          ),
+        onPressed: busy ? null : () => _descargar(r),
+        icon: const Text('📥', style: TextStyle(fontSize: 13)),
+        label: const Text('Descargar'),
+      ),
+      if (!tienePdf) ...[
+        const SizedBox(width: 6),
+        const Tooltip(
+          message: 'El servidor no reporta PDF para esta orden; se intentará descargar igualmente.',
+          child: Text('Sin PDF en servidor',
+              style: TextStyle(fontSize: 10.5, color: Color(0xFFB7791F), fontStyle: FontStyle.italic)),
+        ),
       ],
+    ];
+
+    if (compact) {
+      return Wrap(
+        spacing: 6,
+        runSpacing: 4,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: botones,
+      );
+    }
+
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: botones,
+        ),
+      ),
     );
   }
 }

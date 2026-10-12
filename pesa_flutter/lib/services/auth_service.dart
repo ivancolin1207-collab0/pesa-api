@@ -20,7 +20,14 @@ class UsuarioActual {
     required this.username,
   });
 
+  bool get isAdmin {
+    final r = AuthService.normalizeRole(rol);
+    final u = username.toLowerCase().trim();
+    return r == 'administrador' || r == 'admin' || u == 'ivancolin1207';
+  }
+
   bool get isTecnico {
+    if (isAdmin) return false;
     final r = AuthService.normalizeRole(rol);
     return r == 'tecnico' ||
            r == 'servicio' ||
@@ -88,8 +95,16 @@ class AuthService extends ChangeNotifier {
     return r;
   }
 
+  /// Indica si el usuario es administrador
+  bool get isAdmin {
+    final r = normalizeRole(_role ?? usuarioActual?.rol);
+    final u = (_username ?? usuarioActual?.username ?? '').toLowerCase().trim();
+    return r == 'administrador' || r == 'admin' || u == 'ivancolin1207';
+  }
+
   /// Indica si el usuario es técnico de campo
   bool get isTecnico {
+    if (isAdmin) return false;
     if ((_username ?? '').toLowerCase().contains('daikki')) return true;
     final r = normalizeRole(_role);
     return r == 'tecnico' ||
@@ -126,11 +141,15 @@ class AuthService extends ChangeNotifier {
   }) {
     final user = (username ?? '').toLowerCase().trim();
     final nom  = (nombre ?? '').toLowerCase().trim();
-    return user == 'daikki19' ||
+    final r    = normalizeRole(rol);
+    return r == 'admin' ||
+           r == 'administrador' ||
            nom.contains('alan guevara') ||
-           id == 8 ||
-           normalizeRole(rol) == 'administrador' ||
-           user == 'ivancolin1207';
+           nom.contains('ivan colin') ||
+           nom.contains('iván colín') ||
+           user == 'daikki19' ||
+           user == 'ivancolin1207' ||
+           id == 8;
   }
 
   String get displayName => _nombreCompleto?.isNotEmpty == true

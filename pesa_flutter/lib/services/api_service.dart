@@ -34,6 +34,7 @@ class ApiService {
   int?    _lastIdTecnico; // ID en cat_tecnicos del último login
 
   bool    get isAuthenticated => _token != null;
+  String? get token           => _token;
   String? get userRole       => _userRole;
   String? get lastNombre     => _lastNombre;
   int?    get lastIdTecnico  => _lastIdTecnico;
@@ -734,11 +735,44 @@ class ApiService {
           return true;
         }
         final body = await streamed.stream.bytesToString();
-        debugPrint('[API] ⚠️ uploadPdf falló: HTTP ${streamed.statusCode} — $body');
+        debugPrint('[API] ⚠️ uploadPdf multipart falló: HTTP ${streamed.statusCode} — $body');
       }
     } catch (e) {
-      debugPrint('[API] Error en uploadPdf: $e');
+      debugPrint('[API] Error en multipart uploadPdf: $e');
     }
+
+    // Fallback 3: JSON payload con base64 (tolerante a proxies y restricciones de multipart)
+    try {
+      final bytes = await file.readAsBytes();
+      final base64Pdf = base64Encode(bytes);
+      final jsonPayload = jsonEncode({
+        'folio': folio,
+        'folio_os': folio,
+        if (osId != null && osId > 0) 'os_id': osId,
+        'pdf_base64': base64Pdf,
+        'estatus': 'Cerrado',
+        if (data != null) 'data': data,
+      });
+
+      for (final u in [uri, Uri.parse('$_baseUrl/api/v1/os/$folio/upload-pdf')]) {
+        final resJson = await http.post(
+          u,
+          headers: {
+            'Content-Type': 'application/json',
+            ..._authHeaders,
+          },
+          body: jsonPayload,
+        ).timeout(const Duration(seconds: 30));
+
+        if (resJson.statusCode == 200 || resJson.statusCode == 201) {
+          debugPrint('[API] ✅ PDF subido exitosamente a Render vía JSON Base64 para $folio');
+          return true;
+        }
+      }
+    } catch (eJson) {
+      debugPrint('[API] Error en fallback JSON uploadPdf: $eJson');
+    }
+
     return false;
   }
 
@@ -772,6 +806,124 @@ class ApiService {
       debugPrint('[API] Excepción al resetear toma en servidor: $e');
     }
     return false;
+  }
+
+  /// Rutas de correo soportadas por el backend (Render). Se prueban en orden y solo se
+  /// avanza a la siguiente si el servidor responde 404 (ruta no desplegada / no encontrada).
+  ///   1. POST /api/v1/ordenes/{folio}/enviar-email      (ruta canónica)
+  ///   2. POST /api/v1/ordenes/{folio}/enviar-correo     (alias)
+  ///   3. POST /api/ordenes/{folio}/enviar-correo        (alias legacy)
+  ///   4. POST /api/v1/correos/enviar                    (universal, body {folio|lote_id})
+  List<Uri> _rutasCorreoOrden(String folio) {
+    final f = Uri.encodeComponent(folio);
+    return [
+      Uri.parse('$_baseUrl/api/v1/ordenes/$f/enviar-email'),
+      Uri.parse('$_baseUrl/api/v1/ordenes/$f/enviar-correo'),
+      Uri.parse('$_baseUrl/api/ordenes/$f/enviar-correo'),
+      Uri.parse('$_baseUrl/api/v1/correos/enviar'),
+    ];
+  }
+
+  List<Uri> _rutasCorreoLote(String loteId) {
+    final l = Uri.encodeComponent(loteId);
+    return [
+      Uri.parse('$_baseUrl/api/v1/lotes/$l/enviar-email'),
+      Uri.parse('$_baseUrl/api/v1/lotes/$l/enviar-correo'),
+      Uri.parse('$_baseUrl/api/lotes/$l/enviar-correo'),
+      Uri.parse('$_baseUrl/api/v1/correos/enviar'),
+    ];
+  }
+
+  String _detalleError(String body) {
+    try {
+      final j = jsonDecode(body);
+      if (j is Map && j['detail'] != null) return j['detail'].toString();
+    } catch (_) {}
+    return body;
+  }
+
+  /// POST de correo con fallback de rutas y errores tipados:
+  ///  - [CorreoSinConexionException]: sin red / timeout / Render 5xx  → encolar offline.
+  ///  - [CorreoEndpointNoDisponibleException]: todas las rutas 404    → encolar offline.
+  ///  - [CorreoRechazadoException]: 400/422 con motivo del servidor   → aviso al técnico.
+  Future<Map<String, dynamic>> _postCorreo(
+    List<Uri> rutas,
+    Map<String, dynamic> payload, {
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    String ultimo404 = '';
+    for (final uri in rutas) {
+      debugPrint('[API] Correo → POST $uri');
+      http.Response response;
+      try {
+        response = await http.post(
+          uri,
+          headers: {'Content-Type': 'application/json', ..._authHeaders},
+          body: jsonEncode(payload),
+        ).timeout(timeout);
+        if (response.statusCode == 401) {
+          final ok = await silentRefresh();
+          if (ok) {
+            response = await http.post(
+              uri,
+              headers: {'Content-Type': 'application/json', ..._authHeaders},
+              body: jsonEncode(payload),
+            ).timeout(timeout);
+          }
+        }
+      } on SocketException catch (e) {
+        throw CorreoSinConexionException('Sin conexión a internet (${e.message})');
+      } on TimeoutException {
+        throw CorreoSinConexionException('Tiempo de espera agotado con el servidor');
+      } on HandshakeException catch (e) {
+        throw CorreoSinConexionException('Error de conexión segura (${e.message})');
+      } on http.ClientException catch (e) {
+        throw CorreoSinConexionException('Error de red (${e.message})');
+      }
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        try {
+          final decoded = jsonDecode(response.body);
+          if (decoded is Map<String, dynamic>) return decoded;
+        } catch (_) {}
+        return {'ok': true};
+      }
+      if (response.statusCode == 404) {
+        ultimo404 = _detalleError(response.body);
+        debugPrint('[API] Correo 404 en $uri ($ultimo404) → probando siguiente ruta');
+        continue;
+      }
+      if (response.statusCode >= 500) {
+        throw CorreoSinConexionException('Servidor no disponible (HTTP ${response.statusCode})');
+      }
+      throw CorreoRechazadoException(_detalleError(response.body), response.statusCode);
+    }
+    throw CorreoEndpointNoDisponibleException(
+        'El servidor aún no expone el endpoint de correo ($ultimo404)');
+  }
+
+  /// Dispara el envío o reintento de correo electrónico para una orden individual.
+  Future<Map<String, dynamic>> enviarEmailOrden(String folio, {String? correo, bool forzar = false}) async {
+    final cleanFolio = folio.trim();
+    debugPrint('[API] enviarEmailOrden $cleanFolio (destinatario: $correo)');
+    return _postCorreo(_rutasCorreoOrden(cleanFolio), <String, dynamic>{
+      'folio': cleanFolio,
+      'forzar': forzar,
+      if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
+    });
+  }
+
+  /// Dispara el envío agrupado de un lote. El backend adjunta y cita ÚNICAMENTE
+  /// las órdenes FIRMADAS/Cerradas con PDF existente.
+  Future<Map<String, dynamic>> enviarEmailLote(String loteId, {String? correo, bool forzar = true, List<String>? folios}) async {
+    final cleanLote = loteId.trim();
+    debugPrint('[API] enviarEmailLote $cleanLote (destinatario: $correo, folios: $folios)');
+    return _postCorreo(_rutasCorreoLote(cleanLote), <String, dynamic>{
+      'lote_id': cleanLote,
+      'forzar': forzar,
+      if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
+      if (folios != null && folios.isNotEmpty) 'folios': folios,
+    }, timeout: const Duration(seconds: 60));
   }
 
 
@@ -998,4 +1150,31 @@ class ApiService {
       return false; // No lanzar — este método nunca debe romper el flujo
     }
   }
+}
+
+
+// ── Excepciones tipadas del envío de correo ─────────────────────────────────
+/// Sin red, timeout o servidor caído: el envío debe encolarse en SQLite.
+class CorreoSinConexionException implements Exception {
+  final String mensaje;
+  CorreoSinConexionException(this.mensaje);
+  @override
+  String toString() => mensaje;
+}
+
+/// Ninguna ruta de correo existe en el servidor (404): encolar y reintentar al sincronizar.
+class CorreoEndpointNoDisponibleException implements Exception {
+  final String mensaje;
+  CorreoEndpointNoDisponibleException(this.mensaje);
+  @override
+  String toString() => mensaje;
+}
+
+/// El servidor rechazó el envío con un motivo de negocio (p. ej. lote sin órdenes firmadas).
+class CorreoRechazadoException implements Exception {
+  final String mensaje;
+  final int statusCode;
+  CorreoRechazadoException(this.mensaje, [this.statusCode = 400]);
+  @override
+  String toString() => mensaje;
 }

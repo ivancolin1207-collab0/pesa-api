@@ -21,6 +21,22 @@ import '../widgets/app_shell.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
 import '../widgets/sync_check_badge.dart';
 import 'calibraciones_repositorio_view.dart';
+import 'captura_screen.dart';
+import 'remision_captura_screen.dart';
+import 'revision_bascula_screen.dart';
+import 'levantamiento_proyecto_screen.dart';
+import 'levantamiento_metrologico_screen.dart';
+
+/// Función auxiliar de normalización de cadenas (remover diacríticos/acentos y minúsculas)
+String normalizarTexto(String texto) {
+  var conAcentos = 'ÁÉÍÓÚáéíóúÀÈÌÒÙàèìòùÄËÏÖÜäëïöüÑñ';
+  var sinAcentos = 'AEIOUaeiouAEIOUaeiouAEIOUaeiouNn';
+  String resultado = texto.trim().toLowerCase();
+  for (int i = 0; i < conAcentos.length; i++) {
+    resultado = resultado.replaceAll(conAcentos[i], sinAcentos[i]);
+  }
+  return resultado;
+}
 
 // ── Design Tokens ──────────────────────────────────────────────────────────
 const _kCarmineRed = Color(0xFFB81D24);
@@ -31,11 +47,37 @@ const _kTextPrim   = Color(0xFF1D1D1F);
 const _kTextSec    = Color(0xFF86868B);
 const _kTableHead  = Color(0xFFF3F4F6);
 
-/// Remisiones (RMA-) y Revisiones de Celdas (RE-) son formatos físicos:
-/// se digitalizan por escaneo, nunca con la captura metrológica de OS.
-bool esFolioFormatoFisico(String folio) {
-  final f = folio.trim().toUpperCase();
-  return f.startsWith('RMA-') || f.startsWith('RE-');
+/// Enrutador dinámico por tipo de documento:
+/// RMA -> RemisionCapturaScreen
+/// RE -> RevisionBasculaScreen
+/// LP -> LevantamientoProyectoScreen
+/// LV -> LevantamientoMetrologicoScreen
+/// Resto -> CalibracionAjusteScreen (CapturaScreen)
+void navegarCapturaSegunTipo(BuildContext context, Map<String, dynamic> orden) {
+  final tipoDoc = (orden['tipo_documento'] ?? '').toString().toUpperCase();
+  final tipoSrv = (orden['tipo_servicio'] ?? '').toString().toUpperCase();
+  final folio = (orden['folio_os'] ?? orden['folio_rma'] ?? '').toString().toUpperCase();
+  final tipo = '$tipoDoc $tipoSrv $folio';
+
+  if (tipo.contains('RMA') || tipo.contains('REMISI')) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => RemisionCapturaScreen(orden: orden)));
+  } else if (tipo.contains('REVISI') || tipoDoc == 'RE' || folio.startsWith('RE-')) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => RevisionBasculaScreen(orden: orden)));
+  } else if (tipo.contains('PROYECTO') || tipoDoc == 'LP' || folio.startsWith('LP-')) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => LevantamientoProyectoScreen(orden: orden)));
+  } else if (tipo.contains('METROL') || tipoDoc == 'LV' || folio.startsWith('LV-')) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => LevantamientoMetrologicoScreen(orden: orden)));
+  } else {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => CalibracionAjusteScreen(orden: orden)));
+  }
+}
+
+/// Retorna true si la modalidad del documento es explícitamente física.
+/// Las remisiones (RMA-) y revisiones pueden ser tanto Digitales como Físicas,
+/// según se defina en el backend / logística.
+bool esModalidadFisica(String? modalidad) {
+  final m = (modalidad ?? '').trim().toLowerCase();
+  return m.contains('fisic') || m.contains('físic');
 }
 
 class OsListScreen extends StatefulWidget {
@@ -60,12 +102,22 @@ class _OsListScreenState extends State<OsListScreen> {
 
   // ── Vista: Mis Órdenes vs Repositorio de Calibraciones (solo supervisión) ──
   bool _vistaRepositorio = false;
+  int _seqCorreosVisto = 0;
 
   @override
   void initState() {
     super.initState();
+    final auth = context.read<AuthService>();
+    final usuario = AuthService.usuarioActual;
+    final isAdmin = auth.isAdmin || (usuario != null && usuario.isAdmin);
+    if (isAdmin) {
+      _vistaRepositorio = true;
+      _tecnico = null;
+    }
+
     final sync = context.read<SyncService>();
     sync.startNetworkMonitor();
+    _seqCorreosVisto = sync.correosDespachadosSeq;
     sync.addListener(_onSyncChanged);
 
     if (sync.orders.isNotEmpty) {
@@ -212,6 +264,73 @@ class _OsListScreenState extends State<OsListScreen> {
     }();
   }
 
+  void _mostrarMenuSincronizacion(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Text(
+                    'Opciones Avanzadas de Sincronización',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.cloud_upload_rounded, color: Color(0xFF2563EB), size: 28),
+                  title: const Text('Forzar reenvío de órdenes cerradas', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: const Text('Marca órdenes cerradas como pendientes y las sube forzosamente a PostgreSQL.'),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    final sync = context.read<SyncService>();
+                    final n = await sync.forzarReenvioOrdenesCerradas();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          backgroundColor: Colors.green.shade700,
+                          content: Text('Se forzó el reenvío de $n órdenes cerradas al servidor.'),
+                        ),
+                      );
+                      await _loadLocal();
+                    }
+                  },
+                ),
+                const Divider(),
+                ListTile(
+                  leading: const Icon(Icons.sync_problem_rounded, color: Color(0xFFD97706), size: 28),
+                  title: const Text('Resincronización completa (PULL total)', style: TextStyle(fontWeight: FontWeight.w600)),
+                  subtitle: const Text('Descarga nuevamente todas las órdenes desde el servidor sin usar caché de fecha.'),
+                  onTap: () async {
+                    Navigator.of(ctx).pop();
+                    final sync = context.read<SyncService>();
+                    await sync.resincronizacionCompleta();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          backgroundColor: Color(0xFF2563EB),
+                          content: Text('Resincronización completa ejecutada.'),
+                        ),
+                      );
+                      await _loadLocal();
+                    }
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   void dispose() {
@@ -221,19 +340,34 @@ class _OsListScreenState extends State<OsListScreen> {
   }
 
   void _onSyncChanged() {
+    final syncCorreos = context.read<SyncService>();
+    if (syncCorreos.correosDespachadosSeq != _seqCorreosVisto) {
+      _seqCorreosVisto = syncCorreos.correosDespachadosSeq;
+      final n = syncCorreos.ultimosCorreosDespachados;
+      if (n > 0) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              backgroundColor: const Color(0xFF2E7D32),
+              content: Text('✓ Se enviaron los correos pendientes con éxito ($n)'),
+            ),
+          );
+        });
+      }
+    }
     final sync = context.read<SyncService>();
     final auth = context.read<AuthService>();
     final usuario = AuthService.usuarioActual;
-    final isTecnico = auth.isTecnico || (usuario != null && usuario.rol.toUpperCase() == 'TECNICO');
+    final isAdmin = auth.isAdmin || (usuario != null && usuario.isAdmin);
+    final isTecnico = !isAdmin && (auth.isTecnico || (usuario != null && usuario.isTecnico));
     final currentIdTecnico = usuario?.id ?? auth.idTecnico;
     final currentNombre = (usuario?.nombre ?? auth.displayName).toLowerCase().trim();
 
     if (sync.orders.isNotEmpty && mounted) {
       final ordersToShow = isTecnico
           ? sync.orders.where((o) {
-              String _norm(String s) => s
-                  .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
-                  .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ü','u');
+              final userNorm = normalizarTexto(currentNombre);
               final idTec = int.tryParse(o['id_tecnico']?.toString() ?? '');
               // ID match takes priority (authoritative)
               if (idTec != null && idTec > 0) {
@@ -241,14 +375,15 @@ class _OsListScreenState extends State<OsListScreen> {
                   return idTec == currentIdTecnico;
                 }
               }
-              // Name-based fallback with apellido protection
-              final tec = _norm((o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '').toLowerCase().trim());
-              final myN = _norm(currentNombre);
-              if (tec.isEmpty || myN.isEmpty) return false;
-              if (tec == myN) return true;
-              final tp = tec.split(RegExp(r'\s+')); final mp = myN.split(RegExp(r'\s+'));
+              // Name-based matching with normalizarTexto
+              final bool esMiOrden = normalizarTexto(o['tecnico'] as String? ?? '') == userNorm ||
+                                     normalizarTexto(o['tecnico_nombre'] as String? ?? '') == userNorm;
+              if (esMiOrden) return true;
+              final tec = normalizarTexto(o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '');
+              if (tec.isEmpty || userNorm.isEmpty) return false;
+              final tp = tec.split(RegExp(r'\s+')); final mp = userNorm.split(RegExp(r'\s+'));
               if (tp.length >= 2 && mp.length >= 2 && tp[0] == mp[0] && tp[1] != mp[1]) return false;
-              return tec.contains(myN) || myN.contains(tec);
+              return tec.contains(userNorm) || userNorm.contains(tec);
             }).toList()
           : sync.orders;
 
@@ -266,7 +401,8 @@ class _OsListScreenState extends State<OsListScreen> {
     final sync = context.read<SyncService>();
     final auth = context.read<AuthService>();
     final usuario = AuthService.usuarioActual;
-    final isTecnico = auth.isTecnico || (usuario != null && usuario.rol.toUpperCase() == 'TECNICO');
+    final isAdmin = auth.isAdmin || (usuario != null && usuario.isAdmin);
+    final isTecnico = !isAdmin && (auth.isTecnico || (usuario != null && usuario.isTecnico));
     final currentIdTecnico = usuario?.id ?? auth.idTecnico;
     final currentNombre = usuario?.nombre ?? auth.displayName;
 
@@ -282,23 +418,22 @@ class _OsListScreenState extends State<OsListScreen> {
 
     List<Map<String, dynamic>> filterMem(List<Map<String, dynamic>> src) {
       if (!isTecnico) return src;
-      String _norm(String s) => s
-          .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
-          .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ü','u');
-      final myN = _norm(currentNombre.toLowerCase().trim());
+      final userNorm = normalizarTexto(currentNombre);
       return src.where((o) {
         final idTec = int.tryParse(o['id_tecnico']?.toString() ?? '');
         // ID match takes priority
         if (idTec != null && idTec > 0 && currentIdTecnico != null && currentIdTecnico > 0) {
           return idTec == currentIdTecnico;
         }
-        // Name fallback with apellido protection
-        final tec = _norm((o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '').toLowerCase().trim());
-        if (tec.isEmpty || myN.isEmpty) return false;
-        if (tec == myN) return true;
-        final tp = tec.split(RegExp(r'\s+')); final mp = myN.split(RegExp(r'\s+'));
+        // Name fallback with normalizarTexto
+        final bool esMiOrden = normalizarTexto(o['tecnico'] as String? ?? '') == userNorm ||
+                               normalizarTexto(o['tecnico_nombre'] as String? ?? '') == userNorm;
+        if (esMiOrden) return true;
+        final tec = normalizarTexto(o['tecnico'] as String? ?? o['tecnico_nombre'] as String? ?? '');
+        if (tec.isEmpty || userNorm.isEmpty) return false;
+        final tp = tec.split(RegExp(r'\s+')); final mp = userNorm.split(RegExp(r'\s+'));
         if (tp.length >= 2 && mp.length >= 2 && tp[0] == mp[0] && tp[1] != mp[1]) return false;
-        return tec.contains(myN) || myN.contains(tec);
+        return tec.contains(userNorm) || userNorm.contains(tec);
       }).toList();
     }
 
@@ -367,7 +502,8 @@ class _OsListScreenState extends State<OsListScreen> {
     final now = DateTime.now();
     final auth = context.read<AuthService>();
     final usuario = AuthService.usuarioActual;
-    final isTecnico = auth.isTecnico || (usuario != null && usuario.rol.toUpperCase() == 'TECNICO');
+    final isAdmin = auth.isAdmin || (usuario != null && usuario.isAdmin);
+    final isTecnico = !isAdmin && (auth.isTecnico || (usuario != null && usuario.isTecnico));
     final currentIdTecnico = usuario?.id ?? auth.idTecnico;
     final currentNombre = usuario?.nombre ?? auth.displayName;
 
@@ -399,34 +535,43 @@ class _OsListScreenState extends State<OsListScreen> {
     final String? pdfPath = (o['pdf_path'] ?? o['pdf_path_local'])?.toString().trim();
     final String? pdfUrl = o['pdf_url']?.toString().trim();
     final bool hasPdfFlag = (o['has_pdf'] == 1 || o['has_pdf'] == '1' || o['has_pdf'] == true || o['pdf_subido'] == 1);
+    // 1. Archivo físico existente en disco local (con tamaño válido)
+    bool fileExiste = false;
+    final String? localPath = o['pdf_path_local']?.toString().trim();
+    if (localPath != null && localPath.isNotEmpty) {
+      try {
+        final f = File(localPath);
+        fileExiste = f.existsSync() && f.lengthSync() > 500;
+      } catch (_) {}
+    }
+    if (!fileExiste && pdfPath != null && pdfPath.isNotEmpty) {
+      try {
+        final f = File(pdfPath);
+        fileExiste = f.existsSync() && f.lengthSync() > 500;
+      } catch (_) {}
+    }
+    if (!fileExiste && folioStr.isNotEmpty) {
+      fileExiste = LocalDbService.instance.checkPdfExistsOnDiskSync(folioStr, localPath ?? pdfPath);
+    }
+    if (fileExiste) return true;
 
+    // 2. Base64 de PDF válido presente
+    final bool hasB64 = (o['pdf_b64_local']?.toString().length ?? 0) > 100 || (o['pdf_base64']?.toString().length ?? 0) > 100;
+    if (hasB64) return true;
+
+    // 3. Confirmación explícita del servidor con URL de PDF real y bandera has_pdf
+    if (hasPdfFlag && pdfUrl != null && pdfUrl.isNotEmpty && !pdfUrl.contains('null') && !pdfUrl.contains('404')) return true;
+
+    // 4. Captura metrológica completa con firmas guardadas
     final metro = o['metrologia_data'] ?? o['rep_json'] ?? o['exac_json'];
     final bool tieneMetrologia = metro != null &&
         metro.toString().trim().isNotEmpty &&
         metro.toString().trim() != '{}' &&
         metro.toString().trim() != '[]' &&
         metro.toString().trim() != 'null';
+    final bool hasFirmas = (o['firma_tecnico']?.toString().length ?? 0) > 20 || (o['firma_cliente']?.toString().length ?? 0) > 20;
 
-    // Verificar si el archivo existe físicamente en el almacenamiento local:
-    bool fileExiste = false;
-    final String? localPath = o['pdf_path_local']?.toString().trim();
-    if (localPath != null && localPath.isNotEmpty) {
-      try {
-        fileExiste = File(localPath).existsSync();
-      } catch (_) {}
-    }
-    if (!fileExiste && pdfPath != null && pdfPath.isNotEmpty) {
-      try {
-        fileExiste = File(pdfPath).existsSync();
-      } catch (_) {}
-    }
-    if (!fileExiste && folioStr.isNotEmpty) {
-      fileExiste = LocalDbService.instance.checkPdfExistsOnDiskSync(folioStr, localPath ?? pdfPath);
-    }
-
-    final bool hasB64 = (o['pdf_b64_local']?.toString().length ?? 0) > 100;
-
-    return hasPdfFlag || (pdfUrl != null && pdfUrl.isNotEmpty) || tieneMetrologia || fileExiste || hasB64;
+    return (tieneMetrologia && hasFirmas);
   }
 
   /// Alias para retrocompatibilidad
@@ -447,10 +592,7 @@ class _OsListScreenState extends State<OsListScreen> {
 
   int get _kpiCerrado => _filtered.where((o) => tienePdfReal(o)).length;
 
-  int get _kpiFisico => _filtered.where((o) {
-    final m = (o['modalidad'] as String? ?? '').trim().toUpperCase();
-    return m.contains('FISIC') || m.contains('FÍSIC');
-  }).length;
+  int get _kpiFisico => _filtered.where((o) => esModalidadFisica(o['modalidad'] as String?)).length;
 
   List<String> get _tecnicos => _all
       .map((o) => o['tecnico'] as String? ?? '').where((t) => t.isNotEmpty)
@@ -495,7 +637,13 @@ class _OsListScreenState extends State<OsListScreen> {
   /// True si la OS ya fue enviada al servidor (su PDF oficial vive en PostgreSQL).
   static bool _pdfEnServidor(Map<String, dynamic> os) {
     final st = (os['sync_check_status'] ?? '').toString().toUpperCase();
+    final est = (os['estatus'] ?? os['estado'] ?? '').toString().toUpperCase();
+    final hasPdf = os['has_pdf'] == 1 || os['has_pdf'] == '1' || os['has_pdf'] == true;
+    final hasUrl = (os['pdf_url'] ?? '').toString().isNotEmpty;
     return st == 'SUBIDA_SERVIDOR' || st == 'AUDITADA_ADMIN' || st == 'ABIERTO' ||
+        st == 'ENVIADA' || st == 'SINCRONIZADO' ||
+        est.contains('CERRAD') || est.contains('COMPLET') ||
+        hasPdf || hasUrl ||
         os['pdf_subido'] == 1 || os['pdf_subido'] == true;
   }
 
@@ -542,6 +690,17 @@ class _OsListScreenState extends State<OsListScreen> {
     final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     final ctx = context;
     if (folio.isEmpty) return;
+
+    if (!_OsListScreenState.tieneDocumento(os)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El formato aún no ha sido capturado ni generado en campo.'),
+          backgroundColor: Color(0xFFD97706),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
 
     // Si la OS ya está en el servidor, SIEMPRE mostrar la versión vigente
     // (evita abrir una copia local estancada con firma antigua).
@@ -668,6 +827,41 @@ class _OsListScreenState extends State<OsListScreen> {
         });
       }
     } catch (e) {
+      if (e.toString().contains('404')) {
+        final sqldb = await LocalDbService.instance.database;
+        await sqldb.update(
+          'ordenes_servicio',
+          {
+            'has_pdf': 0,
+            'estatus': 'Asignada',
+            'estado': 'PROCESO',
+            'sync_status': 'Pendiente',
+            'sync_check_status': 'ASIGNADA',
+            'pdf_url': null,
+          },
+          where: 'folio_os = ? OR folio = ?',
+          whereArgs: [folio, folio],
+        );
+        try {
+          os['has_pdf'] = 0;
+          os['estatus'] = 'Asignada';
+          os['estado'] = 'PROCESO';
+          os['sync_status'] = 'Pendiente';
+          os['sync_check_status'] = 'ASIGNADA';
+          os['pdf_url'] = null;
+        } catch (_) {}
+        if (mounted) await _loadLocal();
+        if (ctx.mounted) {
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(
+              backgroundColor: Colors.orange.shade800,
+              content: Text('La orden $folio no tiene formato generado en el servidor. Se habilitó para captura.'),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+        return;
+      }
       if (e.toString().contains('read-only')) {
         final diskPath = await LocalDbService.instance.resolvePdfPathFromDisk(folio);
         if (diskPath != null && File(diskPath).existsSync() && ctx.mounted) {
@@ -720,16 +914,91 @@ class _OsListScreenState extends State<OsListScreen> {
   Future<void> _descargarPdfConNomenclatura(BuildContext context, Map<String, dynamic> os) async {
     final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     if (folio.isEmpty) return;
+
+    if (!_OsListScreenState.tieneDocumento(os)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El formato aún no ha sido capturado ni generado en campo.'),
+          backgroundColor: Color(0xFFD97706),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     // Borrar la copia vieja y bajar la vigente del servidor antes de exportar
     final fresco = await _refrescarPdfDesdeServidor(os);
     if (!context.mounted) return;
+
+    String? sourcePath = fresco ?? os['pdf_path_local'] as String?;
+    if (sourcePath == null || sourcePath.isEmpty || !File(sourcePath).existsSync() || File(sourcePath).lengthSync() < 100) {
+      try {
+        final downloaded = await ApiService.instance.downloadPdf(
+          '/api/v1/ordenes/$folio/download-pdf',
+          targetFileName: '$folio.pdf',
+        );
+        if (File(downloaded).existsSync() && File(downloaded).lengthSync() > 100) {
+          sourcePath = downloaded;
+          await LocalDbService.instance.updatePdfPathLocal(folio, downloaded);
+          os['pdf_path_local'] = downloaded;
+        }
+      } catch (e) {
+        if (e.toString().contains('404')) {
+          final sqldb = await LocalDbService.instance.database;
+          await sqldb.update(
+            'ordenes_servicio',
+            {
+              'has_pdf': 0,
+              'estatus': 'Asignada',
+              'estado': 'PROCESO',
+              'sync_status': 'Pendiente',
+              'sync_check_status': 'ASIGNADA',
+              'pdf_url': null,
+            },
+            where: 'folio_os = ? OR folio = ?',
+            whereArgs: [folio, folio],
+          );
+          try {
+            os['has_pdf'] = 0;
+            os['estatus'] = 'Asignada';
+            os['estado'] = 'PROCESO';
+            os['sync_status'] = 'Pendiente';
+            os['sync_check_status'] = 'ASIGNADA';
+            os['pdf_url'] = null;
+          } catch (_) {}
+          if (mounted) await _loadLocal();
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                backgroundColor: Colors.orange.shade800,
+                content: Text('La orden $folio no tiene formato generado en el servidor. Se habilitó para captura.'),
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+          return;
+        }
+      }
+    }
+
+    if (sourcePath == null || sourcePath.isEmpty || !File(sourcePath).existsSync() || File(sourcePath).lengthSync() < 100) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('El formato aún no ha sido capturado ni generado en campo.'),
+          backgroundColor: Color(0xFFD97706),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     await PdfStorageService.instance.exportToDownloads(
       folio: folio,
       cliente: (os['cliente'] ?? os['razon_social'] ?? os['cliente_nombre'])?.toString(),
       idIndicador: (os['id_indicador'] ?? os['id_instrumento'] ?? os['no_serie'])?.toString(),
       tipoServicio: (os['tipo_servicio'] ?? os['servicio'])?.toString(),
       osData: os,
-      sourcePdfPath: fresco ?? os['pdf_path_local'] as String?,
+      sourcePdfPath: sourcePath,
       context: context,
     );
   }
@@ -782,7 +1051,7 @@ class _OsListScreenState extends State<OsListScreen> {
               editOs.remove('pdf_path_local');
               try { os['estado'] = 'Proceso'; os.remove('pdf_path_local'); } catch (_) {}
               if (!context.mounted) return;
-              context.push('/captura/${os['local_id']}', extra: editOs);
+              navegarCapturaSegunTipo(context, editOs);
             },
           ),
         ],
@@ -979,6 +1248,435 @@ class _OsListScreenState extends State<OsListScreen> {
     }
   }
 
+  /// Función universal de captura y envío de correo para órdenes individuales y lotes
+  Future<void> _procesarEnvioCorreo({required dynamic item, required bool esLote}) async {
+    try {
+      await _procesarEnvioCorreoImpl(item: item, esLote: esLote);
+    } catch (e, st) {
+      debugPrint('[ENVIO CORREO] Error no controlado: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFFD97706),
+            content: Text('No se pudo procesar el envío de correo: $e'),
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _procesarEnvioCorreoImpl({required dynamic item, required bool esLote}) async {
+    List<Map<String, dynamic>> items = [];
+    String loteId = '';
+    String folio = '';
+
+    String folioDe(dynamic m) {
+      if (m is Map) {
+        return ((m['folio_os'] ?? m['folio'])?.toString() ?? '').trim();
+      }
+      return m?.toString().trim() ?? '';
+    }
+
+    if (esLote) {
+      if (item is _OsGroup) {
+        items = List<Map<String, dynamic>>.from(item.items);
+        final rawLote = items.isNotEmpty
+            ? (items.first['id_lote'] ?? items.first['lote'])?.toString().trim()
+            : null;
+        if (rawLote != null && rawLote.isNotEmpty) {
+          loteId = rawLote;
+        } else if (item.loteKey.isNotEmpty && !item.loteKey.startsWith('solo_')) {
+          loteId = item.loteKey;
+        }
+      } else if (item is Map<String, dynamic>) {
+        final rawLote = (item['id_lote'] ?? item['lote'] ?? item['id'] ?? item['lote_id'])?.toString().trim();
+        if (rawLote != null && rawLote.isNotEmpty) {
+          loteId = rawLote;
+        }
+        if (item['ordenes'] is List) {
+          items = (item['ordenes'] as List)
+              .map((e) => e is Map<String, dynamic> ? e : (e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()}))
+              .toList();
+        } else if (item['hijos'] is List) {
+          items = (item['hijos'] as List)
+              .map((e) => e is Map<String, dynamic> ? e : (e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()}))
+              .toList();
+        } else if (item['items'] is List) {
+          items = (item['items'] as List)
+              .map((e) => e is Map<String, dynamic> ? e : (e is Map ? Map<String, dynamic>.from(e) : <String, dynamic>{'folio': e.toString()}))
+              .toList();
+        }
+        if (items.isEmpty && loteId.isNotEmpty) {
+          items = _filtered.where((o) => (o['id_lote'] ?? o['lote'])?.toString().trim() == loteId).toList();
+        }
+      }
+
+      List<String> folios = items.map(folioDe).where((f) => f.isNotEmpty).toList();
+
+      // Búsqueda de respaldo en SQLite si folios viene vacío
+      if (folios.isEmpty) {
+        final cliente = (item is Map
+            ? (item['cliente'] ?? '')
+            : (item is _OsGroup && item.items.isNotEmpty ? item.items.first['cliente'] : ''))?.toString().trim() ?? '';
+        final fecha = (item is Map
+            ? (item['fecha_servicio'] ?? item['fecha_os'] ?? item['fecha'] ?? '')
+            : (item is _OsGroup && item.items.isNotEmpty
+                ? (item.items.first['fecha_servicio'] ?? item.items.first['fecha_os'] ?? item.items.first['fecha'] ?? '')
+                : ''))?.toString().split('T').first.trim() ?? '';
+        final sqlRows = await LocalDbService.instance.obtenerFoliosPorLoteOCliente(
+          loteId: loteId,
+          cliente: cliente,
+          fecha: fecha,
+        );
+        if (sqlRows.isNotEmpty) {
+          items = sqlRows;
+          folios = items.map(folioDe).where((f) => f.isNotEmpty).toList();
+        }
+      }
+
+      if (loteId.isEmpty && folios.isNotEmpty) {
+        loteId = 'LOTE-${folios.first}';
+      }
+      folio = loteId;
+
+      if (folios.isEmpty && items.isEmpty) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo identificar el lote (sin id de lote u órdenes).')),
+          );
+        }
+        return;
+      }
+    } else {
+      final Map<String, dynamic> osMap;
+      if (item is Map<String, dynamic>) {
+        osMap = item;
+      } else if (item is _OsGroup && item.items.isNotEmpty) {
+        osMap = item.items.first;
+      } else {
+        return;
+      }
+      items = [osMap];
+      folio = ((osMap['folio_os'] ?? osMap['folio']) as String? ?? '').trim();
+      loteId = '';
+      if (folio.isEmpty) return;
+    }
+
+    // REGLA ESTRICTA DE LOTES: solo órdenes terminadas (firmadas/cerradas) con PDF existente.
+    // Las OS pendientes o sin formato del lote se ignoran por completo (ni se citan ni se adjuntan).
+    final List<Map<String, dynamic>> itemsBase =
+        esLote ? await _hijasLoteDesdeSqlite(loteId, items) : items;
+    final List<Map<String, dynamic>> itemsEnvio =
+        esLote ? itemsBase.where((o) => tieneDocumento(o)).toList() : itemsBase;
+    final int omitidas = itemsBase.length - itemsEnvio.length;
+    final List<String> foliosEnvio = itemsEnvio.map(folioDe).where((f) => f.isNotEmpty).toList();
+
+    if (esLote && itemsEnvio.isEmpty) {
+      if (mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 26),
+                SizedBox(width: 10),
+                Expanded(child: Text('Lote sin órdenes listas', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
+              ],
+            ),
+            content: Text(
+              'Ninguna orden de este lote está completada con PDF para enviar.\n\n'
+              'Órdenes en el lote: ${itemsBase.length}',
+              style: const TextStyle(fontSize: 13, height: 1.4),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Entendido')),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
+    final bool yaEnviado = itemsEnvio.isNotEmpty &&
+        itemsEnvio.every((o) =>
+            o['email_enviado'] == 1 || o['email_enviado'] == true || o['email_enviado'] == '1' || o['email_enviado'] == 'true');
+
+    // 1. Obtener correo registrado si existe
+    String correoActual = '';
+    for (final it in itemsEnvio) {
+      final c = (it['correo_cliente'] ?? '').toString().trim();
+      if (c.isNotEmpty &&
+          c.toLowerCase() != 'ivancolin1207@gmail.com' &&
+          c.toLowerCase() != 'sin registrar' &&
+          c.toLowerCase() != 'none' &&
+          c.toLowerCase() != 'null') {
+        correoActual = c;
+        break;
+      }
+    }
+
+    // Modal de captura si falta correo o para confirmar/editar destinatario
+    final formKey = GlobalKey<FormState>();
+    final emailCtrl = TextEditingController(text: correoActual);
+
+    final bool? confirmar = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              yaEnviado ? Icons.mark_email_read_rounded : Icons.mail_outline_rounded,
+              color: const Color(0xFFB81D24),
+              size: 26,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                esLote
+                    ? (yaEnviado ? 'Reenviar Lote por Correo' : 'Enviar Lote por Correo')
+                    : (yaEnviado ? 'Reenviar por Correo — $folio' : 'Enviar por Correo — $folio'),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (esLote) ...[
+                Text(
+                  'Se enviará un SOLO correo con ${itemsEnvio.length} reporte(s) PDF firmado(s): ${foliosEnvio.join(', ')}.'
+                  '${omitidas > 0 ? '\n$omitidas orden(es) del lote sin realizar se omitirán del correo.' : ''}',
+                  style: const TextStyle(fontSize: 13, height: 1.4),
+                ),
+                const SizedBox(height: 6),
+              ],
+              const Text(
+                'Se enviará desde ivancolin1207@gmail.com con CC obligatoria a recepcion@basculaspesa.com.mx',
+                style: TextStyle(fontSize: 12, color: Color(0xFF4B5563), height: 1.35),
+              ),
+              const SizedBox(height: 14),
+              TextFormField(
+                controller: emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                autofocus: true,
+                validator: (val) {
+                  final v = (val ?? '').trim();
+                  if (v.isEmpty) return 'Ingresa el correo del cliente';
+                  if (!v.contains('@') || !v.contains('.')) return 'Correo electrónico inválido';
+                  if (v.toLowerCase() == 'ivancolin1207@gmail.com') {
+                    return 'ivancolin1207@gmail.com es el remitente. Ingresa el correo del cliente.';
+                  }
+                  return null;
+                },
+                decoration: InputDecoration(
+                  labelText: 'Correo del Cliente',
+                  hintText: 'cliente@empresa.com',
+                  prefixIcon: const Icon(Icons.alternate_email, color: Color(0xFFB81D24)),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancelar')),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFB81D24),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            icon: const Icon(Icons.send, size: 16),
+            label: Text(esLote ? 'Enviar Lote' : 'Enviar Ahora'),
+            onPressed: () {
+              if (formKey.currentState?.validate() ?? true) {
+                Navigator.of(ctx).pop(true);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+
+    if (confirmar != true) return;
+    final destino = emailCtrl.text.trim();
+    if (!mounted) return;
+
+    // 2. Encolado offline en SQLite (email_status = 'pendiente') — nunca bloquea al técnico.
+    Future<void> encolarLocal(String motivo) async {
+      debugPrint('[ENVIO CORREO] Encolando localmente (${esLote ? 'lote $loteId' : folio}): $motivo');
+      await LocalDbService.instance.encolarCorreo(
+        tipo: esLote ? 'lote' : 'orden',
+        referencia: esLote ? (foliosEnvio.isNotEmpty ? 'LOTE-${foliosEnvio.first}' : loteId) : folio,
+        correo: destino,
+        folios: foliosEnvio,
+      );
+      for (final it in itemsEnvio) {
+        final f = folioDe(it);
+        if (f.isEmpty) continue;
+        await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+        if (mounted) {
+          context.read<SyncService>().updateLocalOrder(f, {
+            'email_enviado': 0,
+            'email_status': 'cola',
+            'correo_cliente': destino,
+          });
+        }
+        it['email_enviado'] = 0;
+        it['email_status'] = 'cola';
+        it['correo_cliente'] = destino;
+      }
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            backgroundColor: Color(0xFFD97706),
+            content: Text('⏳ Guardado en cola offline. Se enviará automáticamente al sincronizar con internet.'),
+          ),
+        );
+        await _loadLocal();
+      }
+    }
+
+    // 3. Verificar conectividad a internet
+    final connResults = await Connectivity().checkConnectivity();
+    final isOnline = connResults.any((r) => r != ConnectivityResult.none);
+    if (!isOnline) {
+      await encolarLocal('sin conectividad');
+      return;
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(esLote
+              ? 'Enviando lote (${foliosEnvio.length} órdenes firmadas)...'
+              : 'Enviando correo para $folio...'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
+    try {
+      final Map<String, dynamic> res = esLote
+          ? await ApiService.instance.enviarEmailLote(loteId, correo: destino, forzar: true, folios: foliosEnvio)
+          : await ApiService.instance.enviarEmailOrden(folio, correo: destino, forzar: true);
+
+      if (res['ok'] != true) {
+        throw CorreoRechazadoException((res['motivo'] ?? res['error'] ?? 'Error desconocido').toString());
+      }
+
+      final List<String> confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
+          ? (res['folios'] as List).map((e) => e.toString()).toList()
+          : foliosEnvio;
+      for (final f in confirmados) {
+        await LocalDbService.instance.updateEmailStatus(f, enviado: true, correo: destino);
+        if (mounted) {
+          context.read<SyncService>().updateLocalOrder(f, {
+            'email_enviado': 1,
+            'email_status': 'enviado',
+            'correo_cliente': destino,
+          });
+        }
+      }
+      for (final it in itemsEnvio) {
+        if (confirmados.contains(folioDe(it))) {
+          it['email_enviado'] = 1;
+          it['email_status'] = 'enviado';
+          it['correo_cliente'] = destino;
+        }
+      }
+
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF2E7D32),
+            content: Text(esLote
+                ? '✓ Lote enviado a $destino: ${confirmados.join(', ')} (${confirmados.length} órdenes). CC: recepcion@basculaspesa.com.mx'
+                : '✓ Correo enviado exitosamente a $destino (CC: recepcion@basculaspesa.com.mx)'),
+          ),
+        );
+        await _loadLocal();
+      }
+    } on CorreoSinConexionException catch (e) {
+      await encolarLocal(e.mensaje);
+    } on CorreoEndpointNoDisponibleException catch (e) {
+      await encolarLocal(e.mensaje);
+    } on CorreoRechazadoException catch (e) {
+      debugPrint('[ENVIO CORREO] Rechazado por servidor: ${e.mensaje}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFFD97706),
+            content: Text('⚠️ ${e.mensaje}'),
+          ),
+        );
+      }
+    } catch (e) {
+      // Cualquier otra falla de red/servidor: no bloquear al técnico, se reintenta al sincronizar.
+      await encolarLocal(e.toString());
+    }
+  }
+
+  /// Órdenes hijas del lote leídas de SQLite local (PDF/estatus frescos), fusionadas con memoria.
+  Future<List<Map<String, dynamic>>> _hijasLoteDesdeSqlite(
+      String loteId, List<Map<String, dynamic>> enMemoria) async {
+    String fol(Map m) => ((m['folio_os'] ?? m['folio'])?.toString() ?? '').trim();
+    try {
+      final db = await LocalDbService.instance.database;
+      final foliosEnMemoria = enMemoria.map(fol).where((f) => f.isNotEmpty).toList();
+      final List<Map<String, dynamic>> rows;
+      if (loteId.isNotEmpty && !loteId.startsWith('grp_') && !loteId.startsWith('LOTE-') && !loteId.startsWith('solo_')) {
+        rows = await db.query('ordenes_servicio', where: 'id_lote = ? OR lote = ?', whereArgs: [loteId, loteId]);
+      } else if (foliosEnMemoria.isNotEmpty) {
+        final qMarks = List.filled(foliosEnMemoria.length, '?').join(',');
+        rows = await db.query('ordenes_servicio',
+            where: 'folio_os IN ($qMarks) OR folio IN ($qMarks)',
+            whereArgs: [...foliosEnMemoria, ...foliosEnMemoria]);
+      } else {
+        rows = [];
+      }
+      if (rows.isEmpty) return enMemoria;
+      final porFolio = <String, Map<String, dynamic>>{for (final m in enMemoria) fol(m): m};
+      final vistos = <String>{};
+      final out = <Map<String, dynamic>>[];
+      for (final r in rows) {
+        final f = fol(r);
+        if (f.isEmpty || !vistos.add(f)) continue;
+        final merged = <String, dynamic>{...?porFolio[f]};
+        r.forEach((k, v) {
+          if (v != null && v.toString().isNotEmpty) merged[k] = v;
+        });
+        out.add(merged);
+      }
+      for (final m in enMemoria) {
+        final f = fol(m);
+        if (f.isNotEmpty && !vistos.contains(f)) out.add(m);
+      }
+      debugPrint('[ENVIO CORREO] Lote $loteId: ${out.length} órdenes hijas (SQLite: ${rows.length})');
+      return out;
+    } catch (e) {
+      debugPrint('[ENVIO CORREO] No se pudieron leer hijas del lote $loteId en SQLite: $e');
+      return enMemoria;
+    }
+  }
+
+  Future<void> _manejarAccionEmail(BuildContext context, Map<String, dynamic> os) =>
+      _procesarEnvioCorreo(item: os, esLote: false);
+
+  Future<void> _manejarEnvioCorreoOrden(Map<String, dynamic> orden) =>
+      _procesarEnvioCorreo(item: orden, esLote: false);
+
+  Future<void> _manejarEnvioCorreoLote(dynamic lote) =>
+      _procesarEnvioCorreo(item: lote, esLote: true);
+
   @override
   Widget build(BuildContext context) {
     final sync        = context.watch<SyncService>();
@@ -1003,15 +1701,32 @@ class _OsListScreenState extends State<OsListScreen> {
       },
     );
 
-    // Solo supervisión metrológica (Alan Guevara ID 8 / admins) ve el selector.
-    final esSupervisor = auth.esSupervisorCalibracion;
-    final repoActivo = esSupervisor && _vistaRepositorio;
+    final u = AuthService.usuarioActual;
+    final String rol = (auth.role ?? u?.rol ?? '').toString().toLowerCase();
+    final String nombre = (auth.displayName.isNotEmpty ? auth.displayName : (u?.nombre ?? '')).toString().toLowerCase();
+    final String user = (auth.username ?? u?.username ?? '').toString().toLowerCase();
+    final bool puedeVerRepositorio = rol == 'admin' ||
+        rol == 'administrador' ||
+        auth.isAdmin ||
+        auth.esSupervisorCalibracion ||
+        nombre.contains('alan guevara') ||
+        nombre.contains('ivan colin') ||
+        nombre.contains('iván colín') ||
+        user == 'ivancolin1207' ||
+        user == 'daikki19';
+
+    if (!puedeVerRepositorio && _vistaRepositorio) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() => _vistaRepositorio = false);
+      });
+    }
+    final repoActivo = puedeVerRepositorio && _vistaRepositorio;
 
     final content = Scaffold(
       backgroundColor: _kBgColor,
       body: SafeArea(
         bottom: false,
-        child: !esSupervisor
+        child: !puedeVerRepositorio
             ? dashboard
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1165,14 +1880,9 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
     // 1. REGLA ESTRICTA DE AISLAMIENTO POR TÉCNICO:
     // No mostrar bajo ninguna circunstancia órdenes de otros técnicos en la vista del técnico
     if (p.isTecnico) {
-      // Helper: normaliza acentos para comparación tolerante de strings
-      String _norm(String s) => s
-          .replaceAll('á','a').replaceAll('é','e').replaceAll('í','i')
-          .replaceAll('ó','o').replaceAll('ú','u').replaceAll('ü','u');
-
+      final userNorm = normalizarTexto(p.currentTecnicoNombre);
       final idTec = int.tryParse(os['id_tecnico']?.toString() ?? '');
       final myId  = p.currentTecnicoId;
-      final myNom = _norm(p.currentTecnicoNombre.toLowerCase().trim());
 
       // ── Caso A: La orden tiene id_tecnico válido ──────────────────────────
       if (idTec != null && idTec > 0) {
@@ -1181,30 +1891,38 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
           // Si los IDs difieren → excluir siempre.
           if (idTec != myId) return false;
           // IDs iguales → incluir; ir directo a los demás filtros.
-        } else if (myNom.isNotEmpty) {
-          // No tenemos ID de usuario en sesión → comparar por nombre completo
-          final tecNorm = _norm((os['tecnico'] as String? ?? os['tecnico_nombre'] as String? ?? '').toLowerCase().trim());
-          if (tecNorm.isEmpty) return true;
-          final tecParts = tecNorm.split(RegExp(r'\s+'));
-          final myParts  = myNom.split(RegExp(r'\s+'));
-          // Mismo primer nombre pero apellido diferente → personas distintas
-          if (tecParts.length >= 2 && myParts.length >= 2 &&
-              tecParts[0] == myParts[0] && tecParts[1] != myParts[1]) return false;
-          if (tecNorm != myNom && !tecNorm.contains(myNom) && !myNom.contains(tecNorm)) return false;
+        } else if (userNorm.isNotEmpty) {
+          // No tenemos ID de usuario en sesión → comparar por nombre normalizado
+          final bool esMiOrden = normalizarTexto(os['tecnico'] as String? ?? '') == userNorm ||
+                                 normalizarTexto(os['tecnico_nombre'] as String? ?? '') == userNorm;
+          if (!esMiOrden) {
+            final tecNorm = normalizarTexto(os['tecnico'] as String? ?? os['tecnico_nombre'] as String? ?? '');
+            if (tecNorm.isEmpty) return true;
+            final tecParts = tecNorm.split(RegExp(r'\s+'));
+            final myParts  = userNorm.split(RegExp(r'\s+'));
+            // Mismo primer nombre pero apellido diferente → personas distintas
+            if (tecParts.length >= 2 && myParts.length >= 2 &&
+                tecParts[0] == myParts[0] && tecParts[1] != myParts[1]) return false;
+            if (!tecNorm.contains(userNorm) && !userNorm.contains(tecNorm)) return false;
+          }
         }
       } else {
         // ── Caso B: Orden sin id_tecnico (formatos físicos o legacy) ─────────
-        if (myNom.isNotEmpty) {
-          final tecNorm = _norm((os['tecnico'] as String? ?? os['tecnico_nombre'] as String? ?? '').toLowerCase().trim());
-          // Sin técnico asignado → excluir para evitar fugas entre técnicos
-          if (tecNorm.isEmpty) return false;
-          final tecParts = tecNorm.split(RegExp(r'\s+'));
-          final myParts  = myNom.split(RegExp(r'\s+'));
-          // Mismo primer nombre pero apellido diferente → personas distintas → excluir
-          if (tecParts.length >= 2 && myParts.length >= 2 &&
-              tecParts[0] == myParts[0] && tecParts[1] != myParts[1]) return false;
-          // Verificación por nombre completo (no solo primer nombre)
-          if (tecNorm != myNom && !tecNorm.contains(myNom) && !myNom.contains(tecNorm)) return false;
+        if (userNorm.isNotEmpty) {
+          final bool esMiOrden = normalizarTexto(os['tecnico'] as String? ?? '') == userNorm ||
+                                 normalizarTexto(os['tecnico_nombre'] as String? ?? '') == userNorm;
+          if (!esMiOrden) {
+            final tecNorm = normalizarTexto(os['tecnico'] as String? ?? os['tecnico_nombre'] as String? ?? '');
+            // Sin técnico asignado → excluir para evitar fugas entre técnicos
+            if (tecNorm.isEmpty) return false;
+            final tecParts = tecNorm.split(RegExp(r'\s+'));
+            final myParts  = userNorm.split(RegExp(r'\s+'));
+            // Mismo primer nombre pero apellido diferente → personas distintas → excluir
+            if (tecParts.length >= 2 && myParts.length >= 2 &&
+                tecParts[0] == myParts[0] && tecParts[1] != myParts[1]) return false;
+            // Verificación por nombre completo
+            if (!tecNorm.contains(userNorm) && !userNorm.contains(tecNorm)) return false;
+          }
         }
       }
     }
@@ -1218,22 +1936,24 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
     }
 
     if (p.modalidad.isNotEmpty && p.modalidad != 'Todas las Modalidades') {
-      final m = (os['modalidad'] as String? ?? '').trim().toUpperCase();
-      final isFisico = m.contains('FISIC') || m.contains('FÍSIC');
+      final isFisico = esModalidadFisica(os['modalidad'] as String?);
       if (p.modalidad == 'Solo Físicos' && !isFisico) return false;
       if (p.modalidad == 'Solo Digitales' && isFisico) return false;
     }
 
-    if (p.tecnico != null && p.tecnico!.isNotEmpty &&
-        !(os['tecnico'] as String? ?? '').toLowerCase().contains(p.tecnico!.toLowerCase())) return false;
+    if (p.tecnico != null && p.tecnico!.isNotEmpty) {
+      final tecFilter = normalizarTexto(p.tecnico!);
+      final tecVal = normalizarTexto(os['tecnico'] as String? ?? os['tecnico_nombre'] as String? ?? '');
+      if (!tecVal.contains(tecFilter)) return false;
+    }
 
     if (p.estado != null && p.estado!.isNotEmpty &&
         (os['estado'] as String? ?? '') != p.estado) return false;
 
     if (p.query.isNotEmpty) {
-      final q = p.query.toLowerCase().trim();
+      final q = normalizarTexto(p.query);
       final ok = ['folio_os', 'cliente', 'sucursal', 'tecnico', 'tipo_servicio', 'id_lote', 'lote']
-          .any((k) => (os[k]?.toString().toLowerCase() ?? '').contains(q));
+          .any((k) => normalizarTexto(os[k]?.toString() ?? '').contains(q));
       if (!ok) return false;
     }
 
@@ -1328,22 +2048,25 @@ class _MobilePhoneDashboard extends StatelessWidget {
               ),
               const SizedBox(width: 6),
               // Botón sincronizar circular
-              IconButton(
-                icon: sync.state == SyncState.syncing
-                    ? const SizedBox(
-                        width: 18, height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: _kCarmineRed),
-                      )
-                    : const Icon(Icons.sync_rounded, color: _kTextPrim, size: 22),
-                // [FIX-CUELGUE] Si está sincroni... siempre permitir tocar para forzar reset
-                onPressed: () {
-                  if (sync.state == SyncState.syncing) {
-                    sync.forceResetSync();
-                  } else {
-                    state._sincronizarOrdenesServidor();
-                  }
-                },
-                tooltip: sync.state == SyncState.syncing ? 'Toca para cancelar' : 'Sincronizar',
+              GestureDetector(
+                onLongPress: () => state._mostrarMenuSincronizacion(context),
+                child: IconButton(
+                  icon: sync.state == SyncState.syncing
+                      ? const SizedBox(
+                          width: 18, height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: _kCarmineRed),
+                        )
+                      : const Icon(Icons.sync_rounded, color: _kTextPrim, size: 22),
+                  // [FIX-CUELGUE] Si está sincroni... siempre permitir tocar para forzar reset
+                  onPressed: () {
+                    if (sync.state == SyncState.syncing) {
+                      sync.forceResetSync();
+                    } else {
+                      state._sincronizarOrdenesServidor();
+                    }
+                  },
+                  tooltip: sync.state == SyncState.syncing ? 'Toca para cancelar' : 'Sincronizar (mantén presionado para opciones)',
+                ),
               ),
             ],
           ),
@@ -1574,24 +2297,19 @@ class _MobilePhoneDashboard extends StatelessWidget {
           return _MobileLoteCard(
             group: group,
             state: state,
-            onCaptura: (os) => ctx.push(
-              '/captura/${os['local_id']}',
-              extra: Map<String, dynamic>.from(os),
-            ),
+            onCaptura: (os) => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
           );
         }
         final os = group.items.first;
         return _MobileOsCard(
           os: os,
-          onCaptura: () => ctx.push(
-            '/captura/${os['local_id']}',
-            extra: Map<String, dynamic>.from(os),
-          ),
+          onCaptura: () => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
           onAbrirPdf: state._abrirPdf,
           onDescargarPdf: state._descargarPdfConNomenclatura,
           onRehacer: state._mostrarDialogoRehacerToma,
           onEliminarDatos: state._mostrarDialogoEliminarDatosDesdeCero,
           onSubirPdfManual: state._subirPdfManual,
+          onEmail: state._manejarAccionEmail,
         );
       },
     );
@@ -1607,6 +2325,7 @@ class _MobileOsCard extends StatelessWidget {
   final Function(BuildContext, Map<String, dynamic>) onRehacer;
   final Function(BuildContext, Map<String, dynamic>) onEliminarDatos;
   final Function(BuildContext, Map<String, dynamic>) onSubirPdfManual;
+  final Function(BuildContext, Map<String, dynamic>) onEmail;
 
   const _MobileOsCard({
     required this.os,
@@ -1616,6 +2335,7 @@ class _MobileOsCard extends StatelessWidget {
     required this.onRehacer,
     required this.onEliminarDatos,
     required this.onSubirPdfManual,
+    required this.onEmail,
   });
 
   @override
@@ -1628,16 +2348,18 @@ class _MobileOsCard extends StatelessWidget {
 
     final bool pdfReal = _OsListScreenState.tienePdfReal(os);
     final bool noIniciada = _OsListScreenState.sinIniciar(os);
-    final bool isFisico = modalidad == 'FISICA' || modalidad == 'FISICO' ||
-        esFolioFormatoFisico(folioStr);
+    final bool isFisico = esModalidadFisica(os['modalidad'] as String?);
 
-    final String estatusLabel = pdfReal
-        ? '✓ PDF Listo'
+    final String estatusRemoto = (os['estatus'] ?? os['estado'] ?? '').toString().trim();
+    final bool isCerrado = pdfReal;
+
+    final String estatusLabel = isCerrado
+        ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
         : (noIniciada ? '⚠️ Sin Formato' : 'Pendiente');
-    final Color estatusFg = pdfReal
+    final Color estatusFg = isCerrado
         ? const Color(0xFF2E7D32)
         : (noIniciada ? const Color(0xFFD97706) : const Color(0xFF2563EB));
-    final Color estatusBg = pdfReal
+    final Color estatusBg = isCerrado
         ? const Color(0xFFE8F5E9)
         : (noIniciada ? const Color(0xFFFFFBEB) : const Color(0xFFEFF6FF));
 
@@ -1724,10 +2446,32 @@ class _MobileOsCard extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ],
+          const SizedBox(height: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF3F4F6),
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(color: const Color(0xFFE5E7EB), width: 0.5),
+            ),
+            child: Text(
+              '👤 Técnico: ${os['tecnico_nombre'] ?? os['tecnico'] ?? 'Sin asignar'}',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF374151),
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           const SizedBox(height: 8),
 
-          // Fila de Metadatos: Tipo de servicio + Fecha + Sync Badge
-          Row(
+          // Fila de Metadatos (Wrap: se reacomoda en Fold doblado sin recortes)
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1752,7 +2496,13 @@ class _MobileOsCard extends StatelessWidget {
                   color: _kTextSec,
                 ),
               ),
-              const Spacer(),
+              EmailStatusBadge(
+                enviado: estadoCorreoOs(os) == 'enviado',
+                enCola: estadoCorreoOs(os) == 'cola',
+                correo: (os['correo_cliente'] ?? '').toString(),
+                onTap: () => onEmail(context, os),
+              ),
+              const SizedBox(width: 6),
               SyncCheckBadge(
                 status: (os['sync_check_status'] as String?)?.isNotEmpty == true
                     ? os['sync_check_status'] as String
@@ -1764,7 +2514,7 @@ class _MobileOsCard extends StatelessWidget {
           const SizedBox(height: 12),
 
           // Fila Inferior (Acciones ergonómicas táctiles)
-          if (pdfReal) ...[
+          if (isCerrado) ...[
             // A) TIENE PDF REAL GENERADO O ADJUNTADO
             Row(
               children: [
@@ -1844,6 +2594,37 @@ class _MobileOsCard extends StatelessWidget {
                 Expanded(
                   child: SizedBox(
                     height: 40,
+                    child: Builder(
+                      builder: (context) {
+                        final item = os;
+                        final String estCorreo = estadoCorreoOs(item);
+                        final bool correoEnviado = estCorreo == 'enviado';
+                        final bool enCola = estCorreo == 'cola';
+                        return ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0)),
+                            foregroundColor: correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100)),
+                            side: BorderSide(color: correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D))),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          ),
+                          icon: Icon(correoEnviado ? Icons.check_circle_outline : (enCola ? Icons.schedule_send : Icons.mail_outline), size: 14),
+                          label: Text(
+                            correoEnviado ? "✓ Enviado" : (enCola ? "⏳ En cola" : "✉ Correo"),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                          ),
+                          onPressed: () => onEmail(context, os),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: SizedBox(
+                    height: 40,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFEDE7F6),
@@ -1858,7 +2639,7 @@ class _MobileOsCard extends StatelessWidget {
                       onPressed: () => onSubirPdfManual(context, os),
                       icon: const Icon(Icons.upload_file_rounded, size: 16),
                       label: const Text(
-                        '📤 Subir PDF manual',
+                        '📤 Subir PDF',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -1882,7 +2663,7 @@ class _MobileOsCard extends StatelessWidget {
                       onPressed: () => onEliminarDatos(context, os),
                       icon: const Icon(Icons.delete_forever_rounded, size: 16),
                       label: const Text(
-                        '🗑️ Eliminar datos',
+                        '🗑️ Eliminar',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -1906,9 +2687,9 @@ class _MobileOsCard extends StatelessWidget {
                     ),
                   ),
                   onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
-                  icon: const Icon(Icons.document_scanner_outlined, size: 18),
+                  icon: const Icon(Icons.camera_alt_rounded, size: 18),
                   label: const Text(
-                    '📤 Adjuntar PDF Escaneado',
+                    '📷 Adjuntar PDF / Escaneo',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -2049,12 +2830,48 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      first['cliente'] as String? ?? 'Cliente del Lote',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _kTextPrim),
-                      overflow: TextOverflow.ellipsis,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          first['cliente'] as String? ?? 'Cliente del Lote',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _kTextPrim),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '👤 Técnico: ${first['tecnico_nombre'] ?? first['tecnico'] ?? 'Sin asignar'}',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF4B5563)),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
                   ),
+                  Builder(
+                    builder: (context) {
+                      final item = widget.group;
+                      final String estLote = estadoCorreoLote(widget.group.items);
+                      final bool loteEnviado = estLote == 'enviado';
+                      final bool loteEnCola = estLote == 'cola';
+                      return ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: loteEnviado ? const Color(0xFF2E7D32) : (loteEnCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0)),
+                          foregroundColor: loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100)),
+                          side: BorderSide(color: loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D))),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        ),
+                        icon: Icon(loteEnviado ? Icons.check_circle_outline : (loteEnCola ? Icons.schedule_send : Icons.mail_outline), size: 14),
+                        label: Text(
+                          loteEnviado ? "✓ Lote Enviado" : (loteEnCola ? "⏳ En cola" : "✉ Enviar Lote"),
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                        onPressed: () => widget.state._procesarEnvioCorreo(item: item, esLote: true),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 4),
                   Icon(
                     _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
                     color: _kCarmineRed,
@@ -2076,6 +2893,7 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                     onRehacer: widget.state._mostrarDialogoRehacerToma,
                     onEliminarDatos: widget.state._mostrarDialogoEliminarDatosDesdeCero,
                     onSubirPdfManual: widget.state._subirPdfManual,
+                    onEmail: widget.state._manejarAccionEmail,
                   );
                 }).toList(),
               ),
@@ -2110,6 +2928,7 @@ class _TabletDesktopDashboard extends StatelessWidget {
         _Header(
           sync: sync,
           onSync: state._sincronizarOrdenesServidor,
+          onLongPressSync: () => state._mostrarMenuSincronizacion(context),
           onRefresh: state._loadLocal,
         ),
         // 4 KPI Cards horizontally balanced
@@ -2137,19 +2956,38 @@ class _TabletDesktopDashboard extends StatelessWidget {
           onSearch:    (v) { state.setState(() => state._query = v); state._applyFilters(); },
           onClear:     ()  { state._searchCtrl.clear(); state.setState(() => state._query = ''); state._applyFilters(); },
         ),
-        // Table Header & Rows (CERO SCROLL HORIZONTAL - 2 Niveles)
+        // Table Header & Rows con Scroll Horizontal y Ancho Mínimo Garantizado
         Expanded(
-          child: Column(
-            children: [
-              _TableHeader(hideTecnico: hideTecnico),
-              Expanded(
-                child: state._loading
-                    ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
-                    : state._filtered.isEmpty
-                        ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
-                        : _buildTabletGroupedList(context),
-              ),
-            ],
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              const double minTableWidth = 720.0;
+              final double effectiveWidth = constraints.maxWidth > minTableWidth
+                  ? constraints.maxWidth
+                  : minTableWidth;
+
+              return Scrollbar(
+                notificationPredicate: (n) => n.depth == 0,
+                child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                child: SizedBox(
+                  width: effectiveWidth,
+                  child: Column(
+                    children: [
+                      _TableHeader(hideTecnico: hideTecnico),
+                      Expanded(
+                        child: state._loading
+                            ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
+                            : state._filtered.isEmpty
+                                ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
+                                : _buildTabletGroupedList(context),
+                      ),
+                    ],
+                  ),
+                ),
+                ),
+              );
+            },
           ),
         ),
         SizedBox(height: bottom > 0 ? bottom : 8),
@@ -2167,11 +3005,9 @@ class _TabletDesktopDashboard extends StatelessWidget {
         if (group.isLote) {
           return _LoteRow(
             group: group,
+            onEnviarLote: () => state._procesarEnvioCorreo(item: group, esLote: true),
             hideTecnico: hideTecnico,
-            onCaptura: (os) => ctx.push(
-              '/captura/${os['local_id']}',
-              extra: Map<String, dynamic>.from(os),
-            ),
+            onCaptura: (os) => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
           );
         }
         final os = group.items.first;
@@ -2179,15 +3015,13 @@ class _TabletDesktopDashboard extends StatelessWidget {
           os: os,
           index: i,
           hideTecnico: hideTecnico,
-          onCaptura: () => ctx.push(
-            '/captura/${os['local_id']}',
-            extra: Map<String, dynamic>.from(os),
-          ),
+          onCaptura: () => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
           onAbrirPdf: state._abrirPdf,
           onDescargarPdf: state._descargarPdfConNomenclatura,
           onRehacer: state._mostrarDialogoRehacerToma,
           onEliminarDatos: state._mostrarDialogoEliminarDatosDesdeCero,
           onSubirPdfManual: state._subirPdfManual,
+          onEmail: (ctx, os) => state._manejarEnvioCorreoOrden(os),
         );
       },
     );
@@ -2198,8 +3032,14 @@ class _TabletDesktopDashboard extends StatelessWidget {
 class _Header extends StatelessWidget {
   final SyncService sync;
   final VoidCallback onSync;
+  final VoidCallback? onLongPressSync;
   final VoidCallback onRefresh;
-  const _Header({required this.sync, required this.onSync, required this.onRefresh});
+  const _Header({
+    required this.sync,
+    required this.onSync,
+    this.onLongPressSync,
+    required this.onRefresh,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -2259,6 +3099,7 @@ class _Header extends StatelessWidget {
                 onSync();
               }
             },
+            onLongPress: onLongPressSync,
             icon: sync.state == SyncState.syncing
                 ? const SizedBox(
                     width: 13, height: 13,
@@ -2667,18 +3508,32 @@ class _TableHeader extends StatelessWidget {
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
-      child: const Row(
+      child: Row(
         children: [
-          SizedBox(width: 130, child: _TH('FOLIO OS')),
-          SizedBox(width: 95, child: _TH('FECHA')),
+          SizedBox(width: 110, child: _TH('FOLIO OS')),
+          SizedBox(width: 85, child: _TH('FECHA')),
           Expanded(
             flex: 3,
-            child: _TH('CLIENTE / SUCURSAL'),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 160),
+              child: Text(
+                'CLIENTE / SUCURSAL',
+                softWrap: false,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  color: _kTextPrim,
+                  letterSpacing: 0.5,
+                ),
+              ),
+            ),
           ),
-          SizedBox(width: 150, child: _TH('TIPO SERVICIO')),
-          SizedBox(width: 90, child: _TH('MODALIDAD')),
-          SizedBox(width: 100, child: _TH('ESTATUS')),
-          SizedBox(width: 90, child: _TH('SYNC')),
+          SizedBox(width: 8),
+          SizedBox(width: 135, child: _TH('TIPO SERVICIO')),
+          SizedBox(width: 80, child: _TH('MODALIDAD')),
+          SizedBox(width: 95, child: _TH('ESTATUS')),
+          SizedBox(width: 85, child: _TH('SYNC')),
         ],
       ),
     );
@@ -2700,7 +3555,7 @@ class _TH extends StatelessWidget {
       );
 }
 
-// ── Table Row (Tablet / Desktop - Layout 2 Niveles) ────────────────────────
+// ─── Table Row (Tablet / Desktop - Layout Reorganizado con Barra de Acciones Inferior) ─────
 class _OsRow extends StatelessWidget {
   final Map<String, dynamic> os;
   final int index;
@@ -2710,6 +3565,7 @@ class _OsRow extends StatelessWidget {
   final Function(BuildContext, Map<String, dynamic>) onRehacer;
   final Function(BuildContext, Map<String, dynamic>) onEliminarDatos;
   final Function(BuildContext, Map<String, dynamic>) onSubirPdfManual;
+  final Function(BuildContext, Map<String, dynamic>) onEmail;
   final bool indent;
   final bool hideTecnico;
 
@@ -2722,27 +3578,61 @@ class _OsRow extends StatelessWidget {
     required this.onRehacer,
     required this.onEliminarDatos,
     required this.onSubirPdfManual,
+    required this.onEmail,
     this.indent = false,
     this.hideTecnico = false,
   });
+
+  Widget _buildBtnAccion({
+    required String label,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onPressed,
+    Color fg = Colors.white,
+    BorderSide side = BorderSide.none,
+  }) {
+    return SizedBox(
+      height: 29,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: color,
+          foregroundColor: fg,
+          elevation: 0,
+          side: side,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          minimumSize: const Size(0, 29),
+          visualDensity: VisualDensity.compact,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+        icon: Icon(icon, size: 14),
+        label: Text(
+          label,
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+        ),
+        onPressed: onPressed,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     final folioStr  = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     final modalidad = (os['modalidad'] as String? ?? 'DIGITAL').toUpperCase();
     final syncSt    = (os['sync_status'] as String? ?? '');
-    final isFisico  = modalidad.contains('FISIC') || modalidad.contains('FÍSIC') ||
-        esFolioFormatoFisico(folioStr);
+    final isFisico  = esModalidadFisica(os['modalidad'] as String?);
     final isEven    = index % 2 == 0;
+    final String tecnicoNombre = (os['tecnico_nombre'] ?? os['tecnico'] ?? '').toString().trim();
 
     final bool hasDoc = _OsListScreenState.tieneDocumento(os);
 
-    // Estatus badge:
-    // Si tieneDocumento(o) == true: [ ✓ PDF Listo ] (Verde).
-    // Si tieneDocumento(o) == false: [ ⚠️ Sin Formato ] (Ámbar).
-    final String estatusLabel = hasDoc ? '✓ PDF Listo' : '⚠️ Sin Formato';
-    final Color estatusFg = hasDoc ? const Color(0xFF2E7D32) : const Color(0xFFD97706);
-    final Color estatusBg = hasDoc ? const Color(0xFFE8F5E9) : const Color(0xFFFFFBEB);
+    final String estatusRemoto = (os['estatus'] ?? os['estado'] ?? '').toString().trim();
+    final bool isCerrado = hasDoc;
+
+    final String estatusLabel = isCerrado
+        ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
+        : '📋 Sin Formato';
+    final Color estatusFg = isCerrado ? const Color(0xFF2E7D32) : const Color(0xFFD97706);
+    final Color estatusBg = isCerrado ? const Color(0xFFE8F5E9) : const Color(0xFFFFFBEB);
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
@@ -2753,8 +3643,6 @@ class _OsRow extends StatelessWidget {
         os['sync_check_status'] == 'ABIERTO' ||
         (hasDoc && syncSt != 'PENDIENTE_ACTUALIZAR');
 
-    // Sync badge:
-    // Si tieneDocumento(o) == false: NUNCA mostrar "✓ Enviada". Debe mostrar [ Abierto ] o [ Asignada ].
     String effectiveSyncStatus;
     final rawSync = (os['sync_check_status'] as String? ?? '').trim().toUpperCase();
     if (!hasDoc) {
@@ -2774,214 +3662,249 @@ class _OsRow extends StatelessWidget {
     final fechaStr = (os['fecha'] as String? ?? '').split('T').first.split(' ').first;
 
     return Container(
-      color: isEven ? _kCardBg : const Color(0xFFFAFAFA),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: isEven ? _kCardBg : const Color(0xFFFAFAFA),
+        border: Border(
+          bottom: const BorderSide(color: _kBorder),
+          left: indent ? const BorderSide(color: Color(0xFFCBD5E1), width: 3.5) : BorderSide.none,
+        ),
+      ),
+      padding: EdgeInsets.only(
+        left: indent ? 24.0 : 16.0,
+        right: 16.0,
+        top: 8.0,
+        bottom: 8.0,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
         children: [
-          // ── NIVEL 1 (Superior): Datos esenciales al 100% del ancho ────────
+          // ── Bloque 1: Datos Principales de la Orden ──
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // [FOLIO OS] (130px)
+              // [FOLIO OS] (110px)
               SizedBox(
-                width: 130,
-                child: Padding(
-                  padding: EdgeInsets.only(left: indent ? 12.0 : 0.0),
-                  child: Text(
-                    folioStr.isNotEmpty ? folioStr : '—',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _kCarmineRed),
-                    overflow: TextOverflow.ellipsis,
-                  ),
+                width: 110,
+                child: Text(
+                  folioStr.isNotEmpty ? folioStr : '—',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: _kCarmineRed),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // [FECHA] (95px)
+              // [FECHA] (85px)
               SizedBox(
-                width: 95,
+                width: 85,
                 child: Text(
                   fechaStr,
                   style: const TextStyle(fontSize: 11, color: _kTextPrim),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // [CLIENTE / SUCURSAL] (Expanded, flex: 3)
+              // [CLIENTE / SUCURSAL] (Expanded, flex: 3 con minWidth garantizado)
               Expanded(
                 flex: 3,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      os['cliente'] ?? '—',
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _kTextPrim),
-                      overflow: TextOverflow.ellipsis,
-                      maxLines: 1,
-                    ),
-                    if ((os['sucursal'] ?? '').toString().isNotEmpty)
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minWidth: 160),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
                       Text(
-                        os['sucursal']!.toString(),
-                        style: const TextStyle(fontSize: 10, color: _kTextSec),
+                        os['cliente'] ?? '—',
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _kTextPrim),
                         overflow: TextOverflow.ellipsis,
+                        softWrap: false,
                         maxLines: 1,
                       ),
-                  ],
+                      if ((os['sucursal'] ?? '').toString().trim().isNotEmpty)
+                        Text(
+                          os['sucursal'].toString().trim(),
+                          style: const TextStyle(fontSize: 9.5, color: _kTextSec),
+                          overflow: TextOverflow.ellipsis,
+                          softWrap: false,
+                          maxLines: 1,
+                        ),
+                      if (tecnicoNombre.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2.0),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.person, size: 13, color: Colors.blueAccent),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text(
+                                  'Técnico: $tecnicoNombre',
+                                  style: const TextStyle(fontSize: 10.5, color: Colors.blueGrey, fontWeight: FontWeight.w500),
+                                  overflow: TextOverflow.ellipsis,
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        const Padding(
+                          padding: EdgeInsets.only(top: 2.0),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.person_outline, size: 12, color: Colors.grey),
+                              SizedBox(width: 3),
+                              Text(
+                                'Sin técnico asignado',
+                                style: TextStyle(fontSize: 9.5, color: Colors.grey, fontStyle: FontStyle.italic),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
-              // [TIPO SERVICIO] (150px)
-              SizedBox(width: 150, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: os))),
-              // [MODALIDAD] (90px)
+              const SizedBox(width: 8),
+              // [TIPO SERVICIO] (135px)
               SizedBox(
-                width: 90,
-                child: _Badge(
-                  label: isFisico ? 'Físico' : 'Digital',
-                  fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-                  bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
+                width: 135,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: TipoServicioBadge(os: os),
                 ),
               ),
-              // [ESTATUS] (100px)
+              // [MODALIDAD] (80px)
               SizedBox(
-                width: 100,
-                child: _Badge(
-                  label: estatusLabel,
-                  fg: estatusFg,
-                  bg: estatusBg,
+                width: 80,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _Badge(
+                    label: isFisico ? 'Físico' : 'Digital',
+                    fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
+                    bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
+                  ),
                 ),
               ),
-              // [SYNC] (90px)
+              // [ESTATUS] (95px)
               SizedBox(
-                width: 90,
-                child: SyncCheckBadge(
-                  status: effectiveSyncStatus,
-                  showLabel: true,
+                width: 95,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: _Badge(
+                    label: estatusLabel,
+                    fg: estatusFg,
+                    bg: estatusBg,
+                  ),
+                ),
+              ),
+              // [SYNC] (85px)
+              SizedBox(
+                width: 85,
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: SyncCheckBadge(
+                    status: effectiveSyncStatus,
+                    showLabel: true,
+                  ),
                 ),
               ),
             ],
           ),
 
-          // ── NIVEL 2 (Inferior): Fila de acciones alineada a la derecha con margen de 6px ───
+          // ── Bloque 2: Divisor ligero ──
+          const SizedBox(height: 6),
+          const Divider(height: 1, thickness: 0.5, color: Color(0xFFE5E7EB)),
+          const SizedBox(height: 6),
+
+          // ── Bloque 3: Barra Inferior de Acciones ──
           Padding(
-            padding: const EdgeInsets.only(top: 6),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (hasDoc) ...[
-                  // Si tiene PDF / formato:
-                  // [ 📄 Ver PDF ]  [ 📥 Descargar ]  [ 🔄 Rehacer ]  [ 📤 Subir PDF ]  [ 🗑️ Reset ]
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF1976D2),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      minimumSize: const Size(60, 30),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            padding: const EdgeInsets.only(top: 6.0, bottom: 4.0, right: 8.0),
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 6.0,    // Espacio horizontal entre botones
+                runSpacing: 6.0, // Salto de línea limpio si no cabe por el sidebar
+                children: [
+                  if (isCerrado) ...[
+                    _buildBtnAccion(
+                      label: "Ver PDF",
+                      icon: Icons.picture_as_pdf,
+                      color: const Color(0xFF1565C0),
+                      onPressed: () => onAbrirPdf(context, os),
                     ),
-                    icon: const Icon(Icons.picture_as_pdf, size: 14),
-                    label: const Text('📄 Ver PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                    onPressed: () => onAbrirPdf(context, os),
-                  ),
-                  const SizedBox(width: 6),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2E7D32),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      minimumSize: const Size(65, 30),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    _buildBtnAccion(
+                      label: "Descargar",
+                      icon: Icons.download,
+                      color: const Color(0xFF2E7D32),
+                      onPressed: () => onDescargarPdf(context, os),
                     ),
-                    icon: const Icon(Icons.download, size: 14),
-                    label: const Text('📥 Descargar', style: TextStyle(fontSize: 11)),
-                    onPressed: () => onDescargarPdf(context, os),
-                  ),
-                  const SizedBox(width: 6),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFF57C00),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      minimumSize: const Size(60, 30),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    _buildBtnAccion(
+                      label: "Rehacer",
+                      icon: Icons.replay,
+                      color: const Color(0xFFEF6C00),
+                      onPressed: () => onRehacer(context, os),
                     ),
-                    icon: const Icon(Icons.replay_rounded, size: 14),
-                    label: const Text('🔄 Rehacer', style: TextStyle(fontSize: 11)),
-                    onPressed: () => onRehacer(context, os),
-                  ),
-                  const SizedBox(width: 6),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4338CA),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      minimumSize: const Size(55, 30),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    _buildBtnAccion(
+                      label: "Subir PDF",
+                      icon: Icons.upload_file,
+                      color: const Color(0xFF4527A0),
+                      onPressed: () => onSubirPdfManual(context, os),
                     ),
-                    icon: const Icon(Icons.upload_file, size: 14),
-                    label: const Text('📤 Subir PDF', style: TextStyle(fontSize: 11)),
-                    onPressed: () => onSubirPdfManual(context, os),
-                  ),
-                  const SizedBox(width: 6),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFC62828),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      minimumSize: const Size(55, 30),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    Builder(
+                      builder: (context) {
+                        final item = os;
+                        final String estCorreo = estadoCorreoOs(item);
+                        final bool correoEnviado = estCorreo == 'enviado';
+                        final bool enCola = estCorreo == 'cola';
+                        return _buildBtnAccion(
+                          label: correoEnviado ? "✓ Enviado" : (enCola ? "⏳ En cola (Offline)" : "✉ Enviar Correo"),
+                          icon: correoEnviado ? Icons.check_circle_outline : (enCola ? Icons.schedule_send : Icons.mail_outline),
+                          color: correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0)),
+                          fg: correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100)),
+                          side: BorderSide(color: correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D))),
+                          onPressed: () {
+                            final st = context.findAncestorStateOfType<_OsListScreenState>();
+                            if (st != null) {
+                              st._procesarEnvioCorreo(item: item, esLote: false);
+                            } else {
+                              onEmail(context, os);
+                            }
+                          },
+                        );
+                      },
                     ),
-                    icon: const Icon(Icons.delete_forever, size: 14),
-                    label: const Text('🗑️ Reset', style: TextStyle(fontSize: 11)),
-                    onPressed: () => onEliminarDatos(context, os),
-                  ),
-                ] else ...[
-                  // Si no tiene formato:
-                  // [ ✍️ Iniciar Captura ]  [ 📤 Subir PDF manual ]
-                  if (isFisico) ...[
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF7C3AED),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        minimumSize: const Size(110, 30),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                      ),
-                      icon: const Icon(Icons.document_scanner_outlined, size: 14),
-                      label: const Text('📤 Adjuntar PDF', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                      onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
+                    _buildBtnAccion(
+                      label: "Reset",
+                      icon: Icons.delete_forever,
+                      color: const Color(0xFFC62828),
+                      onPressed: () => onEliminarDatos(context, os),
                     ),
                   ] else ...[
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFE65100),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        minimumSize: const Size(115, 30),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    if (isFisico) ...[
+                      _buildBtnAccion(
+                        label: "Adjuntar PDF / Escaneo",
+                        icon: Icons.camera_alt_rounded,
+                        color: const Color(0xFF7C3AED),
+                        onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
                       ),
-                      icon: const Icon(Icons.edit, size: 14),
-                      label: const Text(
-                        '✍️ Iniciar Captura',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                    ] else ...[
+                      _buildBtnAccion(
+                        label: "Iniciar Captura",
+                        icon: Icons.edit,
+                        color: const Color(0xFFEF6C00),
+                        onPressed: onCaptura,
                       ),
-                      onPressed: onCaptura,
+                    ],
+                    _buildBtnAccion(
+                      label: "Subir PDF",
+                      icon: Icons.upload_file,
+                      color: const Color(0xFF4527A0),
+                      onPressed: () => onSubirPdfManual(context, os),
                     ),
                   ],
-                  const SizedBox(width: 6),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4338CA),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      minimumSize: const Size(55, 30),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                    ),
-                    icon: const Icon(Icons.upload_file, size: 14),
-                    label: const Text('📤 Subir PDF manual', style: TextStyle(fontSize: 11)),
-                    onPressed: () => onSubirPdfManual(context, os),
-                  ),
                 ],
-              ],
+              ),
             ),
           ),
         ],
@@ -2990,15 +3913,17 @@ class _OsRow extends StatelessWidget {
   }
 }
 
-// ── Tablet Lote Row ────────────────────────────────────────────────────────
+// ─── Tablet Lote Row (Layout Reorganizado con Botón de Correo Destacado Abajo) ─────────────
 class _LoteRow extends StatefulWidget {
   final _OsGroup group;
   final void Function(Map<String, dynamic> os) onCaptura;
   final bool hideTecnico;
+  final VoidCallback? onEnviarLote;
   const _LoteRow({
     required this.group,
     required this.onCaptura,
     this.hideTecnico = false,
+    this.onEnviarLote,
   });
 
   @override
@@ -3012,6 +3937,7 @@ class _LoteRowState extends State<_LoteRow> {
   Widget build(BuildContext context) {
     final first = widget.group.items.first;
     final count = widget.group.items.length;
+    final String tecnicoNombre = (first['tecnico_nombre'] ?? first['tecnico'] ?? '').toString().trim();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -3023,47 +3949,167 @@ class _LoteRowState extends State<_LoteRow> {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: const BoxDecoration(
               border: Border(
-                bottom: BorderSide(color: _kBorder),
-                left: BorderSide(color: _kCarmineRed, width: 3),
+                bottom: BorderSide(color: Color(0xFFFED7AA)),
+                left: BorderSide(color: _kCarmineRed, width: 3.5),
               ),
             ),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  width: 130,
+                // ── Bloque 1: Datos del Lote ──
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 110,
+                      child: Row(
+                        children: [
+                          Icon(_expanded ? Icons.keyboard_arrow_down : Icons.chevron_right, size: 18, color: _kCarmineRed),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(color: _kCarmineRed, borderRadius: BorderRadius.circular(4)),
+                            child: Text('LOTE • $count OS', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: 85,
+                      child: Text(
+                        (first['fecha'] as String? ?? '').split('T').first,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(minWidth: 160),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              first['cliente'] ?? '—',
+                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                              maxLines: 1,
+                              softWrap: false,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (tecnicoNombre.isNotEmpty)
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2.0),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.person, size: 13, color: Colors.blueAccent),
+                                    const SizedBox(width: 3),
+                                    Flexible(
+                                      child: Text(
+                                        'Técnico: $tecnicoNombre',
+                                        style: const TextStyle(fontSize: 10.5, color: Colors.blueGrey, fontWeight: FontWeight.w500),
+                                        overflow: TextOverflow.ellipsis,
+                                        maxLines: 1,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                            else
+                              const Padding(
+                                padding: EdgeInsets.only(top: 2.0),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.person_outline, size: 12, color: Colors.grey),
+                                    SizedBox(width: 3),
+                                    Text(
+                                      'Sin técnico asignado',
+                                      style: TextStyle(fontSize: 9.5, color: Colors.grey, fontStyle: FontStyle.italic),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(width: 135, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: first))),
+                    const SizedBox(width: 80, child: Text('Lote', style: TextStyle(fontSize: 11))),
+                    const SizedBox(width: 95, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
+                    const SizedBox(width: 85),
+                  ],
+                ),
+
+                // ── Bloque 2: Divisor ligero ──
+                const SizedBox(height: 6),
+                const Divider(height: 1, thickness: 0.5, color: Color(0xFFFED7AA)),
+                const SizedBox(height: 6),
+
+                // ── Bloque 3: Barra de Acciones del Lote ──
+                Padding(
+                  padding: const EdgeInsets.only(top: 6.0, bottom: 4.0, right: 8.0),
                   child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Icon(_expanded ? Icons.keyboard_arrow_down : Icons.chevron_right, size: 18, color: _kCarmineRed),
-                      const SizedBox(width: 4),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                        decoration: BoxDecoration(color: _kCarmineRed, borderRadius: BorderRadius.circular(4)),
-                        child: Text('LOTE · $count OS', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.layers, size: 14, color: Color(0xFFC2410C)),
+                          const SizedBox(width: 5),
+                          Text(
+                            '$count órdenes en este lote • Toca para ${_expanded ? "contraer" : "expandir"}',
+                            style: const TextStyle(fontSize: 11, color: Color(0xFF9A3412), fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                      Builder(
+                        builder: (context) {
+                          final item = widget.group;
+                          final String estLote = estadoCorreoLote(widget.group.items);
+                          final bool loteEnviado = estLote == 'enviado';
+                          final bool loteEnCola = estLote == 'cola';
+                          return SizedBox(
+                            height: 29,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: loteEnviado ? const Color(0xFF2E7D32) : (loteEnCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0)),
+                                foregroundColor: loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100)),
+                                side: BorderSide(color: loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D))),
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                minimumSize: const Size(0, 29),
+                                visualDensity: VisualDensity.compact,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              ),
+                              icon: Icon(loteEnviado ? Icons.check_circle_outline : (loteEnCola ? Icons.schedule_send : Icons.mail_outline), size: 14),
+                              label: Text(
+                                loteEnviado ? "✓ Lote Enviado" : (loteEnCola ? "⏳ Lote en cola (Offline)" : "✉ Enviar Lote por Correo"),
+                                style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                              ),
+                              onPressed: () {
+                                if (widget.onEnviarLote != null) {
+                                  widget.onEnviarLote!();
+                                  return;
+                                }
+                                final st = context.findAncestorStateOfType<_OsListScreenState>();
+                                if (st != null) {
+                                  st._procesarEnvioCorreo(item: item, esLote: true);
+                                } else {
+                                  ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                    const SnackBar(content: Text('No se pudo abrir el envío del lote. Recarga el tablero e intenta de nuevo.')),
+                                  );
+                                }
+                              },
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
                 ),
-                SizedBox(
-                  width: 95,
-                  child: Text(
-                    (first['fecha'] as String? ?? '').split('T').first,
-                    style: const TextStyle(fontSize: 11),
-                  ),
-                ),
-                Expanded(
-                  flex: 3,
-                  child: Text(
-                    first['cliente'] ?? '—',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    softWrap: true,
-                  ),
-                ),
-                SizedBox(width: 150, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: first))),
-                const SizedBox(width: 90, child: Text('Lote', style: TextStyle(fontSize: 11))),
-                const SizedBox(width: 100, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
-                const SizedBox(width: 90),
               ],
             ),
           ),
@@ -3080,6 +4126,7 @@ class _LoteRowState extends State<_LoteRow> {
               onRehacer: (ctx, os) => (context.findAncestorStateOfType<_OsListScreenState>())?._mostrarDialogoRehacerToma(ctx, os),
               onEliminarDatos: (ctx, os) => (context.findAncestorStateOfType<_OsListScreenState>())?._mostrarDialogoEliminarDatosDesdeCero(ctx, os),
               onSubirPdfManual: (ctx, os) => (context.findAncestorStateOfType<_OsListScreenState>())?._subirPdfManual(ctx, os),
+              onEmail: (ctx, os) => (context.findAncestorStateOfType<_OsListScreenState>())?._manejarEnvioCorreoOrden(os),
               indent: true,
             ),
       ],
@@ -3087,8 +4134,7 @@ class _LoteRowState extends State<_LoteRow> {
   }
 }
 
-// ── Shared Helpers ─────────────────────────────────────────────────────────
-/// Badge homologado de tipo de servicio (mismas etiquetas que escritorio).
+// ─── Shared Helpers ─────────────────────────────────────────────────────────
 class TipoServicioBadge extends StatelessWidget {
   final Map<String, dynamic> os;
   const TipoServicioBadge({super.key, required this.os});
@@ -3146,6 +4192,82 @@ class _Badge extends StatelessWidget {
       );
 }
 
+class EmailStatusBadge extends StatelessWidget {
+  final bool enviado;
+  final bool enCola;
+  final String correo;
+  final VoidCallback onTap;
+
+  const EmailStatusBadge({
+    super.key,
+    required this.enviado,
+    this.enCola = false,
+    required this.correo,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (enviado) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE8F5E9),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0xFF81C784), width: 0.8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.mark_email_read_rounded, size: 13, color: Color(0xFF2E7D32)),
+              SizedBox(width: 4),
+              Text(
+                '✓ Enviado',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2E7D32),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    } else {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(6),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: const Color(0xFFFFFBEB),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: const Color(0xFFFCD34D), width: 0.8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.mail_outline_rounded, size: 13, color: Color(0xFFD97706)),
+              SizedBox(width: 4),
+              Text(
+                enCola ? '⏳ En cola (Offline)' : '✉ Envío pendiente',
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFFB45309),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+  }
+}
+
 
 class _EmptyState extends StatelessWidget {
   final VoidCallback onSync;
@@ -3192,4 +4314,23 @@ class _OsGroup {
     required this.items,
     required this.isLote,
   });
+}
+
+// ── Estado visual del correo (✓ Enviado / ⏳ En cola (Offline) / ✉ Enviar) ──
+/// 'enviado' | 'cola' | 'ninguno'
+String estadoCorreoOs(Map<String, dynamic> o) {
+  final env = o['email_enviado'];
+  if (env == 1 || env == true || env == '1' || env == 'true') return 'enviado';
+  final st = (o['email_status'] ?? '').toString().trim().toLowerCase();
+  if (st == 'cola' || st == 'pendiente') return 'cola';
+  return 'ninguno';
+}
+
+/// Estado del lote considerando solo las órdenes listas (con PDF); si ninguna lo está, todas.
+String estadoCorreoLote(List<Map<String, dynamic>> items) {
+  final listas = items.where(_OsListScreenState.tieneDocumento).toList();
+  final base = listas.isNotEmpty ? listas : items;
+  if (base.isNotEmpty && base.every((o) => estadoCorreoOs(o) == 'enviado')) return 'enviado';
+  if (base.any((o) => estadoCorreoOs(o) == 'cola')) return 'cola';
+  return 'ninguno';
 }

@@ -316,19 +316,27 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 8,
                     children: [
-                      const Icon(Icons.architecture_outlined, color: _kRed, size: 20),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Geometría de Excentricidad:',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF1D1D1F),
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.architecture_outlined, color: _kRed, size: 20),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'Geometría de Excentricidad:',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1D1D1F),
+                            ),
+                          ),
+                        ],
                       ),
-                      const Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
@@ -358,37 +366,32 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                     ],
                   ),
                   const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    child: SegmentedButton<String>(
-                      segments: const [
-                        ButtonSegment<String>(
-                          value: 'Plataforma',
-                          icon: Icon(Icons.crop_square, size: 16),
-                          label: Text('Plataforma\n(Cuadrada)', textAlign: TextAlign.center, style: TextStyle(fontSize: 11)),
-                        ),
-                        ButtonSegment<String>(
-                          value: 'Circular',
-                          icon: Icon(Icons.circle_outlined, size: 16),
-                          label: Text('Circular', textAlign: TextAlign.center, style: TextStyle(fontSize: 11)),
-                        ),
-                        ButtonSegment<String>(
-                          value: 'Camionera',
-                          icon: Icon(Icons.view_column_outlined, size: 16),
-                          label: Text('Camionera\n(Secciones)', textAlign: TextAlign.center, style: TextStyle(fontSize: 11)),
-                        ),
-                      ],
-                      selected: {_geometriaActual},
-                      onSelectionChanged: (Set<String> newSelection) {
-                        if (newSelection.isNotEmpty) {
-                          _onGeometriaSelected(newSelection.first);
-                        }
-                      },
-                      style: const ButtonStyle(
-                        visualDensity: VisualDensity.compact,
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      _buildGeometryOption(
+                        label: 'Plataforma (Cuadrada)',
+                        icon: Icons.crop_square,
+                        value: 'Plataforma',
+                        selected: _geometriaActual == 'Plataforma',
+                        onTap: () => _onGeometriaSelected('Plataforma'),
                       ),
-                    ),
+                      _buildGeometryOption(
+                        label: 'Circular',
+                        icon: Icons.circle_outlined,
+                        value: 'Circular',
+                        selected: _geometriaActual == 'Circular',
+                        onTap: () => _onGeometriaSelected('Circular'),
+                      ),
+                      _buildGeometryOption(
+                        label: 'Camionera (Secciones)',
+                        icon: Icons.view_column_outlined,
+                        value: 'Camionera',
+                        selected: _geometriaActual == 'Camionera',
+                        onTap: () => _onGeometriaSelected('Camionera'),
+                      ),
+                    ],
                   ),
                   if (_isCamioneraOrFerro) ...[
                     const SizedBox(height: 12),
@@ -441,19 +444,27 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    alignment: WrapAlignment.spaceBetween,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    runSpacing: 4,
                     children: [
-                      const Icon(Icons.scale_outlined, color: _kRed, size: 20),
-                      const SizedBox(width: 12),
-                      const Text(
-                        'Carga de Prueba (kg):',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF1D1D1F),
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.scale_outlined, color: _kRed, size: 20),
+                          const SizedBox(width: 12),
+                          const Text(
+                            'Carga de Prueba (kg):',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF1D1D1F),
+                            ),
+                          ),
+                        ],
                       ),
-                      const Spacer(),
                       if (widget.divMin != null)
                         Text(
                           'd = ${widget.divMin} ($dec decimales)',
@@ -760,6 +771,50 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
             filled: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGeometryOption({
+    required String label,
+    required IconData icon,
+    required String value,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: selected ? _kRed.withOpacity(0.08) : Colors.grey.shade50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? _kRed : Colors.grey.shade300,
+            width: selected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              selected ? Icons.check_circle_rounded : icon,
+              size: 16,
+              color: selected ? _kRed : Colors.grey.shade700,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: selected ? FontWeight.bold : FontWeight.w500,
+                color: selected ? _kRed : const Color(0xFF1D1D1F),
+              ),
+            ),
+          ],
         ),
       ),
     );
