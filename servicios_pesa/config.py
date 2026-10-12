@@ -124,8 +124,8 @@ if _DATABASE_URL:
     # Modo producción: Render PostgreSQL via DATABASE_URL
     DB_CONFIG: dict = _parse_db_url(_DATABASE_URL)
 else:
-    # Modo producción/nube Render con fallback por defecto a Render
-    db_host = os.getenv("PESA_DB_HOST", "dpg-dak6nh61egvs739ar760-a.oregon-postgres.render.com").strip()
+    # Modo con variables PESA_DB_* o localhost por defecto
+    db_host = os.getenv("PESA_DB_HOST", "127.0.0.1").strip()
     db_port = int(os.getenv("PESA_DB_PORT", "5432").strip())
     db_name = os.getenv("PESA_DB_NAME", "pesa_db").strip()
     db_user = os.getenv("PESA_DB_USER", "pesa_user").strip()

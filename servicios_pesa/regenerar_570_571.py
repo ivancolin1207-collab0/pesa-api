@@ -12,7 +12,21 @@ import fitz  # PyMuPDF
 import psycopg2
 import psycopg2.extras
 
-DB_URL = 'postgresql://pesa_user:J494uuILfhNw6qL3n1xFQeijrFX5aSxG@dpg-dak6nh61egvs739ar760-a.oregon-postgres.render.com/pesa_db'
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    _u = os.getenv("PESA_DB_USER")
+    _p = os.getenv("PESA_DB_PASSWORD")
+    _h = os.getenv("PESA_DB_HOST")
+    _port = os.getenv("PESA_DB_PORT", "5432")
+    _db = os.getenv("PESA_DB_NAME", "pesa_db")
+    if _u and _p and _h:
+        DATABASE_URL = f"postgresql://{_u}:{_p}@{_h}:{_port}/{_db}?sslmode=require"
+
+DB_URL = DATABASE_URL
 SUCURSAL_DIR = "Carretera el Jaral del Progreso- Cortazar km 4.3 C.P. 38470, Jaral del Progreso, Guanajuato"
 UBICACION_EQUIPO = "Aseguramiento de calidad"
 

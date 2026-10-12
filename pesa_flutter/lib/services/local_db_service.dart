@@ -2104,14 +2104,14 @@ class LocalDbService {
   }
 
   /// Actualiza el estado de envío de correo en la base de datos SQLite local
-  Future<void> updateEmailStatus(String folio, {required bool enviado, String? status, String? correo}) async {
+  Future<void> updateEmailStatus(String folio, {required bool enviado, String? status, String? correo, String? fechaEnvio}) async {
     final db = await _ensureInit();
     await _ensureColaCorreos(db);
     final String emailSt = status ?? (enviado ? 'enviado' : 'cola');
     final Map<String, dynamic> data = {
       'email_enviado': enviado ? 1 : 0,
       'email_status': emailSt,
-      if (enviado) 'fecha_envio_email': DateTime.now().toIso8601String(),
+      if (enviado) 'fecha_envio_email': fechaEnvio ?? DateTime.now().toIso8601String(),
     };
     if (correo != null && correo.trim().isNotEmpty) {
       data['correo_cliente'] = correo.trim();
@@ -2121,6 +2121,22 @@ class LocalDbService {
       data,
       where: 'folio_os = ? OR folio = ?',
       whereArgs: [folio, folio],
+    );
+  }
+
+  /// Alias explícito para actualizar registro de entrega por correo
+  Future<void> actualizarEnvioCorreo({
+    required String folio,
+    required int enviado,
+    required String fechaEnvio,
+    required String correos,
+  }) async {
+    await updateEmailStatus(
+      folio,
+      enviado: enviado == 1,
+      status: enviado == 1 ? 'enviado' : 'cola',
+      correo: correos,
+      fechaEnvio: fechaEnvio,
     );
   }
 

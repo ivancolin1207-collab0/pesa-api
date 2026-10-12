@@ -903,19 +903,19 @@ class ApiService {
   }
 
   /// Dispara el envío o reintento de correo electrónico para una orden individual.
-  Future<Map<String, dynamic>> enviarEmailOrden(String folio, {String? correo, bool forzar = false}) async {
+  Future<Map<String, dynamic>> enviarEmailOrden(String folio, {String? correo, bool forzar = false, Duration timeout = const Duration(seconds: 20)}) async {
     final cleanFolio = folio.trim();
     debugPrint('[API] enviarEmailOrden $cleanFolio (destinatario: $correo)');
     return _postCorreo(_rutasCorreoOrden(cleanFolio), <String, dynamic>{
       'folio': cleanFolio,
       'forzar': forzar,
       if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
-    });
+    }, timeout: timeout);
   }
 
   /// Dispara el envío agrupado de un lote. El backend adjunta y cita ÚNICAMENTE
   /// las órdenes FIRMADAS/Cerradas con PDF existente.
-  Future<Map<String, dynamic>> enviarEmailLote(String loteId, {String? correo, bool forzar = true, List<String>? folios}) async {
+  Future<Map<String, dynamic>> enviarEmailLote(String loteId, {String? correo, bool forzar = true, List<String>? folios, Duration timeout = const Duration(seconds: 20)}) async {
     final cleanLote = loteId.trim();
     debugPrint('[API] enviarEmailLote $cleanLote (destinatario: $correo, folios: $folios)');
     return _postCorreo(_rutasCorreoLote(cleanLote), <String, dynamic>{
@@ -923,7 +923,7 @@ class ApiService {
       'forzar': forzar,
       if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
       if (folios != null && folios.isNotEmpty) 'folios': folios,
-    }, timeout: const Duration(seconds: 60));
+    }, timeout: timeout);
   }
 
 

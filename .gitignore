@@ -9,6 +9,7 @@ build/
 .env
 .env.*
 *.env
+*.pem
 config_local.py
 # Única plantilla permitida (sin valores reales)
 !.env.example

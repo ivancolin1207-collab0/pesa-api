@@ -10,6 +10,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/firma_tecnico_service.dart';
@@ -26,6 +27,21 @@ import 'remision_captura_screen.dart';
 import 'revision_bascula_screen.dart';
 import 'levantamiento_proyecto_screen.dart';
 import 'levantamiento_metrologico_screen.dart';
+
+/// Formatea fecha y hora de entrega por correo (dd/MM/yyyy HH:mm)
+String formatearFechaHoraEnvio(dynamic val) {
+  if (val == null) return 'Reciente';
+  final s = val.toString().trim();
+  if (s.isEmpty) return 'Reciente';
+  if (s.contains('/') && s.contains(':')) return s;
+  try {
+    final dt = DateTime.tryParse(s);
+    if (dt != null) {
+      return DateFormat('dd/MM/yyyy HH:mm').format(dt.toLocal());
+    }
+  } catch (_) {}
+  return s;
+}
 
 /// Función auxiliar de normalización de cadenas (remover diacríticos/acentos y minúsculas)
 String normalizarTexto(String texto) {
@@ -1318,7 +1334,6 @@ class _OsListScreenState extends State<OsListScreen> {
       debugPrint('[ENVIO CORREO] Clic ignorado: despacho de correo en progreso.');
       return;
     }
-    setState(() => _estaEnviandoEmail = true);
     try {
       await _procesarEnvioCorreoImpl(item: item, esLote: esLote);
     } catch (e, st) {
@@ -1330,12 +1345,6 @@ class _OsListScreenState extends State<OsListScreen> {
             content: Text('No se pudo procesar el envío de correo: $e'),
           ),
         );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _estaEnviandoEmail = false);
-      } else {
-        _estaEnviandoEmail = false;
       }
     }
   }
@@ -1484,7 +1493,7 @@ class _OsListScreenState extends State<OsListScreen> {
     }
 
     final bool yaEnviado = itemsEnvio.isNotEmpty &&
-        itemsEnvio.every((o) =>
+        itemsEnvio.any((o) =>
             o['email_enviado'] == 1 || o['email_enviado'] == true || o['email_enviado'] == '1' || o['email_enviado'] == 'true');
 
     // 1. Obtener correo registrado si existe
@@ -1504,108 +1513,10 @@ class _OsListScreenState extends State<OsListScreen> {
     // Modal de captura si falta correo o para confirmar/editar destinatario
     final formKey = GlobalKey<FormState>();
     final emailCtrl = TextEditingController(text: correoActual);
+    bool isSendingModal = false;
 
-    final bool? confirmar = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Row(
-          children: [
-            Icon(
-              yaEnviado ? Icons.mark_email_read_rounded : Icons.mail_outline_rounded,
-              color: const Color(0xFFB81D24),
-              size: 26,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                esLote
-                    ? (yaEnviado ? 'Reenviar Lote por Correo' : 'Enviar Lote por Correo')
-                    : (yaEnviado ? 'Reenviar por Correo — $folio' : 'Enviar por Correo — $folio'),
-                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-            ),
-          ],
-        ),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (esLote) ...[
-                Text(
-                  'Se enviará un SOLO correo con ${itemsEnvio.length} reporte(s) PDF firmado(s): ${foliosEnvio.join(', ')}.'
-                  '${omitidas > 0 ? '\n$omitidas orden(es) del lote sin realizar se omitirán del correo.' : ''}',
-                  style: const TextStyle(fontSize: 13, height: 1.4),
-                ),
-                const SizedBox(height: 6),
-              ],
-              const Text(
-                'Se enviará desde ivancolin1207@gmail.com con CC obligatoria a recepcion@basculaspesa.com.mx',
-                style: TextStyle(fontSize: 12, color: Color(0xFF4B5563), height: 1.35),
-              ),
-              const SizedBox(height: 14),
-              TextFormField(
-                controller: emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                autofocus: true,
-                validator: (val) {
-                  final v = (val ?? '').trim();
-                  if (v.isEmpty) return 'Ingresa el correo del cliente';
-                  if (!v.contains('@') || !v.contains('.')) return 'Correo electrónico inválido';
-                  if (v.toLowerCase() == 'ivancolin1207@gmail.com') {
-                    return 'ivancolin1207@gmail.com es el remitente. Ingresa el correo del cliente.';
-                  }
-                  return null;
-                },
-                decoration: InputDecoration(
-                  labelText: 'Correo del Cliente',
-                  hintText: 'cliente@empresa.com',
-                  prefixIcon: const Icon(Icons.alternate_email, color: Color(0xFFB81D24)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancelar')),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFB81D24),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            icon: const Icon(Icons.send, size: 16),
-            label: Text(_estaEnviandoEmail ? 'Enviando...' : (esLote ? 'Enviar Lote' : 'Enviar Ahora')),
-            onPressed: _estaEnviandoEmail
-                ? null
-                : () {
-                    if (formKey.currentState?.validate() ?? true) {
-                      Navigator.of(ctx).pop(true);
-                    }
-                  },
-          ),
-        ],
-      ),
-    );
-
-    if (confirmar != true) return;
-    final destino = emailCtrl.text.trim();
-    if (!mounted) return;
-
-    // Cerrojo inmediato para evitar doble despacho por múltiples clics
-    if (_estaEnviandoEmail) return;
-    setState(() => _estaEnviandoEmail = true);
-
-    // Marcar en SQLite email_status = 'enviando' inmediatamente
-    for (final f in foliosEnvio) {
-      await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'enviando', correo: destino);
-    }
-
-    // 2. Encolado offline en SQLite (email_status = 'cola') — copia mutable y sin bloquear al técnico.
-    Future<void> encolarLocal(String motivo) async {
+    // Encolado offline en SQLite (email_status = 'cola')
+    Future<void> encolarLocal(String motivo, String destino) async {
       debugPrint('[ENVIO CORREO] Encolando localmente (${esLote ? 'lote $loteId' : folio}): $motivo');
       await LocalDbService.instance.encolarCorreo(
         tipo: esLote ? 'lote' : 'orden',
@@ -1653,97 +1564,247 @@ class _OsListScreenState extends State<OsListScreen> {
       }
     }
 
-    // 3. Verificar conectividad a internet
-    final connResults = await Connectivity().checkConnectivity();
-    final isOnline = connResults.any((r) => r != ConnectivityResult.none);
-    if (!isOnline) {
-      await encolarLocal('sin conectividad');
-      return;
-    }
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: !isSendingModal,
+      builder: (dialogCtx) => StatefulBuilder(
+        builder: (ctx, setModalState) {
+          return PopScope(
+            canPop: !isSendingModal,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Icon(
+                    yaEnviado ? Icons.mark_email_read_rounded : Icons.mail_outline_rounded,
+                    color: const Color(0xFFB81D24),
+                    size: 26,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      esLote
+                          ? (yaEnviado ? 'Reenviar Lote por Correo' : 'Enviar Lote por Correo')
+                          : (yaEnviado ? 'Reenviar por Correo — $folio' : 'Enviar por Correo — $folio'),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
+              ),
+              content: Form(
+                key: formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (esLote) ...[
+                      Text(
+                        'Se enviará un SOLO correo con ${itemsEnvio.length} reporte(s) PDF firmado(s): ${foliosEnvio.join(', ')}.'
+                        '${omitidas > 0 ? '\n$omitidas orden(es) del lote sin realizar se omitirán del correo.' : ''}',
+                        style: const TextStyle(fontSize: 13, height: 1.4),
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    const Text(
+                      'Se enviará desde ivancolin1207@gmail.com con CC obligatoria a recepcion@basculaspesa.com.mx',
+                      style: TextStyle(fontSize: 12, color: Color(0xFF4B5563), height: 1.35),
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: emailCtrl,
+                      keyboardType: TextInputType.emailAddress,
+                      enabled: !isSendingModal,
+                      autofocus: true,
+                      validator: (val) {
+                        final v = (val ?? '').trim();
+                        if (v.isEmpty) return 'Ingresa el correo del cliente';
+                        if (!v.contains('@') || !v.contains('.')) return 'Correo electrónico inválido';
+                        if (v.toLowerCase() == 'ivancolin1207@gmail.com') {
+                          return 'ivancolin1207@gmail.com es el remitente. Ingresa el correo del cliente.';
+                        }
+                        return null;
+                      },
+                      decoration: InputDecoration(
+                        labelText: 'Correo del Cliente',
+                        hintText: 'cliente@empresa.com',
+                        prefixIcon: const Icon(Icons.alternate_email, color: Color(0xFFB81D24)),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: isSendingModal ? null : () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancelar'),
+                ),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFB81D24),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  icon: isSendingModal
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : Icon(yaEnviado ? Icons.mark_email_read_rounded : Icons.send, size: 16),
+                  label: Text(
+                    isSendingModal
+                        ? 'Enviando...'
+                        : (yaEnviado
+                            ? (esLote ? 'Reenviar Lote' : 'Reenviar Correo')
+                            : (esLote ? 'Enviar Lote' : 'Enviar Ahora')),
+                  ),
+                  onPressed: isSendingModal
+                      ? null
+                      : () async {
+                          if (!(formKey.currentState?.validate() ?? true)) return;
+                          final destino = emailCtrl.text.trim();
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(esLote
-              ? 'Enviando lote (${foliosEnvio.length} órdenes firmadas)...'
-              : 'Enviando correo para $folio...'),
-          duration: const Duration(seconds: 2),
-        ),
-      );
-    }
+                          setModalState(() => isSendingModal = true);
+                          setState(() => _estaEnviandoEmail = true);
 
-    try {
-      final Map<String, dynamic> res = esLote
-          ? await ApiService.instance.enviarEmailLote(loteId, correo: destino, forzar: true, folios: foliosEnvio)
-          : await ApiService.instance.enviarEmailOrden(folio, correo: destino, forzar: true);
+                          try {
+                            // Marcar en SQLite email_status = 'enviando' inmediatamente
+                            for (final f in foliosEnvio) {
+                              await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'enviando', correo: destino);
+                            }
 
-      if (res['ok'] != true) {
-        throw CorreoRechazadoException((res['motivo'] ?? res['error'] ?? 'Error desconocido').toString());
-      }
+                            // Verificar conectividad a internet
+                            final connResults = await Connectivity().checkConnectivity();
+                            final isOnline = connResults.any((r) => r != ConnectivityResult.none);
+                            if (!isOnline) {
+                              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                              await encolarLocal('sin conectividad', destino);
+                              return;
+                            }
 
-      final List<String> confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
-          ? (res['folios'] as List).map((e) => e.toString()).toSet().toList()
-          : foliosEnvio.toSet().toList();
-      for (final f in confirmados) {
-        await LocalDbService.instance.updateEmailStatus(f, enviado: true, status: 'enviado', correo: destino);
-        if (mounted) {
-          context.read<SyncService>().updateLocalOrder(f, {
-            'email_enviado': 1,
-            'email_status': 'enviado',
-            'correo_cliente': destino,
-          });
-        }
-      }
+                            final Map<String, dynamic> res = esLote
+                                ? await ApiService.instance.enviarEmailLote(loteId, correo: destino, forzar: true, folios: foliosEnvio, timeout: const Duration(seconds: 20))
+                                : await ApiService.instance.enviarEmailOrden(folio, correo: destino, forzar: true, timeout: const Duration(seconds: 20));
 
-      if (mounted) {
-        final confirmadosSet = confirmados.toSet();
-        setState(() {
-          _all = _all.map((m) {
-            final f = folioDe(m);
-            if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
-              return {...m, 'email_enviado': 1, 'email_status': 'enviado', 'correo_cliente': destino};
-            }
-            return m;
-          }).toList();
-          _filtered = _filtered.map((m) {
-            final f = folioDe(m);
-            if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
-              return {...m, 'email_enviado': 1, 'email_status': 'enviado', 'correo_cliente': destino};
-            }
-            return m;
-          }).toList();
-        });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFF2E7D32),
-            content: Text('✓ Correo enviado con éxito a $destino' + (esLote ? ' (${confirmados.length} órdenes en lote)' : '')),
-          ),
-        );
-        await _loadLocal();
-      }
-    } on CorreoSinConexionException catch (e) {
-      await encolarLocal(e.mensaje);
-    } on CorreoEndpointNoDisponibleException catch (e) {
-      await encolarLocal(e.mensaje);
-    } on CorreoRechazadoException catch (e) {
-      debugPrint('[ENVIO CORREO] Rechazado por servidor: ${e.mensaje}');
-      for (final f in foliosEnvio) {
-        await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFFD97706),
-            content: Text('⚠️ ${e.mensaje}'),
-          ),
-        );
-      }
-    } catch (e) {
-      for (final f in foliosEnvio) {
-        await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
-      }
-      await encolarLocal(e.toString());
-    }
+                            // Cerrar modal SIEMPRE al terminar
+                            if (Navigator.of(ctx).canPop()) {
+                              Navigator.of(ctx).pop();
+                            }
+
+                            if (res['ok'] != true) {
+                              throw CorreoRechazadoException((res['motivo'] ?? res['error'] ?? 'Error desconocido').toString());
+                            }
+
+                            final List<String> confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
+                                ? (res['folios'] as List).map((e) => e.toString()).toSet().toList()
+                                : foliosEnvio.toSet().toList();
+
+                            final nowStr = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+
+                            for (final f in confirmados) {
+                              await LocalDbService.instance.actualizarEnvioCorreo(
+                                folio: f,
+                                enviado: 1,
+                                fechaEnvio: nowStr,
+                                correos: destino,
+                              );
+                              if (mounted) {
+                                context.read<SyncService>().updateLocalOrder(f, {
+                                  'email_enviado': 1,
+                                  'email_status': 'enviado',
+                                  'fecha_envio_email': nowStr,
+                                  'correo_cliente': destino,
+                                });
+                              }
+                            }
+
+                            if (mounted) {
+                              final confirmadosSet = confirmados.toSet();
+                              setState(() {
+                                _all = _all.map((m) {
+                                  final f = folioDe(m);
+                                  if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
+                                    return {...m, 'email_enviado': 1, 'email_status': 'enviado', 'fecha_envio_email': nowStr, 'correo_cliente': destino};
+                                  }
+                                  return m;
+                                }).toList();
+                                _filtered = _filtered.map((m) {
+                                  final f = folioDe(m);
+                                  if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
+                                    return {...m, 'email_enviado': 1, 'email_status': 'enviado', 'fecha_envio_email': nowStr, 'correo_cliente': destino};
+                                  }
+                                  return m;
+                                }).toList();
+                              });
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  backgroundColor: const Color(0xFF2E7D32),
+                                  content: Text('✓ Correo enviado con éxito a $destino' + (esLote ? ' (${confirmados.length} órdenes en lote)' : '')),
+                                ),
+                              );
+                              await _loadLocal();
+                            }
+                          } on TimeoutException {
+                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                            for (final f in foliosEnvio) {
+                              await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+                            }
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Tiempo de espera agotado con el servidor al enviar correo (20s).'),
+                                  backgroundColor: Colors.deepOrange,
+                                ),
+                              );
+                            }
+                          } on CorreoSinConexionException catch (e) {
+                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                            await encolarLocal(e.mensaje, destino);
+                          } on CorreoEndpointNoDisponibleException catch (e) {
+                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                            await encolarLocal(e.mensaje, destino);
+                          } on CorreoRechazadoException catch (e) {
+                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                            for (final f in foliosEnvio) {
+                              await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+                            }
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  backgroundColor: Colors.redAccent,
+                                  content: Text('Error al enviar: ${e.mensaje}'),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                            for (final f in foliosEnvio) {
+                              await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+                            }
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Tiempo de espera agotado o error de red: $e'),
+                                  backgroundColor: Colors.deepOrange,
+                                ),
+                              );
+                            }
+                          } finally {
+                            if (mounted) {
+                              setState(() => _estaEnviandoEmail = false);
+                            } else {
+                              _estaEnviandoEmail = false;
+                            }
+                          }
+                        },
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   /// Órdenes hijas del lote leídas de SQLite local (PDF/estatus frescos), fusionadas con memoria.
@@ -2808,9 +2869,9 @@ class _MobileOsCard extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                           ),
-                          icon: Icon(enviando ? Icons.hourglass_top_rounded : (correoEnviado ? Icons.check_circle_outline : (enCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
+                          icon: Icon(enviando ? Icons.hourglass_top_rounded : (correoEnviado ? Icons.mark_email_read : (enCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                           label: Text(
-                            enviando ? "⏳ Enviando..." : (correoEnviado ? "✓ Enviado" : (enCola ? "⏳ En cola" : "✉ Correo")),
+                            enviando ? "⏳ Enviando..." : (correoEnviado ? "✓ Reenviar" : (enCola ? "⏳ En cola" : "✉ Correo")),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
@@ -2971,6 +3032,24 @@ class _MobileOsCard extends StatelessWidget {
               ],
             ),
           ],
+          if ((os['email_enviado'] == 1 || os['email_enviado'] == '1' || os['email_enviado'] == true || (os['fecha_envio_email'] != null && os['fecha_envio_email'].toString().trim().isNotEmpty)) &&
+              (os['correo_cliente'] != null && os['correo_cliente'].toString().trim().isNotEmpty && os['correo_cliente'].toString().trim().toLowerCase() != 'sin registrar'))
+            Padding(
+              padding: const EdgeInsets.only(top: 8.0, left: 4.0),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, size: 13, color: Color(0xFF2E7D32)),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      "Enviado el ${formatearFechaHoraEnvio(os['fecha_envio_email'])} a: ${os['correo_cliente']} (CC: recepcion@basculaspesa.com.mx)",
+                      style: const TextStyle(fontSize: 10.5, color: Color(0xFF37474F), fontStyle: FontStyle.italic),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -3067,9 +3146,9 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                         ),
-                        icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.check_circle_outline : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
+                        icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.mark_email_read : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                         label: Text(
-                          enviando ? "⏳ Enviando..." : (loteEnviado ? "✓ Lote Enviado" : (loteEnCola ? "⏳ En cola" : "✉ Enviar Lote")),
+                          enviando ? "⏳ Enviando..." : (loteEnviado ? "✓ Reenviar Lote" : (loteEnCola ? "⏳ En cola" : "✉ Enviar Lote")),
                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                         onPressed: enviando ? null : () => widget.state._procesarEnvioCorreo(item: item, esLote: true),
@@ -3084,6 +3163,39 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                 ],
               ),
             ),
+          ),
+          Builder(
+            builder: (context) {
+              final first = widget.group.items.first;
+              final bool anyEnviado = widget.group.items.any((o) =>
+                  o['email_enviado'] == 1 ||
+                  o['email_enviado'] == '1' ||
+                  o['email_enviado'] == true ||
+                  (o['fecha_envio_email'] != null && o['fecha_envio_email'].toString().trim().isNotEmpty));
+              final String fechaEnvio = widget.group.items
+                  .map((o) => o['fecha_envio_email'])
+                  .firstWhere((f) => f != null && f.toString().trim().isNotEmpty, orElse: () => null)?.toString() ?? '';
+              final String correoLote = (first['correo_cliente'] ?? '').toString().trim();
+              if (!anyEnviado || correoLote.isEmpty || correoLote.toLowerCase() == 'sin registrar') {
+                return const SizedBox.shrink();
+              }
+              return Padding(
+                padding: const EdgeInsets.only(left: 12.0, right: 12.0, bottom: 8.0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle, size: 13, color: Color(0xFF2E7D32)),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        "Enviado el ${formatearFechaHoraEnvio(fechaEnvio)} a: $correoLote (CC: recepcion@basculaspesa.com.mx)",
+                        style: const TextStyle(fontSize: 10.5, color: Color(0xFF37474F), fontStyle: FontStyle.italic),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
           if (_expanded)
             Padding(
@@ -4082,10 +4194,10 @@ class _OsRow extends StatelessWidget {
                         return _buildBtnAccion(
                           label: enviando
                               ? "⏳ Enviando..."
-                              : (correoEnviado ? "✓ Enviado" : (enCola ? "⏳ En cola (Offline)" : "✉ Enviar Correo")),
+                              : (correoEnviado ? "✓ Reenviar Correo" : (enCola ? "⏳ En cola (Offline)" : "✉ Enviar Correo")),
                           icon: enviando
                               ? Icons.hourglass_top_rounded
-                              : (correoEnviado ? Icons.check_circle_outline : (enCola ? Icons.schedule_send : Icons.mail_outline)),
+                              : (correoEnviado ? Icons.mark_email_read : (enCola ? Icons.schedule_send : Icons.mail_outline)),
                           color: enviando
                               ? const Color(0xFFE0E0E0)
                               : (correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
@@ -4136,6 +4248,24 @@ class _OsRow extends StatelessWidget {
               ),
             ),
           ),
+          if ((os['email_enviado'] == 1 || os['email_enviado'] == '1' || os['email_enviado'] == true || (os['fecha_envio_email'] != null && os['fecha_envio_email'].toString().trim().isNotEmpty)) &&
+              (os['correo_cliente'] != null && os['correo_cliente'].toString().trim().isNotEmpty && os['correo_cliente'].toString().trim().toLowerCase() != 'sin registrar'))
+            Padding(
+              padding: const EdgeInsets.only(top: 2.0, bottom: 4.0, left: 16.0, right: 8.0),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle, size: 13, color: Color(0xFF2E7D32)),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      "Enviado el ${formatearFechaHoraEnvio(os['fecha_envio_email'])} a: ${os['correo_cliente']} (CC: recepcion@basculaspesa.com.mx)",
+                      style: const TextStyle(fontSize: 10.5, color: Color(0xFF37474F), fontStyle: FontStyle.italic),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+            ),
         ],
       ),
     );
@@ -4319,11 +4449,11 @@ class _LoteRowState extends State<_LoteRow> {
                                 visualDensity: VisualDensity.compact,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                               ),
-                              icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.check_circle_outline : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
+                              icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.mark_email_read : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                               label: Text(
                                 enviando
                                     ? "⏳ Enviando..."
-                                    : (loteEnviado ? "✓ Lote Enviado" : (loteEnCola ? "⏳ Lote en cola (Offline)" : "✉ Enviar Lote por Correo")),
+                                    : (loteEnviado ? "✓ Reenviar Lote" : (loteEnCola ? "⏳ Lote en cola (Offline)" : "✉ Enviar Lote por Correo")),
                                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                               ),
                               onPressed: enviando ? null : () {
@@ -4345,6 +4475,39 @@ class _LoteRowState extends State<_LoteRow> {
                       ),
                     ],
                   ),
+                ),
+                Builder(
+                  builder: (context) {
+                    final first = widget.group.items.first;
+                    final bool anyEnviado = widget.group.items.any((o) =>
+                        o['email_enviado'] == 1 ||
+                        o['email_enviado'] == '1' ||
+                        o['email_enviado'] == true ||
+                        (o['fecha_envio_email'] != null && o['fecha_envio_email'].toString().trim().isNotEmpty));
+                    final String fechaEnvio = widget.group.items
+                        .map((o) => o['fecha_envio_email'])
+                        .firstWhere((f) => f != null && f.toString().trim().isNotEmpty, orElse: () => null)?.toString() ?? '';
+                    final String correoLote = (first['correo_cliente'] ?? '').toString().trim();
+                    if (!anyEnviado || correoLote.isEmpty || correoLote.toLowerCase() == 'sin registrar') {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 2.0, bottom: 4.0, left: 4.0, right: 8.0),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.check_circle, size: 13, color: Color(0xFF2E7D32)),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              "Enviado el ${formatearFechaHoraEnvio(fechaEnvio)} a: $correoLote (CC: recepcion@basculaspesa.com.mx)",
+                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF37474F), fontStyle: FontStyle.italic),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
               ],
             ),
