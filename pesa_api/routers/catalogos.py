@@ -18,9 +18,9 @@ import uuid
 import base64
 import logging
 from datetime import date
-from typing import Optional, Union
+from typing import Optional, Union, List, Any
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request, status
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile, Request, status
 from pydantic import BaseModel
 
 from pesa_api.core.config import settings
@@ -814,6 +814,8 @@ class EnviarEmailBody(BaseModel):
     forzar: Optional[bool] = False
     folios: Optional[List[str]] = None
 
+EnviarEmailBody.model_rebuild()
+
 
 @router.post(
     "/ordenes/{folio}/enviar-email",
@@ -823,7 +825,7 @@ class EnviarEmailBody(BaseModel):
 @router.post("/ordenes/{folio}/enviar-correo", include_in_schema=True, tags=["Email"])
 async def api_enviar_email_orden(
     folio: str,
-    body: Optional[EnviarEmailBody] = None,
+    body: Optional[EnviarEmailBody] = Body(default=None),
     db = Depends(get_db),
     current_user: dict = Depends(get_optional_user),
 ):
@@ -847,7 +849,7 @@ async def api_enviar_email_orden(
 @router.post("/lotes/{lote_id}/enviar-correo", include_in_schema=True, tags=["Email"])
 async def api_enviar_email_lote(
     lote_id: str,
-    body: Optional[EnviarEmailBody] = None,
+    body: Optional[EnviarEmailBody] = Body(default=None),
     db = Depends(get_db),
     current_user: dict = Depends(get_optional_user),
 ):
@@ -897,6 +899,8 @@ class EnviarCorreoUniversalBody(BaseModel):
     forzar: Optional[bool] = True
     folios: Optional[List[str]] = None
 
+EnviarCorreoUniversalBody.model_rebuild()
+
 
 @router.post(
     "/correos/enviar",
@@ -904,7 +908,7 @@ class EnviarCorreoUniversalBody(BaseModel):
     tags=["Email"],
 )
 async def api_enviar_correo_universal(
-    body: EnviarCorreoUniversalBody,
+    body: EnviarCorreoUniversalBody = Body(...),
     db = Depends(get_db),
     current_user: dict = Depends(get_optional_user),
 ):
