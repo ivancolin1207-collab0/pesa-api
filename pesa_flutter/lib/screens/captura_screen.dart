@@ -12,6 +12,7 @@ import '../widgets/repetibilidad_table.dart';
 import '../widgets/excentricidad_table.dart';
 import '../widgets/exactitud_table.dart';
 import '../widgets/enlaces_sustitucion_table.dart';
+import '../widgets/nombre_recibe.dart';
 import '../widgets/sync_check_badge.dart';
 import 'remision_captura_screen.dart';
 import 'revision_bascula_screen.dart';
