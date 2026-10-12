@@ -1657,13 +1657,56 @@ class _OsListScreenState extends State<OsListScreen> {
                         ? 'Enviando...'
                         : (yaEnviado
                             ? (esLote ? 'Reenviar Lote' : 'Reenviar Correo')
-                            : (esLote ? 'Enviar Lote' : 'Enviar Ahora')),
+                            : (esLote ? 'Finalizar y Enviar Lote' : 'Enviar Ahora')),
                   ),
                   onPressed: isSendingModal
                       ? null
                       : () async {
                           if (!(formKey.currentState?.validate() ?? true)) return;
                           final destino = emailCtrl.text.trim();
+
+                          if (esLote) {
+                            final totalValidas = foliosEnvio.length;
+                            final bool? confirmar = await showDialog<bool>(
+                              context: ctx,
+                              barrierDismissible: false,
+                              builder: (cCtx) => AlertDialog(
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                title: const Row(
+                                  children: [
+                                    Icon(Icons.mark_email_read_rounded, color: Color(0xFFB81D24), size: 24),
+                                    SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'Confirmar Envío de Lote',
+                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                content: Text(
+                                  'Se enviarán $totalValidas órdenes de servicio al correo $destino con copia a recepcion@basculaspesa.com.mx, ¿desea continuar?',
+                                  style: const TextStyle(fontSize: 13, height: 1.4),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(cCtx).pop(false),
+                                    child: const Text('Cancelar'),
+                                  ),
+                                  ElevatedButton(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFFB81D24),
+                                      foregroundColor: Colors.white,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () => Navigator.of(cCtx).pop(true),
+                                    child: const Text('Confirmar y Enviar'),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirmar != true) return;
+                          }
 
                           setModalState(() => isSendingModal = true);
                           setState(() => _estaEnviandoEmail = true);
@@ -3149,7 +3192,7 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                         ),
                         icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.mark_email_read : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                         label: Text(
-                          enviando ? "⏳ Enviando..." : (loteEnviado ? "✓ Reenviar Lote" : (loteEnCola ? "⏳ En cola" : "✉ Enviar Lote")),
+                          enviando ? "⏳ Enviando..." : (loteEnviado ? "✓ Reenviar Lote" : (loteEnCola ? "⏳ En cola" : "✉ Finalizar y Enviar Lote")),
                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                         onPressed: enviando ? null : () => widget.state._procesarEnvioCorreo(item: item, esLote: true),
@@ -4454,7 +4497,7 @@ class _LoteRowState extends State<_LoteRow> {
                               label: Text(
                                 enviando
                                     ? "⏳ Enviando..."
-                                    : (loteEnviado ? "✓ Reenviar Lote" : (loteEnCola ? "⏳ Lote en cola (Offline)" : "✉ Enviar Lote por Correo")),
+                                    : (loteEnviado ? "✓ Reenviar Lote" : (loteEnCola ? "⏳ Lote en cola (Offline)" : "✉ Finalizar y Enviar Lote")),
                                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                               ),
                               onPressed: enviando ? null : () {

@@ -642,7 +642,8 @@ recepcion@basculaspesa.com.mx
             servicio=servicio_real,
         )
 
-        asunto = f"Orden de Servicio {folio} - {empresa} | Básculas PESA"
+        id_txt = f" ({id_equipo_real})" if id_equipo_real and id_equipo_real != "S-ID" else ""
+        asunto = f"Orden de Servicio {folio}{id_txt} - {empresa} | Básculas PESA"
         cuerpo_texto = f"""Estimado cliente ({empresa}):
 
 Adjuntamos el reporte oficial correspondiente a la Orden de Servicio {folio}.

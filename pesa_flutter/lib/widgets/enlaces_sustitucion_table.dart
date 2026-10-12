@@ -41,6 +41,10 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
   late List<TextEditingController> _sustNombreCtrls;
   late List<TextEditingController> _sustPesoCtrls;
 
+  final ScrollController _scrollController = ScrollController();
+  final List<GlobalKey> _rowKeys = [];
+  final List<List<FocusNode>> _rowFocusNodes = [];
+
   bool _isAutoCalculating = false;
 
   @override
@@ -92,6 +96,22 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
     final regCtrl = TextEditingController(text: reg);
 
     final idx = _pesasCtrls.length;
+    _rowKeys.add(GlobalKey());
+
+    final fnP = FocusNode();
+    final fnA = FocusNode();
+    final fnAP = FocusNode();
+    final fnI = FocusNode();
+    final fnR = FocusNode();
+    final fns = [fnP, fnA, fnAP, fnI, fnR];
+    for (final fn in fns) {
+      fn.addListener(() {
+        if (fn.hasFocus) {
+          Future.delayed(const Duration(milliseconds: 250), () => _scrollToRow(idx));
+        }
+      });
+    }
+    _rowFocusNodes.add(fns);
 
     pCtrl.addListener(() => _onPesasOrAguaChanged(idx));
     aCtrl.addListener(() => _onPesasOrAguaChanged(idx));
@@ -104,6 +124,19 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
     _aguaPesasCtrls.add(apCtrl);
     _indicacionCtrls.add(indCtrl);
     _regresoCtrls.add(regCtrl);
+  }
+
+  void _scrollToRow(int index) {
+    if (!mounted || index < 0 || index >= _rowKeys.length) return;
+    final ctx = _rowKeys[index].currentContext;
+    if (ctx != null) {
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.35,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+      );
+    }
   }
 
   void _onPesasOrAguaChanged(int i) {
@@ -163,6 +196,16 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
       _aguaPesasCtrls.removeAt(i);
       _indicacionCtrls.removeAt(i);
       _regresoCtrls.removeAt(i);
+
+      if (i < _rowFocusNodes.length) {
+        for (final fn in _rowFocusNodes[i]) {
+          fn.dispose();
+        }
+        _rowFocusNodes.removeAt(i);
+      }
+      if (i < _rowKeys.length) {
+        _rowKeys.removeAt(i);
+      }
     });
     _notify();
   }
@@ -267,6 +310,12 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
 
   @override
   void dispose() {
+    _scrollController.dispose();
+    for (final fns in _rowFocusNodes) {
+      for (final fn in fns) {
+        fn.dispose();
+      }
+    }
     for (final c in [..._pesasCtrls, ..._aguaCtrls, ..._aguaPesasCtrls, ..._indicacionCtrls, ..._regresoCtrls]) {
       c.dispose();
     }
@@ -283,208 +332,218 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
     final maxErrStr = formatoMilesEspacio(dec > 0 ? maxErr.toStringAsFixed(dec) : maxErr.round().toString());
     final totalSustituto = _calcularTotalSustituto();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        // ── Card de Cargas de Sustitución (Sustituto / Peso) ──
-        if (widget.onSustitutosChanged != null || _sustitutosList.isNotEmpty) ...[
-          Card(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.grey.shade200),
+    return SingleChildScrollView(
+      controller: _scrollController,
+      physics: const BouncingScrollPhysics(),
+      padding: EdgeInsets.only(
+        left: 16,
+        right: 16,
+        top: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Card de Cargas de Sustitución (Sustituto / Peso) ──
+          if (widget.onSustitutosChanged != null || _sustitutosList.isNotEmpty) ...[
+            Card(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+                side: BorderSide(color: Colors.grey.shade200),
+              ),
+              elevation: 1,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.layers, size: 20, color: _kRed),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'MATERIALES / PESOS SUSTITUTOS',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _kRed, letterSpacing: 0.5),
+                        ),
+                        const Spacer(),
+                        ElevatedButton.icon(
+                          onPressed: _addSustituto,
+                          icon: const Icon(Icons.add, size: 16),
+                          label: const Text('Agregar sustituto', style: TextStyle(fontSize: 12)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFFD9E2F3),
+                            foregroundColor: const Color(0xFF1D4ED8),
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Si no se capturan sustitutos con peso > 0, este recuadro se oculta y elimina automáticamente del PDF final.',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                    const SizedBox(height: 10),
+                    if (_sustNombreCtrls.isEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: Colors.grey.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: Colors.grey.shade200),
+                        ),
+                        child: Text(
+                          'No hay sustitutos registrados. Presiona "+ Agregar sustituto" para capturar materiales.',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                        ),
+                      )
+                    else ...[
+                      Table(
+                        border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
+                        columnWidths: const {
+                          0: FlexColumnWidth(2.5),
+                          1: FlexColumnWidth(2.0),
+                          2: FlexColumnWidth(0.8),
+                        },
+                        children: [
+                          const TableRow(
+                            decoration: BoxDecoration(color: Color(0xFFD9E2F3)),
+                            children: [
+                              Padding(padding: EdgeInsets.all(8), child: Text('SUSTITUTO', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
+                              Padding(padding: EdgeInsets.all(8), child: Text('PESO', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
+                              Padding(padding: EdgeInsets.all(8), child: Text('ACCIONES', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
+                            ],
+                          ),
+                          for (int i = 0; i < _sustNombreCtrls.length; i++)
+                            TableRow(
+                              decoration: BoxDecoration(color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9)),
+                              children: [
+                                _sustInput(_sustNombreCtrls[i], hint: 'Ej. Agua 1, Bloque A', isNum: false),
+                                _sustInput(_sustPesoCtrls[i], hint: '0.00', isNum: true),
+                                IconButton(
+                                  icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                  onPressed: () => _removeSustituto(i),
+                                  tooltip: 'Eliminar',
+                                ),
+                              ],
+                            ),
+                          TableRow(
+                            decoration: const BoxDecoration(color: Color(0xFFF3F4F6)),
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.all(8),
+                                child: Text('TOTAL', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.black)),
+                              ),
+                              Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Text(
+                                  formatoMilesEspacio(dec > 0 ? totalPesoStr(dec, totalSustituto) : totalSustituto.round().toString()),
+                                  textAlign: TextAlign.right,
+                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _kRed),
+                                ),
+                              ),
+                              const SizedBox.shrink(),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
+            const SizedBox(height: 14),
+          ],
+
+          // ── Card Tabla Exactitud con Cargas de Sustitución ──
+          Card(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             elevation: 1,
             child: Padding(
-              padding: const EdgeInsets.all(14),
+              padding: const EdgeInsets.all(16),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.layers, size: 20, color: _kRed),
-                      const SizedBox(width: 8),
                       const Text(
-                        'MATERIALES / PESOS SUSTITUTOS',
+                        'EXACTITUD — CARGAS DE SUSTITUCIÓN',
                         style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _kRed, letterSpacing: 0.5),
                       ),
                       const Spacer(),
                       ElevatedButton.icon(
-                        onPressed: _addSustituto,
+                        onPressed: _addPoint,
                         icon: const Icon(Icons.add, size: 16),
-                        label: const Text('Agregar sustituto', style: TextStyle(fontSize: 12)),
+                        label: const Text('Agregar punto', style: TextStyle(fontSize: 12)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFD9E2F3),
-                          foregroundColor: const Color(0xFF1D4ED8),
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          backgroundColor: _kRed,
+                          foregroundColor: Colors.white,
+                          elevation: 1,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Si no se capturan sustitutos con peso > 0, este recuadro se oculta y elimina automáticamente del PDF final.',
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                  const SizedBox(height: 12),
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: SizedBox(
+                      width: 760,
+                      child: Table(
+                        border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
+                        columnWidths: const {
+                          0: FlexColumnWidth(0.5), // N
+                          1: FlexColumnWidth(1.2), // PESAS
+                          2: FlexColumnWidth(1.2), // AGUA
+                          3: FlexColumnWidth(1.4), // AGUA + PESAS
+                          4: FlexColumnWidth(1.3), // INDICACIÓN
+                          5: FlexColumnWidth(1.2), // REGRESO
+                          6: FlexColumnWidth(1.1), // ERROR
+                          7: FlexColumnWidth(0.5), // ACCIONES
+                        },
+                        children: [
+                          _hdr(['N', 'PESAS', 'AGUA', 'AGUA + PESAS', 'INDICACIÓN', 'REGRESO', 'ERROR', '']),
+                          for (int i = 0; i < _pesasCtrls.length; i++) _row(i),
+                        ],
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 10),
-                  if (_sustNombreCtrls.isEmpty)
-                    Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.grey.shade200),
-                      ),
-                      child: Text(
-                        'No hay sustitutos registrados. Presiona "+ Agregar sustituto" para capturar materiales.',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                      ),
-                    )
-                  else ...[
-                    Table(
-                      border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
-                      columnWidths: const {
-                        0: FlexColumnWidth(2.5),
-                        1: FlexColumnWidth(2.0),
-                        2: FlexColumnWidth(0.8),
-                      },
+                  // Footer con Error Máximo Encontrado
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Row(
                       children: [
-                        TableRow(
-                          decoration: const BoxDecoration(color: Color(0xFFD9E2F3)),
-                          children: const [
-                            Padding(padding: EdgeInsets.all(8), child: Text('SUSTITUTO', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
-                            Padding(padding: EdgeInsets.all(8), child: Text('PESO', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
-                            Padding(padding: EdgeInsets.all(8), child: Text('ACCIONES', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
-                          ],
+                        const Text(
+                          'ERROR MÁXIMO ENCONTRADO:',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.black87),
                         ),
-                        for (int i = 0; i < _sustNombreCtrls.length; i++)
-                          TableRow(
-                            decoration: BoxDecoration(color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9)),
-                            children: [
-                              _sustInput(_sustNombreCtrls[i], hint: 'Ej. Agua 1, Bloque A', isNum: false),
-                              _sustInput(_sustPesoCtrls[i], hint: '0.00', isNum: true),
-                              IconButton(
-                                icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
-                                onPressed: () => _removeSustituto(i),
-                                tooltip: 'Eliminar',
-                              ),
-                            ],
+                        const Spacer(),
+                        Text(
+                          maxErrStr,
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w900,
+                            color: maxErr > 0 ? _kRed : Colors.green.shade700,
                           ),
-                        TableRow(
-                          decoration: const BoxDecoration(color: Color(0xFFF3F4F6)),
-                          children: [
-                            const Padding(
-                              padding: EdgeInsets.all(8),
-                              child: Text('TOTAL', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.black)),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.all(8),
-                              child: Text(
-                                formatoMilesEspacio(dec > 0 ? totalPesoStr(dec, totalSustituto) : totalSustituto.round().toString()),
-                                textAlign: TextAlign.right,
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _kRed),
-                              ),
-                            ),
-                            const SizedBox.shrink(),
-                          ],
                         ),
                       ],
                     ),
-                  ],
+                  ),
+                  if (widget.footer != null) ...[const SizedBox(height: 20), widget.footer!],
                 ],
               ),
             ),
           ),
-          const SizedBox(height: 14),
         ],
-
-        // ── Card Tabla Exactitud con Cargas de Sustitución ──
-        Card(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: 1,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    const Text(
-                      'EXACTITUD — CARGAS DE SUSTITUCIÓN',
-                      style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _kRed, letterSpacing: 0.5),
-                    ),
-                    const Spacer(),
-                    ElevatedButton.icon(
-                      onPressed: _addPoint,
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Agregar punto', style: TextStyle(fontSize: 12)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _kRed,
-                        foregroundColor: Colors.white,
-                        elevation: 1,
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(
-                    width: 760,
-                    child: Table(
-                      border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
-                      columnWidths: const {
-                        0: FlexColumnWidth(0.5), // N
-                        1: FlexColumnWidth(1.2), // PESAS
-                        2: FlexColumnWidth(1.2), // AGUA
-                        3: FlexColumnWidth(1.4), // AGUA + PESAS
-                        4: FlexColumnWidth(1.3), // INDICACIÓN
-                        5: FlexColumnWidth(1.2), // REGRESO
-                        6: FlexColumnWidth(1.1), // ERROR
-                        7: FlexColumnWidth(0.5), // ACCIONES
-                      },
-                      children: [
-                        _hdr(['N', 'PESAS', 'AGUA', 'AGUA + PESAS', 'INDICACIÓN', 'REGRESO', 'ERROR', '']),
-                        for (int i = 0; i < _pesasCtrls.length; i++) _row(i),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                // Footer con Error Máximo Encontrado
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
-                  ),
-                  child: Row(
-                    children: [
-                      const Text(
-                        'ERROR MÁXIMO ENCONTRADO:',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.black87),
-                      ),
-                      const Spacer(),
-                      Text(
-                        maxErrStr,
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w900,
-                          color: maxErr > 0 ? _kRed : Colors.green.shade700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (widget.footer != null) ...[const SizedBox(height: 20), widget.footer!],
-              ],
-            ),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
@@ -523,18 +582,22 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
         ? formatoMilesEspacio(dec > 0 ? err.toStringAsFixed(dec) : err.round().toString())
         : '—';
 
+    final key = i < _rowKeys.length ? _rowKeys[i] : null;
+    final fns = i < _rowFocusNodes.length ? _rowFocusNodes[i] : null;
+
     return TableRow(
       decoration: BoxDecoration(color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9)),
       children: [
-        Padding(
+        Container(
+          key: key,
           padding: const EdgeInsets.all(8),
           child: Text('${i + 1}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 11)),
         ),
-        _input(_pesasCtrls[i]),
-        _input(_aguaCtrls[i]),
-        _input(_aguaPesasCtrls[i], hint: 'Auto'),
-        _input(_indicacionCtrls[i]),
-        _input(_regresoCtrls[i]),
+        _input(_pesasCtrls[i], focusNode: fns != null ? fns[0] : null, onTap: () => _scrollToRow(i)),
+        _input(_aguaCtrls[i], focusNode: fns != null ? fns[1] : null, onTap: () => _scrollToRow(i)),
+        _input(_aguaPesasCtrls[i], hint: 'Auto', focusNode: fns != null ? fns[2] : null, onTap: () => _scrollToRow(i)),
+        _input(_indicacionCtrls[i], focusNode: fns != null ? fns[3] : null, onTap: () => _scrollToRow(i)),
+        _input(_regresoCtrls[i], focusNode: fns != null ? fns[4] : null, onTap: () => _scrollToRow(i)),
         Padding(
           padding: const EdgeInsets.all(8),
           child: Text(
@@ -559,12 +622,19 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
     );
   }
 
-  Widget _input(TextEditingController c, {String? hint}) => Padding(
+  Widget _input(
+    TextEditingController c, {
+    String? hint,
+    FocusNode? focusNode,
+    VoidCallback? onTap,
+  }) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: SizedBox(
           height: 30,
           child: TextField(
             controller: c,
+            focusNode: focusNode,
+            onTap: onTap,
             textAlign: TextAlign.center,
             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),

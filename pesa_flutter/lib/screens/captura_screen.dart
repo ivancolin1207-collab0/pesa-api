@@ -252,21 +252,35 @@ class _CapturaScreenState extends State<CapturaScreen>
     _holoAntCtrl.text    = _str('holograma_anterior');
     _holoActCtrl.text    = _str('holograma_actualizado');
 
-    // Capacidad máxima — fallback a string si numérico es null
-    final max = _os['alcance_max'] ?? _os['capacidad_maxima'];
-    final div = _os['div_minima']  ?? _os['division_minima'];
-    final dve = _os['div_verificacion'];
-    if (max != null) {
-      _capMaxCtrl.text = max.toString();
+    // Capacidad máxima, división mínima y tipo de instrumento prellenados desde logística
+    dynamic dj;
+    if (_os['datos_tecnicos_json'] != null) {
+      try {
+        dj = _os['datos_tecnicos_json'] is String
+            ? jsonDecode(_os['datos_tecnicos_json'])
+            : _os['datos_tecnicos_json'];
+      } catch (_) {}
+    }
+
+    final max = _os['capacidad_maxima'] ?? _os['alcance_max'] ?? _os['capacidad_max'] ?? _os['cap_max'] ??
+                (dj is Map ? (dj['capacidad_maxima'] ?? dj['alcance_max'] ?? dj['capacidad_max']) : null);
+    final div = _os['division_minima']  ?? _os['div_minima'] ?? _os['division'] ?? _os['div_min'] ??
+                (dj is Map ? (dj['division_minima'] ?? dj['div_minima'] ?? dj['division']) : null);
+    final dve = _os['div_verificacion'] ?? (dj is Map ? dj['div_verificacion'] : null);
+
+    if (max != null && max.toString().trim().isNotEmpty) {
+      final s = max.toString().replaceAll(RegExp(r'[^0-9.]'), '').trim();
+      if (s.isNotEmpty) _capMaxCtrl.text = s;
     } else {
-      // Fallback: instrumento_capacidad puede ser "75000 kg"
       final capStr = _str('instrumento_capacidad');
       if (capStr.isNotEmpty) {
         _capMaxCtrl.text = capStr.replaceAll(RegExp(r'[^0-9.]'), '').trim();
       }
     }
-    if (div != null) {
-      _divMinCtrl.text = div.toString();
+
+    if (div != null && div.toString().trim().isNotEmpty) {
+      final s = div.toString().replaceAll(RegExp(r'[^0-9.]'), '').trim();
+      if (s.isNotEmpty) _divMinCtrl.text = s;
     } else {
       final divStr = _str('instrumento_division');
       if (divStr.isNotEmpty) {
@@ -275,22 +289,53 @@ class _CapturaScreenState extends State<CapturaScreen>
     }
     if (dve != null) _divVerCtrl.text = dve.toString();
 
-    // Tipo de instrumento
-    final ti = _str('tipo_instrumento');
-    if (ti.isNotEmpty && _tiposInstrumento.contains(ti)) {
-      _tipoInstrumento = ti;
-    } else if (ti.toLowerCase().contains('camion') ||
-               ti.toLowerCase().contains('puente')) {
-      _tipoInstrumento = 'Báscula camionera';
-    } else if (ti.toLowerCase().contains('ferrocarril') ||
-               ti.toLowerCase().contains('ferrovi')) {
-      _tipoInstrumento = 'Báscula de ferrocarril';
-    } else if (ti.toLowerCase().contains('plataforma')) {
-      _tipoInstrumento = 'Báscula de plataforma';
-    } else if (ti.toLowerCase().contains('circular')) {
-      _tipoInstrumento = 'Báscula circular';
-    } else if (ti.toLowerCase().contains('tolva')) {
-      _tipoInstrumento = 'Báscula tolva';
+    // Tipo de instrumento prellenado desde logística
+    final tiRaw = _str('tipo_instrumento').isNotEmpty
+        ? _str('tipo_instrumento')
+        : (_str('tipo_bascula').isNotEmpty
+            ? _str('tipo_bascula')
+            : (dj is Map ? (dj['tipo_instrumento'] ?? dj['tipo_bascula'])?.toString() : ''));
+
+    if (tiRaw != null && tiRaw.trim().isNotEmpty) {
+      final ti = tiRaw.trim();
+      if (_tiposInstrumento.contains(ti)) {
+        _tipoInstrumento = ti;
+      } else {
+        final tiLower = ti.toLowerCase();
+        for (final item in _tiposInstrumento) {
+          if (item.toLowerCase() == tiLower) {
+            _tipoInstrumento = item;
+            break;
+          }
+        }
+        if (_tipoInstrumento == null) {
+          if (tiLower.contains('tanque') || tiLower.contains('silo')) {
+            _tipoInstrumento = 'Tanque / Silo';
+          } else if (tiLower.contains('camion') || tiLower.contains('puente')) {
+            _tipoInstrumento = 'Báscula camionera';
+          } else if (tiLower.contains('ferrocarril') || tiLower.contains('ferrovi')) {
+            _tipoInstrumento = 'Báscula de ferrocarril';
+          } else if (tiLower.contains('plataforma')) {
+            _tipoInstrumento = 'Báscula de plataforma';
+          } else if (tiLower.contains('circular')) {
+            _tipoInstrumento = 'Báscula circular';
+          } else if (tiLower.contains('tolva')) {
+            _tipoInstrumento = 'Báscula tolva';
+          } else if (tiLower.contains('colgante') || tiLower.contains('grúa') || tiLower.contains('grua')) {
+            _tipoInstrumento = 'Báscula colgante / grúa';
+          } else if (tiLower.contains('analit') || tiLower.contains('analít')) {
+            _tipoInstrumento = 'Báscula analítica';
+          } else if (tiLower.contains('piso')) {
+            _tipoInstrumento = 'Báscula de piso';
+          } else if (tiLower.contains('mostrador')) {
+            _tipoInstrumento = 'Báscula de mostrador';
+          } else if (tiLower.contains('patron') || tiLower.contains('patrón')) {
+            _tipoInstrumento = 'Pesa patrón';
+          } else {
+            _tipoInstrumento = ti;
+          }
+        }
+      }
     }
 
     // Nuevos campos: Funcionamiento y Puntos de Apoyo
@@ -590,13 +635,15 @@ class _CapturaScreenState extends State<CapturaScreen>
     final String cliente = (_os['cliente'] ?? _os['cliente_nombre'] ?? widget.osData['cliente'] ?? '').toString();
     final String planta  = (_os['direccion'] ?? _os['direccion_cliente'] ?? _os['sucursal'] ?? _os['planta'] ?? widget.osData['direccion'] ?? '').toString();
     final contactos = await LocalDbService.instance.getContactosPlanta(cliente: cliente, planta: planta);
+    final filtered = contactos.where((c) => !esRazonSocialEmpresa(c, cliente)).toList();
 
     if (mounted) {
       setState(() {
-        _contactosSugeridos = contactos;
-        if (_firmaClienteNombreCtrl.text.trim().isEmpty && contactos.isNotEmpty) {
-          _firmaClienteNombreCtrl.text = contactos.first;
-          _os['firma_cliente_nombre'] = contactos.first;
+        _contactosSugeridos = filtered;
+        // Nombre de quien recibe debe comenzar VACÍO y no precargar razón social de la empresa
+        if (esRazonSocialEmpresa(_firmaClienteNombreCtrl.text, cliente)) {
+          _firmaClienteNombreCtrl.text = '';
+          _os['firma_cliente_nombre'] = '';
         }
       });
     }
@@ -1116,13 +1163,12 @@ class _CapturaScreenState extends State<CapturaScreen>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '¿Se utilizó material de sustitución?',
+                        '¿Aplica cargas de sustitución?',
                         style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
                       ),
                       SizedBox(height: 2),
                       Text(
-                        'Opcional — si eliges "No" o lo dejas vacío, la exactitud se '
-                        'valida solo con pesas patrón directas.',
+                        'Si eliges "Sí", se habilita la tabla de cargas de sustitución en la pestaña de Exactitud.',
                         style: TextStyle(fontSize: 11, color: Colors.grey),
                       ),
                     ],
@@ -1146,14 +1192,6 @@ class _CapturaScreenState extends State<CapturaScreen>
             ),
           ),
         ),
-        if (_usaSustitucion) ...[
-          const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: _NumField('Peso sustituto ($_unidadMedida) — opcional', _masaPatronCtrl)),
-            const SizedBox(width: 12),
-            Expanded(child: _NumField('Factor Sustitución — opcional', _factorSustCtrl)),
-          ]),
-        ],
         const SizedBox(height: 16),
 
         // ── Nuevos campos: Funcionamiento y Puntos de Apoyo ────────────────────

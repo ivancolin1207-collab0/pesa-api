@@ -52,13 +52,17 @@ class _FirmaScreenState extends State<FirmaScreen>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 2, vsync: this);
-    final initialNombre = widget.capturaData['firma_cliente_nombre'] ?? widget.capturaData['nombre_ing'] ?? '';
-    if (initialNombre.toString().isNotEmpty) {
-      _nombreIngCtrl.text = initialNombre.toString();
+    final cli = (widget.capturaData['cliente'] ?? widget.capturaData['cliente_nombre'] ?? widget.capturaData['razon_social'] ?? '').toString().trim();
+    final initialNombre = (widget.capturaData['firma_cliente_nombre'] ?? widget.capturaData['nombre_ing'] ?? '').toString().trim();
+    // REGLA ESTRICTA: El campo NO debe llenarse con la razón social del cliente. Debe comenzar VACÍO.
+    if (initialNombre.isNotEmpty && !esRazonSocialEmpresa(initialNombre, cli)) {
+      _nombreIngCtrl.text = initialNombre;
+    } else {
+      _nombreIngCtrl.text = '';
     }
-    final initialPuesto = widget.capturaData['puesto_ing'] ?? '';
-    if (initialPuesto.toString().isNotEmpty) {
-      _puestoIngCtrl.text = initialPuesto.toString();
+    final initialPuesto = (widget.capturaData['puesto_ing'] ?? '').toString().trim();
+    if (initialPuesto.isNotEmpty) {
+      _puestoIngCtrl.text = initialPuesto;
     }
     _cargarFirmasExistentes();
     _cargarContactosPlanta();
@@ -67,16 +71,16 @@ class _FirmaScreenState extends State<FirmaScreen>
   List<String> _contactosSugeridos = [];
 
   Future<void> _cargarContactosPlanta() async {
-    final cli = (widget.capturaData['cliente'] ?? widget.capturaData['cliente_nombre'] ?? '').toString();
-    final pla = (widget.capturaData['direccion'] ?? widget.capturaData['sucursal'] ?? '').toString();
+    final cli = (widget.capturaData['cliente'] ?? widget.capturaData['cliente_nombre'] ?? '').toString().trim();
+    final pla = (widget.capturaData['direccion'] ?? widget.capturaData['sucursal'] ?? '').toString().trim();
     if (cli.isEmpty) return;
     final contacts = await LocalDbService.instance.getContactosPlanta(cliente: cli, planta: pla);
+    // Filtrar para que la razón social de la empresa nunca aparezca como sugerencia de contacto
+    final filtered = contacts.where((c) => !esRazonSocialEmpresa(c, cli)).toList();
     if (mounted) {
       setState(() {
-        _contactosSugeridos = contacts;
-        if (_nombreIngCtrl.text.trim().isEmpty && contacts.isNotEmpty) {
-          _nombreIngCtrl.text = contacts.first;
-        }
+        _contactosSugeridos = filtered;
+        // Debe comenzar VACÍO: no autollenar con contacts.first
       });
     }
   }
@@ -425,6 +429,41 @@ class _FirmaScreenState extends State<FirmaScreen>
               ),
             ),
           ]),
+          // Chip de sugerencia de sesión de lote (si otra orden del mismo lote ya registró responsable)
+          Builder(
+            builder: (context) {
+              final String loteId = (widget.capturaData['id_lote'] ?? widget.capturaData['lote'] ?? '').toString().trim();
+              final String? respLote = LoteSession.getUltimoResponsable(loteId);
+              final String? puestoLote = LoteSession.getUltimoPuesto(loteId);
+              if (respLote == null || respLote.isEmpty) return const SizedBox.shrink();
+              return Padding(
+                padding: const EdgeInsets.only(top: 6.0),
+                child: Row(
+                  children: [
+                    const Icon(Icons.layers, size: 14, color: _red),
+                    const SizedBox(width: 4),
+                    const Text('Responsable del Lote: ',
+                        style: TextStyle(fontSize: 11, color: _red, fontWeight: FontWeight.bold)),
+                    ActionChip(
+                      visualDensity: VisualDensity.compact,
+                      backgroundColor: const Color(0xFFFFF1F2),
+                      side: const BorderSide(color: Color(0xFFE11D48)),
+                      avatar: const Icon(Icons.touch_app, size: 13, color: Color(0xFFE11D48)),
+                      label: Text(respLote, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFE11D48))),
+                      onPressed: () {
+                        setState(() {
+                          _nombreIngCtrl.text = respLote;
+                          if (puestoLote != null && puestoLote.isNotEmpty) {
+                            _puestoIngCtrl.text = puestoLote;
+                          }
+                        });
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
           if (_contactosSugeridos.isNotEmpty) ...[
             const SizedBox(height: 6),
             Row(
@@ -782,8 +821,9 @@ class _FirmaScreenState extends State<FirmaScreen>
     }
 
     // NOMBRE DE QUIEN RECIBE: ESTRICTAMENTE OBLIGATORIO (la firma del cliente es opcional).
+    final String cli = (widget.capturaData['cliente'] ?? widget.capturaData['cliente_nombre'] ?? '').toString().trim();
     final String nombreRecibe = _nombreIngCtrl.text.trim();
-    if (!exigirNombreRecibe(context, nombreRecibe)) {
+    if (!exigirNombreRecibe(context, nombreRecibe, clienteEmpresa: cli)) {
       _tabCtrl.animateTo(1);
       // Resaltar el campo cuando la pestaña termine de construirse.
       WidgetsBinding.instance.addPostFrameCallback((_) => _formKey.currentState?.validate());
@@ -794,75 +834,90 @@ class _FirmaScreenState extends State<FirmaScreen>
       return;
     }
 
-    // ── MODAL: Solicitar Correo del Cliente para envío automático de la OS ──
-    final String? emailPrevio = (widget.capturaData['correo_cliente'] ?? widget.capturaData['email_cliente'])?.toString().trim();
-    final emailTextCtrl = TextEditingController(text: emailPrevio ?? '');
+    // Registrar en memoria de lote para órdenes hermanas
+    final String loteId = (widget.capturaData['id_lote'] ?? widget.capturaData['lote'] ?? '').toString().trim();
+    if (loteId.isNotEmpty) {
+      LoteSession.registrarResponsable(loteId, nombreRecibe, puesto: _puestoIngCtrl.text);
+    }
 
-    final bool? procedio = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.mark_email_read_rounded, color: Color(0xFFB81D24), size: 26),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Envío por Correo Electrónico',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+    final bool esLote = loteId.isNotEmpty;
+    String correoCapturado = '';
+
+    // Para órdenes pertenecientes a un lote, NO pedir correo individualmente al terminar cada OS.
+    if (!esLote) {
+      // ── MODAL: Solicitar Correo del Cliente para envío automático de la OS individual ──
+      final String? emailPrevio = (widget.capturaData['correo_cliente'] ?? widget.capturaData['email_cliente'])?.toString().trim();
+      final emailTextCtrl = TextEditingController(text: emailPrevio ?? '');
+
+      final bool? procedio = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.mark_email_read_rounded, color: Color(0xFFB81D24), size: 26),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Envío por Correo Electrónico',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                ),
               ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Ingresa el correo electrónico del cliente para el envío automático del reporte en PDF al sincronizar:',
+                style: TextStyle(fontSize: 13, color: Color(0xFF374151), height: 1.4),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: emailTextCtrl,
+                keyboardType: TextInputType.emailAddress,
+                autofocus: true,
+                decoration: InputDecoration(
+                  labelText: 'Correo del Cliente',
+                  hintText: 'ejemplo@empresa.com',
+                  prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFFB81D24)),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'CC obligatorio: recepcion@basculaspesa.com.mx\n(Funciona en modo Offline: se enviará al conectar a internet).',
+                style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Omitir', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFB81D24),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Continuar y Guardar'),
             ),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Ingresa el correo electrónico del cliente para el envío automático del reporte en PDF al sincronizar:',
-              style: TextStyle(fontSize: 13, color: Color(0xFF374151), height: 1.4),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: emailTextCtrl,
-              keyboardType: TextInputType.emailAddress,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'Correo del Cliente',
-                hintText: 'ejemplo@empresa.com',
-                prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFFB81D24)),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              ),
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'CC obligatorio: recepcion@basculaspesa.com.mx\n(Funciona en modo Offline: se enviará al conectar a internet).',
-              style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Omitir', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFB81D24),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Continuar y Guardar'),
-          ),
-        ],
-      ),
-    );
+      );
 
-    if (procedio != true) return;
-    final correoCapturado = emailTextCtrl.text.trim();
+      if (procedio != true) return;
+      correoCapturado = emailTextCtrl.text.trim();
+    } else {
+      // En lote se hereda si ya existía para mantener consistencia
+      correoCapturado = (widget.capturaData['correo_cliente'] ?? widget.capturaData['email_cliente'] ?? '').toString().trim();
+    }
 
     setState(() => _saving = true);
     String? pdfPath;
