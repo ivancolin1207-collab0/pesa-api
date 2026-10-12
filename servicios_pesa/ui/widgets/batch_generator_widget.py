@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QSpinBox, QDateEdit,
     QComboBox, QScrollArea, QSizePolicy,
     QButtonGroup, QRadioButton, QMessageBox,
-    QProgressBar, QAbstractItemView, QTextEdit, QLineEdit, QCompleter,
+    QProgressBar, QAbstractItemView, QTextEdit, QLineEdit, QCompleter, QListView,
 )
 
 logger = logging.getLogger(__name__)
@@ -327,8 +327,12 @@ class EquipoCard(QFrame):
         self._lbl_cca = QLabel("Número de CCA")
         self._lbl_cca.setStyleSheet("font-size: 11px; font-weight: 700; color: #86868B;")
         _col_cca.addWidget(self._lbl_cca)
+        import datetime
+        _anio = str(datetime.datetime.now().year)[-2:]
         self._inp_cca = QLineEdit()
-        self._inp_cca.setPlaceholderText("Ej: CCA.26.001")
+        self._inp_cca.setPlaceholderText(f"CCA.{_anio}.XXXX")
+        if not self._inp_cca.text():
+            self._inp_cca.setText(f"CCA.{_anio}.")
         self._inp_cca.setStyleSheet(_EQUIPO_FIELD_STYLE)
         self._inp_cca.setFixedHeight(40)
         _col_cca.addWidget(self._inp_cca)
@@ -1072,20 +1076,74 @@ def _field_label(text: str, required: bool = False) -> QLabel:
 
 def _input_style() -> str:
     return """
-        QComboBox, QSpinBox, QDateEdit {
-            background: #F8FAFC;
-            border: 1.5px solid #D1D5DB;
+        QComboBox {
+            background-color: #FFFFFF;
+            border: 1px solid #D1D5DB;
             border-radius: 8px;
-            padding: 7px 12px;
+            padding: 6px 12px;
+            color: #111827;
             font-size: 13px;
-            color: #1D1D1F;
             min-height: 36px;
         }
-        QComboBox:focus, QSpinBox:focus, QDateEdit:focus {
-            border-color: #007AFF;
-            background: #FFFFFF;
+        QComboBox:hover {
+            border-color: #9CA3AF;
         }
-        QComboBox::drop-down { border: none; width: 28px; }
+        QComboBox:focus {
+            border-color: #C8102E;
+            background-color: #FFFFFF;
+        }
+        QComboBox::drop-down {
+            border: none;
+            subcontrol-origin: padding;
+            subcontrol-position: top right;
+            width: 25px;
+        }
+        QComboBox QAbstractItemView {
+            background-color: #FFFFFF;
+            border: 1px solid #E5E7EB;
+            border-radius: 8px;
+            selection-background-color: #FEE2E2;
+            selection-color: #991B1B;
+            color: #1F2937;
+            outline: none;
+            padding: 4px;
+        }
+        QComboBox QAbstractItemView::item {
+            min-height: 32px;
+            padding-left: 8px;
+            color: #1F2937;
+            background-color: #FFFFFF;
+        }
+        QComboBox QAbstractItemView::item:selected {
+            background-color: #FEE2E2;
+            color: #991B1B;
+        }
+        QComboBox QAbstractItemView::item:hover {
+            background-color: #F3F4F6;
+            color: #111827;
+        }
+        QComboBox QLineEdit {
+            color: #111827;
+            background: transparent;
+            border: none;
+            font-size: 13px;
+        }
+        QSpinBox, QDateEdit {
+            background-color: #FFFFFF;
+            border: 1px solid #D1D5DB;
+            border-radius: 8px;
+            padding: 6px 12px;
+            color: #111827;
+            font-size: 13px;
+            min-height: 36px;
+        }
+        QSpinBox:hover, QDateEdit:hover {
+            border-color: #9CA3AF;
+        }
+        QSpinBox:focus, QDateEdit:focus {
+            border-color: #C8102E;
+            background-color: #FFFFFF;
+        }
     """
 
 
@@ -1118,13 +1176,20 @@ class _CatalogLoader(QThread):
         try:
             conn = _db_pool.get_connection()
             try:
-                # Clientes
+                # Clientes (Deduplicados sin repetición)
                 with conn.cursor() as cur:
                     cur.execute(
                         "SELECT id, razon_social FROM cat_clientes "
                         "WHERE activo = TRUE ORDER BY razon_social"
                     )
-                    clientes = list(cur.fetchall())
+                    raw_clientes = list(cur.fetchall())
+                    seen_noms = set()
+                    clientes = []
+                    for cid, nom in raw_clientes:
+                        clean = (nom or "").strip()
+                        if clean and clean.lower() not in seen_noms:
+                            seen_noms.add(clean.lower())
+                            clientes.append((cid, clean))
                 self.clientes_ready.emit(clientes)
 
                 # Sucursales — UN solo SELECT para todos los clientes
@@ -1449,6 +1514,7 @@ class BatchGeneratorWidget(QWidget):
         col_cliente.setSpacing(6)
         col_cliente.addWidget(_field_label("Cliente / Razón Social", required=True))
         self.cmb_cliente = QComboBox()
+        self.cmb_cliente.setView(QListView())
         self.cmb_cliente.setMinimumWidth(240)
         self.cmb_cliente.setEditable(True)
         self.cmb_cliente.setPlaceholderText("— Selecciona un cliente —")
@@ -1460,6 +1526,7 @@ class BatchGeneratorWidget(QWidget):
         col_sucursal.setSpacing(6)
         col_sucursal.addWidget(_field_label("Sucursal / Planta", required=True))
         self.cmb_sucursal = QComboBox()
+        self.cmb_sucursal.setView(QListView())
         self.cmb_sucursal.setMinimumWidth(240)
         self.cmb_sucursal.setEditable(False)
         self.cmb_sucursal.setEnabled(False)
@@ -1471,6 +1538,7 @@ class BatchGeneratorWidget(QWidget):
         col_tec.setSpacing(6)
         col_tec.addWidget(_field_label("Técnico Asignado", required=True))
         self.cmb_tecnico = QComboBox()
+        self.cmb_tecnico.setView(QListView())
         self.cmb_tecnico.setMinimumWidth(200)
         self.cmb_tecnico.setPlaceholderText("— Selecciona técnico —")
         self.cmb_tecnico.currentIndexChanged.connect(self._on_params_changed)
@@ -1489,6 +1557,7 @@ class BatchGeneratorWidget(QWidget):
         col_tipo_serv.setSpacing(6)
         col_tipo_serv.addWidget(_field_label("Tipo de Servicio", required=True))
         self.cmb_tipo_servicio = QComboBox()
+        self.cmb_tipo_servicio.setView(QListView())
         self.cmb_tipo_servicio.setMinimumWidth(340)
         self.cmb_tipo_servicio.setPlaceholderText("— Selecciona el tipo de servicio —")
         self.cmb_tipo_servicio.currentIndexChanged.connect(self._on_params_changed)
@@ -2302,12 +2371,20 @@ class BatchGeneratorWidget(QWidget):
 
     @pyqtSlot(list)
     def _on_clientes_loaded(self, clientes: list) -> None:
-        self._clientes_ids = [r[0] for r in clientes]
-        self._clientes     = [r[1] for r in clientes]
+        seen = set()
+        unique = []
+        for cid, nom in clientes:
+            clean = (nom or "").strip()
+            if clean and clean.lower() not in seen:
+                seen.add(clean.lower())
+                unique.append((cid, clean))
+
+        self._clientes_ids = [r[0] for r in unique]
+        self._clientes     = [r[1] for r in unique]
         self.cmb_cliente.blockSignals(True)
         self.cmb_cliente.clear()
         self.cmb_cliente.addItem("— Selecciona un cliente —", None)
-        for cid, nombre in clientes:
+        for cid, nombre in unique:
             self.cmb_cliente.addItem(nombre, cid)
         self.cmb_cliente.blockSignals(False)
 

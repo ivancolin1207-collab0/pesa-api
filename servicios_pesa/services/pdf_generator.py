@@ -8,10 +8,52 @@ Uso:
     path = pdf_generator.generate_os_pdf(os_data, repetibilidad, excentricidad, exactitud)
 """
 import logging
+import re
 import os
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+
+def formato_miles_espacio(valor) -> str:
+    """
+    Formatea un número con espacio como separador de miles para valores >= 1000.
+    Separa únicamente la parte entera y conserva decimales y sufijos/unidades intactos.
+    """
+    if valor is None or str(valor).strip() == "":
+        return ""
+    val_str = str(valor).strip()
+    m = re.match(r'^([-+]?[0-9,.]+)\s*(.*)$', val_str)
+    if not m:
+        return val_str
+    num_part, sufijo = m.group(1), m.group(2)
+    is_neg = num_part.startswith('-')
+
+    if '.' in num_part:
+        partes = num_part.split('.')
+        entera = partes[0].replace(',', '').replace(' ', '')
+        decimal = partes[1]
+        try:
+            ent_val = abs(int(entera))
+            entera_fmt = f"{ent_val:,}".replace(',', ' ')
+            if is_neg:
+                entera_fmt = f"-{entera_fmt}"
+            res = f"{entera_fmt}.{decimal}"
+        except ValueError:
+            res = num_part
+    else:
+        entera = num_part.replace(',', '').replace(' ', '')
+        try:
+            ent_val = abs(int(entera))
+            entera_fmt = f"{ent_val:,}".replace(',', ' ')
+            if is_neg and ent_val != 0:
+                entera_fmt = f"-{entera_fmt}"
+            res = entera_fmt
+        except ValueError:
+            res = num_part
+
+    return f"{res} {sufijo}".strip() if sufijo else res
+
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +335,10 @@ class PdfGenerator:
             """fields: [(label, key, width%), ...]  width en pt"""
             x = self.ML
             for label, key, w in fields:
-                valor = str(os_data.get(key, "") or "")[:int(w / 5)]
+                valor_raw = str(os_data.get(key, "") or "")
+                if key in ("alcance_max", "capacidad_max", "capacidad_maxima", "div_minima", "div_verificacion"):
+                    valor_raw = formato_miles_espacio(valor_raw)
+                valor = valor_raw[:int(w / 5)]
                 c.setFillColor(_GRAY_DARK)
                 c.setFont("Helvetica-Bold", 6.5)
                 c.drawString(x + 1, row_y + 5, label + ":")
@@ -727,16 +772,19 @@ class PdfGenerator:
 
     @staticmethod
     def _fmt(value) -> str:
-        """Formatea un valor numérico o retorna espacio vacío."""
+        """Formatea un valor numérico o retorna espacio vacío con separador de miles."""
         if value is None:
             return ""
         try:
-            f = float(value)
+            val_clean = str(value).strip().replace(' ', '')
+            f = float(val_clean)
             if f == 0:
-                return "0"
-            return f"{f:.4f}".rstrip("0").rstrip(".")
+                res = "0"
+            else:
+                res = f"{f:.4f}".rstrip("0").rstrip(".")
+            return formato_miles_espacio(res)
         except (TypeError, ValueError):
-            return str(value)
+            return formato_miles_espacio(value)
 
     def _wrap_text(self, c, text: str, x: float, y: float, max_w: float,
                    font_size: float, line_h: float) -> float:

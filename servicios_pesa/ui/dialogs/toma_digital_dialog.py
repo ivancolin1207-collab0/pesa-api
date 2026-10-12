@@ -1323,8 +1323,12 @@ class TomDigitalDialog(QDialog):
         _lbl_cca = QLabel("Número de Certificado CCA:")
         _lbl_cca.setStyleSheet("font-size: 12px; font-weight: 600; color: #6B7280; background: transparent;")
         _cca_col.addWidget(_lbl_cca)
+        import datetime
+        _anio = str(datetime.datetime.now().year)[-2:]
         self._inp_cca = QLineEdit()
-        self._inp_cca.setPlaceholderText("Ej: CCA-PESA-26-001")
+        self._inp_cca.setPlaceholderText(f"CCA.{_anio}.XXXX")
+        if not self._inp_cca.text():
+            self._inp_cca.setText(f"CCA.{_anio}.")
         self._inp_cca.setMinimumHeight(_TOUCH_BTN_H)
         self._inp_cca.setStyleSheet(f"""
             QLineEdit {{
@@ -1613,6 +1617,10 @@ class TomDigitalDialog(QDialog):
                 self._os_data.get("numero_cca") or
                 self._os_data.get("cca") or ""
             ).strip()
+            if not cca_val:
+                import datetime
+                _anio = str(datetime.datetime.now().year)[-2:]
+                cca_val = f"CCA.{_anio}."
             self._inp_cca.setText(cca_val)
 
     # ── Guardado ──────────────────────────────────────────────────────────────

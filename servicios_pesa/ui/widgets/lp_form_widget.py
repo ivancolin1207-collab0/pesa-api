@@ -269,9 +269,15 @@ class LPFormWidget(QWidget):
         try:
             conn = db_pool.get_connection()
             with conn.cursor() as cur:
-                # Clientes
                 cur.execute("SELECT id, razon_social FROM cat_clientes WHERE activo=TRUE ORDER BY razon_social")
-                self._clientes = [{"id": r[0], "razon_social": r[1]} for r in cur.fetchall()]
+                raw_c = cur.fetchall()
+                seen_c = set()
+                self._clientes = []
+                for r in raw_c:
+                    nom = (r[1] or "").strip()
+                    if nom and nom.lower() not in seen_c:
+                        seen_c.add(nom.lower())
+                        self._clientes.append({"id": r[0], "razon_social": nom})
                 
                 # Técnicos
                 cur.execute("SELECT id, nombre_completo FROM cat_tecnicos WHERE activo=TRUE ORDER BY nombre_completo")

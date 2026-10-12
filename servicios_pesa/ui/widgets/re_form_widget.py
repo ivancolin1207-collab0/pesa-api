@@ -467,6 +467,11 @@ class REFormWidget(QWidget):
         f(2, 1, "DIVISIÓN MÍNIMA",       "_txt_div_min", 130)
         f(2, 2, "DIV. VERIFICACIÓN",     "_txt_div_ver", 130)
         f(2, 3, "NÚMERO CCA",            "_txt_cca", 130)
+        import datetime
+        _anio = str(datetime.datetime.now().year)[-2:]
+        self._txt_cca.setPlaceholderText(f"CCA.{_anio}.XXXX")
+        if not self._txt_cca.text():
+            self._txt_cca.setText(f"CCA.{_anio}.")
 
         f(3, 0, "UBICACIÓN EXACTA",      "_txt_ubicacion", 200, 2)
         f(3, 2, "ID INTERNO",            "_txt_id_interno", 130)

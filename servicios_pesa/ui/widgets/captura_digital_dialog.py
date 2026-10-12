@@ -350,12 +350,20 @@ class CapturaDigitalDialog(QDialog):
 
         # Fila 3 (Dinámica)
         self._row3 = QHBoxLayout()
+        import datetime
+        _anio = str(datetime.datetime.now().year)[-2:]
         self._le_num_cca = QLineEdit()
+        self._le_num_cca.setPlaceholderText(f"CCA.{_anio}.XXXX")
+        if not self._le_num_cca.text():
+            self._le_num_cca.setText(f"CCA.{_anio}.")
         self._cmb_inicial = QComboBox()
         self._cmb_inicial.addItems(["", "J", "A", "I"])
         self._le_holo_ant = QLineEdit()
         self._le_holo_nuevo = QLineEdit()
         self._le_dve = QLineEdit()
+        self._le_dve.setPlaceholderText(f"DVE.{_anio}.XXXX")
+        if not self._le_dve.text():
+            self._le_dve.setText(f"DVE.{_anio}.")
 
         self._w_cca = QWidget()
         l_cca = QHBoxLayout(self._w_cca)
@@ -755,13 +763,23 @@ class CapturaDigitalDialog(QDialog):
             self._le_modelo.setText(djp.get("modelo") or modelo or "")
             self._le_serie.setText(djp.get("serie") or self._os_data.get("ns") or "")
             self._le_id_equipo.setText(djp.get("id_equipo") or "")
-            self._le_num_cca.setText(djp.get("numero_cca") or "")
+            _cca_v = djp.get("numero_cca") or self._os_data.get("numero_cca") or self._os_data.get("cca") or ""
+            if not _cca_v:
+                import datetime
+                _anio = str(datetime.datetime.now().year)[-2:]
+                _cca_v = f"CCA.{_anio}."
+            self._le_num_cca.setText(_cca_v)
             self._le_capacidad.setText(str(djp.get("alcance_max") or self._os_data.get("alcance_max") or ""))
             self._le_div_min.setText(str(djp.get("div_minima") or self._os_data.get("div_minima") or ""))
             self._le_ubicacion.setText(str(djp.get("ubicacion") or self._os_data.get("ubicacion") or ""))
             self._le_holo_ant.setText(djp.get("holograma_anterior") or "")
             self._le_holo_nuevo.setText(djp.get("holograma_nuevo") or "")
-            self._le_dve.setText(djp.get("dve") or "")
+            _dve_v = djp.get("dve") or djp.get("folio_dve") or djp.get("numero_dve") or self._os_data.get("folio_dve") or ""
+            if not _dve_v:
+                import datetime
+                _anio = str(datetime.datetime.now().year)[-2:]
+                _dve_v = f"DVE.{_anio}."
+            self._le_dve.setText(_dve_v)
 
             # Combos guardados en borrador
             if djp.get("funcionamiento"):

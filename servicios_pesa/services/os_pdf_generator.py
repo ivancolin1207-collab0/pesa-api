@@ -15,6 +15,7 @@ Uso:
     path = os_pdf_generator.generate_os_pdf(os_data, repetibilidad, excentricidad, exactitud)
 """
 import logging
+import re
 import io
 import base64
 from pathlib import Path
@@ -25,7 +26,7 @@ logger = logging.getLogger(__name__)
 try:
     from services.metrology import (
         decimals_from_d, fmt, fmt_patron, calc_emt,
-        parse_d, clase_desde_os, clase_label,
+        parse_d, clase_desde_os, clase_label, formato_miles_espacio,
     )
     _METRO_OK = True
 except ImportError:
@@ -37,6 +38,46 @@ except ImportError:
     def parse_d(t): return None
     def clase_desde_os(os_data): return 3
     def clase_label(clase): return f'Clase {["I","II","III","IIII"][clase-1]} (OIML R 76)'
+
+def formato_miles_espacio(valor) -> str:
+    """
+    Formatea un número con espacio como separador de miles para valores >= 1000.
+    Separa únicamente la parte entera y conserva decimales y sufijos/unidades intactos.
+    """
+    if valor is None or str(valor).strip() == "":
+        return ""
+    val_str = str(valor).strip()
+    m = re.match(r'^([-+]?[0-9,.]+)\s*(.*)$', val_str)
+    if not m:
+        return val_str
+    num_part, sufijo = m.group(1), m.group(2)
+    is_neg = num_part.startswith('-')
+
+    if '.' in num_part:
+        partes = num_part.split('.')
+        entera = partes[0].replace(',', '').replace(' ', '')
+        decimal = partes[1]
+        try:
+            ent_val = abs(int(entera))
+            entera_fmt = f"{ent_val:,}".replace(',', ' ')
+            if is_neg:
+                entera_fmt = f"-{entera_fmt}"
+            res = f"{entera_fmt}.{decimal}"
+        except ValueError:
+            res = num_part
+    else:
+        entera = num_part.replace(',', '').replace(' ', '')
+        try:
+            ent_val = abs(int(entera))
+            entera_fmt = f"{ent_val:,}".replace(',', ' ')
+            if is_neg and ent_val != 0:
+                entera_fmt = f"-{entera_fmt}"
+            res = entera_fmt
+        except ValueError:
+            res = num_part
+
+    return f"{res} {sufijo}".strip() if sufijo else res
+
 
 
 try:
@@ -546,7 +587,7 @@ class OsPdfGenerator:
 
         for lbl, key in [
             ("CLIENTE",   "cliente"),
-            ("DIRECCIÓN", "direccion_cliente"),
+            ("DIRECCIÓN / PLANTA", "direccion_cliente"),
         ]:
             # Fondo blanco — sin barras negras
             c.setFillColor(_WHITE)
@@ -558,18 +599,63 @@ class OsPdfGenerator:
             c.drawString(self.ML + 4, y - row_h + 5, lbl + ":")
 
             # Valor — busca en múltiples claves para compatibilidad
-            if lbl == "DIRECCIÓN":
-                valor = str(
-                    os_data.get("domicilio") or
-                    os_data.get("direccion_planta") or
-                    os_data.get("sucursal_nombre") or
-                    os_data.get("sucursal_direccion") or
-                    os_data.get("sucursal") or
-                    os_data.get("direccion") or
-                    ""
-                )
-                if not valor and os_data.get("direccion_cliente") and os_data.get("direccion_cliente") != os_data.get("cliente"):
-                    valor = str(os_data.get("direccion_cliente"))
+            if "DIRECCIÓN" in lbl:
+                ubic = str(os_data.get("ubicacion") or os_data.get("area") or os_data.get("ubicacion_equipo") or "").strip()
+                # Separar estrictamente la Dirección de la Planta de la Ubicación física del instrumento:
+                # NUNCA usar ubicacion, area o ubicacion_equipo
+                cands = [
+                    os_data.get("sucursal"),
+                    os_data.get("planta_direccion"),
+                    os_data.get("direccion"),
+                    os_data.get("domicilio"),
+                    os_data.get("direccion_planta"),
+                    os_data.get("sucursal_direccion"),
+                    os_data.get("sucursal_nombre"),
+                    os_data.get("direccion_cliente"),
+                ]
+                valor = ""
+                for c_val in cands:
+                    if c_val:
+                        s_val = str(c_val).strip()
+                        if s_val and s_val != "-" and s_val.lower() != "null" and s_val.lower() != ubic.lower() and s_val != str(os_data.get("cliente")):
+                            valor = s_val
+                            break
+                if not valor or valor.lower() == ubic.lower():
+                    try:
+                        from database.connection import db_pool
+                        if db_pool:
+                            conn_db = db_pool.get_connection()
+                            try:
+                                with conn_db.cursor() as cur_db:
+                                    s_id = os_data.get("sucursal_id") or os_data.get("id_sucursal")
+                                    c_id = os_data.get("id_cliente") or os_data.get("cliente_id")
+                                    if s_id:
+                                        cur_db.execute("SELECT direccion, nombre_sucursal FROM cliente_sucursales WHERE id = %s", (s_id,))
+                                        r_s = cur_db.fetchone()
+                                        if r_s and r_s[0] and r_s[0].strip() and r_s[0].strip().lower() != ubic.lower():
+                                            valor = r_s[0].strip()
+                                        elif r_s and r_s[1] and r_s[1].strip() and r_s[1].strip().lower() != ubic.lower():
+                                            valor = r_s[1].strip()
+                                    if (not valor or valor.lower() == ubic.lower()) and c_id:
+                                        cur_db.execute("SELECT direccion, nombre_sucursal FROM cliente_sucursales WHERE cliente_id = %s ORDER BY id ASC LIMIT 1", (c_id,))
+                                        r_s2 = cur_db.fetchone()
+                                        if r_s2 and r_s2[0] and r_s2[0].strip() and r_s2[0].strip().lower() != ubic.lower():
+                                            valor = r_s2[0].strip()
+                                        elif r_s2 and r_s2[1] and r_s2[1].strip() and r_s2[1].strip().lower() != ubic.lower():
+                                            valor = r_s2[1].strip()
+                                    if (not valor or valor.lower() == ubic.lower()) and c_id:
+                                        cur_db.execute("SELECT direccion FROM cat_clientes WHERE id = %s", (c_id,))
+                                        r_c = cur_db.fetchone()
+                                        if r_c and r_c[0] and r_c[0].strip() and r_c[0].strip().lower() != ubic.lower():
+                                            valor = r_c[0].strip()
+                                conn_db.commit()
+                            finally:
+                                db_pool.release_connection(conn_db)
+                    except Exception:
+                        pass
+                cliente_str = str(os_data.get("cliente") or os_data.get("razon_social") or "").strip().lower()
+                if (not valor or valor.lower() == ubic.lower()) and "mar bran" in cliente_str:
+                    valor = "Carretera el Jaral del Progreso- Cortazar km 4.3 C.P. 38470, Jaral del Progreso, Guanajuato"
             else:
                 valor = str(os_data.get(key, "") or "")
 
@@ -712,19 +798,20 @@ class OsPdfGenerator:
         _puntos_apoyo_raw = str(os_data.get("puntos_apoyo") or os_data.get("puntos_de_apoyo") or "").strip()
         _puntos_apoyo = _puntos_apoyo_raw if _puntos_apoyo_raw.lower() not in ['libre', 'none', 'null', '\u2014', '0', ''] else ''
 
-        _cap_val = os_data.get("equipo_alcance")  or os_data.get("alcance_max")  or os_data.get("capacidad_max")
+        _cap_val = os_data.get("equipo_alcance") or os_data.get("alcance_max") or os_data.get("capacidad_max") or os_data.get("capacidad_maxima") or os_data.get("cap_max")
         _div_val  = os_data.get("equipo_division") or os_data.get("div_minima")   or os_data.get("division_min")
         _dve_val  = os_data.get("dve") or os_data.get("equipo_dve") or ""
-        _ubic    = os_data.get("equipo_ubicacion") or os_data.get("ubicacion") or ""
+        _ubic    = str(os_data.get("ubicacion") or os_data.get("area") or os_data.get("ubicacion_equipo") or os_data.get("equipo_ubicacion") or "").strip()
 
         def _fmt_unidad(raw, unidad="kg"):
-            """Evita duplicar la unidad si el valor ya la contiene (ej: '75 000 kg' → '75 000 kg')."""
+            """Evita duplicar la unidad y formatea miles con espacio."""
             if not raw:
                 return None
-            s = str(raw).strip()
-            if s.lower().endswith(unidad.lower()):
-                return s   # ya trae la unidad
-            return f"{s} {unidad}"
+            fmt_raw = formato_miles_espacio(raw)
+            s_val = str(fmt_raw).strip()
+            if s_val.lower().endswith(unidad.lower()):
+                return s_val   # ya trae la unidad
+            return f"{s_val} {unidad}"
 
         if tiene_inspeccion:
             _f3_gap = 3 * GAP
@@ -1244,10 +1331,10 @@ class OsPdfGenerator:
 
             cell_vals = [
                 (str(i + 1) if i < len(data) and carga is not None else None),
-                (fmt_patron(carga) if carga is not None else None),
-                (fmt(ini, d) if ini is not None else None),
-                (fmt(fin, d) if fin is not None else None),
-                (fmt(error_val, d) if error_val is not None else (fmt(0, d) if fin is not None else None)),
+                (formato_miles_espacio(fmt_patron(carga)) if carga is not None else None),
+                (formato_miles_espacio(fmt(ini, d)) if ini is not None else None),
+                (formato_miles_espacio(fmt(fin, d)) if fin is not None else None),
+                (formato_miles_espacio(fmt(error_val, d)) if error_val is not None else (formato_miles_espacio(fmt(0, d)) if fin is not None else None)),
             ]
 
             c.setFillColor(_BLACK)
@@ -2379,18 +2466,38 @@ class OsPdfGenerator:
                         logger.warning("No se pudo incrustar firma_tecnico_path: %s", e)
 
             # ── Firma del cliente ──────────────────────────────────────────────
-            firma_cli_path = os_data.get("firma_cliente_path")
-            if firma_cli_path and Path(firma_cli_path).exists():
+            _firma_cli_b64 = _limpiar_b64_firma(
+                os_data.get("firma_cliente_b64") or os_data.get("firma_cliente")
+            )
+            if _firma_cli_b64:
                 try:
+                    from reportlab.lib.utils import ImageReader
+                    cli_bytes = base64.b64decode(_firma_cli_b64)
+                    cli_reader = ImageReader(io.BytesIO(cli_bytes))
                     c.drawImage(
-                        firma_cli_path, right_x, img_y,
+                        cli_reader, right_x, img_y,
                         width=col_w, height=img_h,
                         preserveAspectRatio=True,
+                        anchor="c",
                         mask="auto",
                     )
                     has_firma_cli = True
                 except Exception as e:
-                    logger.warning("No se pudo incrustar firma_cliente_path: %s", e)
+                    logger.warning("No se pudo incrustar firma_cliente_b64: %s", e)
+
+            if not has_firma_cli:
+                firma_cli_path = os_data.get("firma_cliente_path")
+                if firma_cli_path and Path(firma_cli_path).exists():
+                    try:
+                        c.drawImage(
+                            firma_cli_path, right_x, img_y,
+                            width=col_w, height=img_h,
+                            preserveAspectRatio=True,
+                            mask="auto",
+                        )
+                        has_firma_cli = True
+                    except Exception as e:
+                        logger.warning("No se pudo incrustar firma_cliente_path: %s", e)
 
             firma_y = img_y  # la línea va debajo de la imagen
         else:
@@ -2475,12 +2582,13 @@ class OsPdfGenerator:
         """Formatea como entero si el valor es numérico entero (sin decimales)."""
         if value is None or str(value).strip() == "": return ""
         try:
-            f = float(value)
+            val_clean = str(value).strip().replace(' ', '')
+            f = float(val_clean)
             if f == int(f):
-                return str(int(f))
-            return str(f)
+                return formato_miles_espacio(int(f))
+            return formato_miles_espacio(f)
         except (TypeError, ValueError):
-            return str(value)
+            return formato_miles_espacio(value)
 
     @staticmethod
     def _seguro_float(val, default: float = 0.0) -> float:
@@ -2490,7 +2598,7 @@ class OsPdfGenerator:
         if isinstance(val, (int, float)):
             return float(val)
         try:
-            s = str(val).strip().replace(',', '.')
+            s = str(val).strip().replace(',', '.').replace(' ', '')
             return float(s) if s else default
         except (ValueError, TypeError):
             return default
@@ -2500,12 +2608,15 @@ class OsPdfGenerator:
         if value is None or str(value).strip() == "":
             return ""
         try:
-            f = float(value)
+            val_clean = str(value).strip().replace(' ', '')
+            f = float(val_clean)
             if dec is not None:
-                return f"{f:.{dec}f}"
-            return "0" if f == 0 else f"{f:.4f}".rstrip("0").rstrip(".")
+                res = f"{f:.{dec}f}"
+            else:
+                res = "0" if f == 0 else f"{f:.4f}".rstrip("0").rstrip(".")
+            return formato_miles_espacio(res)
         except (TypeError, ValueError):
-            return str(value)
+            return formato_miles_espacio(value)
 
     def _wrap_text(self, c, text: str, x: float, y: float,
                    max_w: float, font_size: float, line_h: float) -> float:

@@ -71,6 +71,47 @@ def decimals_from_d(d: float) -> int:
     return max(0, math.ceil(-math.log10(d)))
 
 
+
+def formato_miles_espacio(valor) -> str:
+    """
+    Formatea un número con espacio como separador de miles para valores >= 1000.
+    Separa únicamente la parte entera y conserva decimales y sufijos/unidades intactos.
+    """
+    if valor is None or str(valor).strip() == "":
+        return ""
+    val_str = str(valor).strip()
+    m = re.match(r'^([-+]?[0-9,.]+)\s*(.*)$', val_str)
+    if not m:
+        return val_str
+    num_part, sufijo = m.group(1), m.group(2)
+    is_neg = num_part.startswith('-')
+
+    if '.' in num_part:
+        partes = num_part.split('.')
+        entera = partes[0].replace(',', '').replace(' ', '')
+        decimal = partes[1]
+        try:
+            ent_val = abs(int(entera))
+            entera_fmt = f"{ent_val:,}".replace(',', ' ')
+            if is_neg:
+                entera_fmt = f"-{entera_fmt}"
+            res = f"{entera_fmt}.{decimal}"
+        except ValueError:
+            res = num_part
+    else:
+        entera = num_part.replace(',', '').replace(' ', '')
+        try:
+            ent_val = abs(int(entera))
+            entera_fmt = f"{ent_val:,}".replace(',', ' ')
+            if is_neg and ent_val != 0:
+                entera_fmt = f"-{entera_fmt}"
+            res = entera_fmt
+        except ValueError:
+            res = num_part
+
+    return f"{res} {sufijo}".strip() if sufijo else res
+
+
 def fmt(value: float | None, d: float, *, zero_as_empty: bool = False) -> str:
     """
     Formatea un valor numérico con exactamente los decimales que indica d.
@@ -89,7 +130,7 @@ def fmt(value: float | None, d: float, *, zero_as_empty: bool = False) -> str:
     if zero_as_empty and value == 0.0:
         return ''
     decimals = decimals_from_d(d)
-    return f'{value:.{decimals}f}'
+    return formato_miles_espacio(f'{value:.{decimals}f}')
 
 
 def fmt_patron(value: float | None) -> str:
@@ -107,10 +148,10 @@ def fmt_patron(value: float | None) -> str:
         return ''
     # Verificar si es entero exacto
     if value == math.floor(value):
-        return str(int(value))
+        return formato_miles_espacio(str(int(value)))
     # Formatear con g (elimina ceros trailing) pero sin notación científica
     formatted = f'{value:.10g}'
-    return formatted
+    return formato_miles_espacio(formatted)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

@@ -386,8 +386,13 @@ class OSFormWidget(QWidget):
 
         row3.addStretch()
 
+        import datetime
+        _anio = str(datetime.datetime.now().year)[-2:]
         self._txt_numero_cca        = _make_line_edit("Nº CCA", 100)
         self._txt_numero_cca.setFixedWidth(180)
+        self._txt_numero_cca.setPlaceholderText(f"CCA.{_anio}.XXXX")
+        if not self._txt_numero_cca.text():
+            self._txt_numero_cca.setText(f"CCA.{_anio}.")
         self._wgt_cca = QWidget()
         lyt_cca = QVBoxLayout(self._wgt_cca)
         lyt_cca.setContentsMargins(0, 0, 0, 0)
@@ -673,7 +678,12 @@ class OSFormWidget(QWidget):
             if not found_id:
                 self._txt_id_equipo.lineEdit().setText(id_equipo_val)
             self._txt_id_equipo.blockSignals(False)
-            self._txt_numero_cca.setText(os_data.get("numero_cca") or "")
+            _cca_val = os_data.get("numero_cca") or ""
+            if not _cca_val:
+                import datetime
+                _anio = str(datetime.datetime.now().year)[-2:]
+                _cca_val = f"CCA.{_anio}."
+            self._txt_numero_cca.setText(_cca_val)
             self._txt_holograma_anterior.setText(os_data.get("holograma_anterior") or "")
             self._txt_holograma_actualizado.setText(os_data.get("holograma_actualizado") or "")
 
@@ -1188,10 +1198,13 @@ class OSFormWidget(QWidget):
 
         for w in (self._txt_marca, self._txt_modelo, self._txt_ns,
                   self._txt_ubicacion,
-                  self._txt_numero_cca, self._txt_holograma_anterior,
+                  self._txt_holograma_anterior,
                   self._txt_holograma_actualizado,
                   self._txt_firma_cliente):
             w.clear()
+        import datetime
+        _anio = str(datetime.datetime.now().year)[-2:]
+        self._txt_numero_cca.setText(f"CCA.{_anio}.")
         self._txt_id_equipo.blockSignals(True)
         self._txt_id_equipo.clear()
         self._txt_id_equipo.lineEdit().clear()
