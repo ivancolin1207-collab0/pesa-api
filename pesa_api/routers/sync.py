@@ -26,7 +26,7 @@ import logging
 import os
 import traceback
 from datetime import datetime, timezone
-from typing   import Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
@@ -111,8 +111,8 @@ class OSCompleta(BaseModel):
     num_secciones:         Optional[int]   = 0
     instrumento_capacidad: Optional[str]   = None
     datos_tecnicos_json:   Optional[str]   = '{}'
-    partidas:              Optional[Any]   = None
-    refacciones:           Optional[Any]   = None
+    partidas:              Optional[Union[List[dict], List[Any], str, Any]] = None
+    refacciones:           Optional[Union[List[dict], List[Any], str, Any]] = None
     tipo_documento:        Optional[str]   = None
     pdf_url:               Optional[str]   = None
     # Campos Offline-First v2
@@ -237,6 +237,16 @@ class FolioLockResponse(BaseModel):
     folio:      str
     tipo:       str
     reservado:  bool = True
+
+
+# Reconstrucción explícita de modelos para resolver TypeAdapter y forward references en Pydantic v2
+OSResumen.model_rebuild()
+OSCompleta.model_rebuild()
+PushDetalle.model_rebuild()
+PushPayload.model_rebuild()
+PushResponse.model_rebuild()
+FirmasPayload.model_rebuild()
+FolioLockResponse.model_rebuild()
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -1317,3 +1327,6 @@ async def folio_lock(
         folio, current_user["username"]
     )
     return FolioLockResponse(folio=folio, tipo=tipo)
+
+
+OSCompleta.model_rebuild()
