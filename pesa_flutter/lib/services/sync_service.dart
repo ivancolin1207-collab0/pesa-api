@@ -968,62 +968,31 @@ class SyncService extends ChangeNotifier {
     final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     if (folio.isEmpty) return null;
 
-    // 1. Ruta registrada en la BD (pdf_path o pdf_path_local)
-    final pathLocal = (os['pdf_path'] as String?)?.isNotEmpty == true
-        ? os['pdf_path'] as String?
-        : (os['pdf_path_local'] as String?);
-    if (pathLocal != null && pathLocal.isNotEmpty) {
-      final f = File(pathLocal);
-      if (await f.exists() && await f.length() > 500) {
-        return f;
+    // 1-3. Reunir TODAS las copias del folio y quedarse con la MÁS RECIENTE
+    //      (LastWriteTime). Evita adjuntar un borrador / versión previa en caché
+    //      de una remisión editada o re-firmada. SOLO LECTURA: no se borra nada.
+    final elegido = await _pdfMasReciente(folio, [
+      (os['pdf_path_local'] as String?)?.trim(),
+      (os['pdf_path'] as String?)?.trim(),
+    ]);
+    if (elegido != null) {
+      final registrado = (os['pdf_path_local'] as String? ?? '').trim();
+      if (registrado != elegido.path) {
+        // Limpiar referencia estática en caché que apuntaba a la ruta previa/temporal
+        try {
+          final sqldb = await LocalDbService.instance.database;
+          await sqldb.rawUpdate(
+            'UPDATE ordenes_servicio SET pdf_path_local = ? WHERE folio_os = ? OR folio = ?',
+            [elegido.path, folio, folio],
+          );
+          updateLocalOrder(folio, {'pdf_path_local': elegido.path});
+          debugPrint('[Sync] Referencia PDF de $folio actualizada → ${elegido.path} (antes: $registrado)');
+        } catch (e) {
+          debugPrint('[Sync] No se pudo actualizar referencia PDF de $folio: $e');
+        }
       }
+      return elegido;
     }
-
-    // 2. Carpeta Documents / Pesa_PDFs (Almacenamiento persistente)
-    try {
-      final appDocDir = await getApplicationDocumentsDirectory();
-      final pdfDir = Directory('${appDocDir.path}/Pesa_PDFs');
-      if (await pdfDir.exists()) {
-        final files = pdfDir.listSync().whereType<File>();
-        final match = files.firstWhere(
-          (f) => f.path.split(Platform.pathSeparator).last.startsWith(folio),
-          orElse: () => File(''),
-        );
-        if (match.path.isNotEmpty && await match.exists() && await match.length() > 500) {
-          return match;
-        }
-      }
-    } catch (_) {}
-
-    // 3. Carpeta Documents / pdfs / Pesa_PDFs / PESA_Tablet
-    try {
-      final appDocDir = await getApplicationDocumentsDirectory();
-      for (final p in [
-        '${appDocDir.path}/pdfs/OS-$folio.pdf',
-        '${appDocDir.path}/pdfs/$folio.pdf',
-        '${appDocDir.path}/Pesa_PDFs/$folio.pdf',
-        '${appDocDir.path}/Pesa_PDFs/OS-$folio.pdf',
-        '${appDocDir.path}/PESA_Tablet/PDF_OS/$folio.pdf',
-      ]) {
-        final f = File(p);
-        if (await f.exists() && await f.length() > 500) {
-          return f;
-        }
-      }
-    } catch (_) {}
-
-    // 3. Carpeta Temporal / PESA_Tablet / PDF_OS
-    try {
-      final tmpDir = await getTemporaryDirectory();
-      final cand2 = File('${tmpDir.path}/PESA_Tablet/PDF_OS/$folio.pdf');
-      if (await cand2.exists() && await cand2.length() > 500) {
-        return cand2;
-      }
-      final cand3 = File('${tmpDir.path}/$folio.pdf');
-      if (await cand3.exists() && await cand3.length() > 500) {
-        return cand3;
-      }
-    } catch (_) {}
 
     // 4. Reconstrucción desde pdf_b64_local almacenado en SQLite
     final b64 = os['pdf_b64_local'] as String?;
@@ -1042,6 +1011,154 @@ class SyncService extends ChangeNotifier {
     }
 
     return null;
+  }
+
+  /// Antes de un envío de LOTE: garantiza que el servidor tenga la versión FINAL
+  /// (más reciente) del PDF de cada folio. Si la copia local más reciente difiere
+  /// de la del servidor y es posterior a la última subida conocida, se re-sube.
+  /// Nunca borra ni modifica archivos locales.
+  Future<void> asegurarPdfsVigentesEnServidor(List<String> folios) async {
+    for (final folio in folios.toSet()) {
+      try {
+        final os = await LocalDbService.instance.getOsByFolio(folio);
+        if (os == null) continue;
+        final local = await _pdfMasReciente(folio, [
+          (os['pdf_path_local'] as String?)?.trim(),
+          (os['pdf_path'] as String?)?.trim(),
+        ]);
+        if (local == null) continue;
+        final localBytes = await local.readAsBytes();
+        final serverBytes = await ApiService.instance
+            .fetchPdfFresco(folio)
+            .timeout(const Duration(seconds: 15), onTimeout: () => null);
+        if (serverBytes != null && serverBytes.length == localBytes.length) {
+          bool iguales = true;
+          for (int i = 0; i < localBytes.length; i++) {
+            if (localBytes[i] != serverBytes[i]) { iguales = false; break; }
+          }
+          if (iguales) continue; // el servidor ya tiene la versión final
+        }
+        final tsServidor = DateTime.tryParse((os['fecha_subida_servidor'] ?? '').toString());
+        final mtimeLocal = local.lastModifiedSync();
+        if (serverBytes != null && tsServidor != null && !mtimeLocal.isAfter(tsServidor)) {
+          continue; // la versión del servidor es posterior (p.ej. regenerada en escritorio)
+        }
+        final ok = await ApiService.instance
+            .uploadPdf(folio, local, osId: os['local_id'] as int?)
+            .timeout(const Duration(seconds: 25), onTimeout: () => false);
+        debugPrint('[LOTE] $folio: versión final ${local.path} re-subida antes del envío → $ok');
+      } catch (e) {
+        debugPrint('[LOTE] No se pudo verificar PDF vigente de $folio: $e');
+      }
+    }
+  }
+
+  /// Devuelve la copia más reciente (LastWriteTime) del PDF de [folio] entre las
+  /// rutas registradas y las carpetas conocidas. Excluye borradores/temporales
+  /// por nombre; en empate prefiere '_firmado'. SOLO LECTURA.
+  Future<File?> _pdfMasReciente(String folio, List<String?> rutasRegistradas) async {
+    final candidatos = <String, File>{};
+    void addFile(File f) {
+      try {
+        if (f.existsSync() && f.lengthSync() > 500) candidatos[f.absolute.path] = f;
+      } catch (_) {}
+    }
+
+    for (final r in rutasRegistradas) {
+      if (r != null && r.isNotEmpty) addFile(File(r));
+    }
+
+    final folioL = folio.toLowerCase();
+    bool coincide(String nombre) {
+      final n = nombre.toLowerCase();
+      if (!n.endsWith('.pdf')) return false;
+      for (final pref in [folioL, 'os-$folioL']) {
+        if (n.startsWith(pref)) {
+          final resto = n.substring(pref.length);
+          // Evita que 'RMA-26-64' coincida con 'RMA-26-640'
+          if (resto.isEmpty || '._- ('.contains(resto[0])) return true;
+        }
+      }
+      return false;
+    }
+
+    final dirs = <Directory>[];
+    try {
+      final doc = await getApplicationDocumentsDirectory();
+      dirs.addAll([
+        Directory('${doc.path}/pdfs'),
+        Directory('${doc.path}/Pesa_PDFs'),
+        Directory('${doc.path}/PESA_Tablet/PDF_OS'),
+      ]);
+    } catch (_) {}
+    try {
+      final tmp = await getTemporaryDirectory();
+      dirs.addAll([Directory('${tmp.path}/PESA_Tablet/PDF_OS'), tmp]);
+    } catch (_) {}
+
+    for (final d in dirs) {
+      try {
+        if (!d.existsSync()) continue;
+        for (final f in d.listSync().whereType<File>()) {
+          if (coincide(f.uri.pathSegments.isNotEmpty ? f.uri.pathSegments.last : f.path)) addFile(f);
+        }
+      } catch (_) {}
+    }
+
+    const borrador = ['borrador', 'draft', 'preview', 'tmp_', '_tmp', 'temp_'];
+    final lista = candidatos.values.where((f) {
+      final n = f.uri.pathSegments.last.toLowerCase();
+      return !borrador.any(n.contains);
+    }).toList();
+    if (lista.isEmpty) return null;
+
+    lista.sort((a, b) {
+      final c = b.lastModifiedSync().compareTo(a.lastModifiedSync());
+      if (c != 0) return c;
+      final fa = a.path.toLowerCase().contains('_firmado') ? 1 : 0;
+      final fb = b.path.toLowerCase().contains('_firmado') ? 1 : 0;
+      return fb - fa;
+    });
+    if (lista.length > 1) {
+      debugPrint('[Sync] $folio: ${lista.length} copias PDF → se usa la más reciente ${lista.first.path}');
+    }
+    return lista.first;
+  }
+
+  /// Clave de lote igual a la del tablero (_groupByLote): id_lote o cliente+sucursal+fecha.
+  static String _claveLote(Map<String, dynamic> os) {
+    final lote = (os['id_lote'] ?? os['lote'])?.toString().trim() ?? '';
+    if (lote.isNotEmpty) return lote;
+    final cliente  = (os['cliente'] ?? '').toString().trim();
+    final sucursal = (os['sucursal'] ?? '').toString().trim();
+    final fecha = (os['fecha_servicio'] ?? os['fecha_os'] ?? os['fecha'] ?? '')
+        .toString().split('T').first.trim();
+    if (cliente.isNotEmpty && fecha.isNotEmpty) return 'grp_${cliente}_${sucursal}_$fecha';
+    return 'solo_${os['folio_os'] ?? os['folio'] ?? os['local_id']}';
+  }
+
+  /// Folios que forman parte de un lote (id_lote explícito o ≥2 órdenes agrupadas).
+  Future<Set<String>> _foliosEnLote() async {
+    final out = <String>{};
+    try {
+      final sqldb = await LocalDbService.instance.database;
+      final rows = await sqldb.query('ordenes_servicio');
+      final buckets = <String, List<String>>{};
+      for (final r in rows) {
+        final f = ((r['folio_os'] ?? r['folio'])?.toString() ?? '').trim();
+        if (f.isEmpty) continue;
+        final key = _claveLote(Map<String, dynamic>.from(r));
+        final explicito = ((r['id_lote'] ?? r['lote'])?.toString().trim() ?? '').isNotEmpty;
+        if (explicito) out.add(f);
+        buckets.putIfAbsent(key, () => []).add(f);
+      }
+      for (final e in buckets.entries) {
+        if (!e.key.startsWith('solo_') && e.value.toSet().length > 1) out.addAll(e.value);
+      }
+    } catch (e) {
+      debugPrint('[Sync PUSH Email] No se pudo calcular pertenencia a lotes: $e');
+    }
+    return out;
   }
 
   /// Sube los PDFs binarios pendientes de órdenes completadas/cerradas a Render.
@@ -1216,10 +1333,17 @@ class SyncService extends ChangeNotifier {
       } catch (e) {
         debugPrint('[Sync PUSH Email] getOsParaEnviarEmail error: $e');
       }
+      // Órdenes de un lote: NUNCA envío automático individual. El lote viaja
+      // únicamente con la acción "Enviar/Reenviar Lote" en un solo correo.
+      final foliosLote = pendientesEmail.isEmpty ? <String>{} : await _foliosEnLote();
       for (final os in pendientesEmail) {
         final folio = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
         final correo = (os['correo_cliente'] as String? ?? '').trim();
         if (folio.isEmpty || correo.isEmpty || manejados.contains(folio)) continue;
+        if (foliosLote.contains(folio)) {
+          debugPrint('[Sync PUSH Email] $folio pertenece a un lote → se omite envío automático individual');
+          continue;
+        }
 
         // 2. Marcar INMEDIATAMENTE como 'enviando' para que ningún otro hilo lo tome
         await db.updateEmailStatus(folio, enviado: false, status: 'enviando', correo: correo);

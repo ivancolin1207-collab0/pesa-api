@@ -43,29 +43,111 @@ def _es_finalizada(r) -> bool:
     return False
 
 
-def _cargar_pdf_bytes(r, folio: str) -> Optional[bytes]:
-    """Obtiene los bytes del PDF (pdf_b64 → pdf_path → uploads/{folio}.pdf). Solo lectura."""
-    content_pdf = None
-    if r["pdf_b64"]:
+_PDF_BORRADOR_TOKENS = ("borrador", "draft", "preview", "tmp", "temp")
+
+
+def _candidatos_pdf_disco(r, folio: str) -> List[str]:
+    """
+    Rutas de PDF en disco asociadas al folio (pdf_path registrado + uploads/{folio}*.pdf).
+    Excluye borradores/temporales. SOLO LECTURA: nunca borra ni sobreescribe archivos.
+    """
+    rutas: List[str] = []
+    try:
+        p = r["pdf_path"]
+    except Exception:
+        p = None
+    if p and os.path.isfile(p):
+        rutas.append(os.path.abspath(p))
+
+    upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+    folio_l = (folio or "").strip().lower()
+    if folio_l and os.path.isdir(upload_dir):
         try:
-            content_pdf = base64.b64decode(r["pdf_b64"].strip())
+            for nombre in os.listdir(upload_dir):
+                n_l = nombre.lower()
+                if not n_l.endswith(".pdf") or not n_l.startswith(folio_l):
+                    continue
+                resto = n_l[len(folio_l):]
+                # Evitar que 'RMA-26-64' coincida con 'RMA-26-640'
+                if resto and resto[0] not in "._- (":
+                    continue
+                full = os.path.abspath(os.path.join(upload_dir, nombre))
+                if full not in rutas:
+                    rutas.append(full)
         except Exception:
-            content_pdf = None
-    if not content_pdf and r["pdf_path"] and os.path.exists(r["pdf_path"]):
+            pass
+
+    def _es_borrador(path: str) -> bool:
+        base = os.path.basename(path).lower()
+        return any(t in base for t in _PDF_BORRADOR_TOKENS)
+
+    return [x for x in rutas if not _es_borrador(x) and os.path.getsize(x) > 500]
+
+
+def _cargar_pdf_bytes(r, folio: str) -> Optional[bytes]:
+    """
+    Obtiene los bytes del PDF VIGENTE de la orden. Solo lectura.
+      1. Archivo en disco con LastWriteTime más reciente (desempate: '_firmado').
+      2. pdf_b64 persistido en PostgreSQL (disco efímero vacío tras redeploy).
+    Evita adjuntar una versión previa en caché de una remisión editada/firmada.
+    """
+    content_pdf = None
+    candidatos = _candidatos_pdf_disco(r, folio)
+    if candidatos:
+        candidatos.sort(
+            key=lambda p: (os.path.getmtime(p), "_firmado" in os.path.basename(p).lower()),
+            reverse=True,
+        )
+        elegido = candidatos[0]
         try:
-            with open(r["pdf_path"], "rb") as fp:
+            with open(elegido, "rb") as fp:
                 content_pdf = fp.read()
+            logger.info("[EMAIL] PDF vigente de %s: %s (de %d candidato(s))", folio, os.path.basename(elegido), len(candidatos))
         except Exception:
             content_pdf = None
     if not content_pdf:
-        upload_cand = os.path.join(os.environ.get("UPLOAD_DIR", "uploads"), f"{folio}.pdf")
-        if os.path.exists(upload_cand):
+        try:
+            b64 = r["pdf_b64"]
+        except Exception:
+            b64 = None
+        if b64:
             try:
-                with open(upload_cand, "rb") as fp:
-                    content_pdf = fp.read()
+                content_pdf = base64.b64decode(b64.strip())
             except Exception:
                 content_pdf = None
     return content_pdf or None
+
+
+async def _pertenece_a_lote(conn, row) -> bool:
+    """
+    True si la orden forma parte de un lote: id_lote explícito, o hermanas del mismo
+    cliente y misma fecha (mismo criterio de agrupación 'grp_' que usa la tablet).
+    """
+    try:
+        if row["id_lote"] and str(row["id_lote"]).strip():
+            return True
+    except Exception:
+        pass
+    try:
+        n = await conn.fetchval(
+            """
+            SELECT COUNT(*)
+            FROM ordenes_servicio o2
+            JOIN ordenes_servicio o1 ON o1.id = $1
+            WHERE o2.id <> o1.id
+              AND COALESCE(o1.fecha::text, '') <> ''
+              AND LEFT(COALESCE(o2.fecha::text, ''), 10) = LEFT(o1.fecha::text, 10)
+              AND (
+                    (o1.id_cliente IS NOT NULL AND o2.id_cliente = o1.id_cliente)
+                 OR (o1.id_cliente IS NULL AND COALESCE(o1.cliente, '') <> '' AND o2.cliente = o1.cliente)
+              )
+            """,
+            row["id"],
+        )
+        return bool(n and int(n) > 0)
+    except Exception as e_l:
+        logger.debug("[EMAIL] No se pudo evaluar pertenencia a lote: %s", e_l)
+        return False
 
 
 def _unir_folios(folios: List[str]) -> str:
@@ -200,10 +282,14 @@ def _enviar_smtp_sync(destinatario: str, cc: str, asunto: str, cuerpo_html: str,
             pass
 
 
-async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_override: Optional[str] = None, forzar: bool = False, folios_lista: Optional[List[str]] = None) -> Dict[str, Any]:
+async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_override: Optional[str] = None, forzar: bool = False, folios_lista: Optional[List[str]] = None, auto: bool = False) -> Dict[str, Any]:
     """
     Envía por correo el PDF de una orden (o lote si pertenece a uno).
     Se ejecuta de forma asíncrona tolerante a fallos. Soporta db=None (obtiene del pool).
+
+    auto=True → disparo automático (subida de PDF / sync). Si la orden pertenece a un
+    lote NO se envía nada: el lote se despacha ÚNICAMENTE con la acción manual
+    "Enviar Lote" / "Reenviar Lote" en un solo correo consolidado.
     """
     conn = db
     release_needed = False
@@ -244,6 +330,20 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
         actual_id = row["id"]
         folio = row["folio_os"]
         id_lote = row["id_lote"]
+
+        # ── Bloqueo de envío automático individual para órdenes de un lote ──
+        if auto and not folios_lista and await _pertenece_a_lote(conn, row):
+            logger.info(
+                "[EMAIL LOTE] %s pertenece a un lote (id_lote=%s): envío automático individual bloqueado. "
+                "Se despachará con la acción 'Enviar Lote'.",
+                folio, id_lote,
+            )
+            return {
+                "ok": False,
+                "status": "lote_manual",
+                "motivo": "La orden pertenece a un lote; se envía únicamente con la acción del lote.",
+                "folio": folio,
+            }
 
         # Deduplicar lista de folios recibida preservando orden
         if folios_lista:
@@ -510,8 +610,9 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 n = len(adjuntos)
                 total_ordenes = len(folios_unicos)
                 txt_ordenes = "orden" if n == 1 else "órdenes"
+                txt_docs = "documento" if n == 1 else "documentos"
                 folios_str = _unir_folios(folios_lote)
-                asunto = f"Reporte de Servicio - Lote {folios_str} ({n} {txt_ordenes}) - {empresa_lote} | Básculas PESA"
+                asunto = f"Reporte de Servicio - Lote {folios_str} ({n} {txt_docs}) - {empresa_lote} | Básculas PESA"
 
                 cuerpo_texto = f"""Estimado cliente ({empresa_lote}):
 
@@ -588,27 +689,8 @@ recepcion@basculaspesa.com.mx
             logger.info("[EMAIL] Orden %s no tiene correo_cliente definido. Envío omitido.", folio)
             return {"ok": False, "motivo": "Sin correo de cliente especificado"}
 
-        # Extraer PDF
-        content_pdf = None
-        if row["pdf_b64"]:
-            try:
-                content_pdf = base64.b64decode(row["pdf_b64"].strip())
-            except Exception:
-                pass
-        if not content_pdf and row["pdf_path"] and os.path.exists(row["pdf_path"]):
-            try:
-                with open(row["pdf_path"], "rb") as fp:
-                    content_pdf = fp.read()
-            except Exception:
-                pass
-        if not content_pdf:
-            upload_cand = os.path.join(os.environ.get("UPLOAD_DIR", "uploads"), f"{folio}.pdf")
-            if os.path.exists(upload_cand):
-                try:
-                    with open(upload_cand, "rb") as fp:
-                        content_pdf = fp.read()
-                except Exception:
-                    pass
+        # Extraer PDF VIGENTE (archivo más reciente en disco → pdf_b64)
+        content_pdf = _cargar_pdf_bytes(row, folio)
 
         if not content_pdf:
             return {"ok": False, "motivo": f"No se encontró el PDF para la orden {folio}"}

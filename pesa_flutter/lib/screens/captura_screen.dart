@@ -946,6 +946,8 @@ class _CapturaScreenState extends State<CapturaScreen>
               .toList(),
           onChanged: (v) => setState(() {
             _tipoInstrumento = v;
+            final wasTanque = (_os['motivo_no_aplica']?.toString().toLowerCase().contains('tanque') ?? false) ||
+                _asBool(_os['es_enlace_sustitucion']);
             _os['tipo_instrumento'] = v;
             final isTanque = (v ?? '').toLowerCase().contains('tanque');
             if (isTanque) {
@@ -956,6 +958,17 @@ class _CapturaScreenState extends State<CapturaScreen>
               _os['usa_sustitucion'] = true;
               _os['es_sustitucion'] = true;
               _os['es_enlace_sustitucion'] = true;
+            } else if (wasTanque) {
+              // Salió de Tanque: limpiar banderas heredadas para que el PDF
+              // dibuje el formato estándar de plataforma.
+              _usaSustitucion = false;
+              _aplExcOverride = null;
+              _os.remove('aplica_excentricidad');
+              _os['motivo_no_aplica'] = '';
+              _os['usa_sustitucion'] = false;
+              _os['aplica_sustitucion'] = false;
+              _os['es_sustitucion'] = false;
+              _os['es_enlace_sustitucion'] = false;
             }
             _puntosApoyo = getPuntosApoyoPorDefecto(v, fallback: _puntosApoyo);
             _os['puntos_apoyo'] = _puntosApoyo;

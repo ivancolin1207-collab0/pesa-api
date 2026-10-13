@@ -115,6 +115,27 @@ class LocalDbService {
     )
   ''';
 
+  /// Tabla de borradores offline. Se crea en onCreate, onOpen y en cada
+  /// _ensureInit() para tablets con BD previa (sin desinstalar ni perder datos).
+  static const _createTableBorradoresSql = '''
+    CREATE TABLE IF NOT EXISTS borradores_captura (
+      folio_os TEXT PRIMARY KEY,
+      draft_json TEXT,
+      updated_at TEXT
+    )
+  ''';
+
+  bool _borradoresVerificada = false;
+
+  Future<void> _asegurarTablaBorradores(Database db) async {
+    try {
+      await db.execute(_createTableBorradoresSql);
+      _borradoresVerificada = true;
+    } catch (e) {
+      debugPrint('[LocalDB] Error creando borradores_captura: $e');
+    }
+  }
+
   // ── Inicializacion ────────────────────────────────────────────────────────
 
   Future<void> init() async {
@@ -206,6 +227,7 @@ class LocalDbService {
         await db.execute('''
           CREATE INDEX IF NOT EXISTS idx_marcas_modelos_marca ON catalogo_marcas_modelos(marca)
         ''');
+        await db.execute(_createTableBorradoresSql);
         final devId = _generateUuid();
         await db.insert('meta', {'key': 'device_id', 'value': devId});
       },
@@ -223,6 +245,8 @@ class LocalDbService {
         }
       },
       onOpen: (db) async {
+        // Salvaguarda: tablets con BD existente crean la tabla de borradores al abrir
+        await _asegurarTablaBorradores(db);
         // [FIX-DEFENSIVO] Verificar columnas requeridas y agregarlas si faltan
         try {
           final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
@@ -457,17 +481,25 @@ class LocalDbService {
   /// Lazy init: abre la BD si aun no está lista.
   /// Seguro ante llamadas concurrentes (espera a que termine la primera).
   Future<Database> _ensureInit() async {
-    if (_db != null) return _db!;
+    if (_db != null) {
+      if (!_borradoresVerificada) await _asegurarTablaBorradores(_db!);
+      return _db!;
+    }
     while (_initializing) {
       await Future<void>.delayed(const Duration(milliseconds: 50));
     }
-    if (_db != null) return _db!;
+    if (_db != null) {
+      if (!_borradoresVerificada) await _asegurarTablaBorradores(_db!);
+      return _db!;
+    }
     _initializing = true;
     try {
       await init();
     } finally {
       _initializing = false;
     }
+    // Salvaguarda obligatoria antes de devolver la instancia
+    await _asegurarTablaBorradores(_db!);
     return _db!;
   }
 

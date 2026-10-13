@@ -1,4 +1,7 @@
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+
+hidden_reportlab = collect_submodules('reportlab')
+datas_reportlab  = collect_data_files('reportlab')
 
 hidden_ui        = collect_submodules('ui')
 hidden_services  = collect_submodules('services')
@@ -7,7 +10,7 @@ hidden_auth      = collect_submodules('auth')
 hidden_models    = collect_submodules('models')
 
 all_hidden = sorted(list(set(
-    hidden_ui + hidden_services + hidden_database + hidden_auth + hidden_models + [
+    hidden_ui + hidden_services + hidden_database + hidden_auth + hidden_models + hidden_reportlab + [
         'ui',
         'ui.main_window',
         'ui.widgets',
@@ -69,7 +72,7 @@ a = Analysis(
         ('database', 'database'),
         ('auth', 'auth'),
         ('models', 'models'),
-    ],
+    ] + datas_reportlab,
     hiddenimports=all_hidden,
     hookspath=[],
     hooksconfig={},

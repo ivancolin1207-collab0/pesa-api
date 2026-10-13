@@ -80,6 +80,10 @@ def formato_miles_espacio(valor) -> str:
 
 
 
+# [FIX colors] import top-level garantizado
+from reportlab.lib import colors
+from reportlab.lib.colors import HexColor
+
 try:
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
@@ -224,19 +228,39 @@ def _inferir_tipo_no_aplica(os_data: dict) -> str:
         return "tolva"
     return "tolva"  # fallback con dibujo disponible
 
+def _flag_sustitucion_estricto(raw) -> bool:
+    """True SOLO si el valor es explícitamente verdadero (True/1/'1'/'true'/'SI'/'SÍ')."""
+    if raw is True:
+        return True
+    if raw is None or raw is False:
+        return False
+    if isinstance(raw, (int, float)):
+        return raw == 1
+    return str(raw).strip().lower() in ("1", "true", "si", "sí")
+
+
+def _es_tanque(os_data: dict) -> bool:
+    """Tanque determinado ÚNICAMENTE por tipo_instrumento / tipo_equipo (no por motivo heredado)."""
+    tipo = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or "").lower()
+    return "tanque" in tipo
+
+
 def _es_modo_sustitucion(os_data: dict) -> bool:
-    """Detecta si la orden tiene activo el modo sustitución (Tanque o flag de sustitución)."""
+    """
+    Formato de sustitución (Agua + Pesas, Excentricidad No Apta) SOLO si:
+      - tipo_instrumento es Tanque, o
+      - aplica_sustitucion es explícitamente verdadero.
+    Banderas heredadas (es_sustitucion / es_enlace_sustitucion / motivo 'Tanque')
+    ya NO fuerzan este formato en básculas de plataforma.
+    """
     if not os_data:
         return False
-    if (os_data.get("es_enlace_sustitucion") or
-        os_data.get("usa_sustitucion") or
-        os_data.get("es_sustitucion") or
-        os_data.get("aplica_sustitucion")):
+    if _es_tanque(os_data):
         return True
-    tipo = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or os_data.get("motivo_no_aplica") or "").lower()
-    if "tanque" in tipo or "tolva" in tipo or "silo" in tipo:
-        return True
-    return False
+    raw = os_data.get("aplica_sustitucion")
+    if raw is None:
+        raw = os_data.get("usa_sustitucion")
+    return _flag_sustitucion_estricto(raw)
 
 def _es_servicio_calibracion(os_data: dict) -> bool:
     """
@@ -979,9 +1003,12 @@ class OsPdfGenerator:
         tipo_no = _motivo_directo if _motivo_directo else _inferir_tipo_no_aplica(os_data)
 
         tipo_inst = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or "").lower()
-        if "tanque" in tipo_inst or "tanque" in tipo_no or _es_modo_sustitucion(os_data):
+        # Un motivo 'Tanque' heredado no aplica si el instrumento ya no es Tanque
+        if "tanque" in tipo_no.lower() and "tanque" not in tipo_inst:
+            tipo_no = _inferir_tipo_no_aplica({**os_data, "tipo_no_aplica_exc": ""})
+        if "tanque" in tipo_inst or _es_modo_sustitucion(os_data):
             aplica_exc = False
-            if "tanque" in tipo_inst or "tanque" in tipo_no:
+            if "tanque" in tipo_inst:
                 tipo_no = "tanque"
 
         if aplica_exc:

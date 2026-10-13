@@ -634,7 +634,7 @@ async def upload_pdf_tablet_os(
     try:
         import asyncio
         from pesa_api.core.email_service import enviar_email_orden
-        asyncio.create_task(enviar_email_orden(None, actual_folio, correo_override=correo_cliente))
+        asyncio.create_task(enviar_email_orden(None, actual_folio, correo_override=correo_cliente, auto=True))
         logger.info("[UPLOAD-PDF OS] Envío automático de correo programado para %s", actual_folio)
     except Exception as e_mail:
         logger.warning("[UPLOAD-PDF OS] Error programando envío de correo: %s", e_mail)

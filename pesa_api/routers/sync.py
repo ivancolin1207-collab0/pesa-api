@@ -1053,7 +1053,7 @@ async def sync_push(
                 try:
                     import asyncio
                     from pesa_api.core.email_service import enviar_email_orden
-                    asyncio.create_task(enviar_email_orden(None, payload.folio_os, correo_override=payload.correo_cliente))
+                    asyncio.create_task(enviar_email_orden(None, payload.folio_os, correo_override=payload.correo_cliente, auto=True))
                     logger.info("[SYNC PUSH] Envío de correo programado para %s", payload.folio_os)
                 except Exception as e_em:
                     logger.warning("[SYNC PUSH] Error programando correo: %s", e_em)

@@ -57,6 +57,10 @@ def formato_miles_espacio(valor) -> str:
 
 logger = logging.getLogger(__name__)
 
+# [FIX colors] import top-level garantizado
+from reportlab.lib import colors
+from reportlab.lib.colors import HexColor
+
 try:
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.units import cm, mm

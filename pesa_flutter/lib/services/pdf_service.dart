@@ -507,13 +507,19 @@ class PdfService {
     required int divMin,
     required String geo,
   }) {
-    final bool esTanque = _s(osData, 'tipo_instrumento', '').toLowerCase().contains('tanque') ||
-        motivoNo.toLowerCase().contains('tanque');
-    final bool esSustitucion = esTanque ||
-        _parseBool(osData['usa_sustitucion']) ||
-        _parseBool(osData['es_sustitucion']) ||
-        _parseBool(osData['es_enlace_sustitucion']) ||
-        _parseBool(osData['aplica_sustitucion']);
+    // Evaluación ESTRICTA: el tipo se toma SOLO de tipo_instrumento (no de un
+    // motivo_no_aplica='Tanque' heredado) y la bandera SOLO de aplica_sustitucion
+    // (fallback usa_sustitucion si no existe). es_sustitucion / es_enlace_sustitucion
+    // pueden quedar 'pegadas' tras cambiar el tipo en captura y ya no se consideran.
+    final bool esTanque = (osData['tipo_instrumento']?.toString().toLowerCase().contains('tanque') ?? false);
+    final rawSust = osData.containsKey('aplica_sustitucion') && osData['aplica_sustitucion'] != null
+        ? osData['aplica_sustitucion']
+        : osData['usa_sustitucion'];
+    final String sSust = rawSust?.toString().trim().toUpperCase() ?? '';
+    final bool aplicaSustitucion = rawSust == true || rawSust == 1 ||
+        sSust == '1' || sSust == 'TRUE' || sSust == 'SI' || sSust == 'SÍ';
+    // Plataforma (no Tanque) sin sustitución explícita ⇒ tabla tradicional.
+    final bool esSustitucion = esTanque || aplicaSustitucion;
 
     if (esSustitucion) {
       final sustitutosRaw = osData['sustitutos'] ?? osData['elementos_sustitucion'];
@@ -583,7 +589,7 @@ class PdfService {
             children: [
               _buildRepetibilidadTable(repRows, osData, divMin),
               pw.SizedBox(height: 5),
-              aplExc
+              (aplExc || (!esTanque && motivoNo.toLowerCase().contains('tanque')))
                   ? _buildExcentricidadTable(excRows, osData, divMin)
                   : _buildNoAplicaBox(motivoNo, leyenda),
             ],

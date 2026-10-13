@@ -738,27 +738,16 @@ class _OsListScreenState extends State<OsListScreen> {
       final bytes = await ApiService.instance.fetchPdfFresco(folio);
       if (bytes == null) return null;
 
-      // 1. Borrar explícitamente TODAS las copias viejas estancadas
-      await LocalDbService.instance.invalidarPdfLocal(
-        folio, pathExtra: os['pdf_path_local']?.toString());
-
-      // 2. Guardar la versión fresca
+      // PRESERVACIÓN: NO borrar ni sobreescribir copias locales firmadas.
+      // La versión del servidor se guarda en una caché de solo-visualización
+      // separada (no registrada en SQLite ni usada para subir/enviar).
       final dir = await getApplicationDocumentsDirectory();
-      final pdfDir = Directory('${dir.path}/pdfs');
-      if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
+      final cacheDir = Directory('${dir.path}/pdfs_servidor_cache');
+      if (!await cacheDir.exists()) await cacheDir.create(recursive: true);
       final safe = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
-      final file = File('${pdfDir.path}/$safe.pdf');
+      final file = File('${cacheDir.path}/$safe.pdf');
       await file.writeAsBytes(bytes, flush: true, mode: FileMode.write);
-      try {
-        final legacy = Directory('${dir.path}/Pesa_PDFs');
-        if (!await legacy.exists()) await legacy.create(recursive: true);
-        await File('${legacy.path}/$safe.pdf').writeAsBytes(bytes, flush: true, mode: FileMode.write);
-      } catch (_) {}
-
-      // 3. Actualizar SQLite (ruta + Base64) para que el fallback offline también sea el nuevo
-      await LocalDbService.instance.reemplazarPdfLocal(folio, file.path, base64Encode(bytes));
-      try { os['pdf_path_local'] = file.path; } catch (_) {}
-      debugPrint('[Dashboard] PDF fresco de $folio → ${file.path} (${bytes.length} B)');
+      debugPrint('[Dashboard] PDF vigente del servidor de $folio → ${file.path} (${bytes.length} B, solo vista)');
       return file.path;
     } catch (e) {
       debugPrint('[Dashboard] No se pudo refrescar PDF de $folio: $e');
@@ -1724,6 +1713,11 @@ class _OsListScreenState extends State<OsListScreen> {
                               if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
                               await encolarLocal('sin conectividad', destino);
                               return;
+                            }
+
+                            if (esLote) {
+                              // Un SOLO correo con la versión FINAL de cada documento del lote
+                              await context.read<SyncService>().asegurarPdfsVigentesEnServidor(foliosEnvio);
                             }
 
                             final Map<String, dynamic> res = esLote
