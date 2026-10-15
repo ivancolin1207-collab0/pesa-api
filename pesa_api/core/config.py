@@ -102,10 +102,12 @@ class Settings:
         return _DB_DSN
 
     # ── JWT ───────────────────────────────────────────────────────────────────
-    JWT_SECRET:          str = os.getenv("PESA_JWT_SECRET",           "CAMBIAR-EN-PRODUCCION-secret-pesa-2026")
-    JWT_ALGORITHM:       str = "HS256"
-    JWT_EXPIRE_MINUTES:  int = int(os.getenv("PESA_JWT_EXPIRE_MINUTES",  "480"))
-    REFRESH_EXPIRE_DAYS: int = int(os.getenv("PESA_REFRESH_EXPIRE_DAYS", "7"))
+    SECRET_KEY:                  str = (os.getenv("PESA_JWT_SECRET") or "CAMBIAR-EN-PRODUCCION-secret-pesa-2026").strip()
+    JWT_SECRET:                  str = SECRET_KEY
+    JWT_ALGORITHM:               str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 365  # 365 días para tablets de campo
+    JWT_EXPIRE_MINUTES:          int = max(int(os.getenv("PESA_JWT_EXPIRE_MINUTES", str(60 * 24 * 365))), 60 * 24 * 365)
+    REFRESH_EXPIRE_DAYS:         int = max(int(os.getenv("PESA_REFRESH_EXPIRE_DAYS", "365")), 365)
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     # "*" permite peticiones desde la tablet Android (HTTP/HTTPS, cualquier IP).

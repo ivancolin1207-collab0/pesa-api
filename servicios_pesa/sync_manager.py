@@ -394,6 +394,13 @@ class SyncManager:
             True si se guardó correctamente.
         """
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        fecha_ejecucion_hoy = datetime.now().strftime("%Y-%m-%d")
+        estado_val = form_data.get("estado", "Cerrada")
+        if str(estado_val).strip().upper() in ("CERRADA", "CERRADO", "COMPLETADA", "COMPLETADA_DIGITAL", "FINALIZADA"):
+            form_data["fecha_creacion_logistica"] = form_data.get("fecha")
+            form_data["fecha"] = fecha_ejecucion_hoy
+            form_data["fecha_servicio"] = fecha_ejecucion_hoy
+            form_data["fecha_cierre"] = datetime.now().isoformat()
         try:
             with self._get_local_conn() as conn:
                 conn.execute("""
@@ -420,7 +427,7 @@ class SyncManager:
                         updated_at          = excluded.updated_at
                 """, (
                     folio_os,
-                    form_data.get("fecha"),
+                    form_data.get("fecha") or fecha_ejecucion_hoy,
                     form_data.get("equipo_marca", form_data.get("marca", "")),
                     form_data.get("equipo_modelo", form_data.get("modelo", "")),
                     form_data.get("equipo_ns", form_data.get("ns", "")),
@@ -429,7 +436,7 @@ class SyncManager:
                     form_data.get("nombre_cliente_firma", ""),
                     form_data.get("firma_tecnico", ""),
                     form_data.get("firma_cliente", ""),
-                    form_data.get("estado", "Cerrada"),
+                    estado_val,
                     "DIGITAL",
                     pdf_path,
                     "PENDING",
@@ -579,8 +586,7 @@ class SyncManager:
     def _push_one_to_pg(self, pg_conn, local_row: dict) -> None:
         """
         Actualiza una OS en PostgreSQL con los datos capturados en la tablet.
-        Solo actualiza los campos que el técnico pudo modificar en campo;
-        no sobreescribe datos administrativos (cliente, folio, fecha, técnico).
+        Actualiza también la fecha real de realización cuando el técnico finaliza el servicio.
         """
         with pg_conn.cursor() as cur:
             # Verificar que el folio exista en PG
@@ -591,9 +597,10 @@ class SyncManager:
             pg_row = cur.fetchone()
 
             if pg_row:
-                # Actualizar registro existente
+                # Actualizar registro existente (incluyendo fecha real de ejecución)
                 cur.execute("""
                     UPDATE ordenes_servicio SET
+                        fecha                = COALESCE(%s, fecha),
                         marca                = COALESCE(%s, marca),
                         modelo               = COALESCE(%s, modelo),
                         ns                   = COALESCE(%s, ns),
@@ -608,6 +615,7 @@ class SyncManager:
                         updated_at           = NOW()
                     WHERE folio_os = %s
                 """, (
+                    (str(local_row.get("fecha"))[:10] if local_row.get("fecha") else None),
                     local_row.get("marca") or None,
                     local_row.get("modelo") or None,
                     local_row.get("ns") or None,

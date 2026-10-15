@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../widgets/nombre_recibe.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
@@ -979,22 +980,15 @@ class _FirmaScreenState extends State<FirmaScreen>
       final excRows  = _castList(widget.capturaData['exc_rows']);
       final exacRows = _castList(widget.capturaData['exac_rows']);
 
-      // 3. Guardar ambas firmas + nombre/puesto del ingeniero + correo_cliente
-      await LocalDbService.instance.saveFirmas(
-        localId:        widget.osId,
-        folio:          folio,
-        firmaTecBase64: tecBase64,
-        firmaCliBase64: cliBase64,
-        nombreIng:      nombreIng,
-        puestoIng:      puestoIng,
-        correoCliente:  correoCapturado.isNotEmpty ? correoCapturado : null,
-      );
+      // 2.1 Actualizar fecha real de ejecución al finalizar servicio (OS)
+      final String fechaEjecucionHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final String fechaCierreIso = DateTime.now().toIso8601String();
 
-      // 4. Generar PDF con ambas firmas y nombre del responsable
       final osData = (widget.osId > 0 ? await LocalDbService.instance.getOs(widget.osId) : null)
           ?? (folio.isNotEmpty ? await LocalDbService.instance.getOsByFolio(folio) : null)
           ?? {};
-      final enrichedOs = <String, dynamic>{
+
+      final ordenMutable = <String, dynamic>{
         ...osData,
         ...widget.capturaData,
         'folio_os':      folio,
@@ -1006,6 +1000,35 @@ class _FirmaScreenState extends State<FirmaScreen>
         'correo_cliente': correoCapturado.isNotEmpty ? correoCapturado : (osData['correo_cliente'] ?? ''),
         'email_enviado': 0,
       };
+      ordenMutable['fecha_creacion_logistica'] = ordenMutable['fecha_creacion_logistica'] ?? ordenMutable['fecha'];
+      ordenMutable['fecha'] = fechaEjecucionHoy;
+      ordenMutable['fecha_servicio'] = fechaEjecucionHoy;
+      ordenMutable['fecha_cierre'] = fechaCierreIso;
+      final enrichedOs = ordenMutable;
+
+      await LocalDbService.instance.actualizarFechaEjecucionAlFinalizar(
+        folio,
+        fechaEjecucionHoy,
+        localId: widget.osId,
+        fechaCierre: fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
+      );
+
+      // 3. Guardar ambas firmas + nombre/puesto del ingeniero + correo_cliente + fecha de ejecución
+      await LocalDbService.instance.saveFirmas(
+        localId:        widget.osId,
+        folio:          folio,
+        firmaTecBase64: tecBase64,
+        firmaCliBase64: cliBase64,
+        nombreIng:      nombreIng,
+        puestoIng:      puestoIng,
+        correoCliente:  correoCapturado.isNotEmpty ? correoCapturado : null,
+        fechaEjecucion: fechaEjecucionHoy,
+        fechaCierre:    fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
+      );
+
+      // 4. Generar PDF con ambas firmas, nombre del responsable y fecha real de ejecución
 
       if ((enrichedOs['direccion'] == null || enrichedOs['direccion'].toString().trim().isEmpty || enrichedOs['direccion'] == '-') &&
           (enrichedOs['sucursal'] == null || enrichedOs['sucursal'].toString().trim().isEmpty || enrichedOs['sucursal'] == '-')) {
@@ -1058,6 +1081,9 @@ class _FirmaScreenState extends State<FirmaScreen>
         pdfB64: pdfB64,
         isOnline: isOnline,
         uploadOk: false,
+        fechaEjecucion: fechaEjecucionHoy,
+        fechaCierre: fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
       );
 
       // 5.1 Eliminar el borrador local correspondiente al completar la orden
@@ -1066,6 +1092,9 @@ class _FirmaScreenState extends State<FirmaScreen>
       // 5.2 Actualizar estado en memoria reactivo en SyncService
       if (mounted) {
         context.read<SyncService>().updateLocalOrder(folio, {
+          'fecha': fechaEjecucionHoy,
+          'fecha_servicio': fechaEjecucionHoy,
+          'fecha_cierre': fechaCierreIso,
           'pdf_path_local': pdfPath,
           'estado': 'COMPLETADA_DIGITAL',
           'estatus': 'Cerrado',
@@ -1080,6 +1109,9 @@ class _FirmaScreenState extends State<FirmaScreen>
       try {
         final uploadPayload = <String, dynamic>{
           ...enrichedOs,
+          'fecha': fechaEjecucionHoy,
+          'fecha_servicio': fechaEjecucionHoy,
+          'fecha_cierre': fechaCierreIso,
           'rep_rows': repRows,
           'exc_rows': excRows,
           'exac_rows': exacRows,
@@ -1105,6 +1137,9 @@ class _FirmaScreenState extends State<FirmaScreen>
                 pdfB64: pdfB64,
                 isOnline: true,
                 uploadOk: true,
+                fechaEjecucion: fechaEjecucionHoy,
+                fechaCierre: fechaCierreIso,
+                fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
               );
               await LocalDbService.instance.updateOsSyncCheckStatus(
                 folio,
@@ -1126,6 +1161,9 @@ class _FirmaScreenState extends State<FirmaScreen>
               }
               if (mounted) {
                 context.read<SyncService>().updateLocalOrder(folio, {
+                  'fecha': fechaEjecucionHoy,
+                  'fecha_servicio': fechaEjecucionHoy,
+                  'fecha_cierre': fechaCierreIso,
                   'pdf_path_local': pdfPath,
                   'estado': 'COMPLETADA_DIGITAL',
                   'estatus': 'Cerrado',

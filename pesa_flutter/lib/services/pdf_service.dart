@@ -81,6 +81,12 @@ class PdfService {
     String? firmaTecBase64,
     String? firmaCliBase64,
   }) async {
+    final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
+    osData['fecha_creacion_logistica'] ??= osData['fecha'];
+    osData['fecha'] = fechaEjecucionHoy;
+    osData['fecha_servicio'] = fechaEjecucionHoy;
+    osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+
     final bytes = await buildPdfBytes(
       osData: osData, repRows: repRows, excRows: excRows, exacRows: exacRows,
       firmaTecBase64: firmaTecBase64, firmaCliBase64: firmaCliBase64,
@@ -544,7 +550,16 @@ class PdfService {
           validSustitutos.add({'sustituto': 'Sustituto 1', 'peso': p});
         }
       }
-      final bool tieneSustitutos = validSustitutos.isNotEmpty;
+      // FÍSICO: si aplica Sustituto (bandera o lista configurada), tabla en blanco.
+      bool flagSust(dynamic v) =>
+          v == true || v == 1 || ['1', 'true', 'si', 'sí'].contains(v?.toString().trim().toLowerCase());
+      final bool sustitutoFisicoBlanco = validSustitutos.isEmpty &&
+          _esFormatoFisico(osData, tieneDatos: false) &&
+          (flagSust(osData['aplica_sustituto']) ||
+              flagSust(osData['usa_sustituto']) ||
+              flagSust(osData['tiene_sustituto']) ||
+              (sustitutosRaw is List && sustitutosRaw.isNotEmpty));
+      final bool tieneSustitutos = validSustitutos.isNotEmpty || sustitutoFisicoBlanco;
 
       return pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -560,7 +575,9 @@ class PdfService {
                 _buildNoAplicaTanqueBox(),
                 if (tieneSustitutos) ...[
                   pw.SizedBox(height: 5),
-                  _buildSustitutoTable(validSustitutos, osData, divMin),
+                  _buildSustitutoTable(validSustitutos, osData, divMin,
+                      enBlanco: sustitutoFisicoBlanco,
+                      filasBlanco: sustitutosRaw is List ? sustitutosRaw.length : 0),
                 ],
               ],
             ),
@@ -951,7 +968,8 @@ class PdfService {
   // TABLA SUSTITUTO / PESO (Solo si peso > 0)
   // ══════════════════════════════════════════════════════════════════════════
   pw.Widget _buildSustitutoTable(
-      List<Map<String, dynamic>> sustitutos, Map<String, dynamic> os, int dec) {
+      List<Map<String, dynamic>> sustitutos, Map<String, dynamic> os, int dec,
+      {bool enBlanco = false, int filasBlanco = 0}) {
     const hdrColor = PdfColor.fromInt(0xFFD9E2F3);
     const borderColor = PdfColor.fromInt(0xFF333333);
     const rowH = 13.0;
@@ -964,7 +982,8 @@ class PdfService {
     }
 
     final displayRows = List<Map<String, dynamic>>.from(sustitutos);
-    while (displayRows.length < 4) {
+    final int minRows = enBlanco && filasBlanco > 4 ? filasBlanco : 4;
+    while (displayRows.length < minRows) {
       displayRows.add({});
     }
 
@@ -1068,7 +1087,7 @@ class PdfService {
                   padding: const pw.EdgeInsets.only(right: 4),
                   child: pw.Align(
                     alignment: pw.Alignment.centerRight,
-                    child: pw.Text(formatoMilesEspacio(_fmtDec(totalPeso, dec)),
+                    child: pw.Text(enBlanco ? '' : formatoMilesEspacio(_fmtDec(totalPeso, dec)),
                         style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
                   ),
                 ),
@@ -1090,14 +1109,28 @@ class PdfService {
     const rowH = 14.0;
     const hdrH = 15.0;
 
-    // Filtrar únicamente los renglones que tengan datos capturados (omite renglones vacíos)
+    // Renglones con datos capturados por el técnico
     final puntosValidos = rows.where((p) {
       final pesas = p['pesas']?.toString().trim() ?? '';
       final agua  = p['agua']?.toString().trim() ?? '';
       final ind   = (p['indicacion'] ?? p['lectura_inicial'])?.toString().trim() ?? '';
       return pesas.isNotEmpty || agua.isNotEmpty || ind.isNotEmpty;
     }).toList();
-    final display = puntosValidos.isNotEmpty ? puntosValidos : (rows.isNotEmpty ? [rows.first] : []);
+
+    // ── Bifurcación FÍSICO vs DIGITAL ──
+    // FÍSICO: NUNCA omitir renglones; exactamente N filas configuradas (en blanco).
+    // DIGITAL: omitir renglones que el técnico dejó vacíos.
+    final bool esFisico = _esFormatoFisico(os, tieneDatos: puntosValidos.isNotEmpty);
+    final List<Map<String, dynamic>> display;
+    if (esFisico) {
+      final int nCfg = _numEnlacesConfigurados(os, rows.length);
+      display = List<Map<String, dynamic>>.generate(
+          nCfg, (i) => i < rows.length ? rows[i] : <String, dynamic>{});
+    } else {
+      display = puntosValidos.isNotEmpty
+          ? puntosValidos
+          : (rows.isNotEmpty ? [rows.first] : <Map<String, dynamic>>[]);
+    }
 
     final colWidths = [
       0.06, // N
@@ -1184,7 +1217,7 @@ class PdfService {
             ap != null ? formatoMilesEspacio(_fmtDec(ap, dec)) : '',
             ind != null ? formatoMilesEspacio(_fmtDec(ind, dec)) : '',
             reg != null ? formatoMilesEspacio(_fmtDec(reg, dec)) : '',
-            err != null ? formatoMilesEspacio(_fmtDec(err, dec)) : (hasData ? '0' : ''),
+            err != null ? formatoMilesEspacio(_fmtDec(err, dec)) : (hasData && !esFisico ? '0' : ''),
           ];
 
           return pw.Container(
@@ -1249,7 +1282,7 @@ class PdfService {
               pw.Padding(
                 padding: const pw.EdgeInsets.only(right: 6),
                 child: pw.Text(
-                  formatoMilesEspacio(_fmtDec(maxErr, dec)),
+                  esFisico && maxErr == 0 ? '' : formatoMilesEspacio(_fmtDec(maxErr, dec)),
                   style: pw.TextStyle(fontSize: 7.0, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
                 ),
               ),
@@ -1259,6 +1292,31 @@ class PdfService {
       ],
     );
   }
+
+  /// FÍSICO si la modalidad es explícitamente física / impresión en blanco,
+  /// o si no es DIGITAL explícito y no hay capturas (plantilla para imprimir).
+  bool _esFormatoFisico(Map<String, dynamic> os, {required bool tieneDatos}) {
+    final m = (os['modalidad']?.toString() ?? '')
+        .trim()
+        .toLowerCase()
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o');
+    bool flag(dynamic v) =>
+        v == true || v == 1 || ['1', 'true', 'si', 'sí'].contains(v?.toString().trim().toLowerCase());
+    final explicito = ['fisico', 'impresion', 'blanco', 'calca'].contains(m) ||
+        flag(os['es_formato_fisico']) ||
+        flag(os['es_impresion_en_blanco']);
+    return explicito || (m != 'digital' && !tieneDatos);
+  }
+
+  int _numEnlacesConfigurados(Map<String, dynamic> os, int fallbackLen) {
+    for (final k in ['num_enlaces_sustitucion', 'num_enlaces', 'pts_exactitud']) {
+      final v = int.tryParse(os[k]?.toString() ?? '');
+      if (v != null && v > 0) return v;
+    }
+    return fallbackLen > 0 ? fallbackLen : 6;
+  }
+
   pw.Widget _buildDiagrama3Paneles(Map<String, dynamic> os, String geo) {
     final tipo = _s(os, 'tipo_instrumento', '').toLowerCase();
     final rawGeo = (_s(os, 'geometria_excentricidad', '').isNotEmpty)

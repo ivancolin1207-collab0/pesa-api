@@ -154,15 +154,17 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
     final tecnico = _campo(['tecnico', 'tecnico_nombre']).isNotEmpty
         ? _campo(['tecnico', 'tecnico_nombre'])
         : auth.displayName;
-    final fecha = _campo(['fecha', 'fecha_servicio']);
+    final fechaOriginal = _campo(['fecha_creacion_logistica', 'fecha', 'fecha_servicio']);
+    final fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
     return {
       'folio_os':      _folioOs,
       'cliente':       _campo(['cliente', 'cliente_nombre', 'razon_social']),
       'sucursal':      _campo(['sucursal', 'sucursal_nombre', 'direccion', 'direccion_cliente']),
       'tecnico':       tecnico,
-      'fecha':         fecha.isNotEmpty
-          ? fecha.split(' ').first
-          : DateTime.now().toIso8601String().substring(0, 10),
+      'fecha':         fechaEjecucionHoy,
+      'fecha_servicio': fechaEjecucionHoy,
+      'fecha_cierre':  DateTime.now().toIso8601String(),
+      if (fechaOriginal.isNotEmpty) 'fecha_creacion_logistica': fechaOriginal.split(' ').first,
       'modalidad':     'FISICO',
       'estatus':       'Cerrado',
       'tipo_formato':  _formatoLabel,
@@ -255,6 +257,13 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
     final folio = _folioOs!;
     try {
       final payload = _payloadHomologado();
+      final fechaEjecucionHoy = (payload['fecha'] ?? DateTime.now().toIso8601String().substring(0, 10)).toString();
+      await LocalDbService.instance.actualizarFechaEjecucionAlFinalizar(
+        folio,
+        fechaEjecucionHoy,
+        fechaCierre: payload['fecha_cierre']?.toString(),
+        fechaCreacionLogistica: payload['fecha_creacion_logistica']?.toString(),
+      );
       final pdfFile = await _imagenAPdf(_capturedImage!, folio);
 
       // 1) upload-pdf: localiza la OS por FOLIO, guarda el PDF en PostgreSQL

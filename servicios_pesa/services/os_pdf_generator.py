@@ -1061,7 +1061,9 @@ class OsPdfGenerator:
             y_left = self._draw_no_aplica_exc_box(c, left_x, y_left, left_w, tipo_no)
 
             # Tabla SUSTITUTO | PESO únicamente si existen registros con peso > 0
-            if os_data and self._tiene_sustitutos_validos(os_data):
+            # En FÍSICO: si aplica Sustituto, dibujar la tabla con filas en blanco.
+            if os_data and (self._tiene_sustitutos_validos(os_data)
+                            or self._sustituto_aplica_fisico(os_data)):
                 y_left -= 6
                 y_left = self._draw_elementos_sustitucion(c, left_x, y_left, left_w, os_data)
 
@@ -2042,6 +2044,24 @@ class OsPdfGenerator:
             return True
         return False
 
+    def _sustituto_aplica_fisico(self, os_data: dict) -> bool:
+        """True si el formato es FÍSICO (no DIGITAL) y la OS indica que aplica Sustituto
+        (bandera explícita o lista de sustitutos configurada, aunque sin pesos)."""
+        if not os_data or self._es_digital(os_data):
+            return False
+        for k in ("aplica_sustituto", "usa_sustituto", "tiene_sustituto"):
+            v = os_data.get(k)
+            if v is True or str(v).strip().lower() in ("1", "true", "si", "sí", "yes"):
+                return True
+        raw = os_data.get("sustitutos") or os_data.get("elementos_sustitucion")
+        if isinstance(raw, str):
+            try:
+                import json
+                raw = json.loads(raw)
+            except Exception:
+                raw = None
+        return isinstance(raw, list) and len(raw) > 0
+
     def _draw_elementos_sustitucion(self, c, x: float, y: float, w: float, os_data: dict) -> float:
         """Tabla para Elementos de Carga Sustituta (Sustituto | Peso). Solo se dibuja si peso > 0."""
         sustitutos_raw = os_data.get("sustitutos") or os_data.get("elementos_sustitucion") or []
@@ -2066,8 +2086,12 @@ class OsPdfGenerator:
             if p > 0:
                 valid_sustitutos.append({"sustituto": "Sustituto 1", "peso": p})
 
+        _fisico_blank = False
         if not valid_sustitutos:
-            return y
+            if not self._sustituto_aplica_fisico(os_data):
+                return y
+            _fisico_blank = True   # FÍSICO: filas en blanco para llenado manual
+            _raw_len = len(sustitutos_raw) if isinstance(sustitutos_raw, list) else 0
 
         from reportlab.lib.colors import HexColor
         _HDR = HexColor("#D9E2F3")
@@ -2090,7 +2114,7 @@ class OsPdfGenerator:
         c.line(x + w_sust, y, x + w_sust, y - hdr_h)
         y -= hdr_h
         
-        n_rows = max(len(valid_sustitutos), 4)
+        n_rows = max(len(valid_sustitutos), 4) if not _fisico_blank else max(_raw_len, 4)
         total_peso = sum(s["peso"] for s in valid_sustitutos)
         
         c.setFont("Helvetica", 6.5)
@@ -2114,8 +2138,9 @@ class OsPdfGenerator:
         c.setFillColor(HexColor("#000000"))
         c.setFont("Helvetica-Bold", 6.5)
         c.drawString(x + 5, y - row_h + 4, "TOTAL")
-        total_str = self._fmt(total_peso)
-        c.drawRightString(x + w - 5, y - row_h + 4, total_str)
+        if not _fisico_blank:
+            total_str = self._fmt(total_peso)
+            c.drawRightString(x + w - 5, y - row_h + 4, total_str)
         y -= row_h
         
         return y
@@ -2130,7 +2155,9 @@ class OsPdfGenerator:
 
         hdr_h     = 16
 
-        # Filtrar únicamente los renglones que tengan datos capturados (omite renglones vacíos)
+        _od = os_data or {}
+
+        # Renglones con datos capturados por el técnico
         puntos_validos = []
         for r in (data or []):
             if not isinstance(r, dict):
@@ -2145,7 +2172,39 @@ class OsPdfGenerator:
             ):
                 puntos_validos.append(r)
 
-        display_data = puntos_validos if puntos_validos else (data[:1] if data else [])
+        # ── Bifurcación FÍSICO vs DIGITAL ─────────────────────────────────────
+        # FÍSICO (impresión en blanco): NUNCA omitir renglones; dibujar exactamente
+        #   las N filas configuradas por logística, con celdas vacías.
+        # DIGITAL (capturado): omitir los renglones que el técnico dejó vacíos.
+        import unicodedata as _ud
+        _mod_norm = _ud.normalize(
+            "NFKD", str(_od.get("modalidad") or "")
+        ).encode("ascii", "ignore").decode().strip().lower()
+        _fisico_explicito = (
+            _mod_norm in ("fisico", "impresion", "blanco", "calca")
+            or bool(_od.get("es_formato_fisico"))
+            or bool(_od.get("es_impresion_en_blanco"))
+        )
+        # Sin modalidad explícita DIGITAL y sin capturas → es plantilla física.
+        es_fisico = _fisico_explicito or (not self._es_digital(_od) and not puntos_validos)
+
+        if es_fisico:
+            try:
+                n_cfg = int(
+                    _od.get("num_enlaces_sustitucion")
+                    or _od.get("num_enlaces")
+                    or _od.get("pts_exactitud")
+                    or len(data or [])
+                    or 6
+                )
+            except (TypeError, ValueError):
+                n_cfg = 6
+            n_cfg = max(1, n_cfg)
+            src = [r if isinstance(r, dict) else {} for r in (data or [])]
+            # Exactamente n_cfg filas (rellenar con vacías si faltan); sin filtrar.
+            display_data = (src + [{}] * n_cfg)[:n_cfg]
+        else:
+            display_data = puntos_validos if puntos_validos else (data[:1] if data else [])
         num_enlaces = len(display_data)
 
         if num_enlaces <= 5:

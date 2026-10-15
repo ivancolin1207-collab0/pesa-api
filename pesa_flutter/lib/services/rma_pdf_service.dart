@@ -57,7 +57,12 @@ class RmaPdfService {
     }
 
     final folio = (rmaData['folio_os'] ?? rmaData['folio_rma'] ?? 'RMA-00-000').toString();
-    final fecha = (rmaData['fecha'] ?? DateTime.now().toString().substring(0, 10)).toString();
+    final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
+    rmaData['fecha_creacion_logistica'] ??= rmaData['fecha'];
+    rmaData['fecha'] = fechaEjecucionHoy;
+    rmaData['fecha_servicio'] = fechaEjecucionHoy;
+    rmaData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    final fecha = fechaEjecucionHoy;
     final cliente = (rmaData['cliente'] ?? rmaData['cliente_nombre'] ?? rmaData['razon_social'] ?? '').toString();
     final direccion = (rmaData['direccion'] ?? rmaData['sucursal_direccion'] ?? rmaData['sucursal'] ?? '').toString();
     final tecnico = (rmaData['tecnico'] ?? rmaData['tecnico_nombre'] ?? '').toString();

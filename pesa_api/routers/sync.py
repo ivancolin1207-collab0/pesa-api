@@ -188,6 +188,12 @@ class PushPayload(BaseModel):
     estatus:        Optional[str] = None
     modalidad:      Optional[str] = None
 
+    # Fecha real de ejecución y cierre en campo
+    fecha:                    Optional[str] = None
+    fecha_servicio:           Optional[str] = None
+    fecha_cierre:             Optional[str] = None
+    fecha_creacion_logistica: Optional[str] = None
+
     # Offline-First v2: PDF + firmas digitales
     pdf_b64:              Optional[str] = None  # PDF completo en Base64
     firma_tecnico:        Optional[str] = None  # PNG firma técnico en Base64
@@ -1017,6 +1023,35 @@ async def sync_push(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"OS {payload.folio_os!r} no se pudo actualizar en el servidor",
             )
+
+        # Actualizar fecha real de realización enviada por la tablet al finalizar servicio
+        fecha_ejecucion_raw = (payload.fecha or payload.fecha_servicio or "").strip()
+        if fecha_ejecucion_raw:
+            fecha_iso = fecha_ejecucion_raw[:10]
+            try:
+                from datetime import date as _date
+                fecha_dt = _date.fromisoformat(fecha_iso)
+                await db.execute(
+                    "UPDATE ordenes_servicio SET fecha = $1, updated_at = NOW() WHERE id = $2",
+                    fecha_dt, os_id,
+                )
+            except Exception:
+                try:
+                    await db.execute(
+                        "UPDATE ordenes_servicio SET fecha = $1, updated_at = NOW() WHERE id = $2",
+                        fecha_iso, os_id,
+                    )
+                except Exception as e_fecha:
+                    logger.warning("[SYNC PUSH] No se pudo actualizar fecha de OS %s: %s", payload.folio_os, e_fecha)
+
+        if payload.fecha_cierre or nuevo_estado in ("COMPLETADA", "COMPLETADA_DIGITAL", "Cerrado", "CERRADO"):
+            try:
+                await db.execute(
+                    "UPDATE ordenes_servicio SET fecha_cierre = COALESCE(fecha_cierre, NOW()) WHERE id = $1",
+                    os_id,
+                )
+            except Exception:
+                pass
 
         # Upsert de pruebas metrológicas
         await _upsert_pruebas(db, os_id, payload)

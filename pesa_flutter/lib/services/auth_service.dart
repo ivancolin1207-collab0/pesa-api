@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'api_service.dart';
 import 'firma_tecnico_service.dart';
 
@@ -168,6 +169,17 @@ class AuthService extends ChangeNotifier {
   Future<void> loadSession() async {
     await ApiService.instance.loadSavedToken();
     _authenticated = ApiService.instance.isAuthenticated;
+
+    // Mantener la sesión activa indefinidamente mientras el usuario no pulse "Cerrar Sesión"
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sessionActive = prefs.getBool('pesa_session_active') ?? false;
+      final savedUser = prefs.getString('pesa_username') ?? await _storage.read(key: 'pesa_username');
+      if (!_authenticated && sessionActive && savedUser != null && savedUser.isNotEmpty) {
+        _authenticated = true;
+      }
+    } catch (_) {}
+
     if (_authenticated) await _loadClaims();
     if (_authenticated && _username != null && _username!.isNotEmpty) {
       FirmaTecnicoService.instance.syncFirmaFromCloud(_username!, _idTecnico ?? 0);
@@ -175,6 +187,24 @@ class AuthService extends ChangeNotifier {
     // Seed siempre en background (no bloquea la UI)
     _seedDefaultCredentials();
     notifyListeners();
+  }
+
+  /// Renueva la sesión silenciosamente en segundo plano usando las credenciales guardadas.
+  Future<bool> renovarSesionSilenciosa() => _renovarSesionSilenciosa();
+
+  Future<bool> _renovarSesionSilenciosa() async {
+    return ApiService.instance.renovarSesionSilenciosa();
+  }
+
+  static String? getDefaultPasswordForUser(String? usernameOrName) {
+    if (usernameOrName == null || usernameOrName.trim().isEmpty) return null;
+    final q = usernameOrName.trim().toLowerCase();
+    for (final cred in _defaultOfflineUsers) {
+      if (cred[0].toLowerCase() == q || cred[3].toLowerCase() == q) {
+        return cred[1];
+      }
+    }
+    return null;
   }
 
   static int? resolveKnownIdTecnico(String username) {
@@ -216,6 +246,7 @@ class AuthService extends ChangeNotifier {
     _idTecnico      = idTecnico ?? resolveKnownIdTecnico(username);
     await _storage.write(key: 'pesa_username',       value: username);
     await _storage.write(key: 'pesa_role',           value: _role!);
+    await _storage.write(key: 'pesa_cred_user',      value: username);
     if (nombreCompleto != null) {
       await _storage.write(key: 'pesa_nombre_completo', value: nombreCompleto);
     }
@@ -223,6 +254,25 @@ class AuthService extends ChangeNotifier {
       await _storage.write(key: 'pesa_id_tecnico', value: _idTecnico.toString());
       await _storage.write(key: 'offline_id_tecnico_$username', value: _idTecnico.toString());
     }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('pesa_session_active', true);
+      await prefs.setString('pesa_username', username);
+      await prefs.setString('pesa_cred_user', username);
+      await prefs.setString('pesa_role', _role!);
+      if (nombreCompleto != null) {
+        await prefs.setString('pesa_nombre_completo', nombreCompleto);
+      }
+      if (_idTecnico != null) {
+        await prefs.setInt('pesa_id_tecnico', _idTecnico!);
+      }
+      final fallbackPass = getDefaultPasswordForUser(username);
+      if (fallbackPass != null && (prefs.getString('pesa_cred_pass') ?? '').isEmpty) {
+        await prefs.setString('pesa_cred_pass', fallbackPass);
+        await _storage.write(key: 'pesa_cred_pass', value: fallbackPass);
+      }
+    } catch (_) {}
+
     if (_username != null && _username!.isNotEmpty) {
       FirmaTecnicoService.instance.syncFirmaFromCloud(_username!, _idTecnico ?? 0);
     }
@@ -235,18 +285,27 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Guarda las credenciales del usuario para login offline futuro.
-  /// Guarda AMBOS: el SHA-256 y el texto plano cifrado (para compatibilidad).
+  /// Guarda las credenciales del usuario para login offline futuro y renovación silenciosa.
+  /// Guarda AMBOS: el SHA-256 y el texto plano cifrado en SecureStorage y SharedPreferences.
   Future<void> saveOfflineCredentials(String username, String password, String role,
       {String? nombreCompleto}) async {
     final hash = sha256.convert(utf8.encode(password)).toString();
     await _storage.write(key: 'offline_hash_$username',   value: hash);
     await _storage.write(key: 'offline_plain_$username',  value: password);
     await _storage.write(key: 'offline_role_$username',   value: role);
+    await _storage.write(key: 'pesa_cred_user',           value: username.trim());
+    await _storage.write(key: 'pesa_cred_pass',           value: password.trim());
     if (nombreCompleto != null) {
       await _storage.write(key: 'offline_nombre_$username', value: nombreCompleto);
     }
-    debugPrint('[AuthService] Credenciales offline guardadas para: $username');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('pesa_session_active', true);
+      await prefs.setString('pesa_cred_user', username.trim());
+      await prefs.setString('pesa_cred_pass', password.trim());
+      await prefs.setString('offline_plain_$username', password.trim());
+    } catch (_) {}
+    debugPrint('[AuthService] Credenciales offline y de auto-login guardadas para: $username');
   }
 
   /// Login offline: acepta SHA-256 O texto plano (igual que el backend Python).
@@ -293,16 +352,8 @@ class AuthService extends ChangeNotifier {
         ?? await _storage.read(key: 'pesa_nombre_completo')
         ?? hardcodedNombre;
 
-    // [FIX] Guardar en SecureStorage para que el proximo offline no necesite el hardcoded
-    if (hardcodedOk && (storedHash == null || storedPlain == null)) {
-      debugPrint('[AuthService] Sembrando credencial hardcoded via loginOffline para: $username');
-      try {
-        await _storage.write(key: 'offline_hash_$username',   value: inputHash);
-        await _storage.write(key: 'offline_plain_$username',  value: password);
-        await _storage.write(key: 'offline_role_$username',   value: role);
-        if (nombre != null) await _storage.write(key: 'offline_nombre_$username', value: nombre);
-      } catch (_) {}
-    }
+    // Persistir credenciales para renovación silenciosa cuando regrese Wi-Fi
+    await saveOfflineCredentials(username, password, role, nombreCompleto: nombre);
 
     final storedIdTec = await _storage.read(key: 'offline_id_tecnico_$username');
     final idTec = int.tryParse(storedIdTec ?? '') ?? resolveKnownIdTecnico(username);
@@ -353,15 +404,17 @@ class AuthService extends ChangeNotifier {
   }
 
   Future<void> _loadClaims() async {
-    _username       = await _storage.read(key: 'pesa_username');
-    _role           = normalizeRole(await _storage.read(key: 'pesa_role'));
-    _nombreCompleto = await _storage.read(key: 'pesa_nombre_completo');
+    final prefs     = await SharedPreferences.getInstance();
+    _username       = await _storage.read(key: 'pesa_username') ?? prefs.getString('pesa_username');
+    _role           = normalizeRole(await _storage.read(key: 'pesa_role') ?? prefs.getString('pesa_role'));
+    _nombreCompleto = await _storage.read(key: 'pesa_nombre_completo') ?? prefs.getString('pesa_nombre_completo');
     final idTecStr  = await _storage.read(key: 'pesa_id_tecnico');
     if (idTecStr != null && idTecStr.isNotEmpty) {
       _idTecnico = int.tryParse(idTecStr);
     }
+    _idTecnico ??= prefs.getInt('pesa_id_tecnico');
     try {
-      final token = await _storage.read(key: 'jwt_token');
+      final token = await _storage.read(key: 'jwt_token') ?? prefs.getString('jwt_token');
       if (token != null) {
         final parts = token.split('.');
         if (parts.length == 3) {
@@ -426,6 +479,10 @@ class AuthService extends ChangeNotifier {
     await _storage.delete(key: 'pesa_username');
     await _storage.delete(key: 'pesa_role');
     await _storage.delete(key: 'pesa_nombre_completo');
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('pesa_session_active', false);
+    } catch (_) {}
     _authenticated  = false;
     _isOfflineMode  = false;
     _username       = null;

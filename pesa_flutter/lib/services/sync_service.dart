@@ -360,37 +360,24 @@ class SyncService extends ChangeNotifier {
           debugPrint('[SYNC] Error leyendo token de storage: $e');
         }
 
-        // Paso 2: login rápido si no había token guardado
+        // Paso 2: renovación silenciosa automática si no había token cargado
         if (!tokenLoaded) {
           try {
-            const st = FlutterSecureStorage(
-              aOptions: AndroidOptions(encryptedSharedPreferences: true),
-            );
-            final savedUser = await st
-                .read(key: 'pesa_username')
-                .timeout(const Duration(seconds: 3), onTimeout: () => null);
-            final savedPass = await st
-                .read(key: 'pesa_cred_pass')
-                .timeout(const Duration(seconds: 3), onTimeout: () => null);
-            if (savedUser != null && savedUser.isNotEmpty && savedPass != null) {
-              final loginErr = await ApiService.instance
-                  .login(savedUser, savedPass)
-                  .timeout(
-                    const Duration(seconds: 10),
-                    onTimeout: () => 'Timeout login 10s',
-                  );
-              if (loginErr != null) {
-                debugPrint('[SYNC] Login rápido falló: $loginErr');
-              }
+            final ok = await _renovarSesionSilenciosa()
+                .timeout(const Duration(seconds: 25), onTimeout: () => false);
+            if (!ok) {
+              debugPrint('[SYNC] _renovarSesionSilenciosa() no pudo obtener token (servidor frío o sin red)');
             }
           } catch (e) {
-            debugPrint('[SYNC] Error en login rápido: $e');
+            debugPrint('[SYNC] Error en _renovarSesionSilenciosa inicial: $e');
           }
         }
 
         if (!ApiService.instance.isAuthenticated) {
-          _state   = SyncState.error;
-          _message = 'Sin sesión activa. Vuelve a iniciar sesión.';
+          await _fallbackCargarLocal();
+          _state   = SyncState.offline;
+          _errorMessage = null;
+          _message = 'Modo local activo (reintentando conexión en segundo plano)';
           return; // el finally liberará isSyncing
         }
       }
@@ -414,7 +401,7 @@ class SyncService extends ChangeNotifier {
 
       try {
         final pushed = await _pushPendientes()
-            .timeout(const Duration(seconds: 15), onTimeout: () => 0);
+            .timeout(const Duration(seconds: 25), onTimeout: () => 0);
         debugPrint('[Sync PUSH] $pushed OS subidas');
       } catch (e) {
         debugPrint('[Sync PUSH pendientes] Error ignorado: $e');
@@ -492,10 +479,6 @@ class SyncService extends ChangeNotifier {
       String? updatedAfter;
       if (conteoLocal > 0) {
         updatedAfter = prefs.getString('last_sync_timestamp');
-        // v3.1.20+77: auto-reparación de tipo_servicio. Si alguna OS local quedó
-        // sin tipo (descargada antes del fix de /api/v1/ordenes), forzar PULL
-        // completo en cada ciclo hasta que todas lo tengan. Sustituye la bandera
-        // única de v76, que se consumía aunque el servidor aún no tuviera el fix.
         await LocalDbService.instance.parchearTiposServicioConocidos();
         final sinTipo = await LocalDbService.instance.contarSinTipoServicio();
         if (sinTipo > 0) {
@@ -542,9 +525,6 @@ class SyncService extends ChangeNotifier {
             ? 'Sincronizado ✓ ($pullCount nuevas OS)'
             : 'Sincronizado ✓ Sin cambios nuevos';
 
-        // Repositorio de Calibraciones (solo supervisión metrológica):
-        // refresco en segundo plano, sin bloquear el ciclo ni el watchdog.
-        // Se guarda en la tabla separada `calibraciones_consulta`.
         if (AuthService.esSupervisorCalibracionActual) {
           unawaited(_refrescarRepositorioCalibraciones());
         }
@@ -569,40 +549,63 @@ class SyncService extends ChangeNotifier {
         final msg = e.message;
         debugPrint('[SYNC ERROR] HTTP: $msg');
         if (msg.contains('401')) {
-          // Intentar refrescar token y reintentar pull UNA sola vez
+          // 1. NO mostrar el cartel "Sesión expirada (401). Vuelve a iniciar sesión."
+          // 2. Invocar automáticamente en segundo plano _renovarSesionSilenciosa()
           bool refreshed = false;
           try {
-            refreshed = await ApiService.instance
-                .silentRefresh()
-                .timeout(const Duration(seconds: 10), onTimeout: () => false);
+            refreshed = await _renovarSesionSilenciosa()
+                .timeout(const Duration(seconds: 30), onTimeout: () => false);
           } catch (_) {}
 
           if (refreshed) {
             try {
-              final pullRetry = await _pullNuevos()
-                  .timeout(const Duration(seconds: 20), onTimeout: () => 0);
+              // 3. Reintentar de inmediato subida de órdenes, PDFs, cola de correos y pull
+              try {
+                await _pushPendientes().timeout(const Duration(seconds: 25), onTimeout: () => 0);
+              } catch (_) {}
+              try {
+                await _subirPdfsPendientes().timeout(const Duration(seconds: 60), onTimeout: () => 0);
+              } catch (_) {}
+              try {
+                final emailsRetry = await _pushEmailsPendientes().timeout(const Duration(seconds: 120), onTimeout: () => 0);
+                if (emailsRetry > 0) {
+                  _ultimosCorreosDespachados = emailsRetry;
+                  _correosDespachadosSeq++;
+                }
+              } catch (_) {}
+
+              final pullRetry = await _pullNuevos(updatedAfter: updatedAfter)
+                  .timeout(const Duration(seconds: 25), onTimeout: () => 0);
               _lastSync = DateTime.now();
               await _refreshPending();
               _state   = SyncState.success;
               _errorMessage = null;
               _message = pullRetry > 0
-                  ? 'Sincronizado (reintento): $pullRetry OS'
-                  : 'Sincronizado. Sin cambios nuevos.';
+                  ? 'Sincronizado ✓ ($pullRetry nuevas OS)'
+                  : 'Sincronizado ✓ Sin cambios nuevos';
               notifyListeners();
             } catch (retryErr) {
               debugPrint('[SYNC ERROR] Error en reintento post-refresh: $retryErr');
-              _state   = SyncState.error;
-              _errorMessage = 'Reintento falló: $retryErr';
-              _message = _errorMessage!;
-              notifyListeners();
               await _fallbackCargarLocal();
+              _state = SyncState.success;
+              _errorMessage = null;
+              _message = 'Datos locales disponibles';
+              notifyListeners();
             }
-          } else {
+          } else if (ApiService.instance.credentialsRevoked) {
+            // 4. Solo si las credenciales fueron revocadas o el usuario fue dado de baja en el servidor, mostrar aviso
             _state   = SyncState.error;
-            _errorMessage = 'Sesión expirada (401). Vuelve a iniciar sesión.';
+            _errorMessage = 'Acceso revocado o usuario dado de baja en el servidor.';
             _message = _errorMessage!;
             notifyListeners();
             await _fallbackCargarLocal();
+          } else {
+            // Sin mostrar cartel 401: mantener sesión local y reintentar en el siguiente ciclo
+            await _fallbackCargarLocal();
+            _state   = SyncState.success;
+            _errorMessage = null;
+            _message = 'Datos locales sincronizados';
+            notifyListeners();
           }
         } else {
           _state   = SyncState.error;
@@ -662,8 +665,13 @@ class SyncService extends ChangeNotifier {
   }
 
 
-  // ── Push: Subir OS con estado PENDIENTE_ACTUALIZAR ────────────────────────
+  /// Invoca la renovación silenciosa de sesión cuando una petición devuelve 401.
+  Future<bool> _renovarSesionSilenciosa() {
+    return ApiService.instance.renovarSesionSilenciosa();
+  }
 
+  /// Alias para sincronizar todo el flujo (push órdenes, PDFs, correos y pull).
+  Future<void> sincronizar() => performSync();
 
   // ── Push: Subir OS con estado is_dirty=1 (solo las sucias) ─────────────────
   //   Concurrencia: Future.wait envía hasta 3 órdenes en paralelo.
@@ -692,7 +700,7 @@ class SyncService extends ChangeNotifier {
       final results = await Future.wait(
         batch.map((os) =>
             _subirUnaOrden(os)
-                .timeout(const Duration(seconds: 10), onTimeout: () => false)
+                .timeout(const Duration(seconds: 25), onTimeout: () => false)
                 .catchError((_) => false)),
       );
       uploaded += results.where((ok) => ok == true).length;
@@ -764,16 +772,20 @@ class SyncService extends ChangeNotifier {
       final cerradaLocal = {'CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA'}.contains(estLocal)
                         || {'CERRADO','CERRADA','COMPLETADA'}.contains(estatusLocal);
 
-      final payload = {
+      final fechaStr = (os['fecha'] ?? os['fecha_servicio'])?.toString().trim();
+
+      final payload = <String, dynamic>{
         'folio_os':          folio,
         'device_id':         await db.getDeviceId(),
         'sync_version_base': os['sync_version'] ?? 0,
-        // Estado canónico que el servidor acepta como cierre (evita que 'Cerrado'
-        // local sea rechazado por la tabla de transiciones y quede en 'Proceso').
         'nuevo_estado':      cerradaLocal ? 'COMPLETADA_DIGITAL' : (os['estado'] ?? 'COMPLETADA_DIGITAL'),
-        // Estatus y modalidad explícitos para que PostgreSQL / macOS reflejen el cierre.
         'estatus':           cerradaLocal ? 'Cerrado' : (os['estatus'] ?? 'Proceso'),
         if ((os['modalidad'] as String?)?.isNotEmpty == true) 'modalidad': os['modalidad'],
+        if (fechaStr != null && fechaStr.isNotEmpty) 'fecha': fechaStr,
+        if (fechaStr != null && fechaStr.isNotEmpty) 'fecha_servicio': fechaStr,
+        if ((os['fecha_cierre'] as String?)?.isNotEmpty == true) 'fecha_cierre': os['fecha_cierre'],
+        if ((os['fecha_creacion_logistica'] as String?)?.isNotEmpty == true)
+          'fecha_creacion_logistica': os['fecha_creacion_logistica'],
         'observaciones':     os['observaciones'],
         'datos_captura':     os['datos_captura'],
         'usa_sustitucion':   os['usa_sustitucion'] == 1 || os['usa_sustitucion'] == 'true' || os['usa_sustitucion'] == true,
@@ -797,30 +809,25 @@ class SyncService extends ChangeNotifier {
       };
 
       final backendUrl = ApiService.instance.baseUrl;
-      final token = ApiService.instance.token;
-      final headers = <String, String>{
-        'Content-Type': 'application/json',
-        if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-      };
 
       http.Response? response;
       try {
-        response = await http.post(
+        response = await ApiService.instance.postJsonWithAuthRetry(
           Uri.parse('$backendUrl/api/ordenes/sync'),
-          headers: headers,
-          body: jsonEncode(payload),
-        ).timeout(const Duration(seconds: 30));
+          payload,
+          timeout: const Duration(seconds: 30),
+        );
       } catch (e) {
         debugPrint('[PUSH] Intento /api/ordenes/sync para $folio: $e');
       }
 
       if (response == null || response.statusCode == 404) {
         try {
-          response = await http.post(
+          response = await ApiService.instance.postJsonWithAuthRetry(
             Uri.parse('$backendUrl/api/v1/sync/push'),
-            headers: headers,
-            body: jsonEncode(payload),
-          ).timeout(const Duration(seconds: 30));
+            payload,
+            timeout: const Duration(seconds: 30),
+          );
         } catch (e) {
           debugPrint('[PUSH] Intento /api/v1/sync/push para $folio: $e');
         }
@@ -1188,6 +1195,10 @@ class SyncService extends ChangeNotifier {
           osId: osId,
           data: {
             'folio_os': folio,
+            'fecha': os['fecha'],
+            'fecha_servicio': os['fecha_servicio'] ?? os['fecha'],
+            'fecha_cierre': os['fecha_cierre'],
+            'fecha_creacion_logistica': os['fecha_creacion_logistica'],
             'observaciones': os['observaciones'],
             'rep_rows': _decodeJson(os['rep_json']),
             'exc_rows': _decodeJson(os['exc_json']),

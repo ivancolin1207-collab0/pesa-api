@@ -3875,6 +3875,59 @@ class BatchGeneratorWidget(QWidget):
                                     pass
                         _dt_json_str = json.dumps(_dt_dict, ensure_ascii=False, default=str)
 
+                        # ── Inicializar _equipos y datos del instrumento de forma segura antes de cualquier bloque ──
+                        _equipos = []
+                        if hasattr(self, 'obtener_datos_instrumentos'):
+                            try:
+                                _equipos = self.obtener_datos_instrumentos() or []
+                            except Exception:
+                                _equipos = []
+                        elif 'equipos' in datos and datos.get('equipos'):
+                            _equipos = datos.get('equipos') or []
+                        else:
+                            _equipos = [datos]
+
+                        if not _equipos:
+                            _equipos = [datos]
+
+                        # ── Extraer datos del primer equipo (instrumento principal) ──
+                        _eq1 = _equipos[0] if _equipos else {}
+                        _marca    = _eq1.get("marca", "").strip() or None
+                        _modelo   = _eq1.get("modelo", "").strip() or None
+                        _ns       = (_eq1.get("numero_serie") or _eq1.get("ns") or _eq1.get("serie", "")).strip() or None
+                        _id_eq    = (_eq1.get("id_indicador") or _eq1.get("id_equipo", "")).strip() or None
+                        _ubicacion = (_eq1.get("ubicacion_interna") or _eq1.get("ubicacion", "")).strip() or None
+                        _tipo_ins_nombre = _eq1.get("tipo_instrumento", "").strip() or None
+                        # capacidad y división: normalizar a numérico
+                        def _to_num(v):
+                            if v is None: return None
+                            try:
+                                return float(str(v).replace(",", ".").replace(" ", "").split()[0])
+                            except Exception:
+                                return None
+                        _cap_raw  = _eq1.get("capacidad_max") or _eq1.get("capacidad") or ""
+                        _div_raw  = _eq1.get("division_min")  or _eq1.get("division")  or ""
+                        _cap_num  = _to_num(_cap_raw)
+                        _div_num  = _to_num(_div_raw)
+                        _cap_str  = str(_cap_raw).strip() or None
+                        _div_str  = str(_div_raw).strip() or None
+                        # secciones: del eq o del campo general
+                        _secciones = datos.get("secciones_camionera") or None
+                        if not _secciones:
+                            _secciones_raw = _eq1.get("secciones") or _eq1.get("num_secciones")
+                            try: _secciones = int(_secciones_raw) if _secciones_raw else None
+                            except Exception: _secciones = None
+                        # aplica_excentricidad: inferir de tipo instrumento si no hay dato
+                        _aplica_exc = datos.get("aplica_excentricidad")
+                        if _aplica_exc is None:
+                            _tipo_low = (_tipo_ins_nombre or "").lower()
+                            _TIPOS_SIN_EXC = ["tolva", "tanque", "silo", "grúa", "grua", "colgante"]
+                            _aplica_exc = not any(k in _tipo_low for k in _TIPOS_SIN_EXC)
+                        # filas_excentricidad: del campo o por defecto 4 para camionera
+                        _filas_exc = datos.get("filas_excentricidad")
+                        if not _filas_exc and _secciones:
+                            _filas_exc = _secciones
+
                         # Upsert seguro sin ON CONFLICT: verificar si el folio ya existe
                         cur.execute(
                             "SELECT id FROM ordenes_servicio WHERE folio_os = %s",
@@ -3901,7 +3954,7 @@ class BatchGeneratorWidget(QWidget):
                                 (
                                     _dt_json_str,
                                     tipo,
-                                    datos.get("modalidad", "Digital"),
+                                    datos.get("modalidad", "FISICO"),
                                     datos.get("id_cliente"),
                                     datos.get("id_tecnico"),
                                     datos.get("sucursal_id"),
@@ -3911,44 +3964,6 @@ class BatchGeneratorWidget(QWidget):
                                 ),
                             )
                         else:
-                            # ── Extraer datos del primer equipo (instrumento principal) ──
-                            _equipos = datos.get("equipos") or []
-                            _eq1 = _equipos[0] if _equipos else {}
-                            _marca    = _eq1.get("marca", "").strip() or None
-                            _modelo   = _eq1.get("modelo", "").strip() or None
-                            _ns       = (_eq1.get("numero_serie") or _eq1.get("ns") or _eq1.get("serie", "")).strip() or None
-                            _id_eq    = (_eq1.get("id_indicador") or _eq1.get("id_equipo", "")).strip() or None
-                            _ubicacion = (_eq1.get("ubicacion_interna") or _eq1.get("ubicacion", "")).strip() or None
-                            _tipo_ins_nombre = _eq1.get("tipo_instrumento", "").strip() or None
-                            # capacidad y división: normalizar a numérico
-                            def _to_num(v):
-                                if v is None: return None
-                                try:
-                                    return float(str(v).replace(",", ".").replace(" ", "").split()[0])
-                                except Exception:
-                                    return None
-                            _cap_raw  = _eq1.get("capacidad_max") or _eq1.get("capacidad") or ""
-                            _div_raw  = _eq1.get("division_min")  or _eq1.get("division")  or ""
-                            _cap_num  = _to_num(_cap_raw)
-                            _div_num  = _to_num(_div_raw)
-                            _cap_str  = str(_cap_raw).strip() or None
-                            _div_str  = str(_div_raw).strip() or None
-                            # secciones: del eq o del campo general
-                            _secciones = datos.get("secciones_camionera") or None
-                            if not _secciones:
-                                _secciones_raw = _eq1.get("secciones") or _eq1.get("num_secciones")
-                                try: _secciones = int(_secciones_raw) if _secciones_raw else None
-                                except Exception: _secciones = None
-                            # aplica_excentricidad: inferir de tipo instrumento si no hay dato
-                            _aplica_exc = datos.get("aplica_excentricidad")
-                            if _aplica_exc is None:
-                                _tipo_low = (_tipo_ins_nombre or "").lower()
-                                _TIPOS_SIN_EXC = ["tolva", "tanque", "silo", "grúa", "grua", "colgante"]
-                                _aplica_exc = not any(k in _tipo_low for k in _TIPOS_SIN_EXC)
-                            # filas_excentricidad: del campo o por defecto 4 para camionera
-                            _filas_exc = datos.get("filas_excentricidad")
-                            if not _filas_exc and _secciones:
-                                _filas_exc = _secciones
                             cur.execute(
                                 """
                                 INSERT INTO ordenes_servicio (

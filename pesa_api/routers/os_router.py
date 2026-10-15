@@ -575,6 +575,23 @@ async def upload_pdf_tablet_os(
                 p.get("nombre_ing") or p.get("firma_cliente_nombre"), p.get("puesto_ing"),
                 p.get("unidad_medida"), actual_id,
             )
+            fecha_raw = str(p.get("fecha") or p.get("fecha_servicio") or "").strip()
+            if fecha_raw:
+                fecha_iso = fecha_raw[:10]
+                try:
+                    from datetime import date as _date
+                    await db.execute(
+                        "UPDATE ordenes_servicio SET fecha = $1 WHERE id = $2",
+                        _date.fromisoformat(fecha_iso), actual_id,
+                    )
+                except Exception:
+                    try:
+                        await db.execute(
+                            "UPDATE ordenes_servicio SET fecha = $1 WHERE id = $2",
+                            fecha_iso, actual_id,
+                        )
+                    except Exception as e_f:
+                        logger.warning("[UPLOAD-PDF OS] No se pudo actualizar fecha: %s", e_f)
             for idx, r in enumerate(p.get("rep_rows", [])):
                 pid = r.get("posicion_id") or (idx + 1)
                 await db.execute(
@@ -704,6 +721,24 @@ async def sync_data_os(
         payload.get("unidad_medida"),
         actual_id,
     )
+
+    fecha_raw_sd = str(payload.get("fecha") or payload.get("fecha_servicio") or "").strip()
+    if fecha_raw_sd:
+        fecha_iso_sd = fecha_raw_sd[:10]
+        try:
+            from datetime import date as _date
+            await db.execute(
+                "UPDATE ordenes_servicio SET fecha = $1 WHERE id = $2",
+                _date.fromisoformat(fecha_iso_sd), actual_id,
+            )
+        except Exception:
+            try:
+                await db.execute(
+                    "UPDATE ordenes_servicio SET fecha = $1 WHERE id = $2",
+                    fecha_iso_sd, actual_id,
+                )
+            except Exception as e_fsd:
+                logger.warning("[SYNC DATA] No se pudo actualizar fecha: %s", e_fsd)
 
     # Detalle de mediciones
     for idx, r in enumerate(payload.get("repetibilidad", []) or payload.get("rep_rows", [])):

@@ -3,6 +3,8 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../widgets/nombre_recibe.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
@@ -13,6 +15,7 @@ import 'package:signature/signature.dart';
 import '../services/api_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
+import '../services/sync_service.dart';
 import '../widgets/signature_shield.dart';
 
 class LevantamientoMetrologicoScreen extends StatefulWidget {
@@ -78,6 +81,27 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
       final localId = widget.orden['local_id'] as int? ?? 0;
       final folio = (widget.orden['folio_os'] ?? 'LV-00-000').toString();
 
+      final String fechaEjecucionHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final String fechaCierreIso = DateTime.now().toIso8601String();
+
+      final ordenMutable = Map<String, dynamic>.from(widget.orden);
+      ordenMutable['fecha_creacion_logistica'] = ordenMutable['fecha_creacion_logistica'] ?? ordenMutable['fecha'];
+      ordenMutable['fecha'] = fechaEjecucionHoy;
+      ordenMutable['fecha_servicio'] = fechaEjecucionHoy;
+      ordenMutable['fecha_cierre'] = fechaCierreIso;
+
+      widget.orden['fecha'] = fechaEjecucionHoy;
+      widget.orden['fecha_servicio'] = fechaEjecucionHoy;
+      widget.orden['fecha_cierre'] = fechaCierreIso;
+
+      await LocalDbService.instance.actualizarFechaEjecucionAlFinalizar(
+        folio,
+        fechaEjecucionHoy,
+        localId: localId,
+        fechaCierre: fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
+      );
+
       final pdf = pw.Document(title: 'Levantamiento Metrológico - $folio');
       pdf.addPage(
         pw.Page(
@@ -90,11 +114,18 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text('BÁSCULAS PESA — LEVANTAMIENTO METROLÓGICO (LV)', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFFC8102E))),
-                  pw.Text('FOLIO: $folio', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                  pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text('FOLIO: $folio', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                      pw.Text('FECHA: $fechaEjecucionHoy', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                    ],
+                  ),
                 ],
               ),
               pw.Divider(color: PdfColors.grey),
-              pw.Text('Cliente: ${widget.orden['cliente'] ?? ''}', style: const pw.TextStyle(fontSize: 10)),
+              pw.Text('Cliente: ${ordenMutable['cliente'] ?? ''}', style: const pw.TextStyle(fontSize: 10)),
+              pw.Text('Fecha de Ejecución: $fechaEjecucionHoy', style: const pw.TextStyle(fontSize: 10)),
               pw.SizedBox(height: 10),
               pw.Text('LOGÍSTICA DE PESAS PATRÓN:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
               pw.Text('Masa Total Requerida: ${_pesoTotalCtrl.text} | Clase: ${_clasePesasCtrl.text}', style: const pw.TextStyle(fontSize: 9)),
@@ -147,11 +178,27 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
         firmaTecBase64: '',
         firmaCliBase64: fCliB64 ?? '',
         nombreIng: nombre,
+        fechaEjecucion: fechaEjecucionHoy,
+        fechaCierre: fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
       );
 
       bool subio = false;
       try {
-        subio = await ApiService.instance.uploadPdf(folio, file, osId: localId);
+        subio = await ApiService.instance.uploadPdf(
+          folio,
+          file,
+          osId: localId,
+          data: {
+            'tipo_documento': 'LV',
+            'fecha': fechaEjecucionHoy,
+            'fecha_servicio': fechaEjecucionHoy,
+            'fecha_cierre': fechaCierreIso,
+            'observaciones': _observacionesCtrl.text,
+            'nombre_ing': nombre,
+            'firma_cliente_nombre': nombre,
+          },
+        );
       } catch (_) {}
 
       await LocalDbService.instance.savePdfPath(
@@ -161,7 +208,25 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
         pdfB64: base64Encode(pdfBytes),
         isOnline: subio,
         uploadOk: subio,
+        fechaEjecucion: fechaEjecucionHoy,
+        fechaCierre: fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
       );
+
+      if (mounted) {
+        try {
+          context.read<SyncService>().updateLocalOrder(folio, {
+            'fecha': fechaEjecucionHoy,
+            'fecha_servicio': fechaEjecucionHoy,
+            'fecha_cierre': fechaCierreIso,
+            'pdf_path_local': pdfPath,
+            'estado': 'COMPLETADA_DIGITAL',
+            'estatus': 'Cerrado',
+            'sync_check_status': subio ? 'SUBIDA_SERVIDOR' : 'PENDIENTE_SUBIDA',
+            'sync_status': subio ? 'SINCRONIZADO' : 'PENDIENTE',
+          });
+        } catch (_) {}
+      }
 
       if (mounted) {
         setState(() => _saving = false);

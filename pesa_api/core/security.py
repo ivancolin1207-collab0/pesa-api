@@ -32,18 +32,20 @@ SQL_CURRENT_USER = "SELECT id, usuario AS username, nombre_completo, activo, id 
 # cuando Render no tiene PESA_JWT_SECRET configurado en Environment Variables.
 # [FIX-401] Esta era la causa raíz del bucle 401: dos fallbacks distintos entre
 #            config.py y security.py firmaban/validaban con claves diferentes.
-_SECRET = settings.JWT_SECRET  # settings.JWT_SECRET = os.getenv("PESA_JWT_SECRET", "CAMBIAR-EN-PRODUCCION-secret-pesa-2026")
+SECRET_KEY = (os.getenv("PESA_JWT_SECRET") or settings.JWT_SECRET or "CAMBIAR-EN-PRODUCCION-secret-pesa-2026").strip()
+_SECRET = SECRET_KEY
 _ALGO   = settings.JWT_ALGORITHM
-# Access token: 30 días (43,200 min) para técnicos de campo sin conexión frecuente
-_ACCESS_MINUTES = int(os.environ.get(
-    "PESA_JWT_EXPIRE_MINUTES",
-    getattr(settings, "JWT_EXPIRE_MINUTES", 43_200)  # 30 días por defecto
-))
-# Refresh token: 90 días
-_REFRESH_DAYS = int(os.environ.get(
-    "PESA_REFRESH_EXPIRE_DAYS",
-    getattr(settings, "REFRESH_EXPIRE_DAYS", 90)
-))
+# Access token: 365 días (525,600 min) para que las tablets de campo nunca caduquen offline
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 365
+_ACCESS_MINUTES = max(
+    int(os.environ.get("PESA_JWT_EXPIRE_MINUTES", ACCESS_TOKEN_EXPIRE_MINUTES)),
+    ACCESS_TOKEN_EXPIRE_MINUTES,
+)
+# Refresh token: 365 días
+_REFRESH_DAYS = max(
+    int(os.environ.get("PESA_REFRESH_EXPIRE_DAYS", 365)),
+    365,
+)
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:

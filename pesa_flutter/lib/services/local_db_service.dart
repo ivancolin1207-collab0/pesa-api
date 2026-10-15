@@ -111,6 +111,9 @@ class LocalDbService {
       partidas               TEXT,
       tipo_documento         TEXT,
       datos_tecnicos_json    TEXT,
+      fecha_servicio         TEXT,
+      fecha_cierre           TEXT,
+      fecha_creacion_logistica TEXT,
       updated_at             TEXT
     )
   ''';
@@ -156,12 +159,17 @@ class LocalDbService {
         await db.execute(_createTableOrdenesSql);
         try {
           await db.execute('CREATE VIEW IF NOT EXISTS ordenes AS SELECT *, folio_os AS folio, estado AS estatus FROM ordenes_servicio');
+          await db.execute('DROP TRIGGER IF EXISTS tr_update_ordenes_view');
           await db.execute('''
             CREATE TRIGGER IF NOT EXISTS tr_update_ordenes_view
             INSTEAD OF UPDATE ON ordenes
             BEGIN
               UPDATE ordenes_servicio
               SET 
+                fecha = COALESCE(NEW.fecha, ordenes_servicio.fecha),
+                fecha_servicio = COALESCE(NEW.fecha_servicio, NEW.fecha, ordenes_servicio.fecha_servicio),
+                fecha_cierre = COALESCE(NEW.fecha_cierre, ordenes_servicio.fecha_cierre),
+                fecha_creacion_logistica = COALESCE(NEW.fecha_creacion_logistica, ordenes_servicio.fecha_creacion_logistica),
                 estatus = COALESCE(NEW.estatus, ordenes_servicio.estatus),
                 estado = CASE 
                   WHEN NEW.estatus IN ('Cerrado', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL') THEN 'COMPLETADA_DIGITAL'
@@ -312,6 +320,9 @@ class LocalDbService {
             'partidas': 'TEXT',
             'tipo_documento': 'TEXT',
             'datos_tecnicos_json': 'TEXT',
+            'fecha_servicio': 'TEXT',
+            'fecha_cierre': 'TEXT',
+            'fecha_creacion_logistica': 'TEXT',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -326,6 +337,8 @@ class LocalDbService {
 
           // Crear vista 'ordenes' y trigger INSTEAD OF UPDATE para compatibilidad total
           try {
+            await db.execute('DROP TRIGGER IF EXISTS tr_update_ordenes_view');
+            await db.execute('DROP VIEW IF EXISTS ordenes');
             await db.execute('CREATE VIEW IF NOT EXISTS ordenes AS SELECT *, folio_os AS folio, estado AS estatus FROM ordenes_servicio');
             await db.execute('''
               CREATE TRIGGER IF NOT EXISTS tr_update_ordenes_view
@@ -333,6 +346,10 @@ class LocalDbService {
               BEGIN
                 UPDATE ordenes_servicio
                 SET 
+                  fecha = COALESCE(NEW.fecha, ordenes_servicio.fecha),
+                  fecha_servicio = COALESCE(NEW.fecha_servicio, NEW.fecha, ordenes_servicio.fecha_servicio),
+                  fecha_cierre = COALESCE(NEW.fecha_cierre, ordenes_servicio.fecha_cierre),
+                  fecha_creacion_logistica = COALESCE(NEW.fecha_creacion_logistica, ordenes_servicio.fecha_creacion_logistica),
                   estatus = COALESCE(NEW.estatus, ordenes_servicio.estatus),
                   estado = CASE 
                     WHEN NEW.estatus IN ('Cerrado', 'CERRADO', 'COMPLETADA', 'COMPLETADA_DIGITAL') THEN 'COMPLETADA_DIGITAL'
@@ -1090,7 +1107,11 @@ class LocalDbService {
             if (idTecnicoFinal != null && idTecnicoFinal > 0) 'id_tecnico': idTecnicoFinal,
             'modalidad': modSafe,
 
-            // Mantener intactos: estatus 'Cerrado', estado local, mediciones, firmas y pdf_path_local
+            // Mantener intactos: fecha de ejecución real, estatus 'Cerrado', estado local, mediciones, firmas y pdf_path_local
+            if (ex['fecha'] != null && ex['fecha'].toString().trim().isNotEmpty) 'fecha': ex['fecha'],
+            if (ex['fecha_servicio'] != null && ex['fecha_servicio'].toString().trim().isNotEmpty) 'fecha_servicio': ex['fecha_servicio'],
+            if (ex['fecha_cierre'] != null && ex['fecha_cierre'].toString().trim().isNotEmpty) 'fecha_cierre': ex['fecha_cierre'],
+            if (ex['fecha_creacion_logistica'] != null && ex['fecha_creacion_logistica'].toString().trim().isNotEmpty) 'fecha_creacion_logistica': ex['fecha_creacion_logistica'],
             'estado': (ex['estado'] != null && ex['estado'].toString().isNotEmpty && ex['estado'] != 'PROCESO')
                 ? ex['estado']
                 : 'COMPLETADA_DIGITAL',
@@ -1870,6 +1891,66 @@ class LocalDbService {
     }
   }
 
+  /// Actualiza la fecha de ejecución real al finalizar un servicio/formato (OS, RMA, LP, LV, RE)
+  /// tanto en la vista/tabla `ordenes` como en `ordenes_servicio`.
+  Future<void> actualizarFechaEjecucionAlFinalizar(
+    String folio,
+    String fechaEjecucionHoy, {
+    int? localId,
+    String? fechaCierre,
+    String? fechaCreacionLogistica,
+  }) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty && (localId == null || localId <= 0)) return;
+    final db = await _ensureInit();
+    final nowIso = fechaCierre ?? DateTime.now().toIso8601String();
+
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+      final existingCols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+
+      final rawUpd = <String, dynamic>{
+        'fecha': fechaEjecucionHoy,
+        'fecha_servicio': fechaEjecucionHoy,
+        'fecha_cierre': nowIso,
+        if (fechaCreacionLogistica != null && fechaCreacionLogistica.trim().isNotEmpty)
+          'fecha_creacion_logistica': fechaCreacionLogistica.trim(),
+        'is_dirty': 1,
+        'updated_at': DateTime.now().toUtc().toIso8601String(),
+      };
+
+      final sanitized = <String, dynamic>{};
+      rawUpd.forEach((k, v) {
+        if (existingCols.contains(k.toLowerCase())) {
+          sanitized[k] = v;
+        }
+      });
+
+      if (localId != null && localId > 0) {
+        await db.update('ordenes_servicio', sanitized, where: 'local_id = ?', whereArgs: [localId]);
+      }
+      if (folioKey.isNotEmpty) {
+        await db.update(
+          'ordenes_servicio',
+          sanitized,
+          where: 'folio_os = ? OR folio = ?',
+          whereArgs: [folioKey, folioKey],
+        );
+        try {
+          await db.update(
+            'ordenes',
+            {'fecha': fechaEjecucionHoy},
+            where: 'folio_os = ? OR folio = ?',
+            whereArgs: [folioKey, folioKey],
+          );
+        } catch (_) {}
+      }
+      debugPrint('[LocalDB] 📅 Fecha de ejecución actualizada para $folioKey -> $fechaEjecucionHoy');
+    } catch (e) {
+      debugPrint('[LocalDB] Error en actualizarFechaEjecucionAlFinalizar($folioKey): $e');
+    }
+  }
+
   Future<void> savePdfPath(
     int localId,
     String path, {
@@ -1877,6 +1958,9 @@ class LocalDbService {
     String? pdfB64,
     bool isOnline = false,
     bool uploadOk = false,
+    String? fechaEjecucion,
+    String? fechaCierre,
+    String? fechaCreacionLogistica,
   }) async {
     final db = await _ensureInit();
     final folioKey = (folio ?? '').trim();
@@ -1886,9 +1970,18 @@ class LocalDbService {
     final pdfSubido = (isOnline && uploadOk) ? 1 : 0;
     final isDirty = (isOnline && uploadOk) ? 0 : 1;
 
+    final String hoy = (fechaEjecucion != null && fechaEjecucion.trim().isNotEmpty)
+        ? fechaEjecucion.trim()
+        : DateTime.now().toIso8601String().split('T').first;
+
     final updateData = <String, dynamic>{
       'pdf_path_local': path,
       if (pdfB64 != null && pdfB64.isNotEmpty) 'pdf_b64_local': pdfB64,
+      'fecha': hoy,
+      'fecha_servicio': hoy,
+      'fecha_cierre': fechaCierre ?? DateTime.now().toIso8601String(),
+      if (fechaCreacionLogistica != null && fechaCreacionLogistica.trim().isNotEmpty)
+        'fecha_creacion_logistica': fechaCreacionLogistica.trim(),
       'estado': 'COMPLETADA_DIGITAL',
       'estatus': 'Cerrado',
       'sync_check_status': syncCheck,
@@ -1925,7 +2018,7 @@ class LocalDbService {
           whereArgs: [folioKey],
         );
       }
-      debugPrint('[LocalDB] savePdfPath exitoso para $folioKey (localId: $localId, path: $path, syncCheck: $syncCheck)');
+      debugPrint('[LocalDB] savePdfPath exitoso para $folioKey (localId: $localId, path: $path, fecha: $hoy, syncCheck: $syncCheck)');
     } catch (e) {
       debugPrint('[LocalDB] Error en savePdfPath: $e');
     }
@@ -2138,20 +2231,40 @@ class LocalDbService {
     String nombreIng = '',
     String puestoIng = '',
     String? correoCliente,
+    String? fechaEjecucion,
+    String? fechaCierre,
+    String? fechaCreacionLogistica,
   }) async {
     final db = await _ensureInit();
     final whereClause = (localId > 0) ? 'local_id = ?' : 'folio_os = ?';
     final whereArg = (localId > 0) ? localId : folio;
+    final String hoy = (fechaEjecucion != null && fechaEjecucion.trim().isNotEmpty)
+        ? fechaEjecucion.trim()
+        : DateTime.now().toIso8601String().split('T').first;
     final Map<String, dynamic> upd = {
       'firma_tecnico': firmaTecBase64,
       'firma_cliente': firmaCliBase64,
       'nombre_ing':    nombreIng,
       'puesto_ing':    puestoIng,
+      'fecha':         hoy,
       'is_dirty':      1,
     };
     if (correoCliente != null && correoCliente.trim().isNotEmpty) {
       upd['correo_cliente'] = correoCliente.trim();
     }
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+      final existingCols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+      if (existingCols.contains('fecha_servicio')) upd['fecha_servicio'] = hoy;
+      if (existingCols.contains('fecha_cierre')) {
+        upd['fecha_cierre'] = fechaCierre ?? DateTime.now().toIso8601String();
+      }
+      if (fechaCreacionLogistica != null &&
+          fechaCreacionLogistica.trim().isNotEmpty &&
+          existingCols.contains('fecha_creacion_logistica')) {
+        upd['fecha_creacion_logistica'] = fechaCreacionLogistica.trim();
+      }
+    } catch (_) {}
     await db.update(
       'ordenes_servicio',
       upd,

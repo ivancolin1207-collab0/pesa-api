@@ -750,6 +750,23 @@ async def upload_pdf_tablet(
                 p.get("nombre_ing") or p.get("firma_cliente_nombre"), p.get("puesto_ing"),
                 p.get("unidad_medida"), actual_id,
             )
+            fecha_raw = str(p.get("fecha") or p.get("fecha_servicio") or "").strip()
+            if fecha_raw:
+                fecha_iso = fecha_raw[:10]
+                try:
+                    from datetime import date as _date
+                    await db.execute(
+                        "UPDATE ordenes_servicio SET fecha = $1 WHERE id = $2",
+                        _date.fromisoformat(fecha_iso), actual_id,
+                    )
+                except Exception:
+                    try:
+                        await db.execute(
+                            "UPDATE ordenes_servicio SET fecha = $1 WHERE id = $2",
+                            fecha_iso, actual_id,
+                        )
+                    except Exception as e_f:
+                        logger.warning("[UPLOAD-PDF] No se pudo actualizar fecha: %s", e_f)
             for idx, r in enumerate(p.get("rep_rows", [])):
                 pid = r.get("posicion_id") or (idx + 1)
                 await db.execute(

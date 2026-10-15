@@ -4,6 +4,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
 import '../widgets/nombre_recibe.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
@@ -13,6 +15,7 @@ import '../services/api_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
 import '../services/rma_pdf_service.dart';
+import '../services/sync_service.dart';
 import '../widgets/signature_shield.dart';
 
 class RemisionCapturaScreen extends StatefulWidget {
@@ -342,10 +345,31 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
       final localId = widget.orden['local_id'] as int? ?? 0;
       final folio = (widget.orden['folio_os'] ?? widget.orden['folio_rma'] ?? 'RMA').toString();
 
-      final rmaData = Map<String, dynamic>.from(widget.orden);
-      rmaData['firma_cliente_nombre'] = nombreReceptor;
-      rmaData['puesto_ing'] = _puestoReceptorCtrl.text.trim();
-      rmaData['observaciones'] = _observacionesCtrl.text.trim();
+      final String fechaEjecucionHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final String fechaCierreIso = DateTime.now().toIso8601String();
+
+      final ordenMutable = Map<String, dynamic>.from(widget.orden);
+      ordenMutable['fecha_creacion_logistica'] = ordenMutable['fecha_creacion_logistica'] ?? ordenMutable['fecha'];
+      ordenMutable['fecha'] = fechaEjecucionHoy;
+      ordenMutable['fecha_servicio'] = fechaEjecucionHoy;
+      ordenMutable['fecha_cierre'] = fechaCierreIso;
+      ordenMutable['firma_cliente_nombre'] = nombreReceptor;
+      ordenMutable['puesto_ing'] = _puestoReceptorCtrl.text.trim();
+      ordenMutable['observaciones'] = _observacionesCtrl.text.trim();
+      final rmaData = ordenMutable;
+
+      widget.orden['fecha'] = fechaEjecucionHoy;
+      widget.orden['fecha_servicio'] = fechaEjecucionHoy;
+      widget.orden['fecha_cierre'] = fechaCierreIso;
+
+      // Actualizar fecha real en SQLite antes de generar el PDF
+      await LocalDbService.instance.actualizarFechaEjecucionAlFinalizar(
+        folio,
+        fechaEjecucionHoy,
+        localId: localId,
+        fechaCierre: fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
+      );
 
       // Generar PDF
       final pdfBytes = await RmaPdfService.generate(
@@ -374,6 +398,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
         firmaCliBase64: firmaCliB64 ?? '',
         nombreIng: nombreReceptor,
         puestoIng: _puestoReceptorCtrl.text.trim(),
+        fechaEjecucion: fechaEjecucionHoy,
+        fechaCierre: fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
       );
 
       // Subir al servidor si hay conexión
@@ -385,6 +412,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
           osId: localId,
           data: {
             'tipo_documento': 'RMA',
+            'fecha': fechaEjecucionHoy,
+            'fecha_servicio': fechaEjecucionHoy,
+            'fecha_cierre': fechaCierreIso,
             'items': itemsValidos,
             'partidas': itemsValidos,
             'refacciones': itemsValidos,
@@ -397,8 +427,8 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
       try {
         final db = await LocalDbService.instance.database;
         await db.rawUpdate(
-          'UPDATE ordenes_servicio SET partidas = ?, tipo_documento = ? WHERE folio_os = ? OR folio = ?',
-          [jsonEncode(itemsValidos), 'RMA', folio, folio],
+          'UPDATE ordenes_servicio SET partidas = ?, tipo_documento = ?, fecha = ? WHERE folio_os = ? OR folio = ?',
+          [jsonEncode(itemsValidos), 'RMA', fechaEjecucionHoy, folio, folio],
         );
       } catch (_) {}
 
@@ -409,7 +439,25 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
         pdfB64: pdfB64,
         isOnline: subio,
         uploadOk: subio,
+        fechaEjecucion: fechaEjecucionHoy,
+        fechaCierre: fechaCierreIso,
+        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
       );
+
+      if (mounted) {
+        try {
+          context.read<SyncService>().updateLocalOrder(folio, {
+            'fecha': fechaEjecucionHoy,
+            'fecha_servicio': fechaEjecucionHoy,
+            'fecha_cierre': fechaCierreIso,
+            'pdf_path_local': pdfPath,
+            'estado': 'COMPLETADA_DIGITAL',
+            'estatus': 'Cerrado',
+            'sync_check_status': subio ? 'SUBIDA_SERVIDOR' : 'PENDIENTE_SUBIDA',
+            'sync_status': subio ? 'SINCRONIZADO' : 'PENDIENTE',
+          });
+        } catch (_) {}
+      }
 
       if (mounted) {
         setState(() => _saving = false);
