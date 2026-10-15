@@ -381,6 +381,24 @@ class OsPdfGenerator:
         if not _RL_OK:
             raise RuntimeError("ReportLab no instalado. Ejecutar: pip install reportlab")
 
+        folio_check = str((os_data or {}).get("folio_os") or (os_data or {}).get("folio_re") or "").strip().upper()
+        if folio_check.startswith("RE-"):
+            try:
+                from services.re_pdf_generator import re_pdf_generator
+                merged_re = dict(os_data or {})
+                if tecnico_nombre and not merged_re.get("tecnico_nombre"):
+                    merged_re["tecnico_nombre"] = tecnico_nombre
+                if firma_tecnico_b64 and not merged_re.get("firma_tecnico"):
+                    merged_re["firma_tecnico"] = firma_tecnico_b64
+                return re_pdf_generator.generate(
+                    rv_data=merged_re,
+                    output_path=output_path,
+                    force=force,
+                    digital=digital,
+                )
+            except Exception as exc_re:
+                logger.warning("Delegación a re_pdf_generator falló (%s); usando flujo estándar.", exc_re)
+
         # Si los datos vienen dentro de os_data (llamada desde digital_service_dialog)
         repetibilidad = repetibilidad or os_data.get("repetibilidad", []) or []
         excentricidad = excentricidad or os_data.get("excentricidad", []) or []

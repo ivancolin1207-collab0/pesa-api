@@ -72,18 +72,59 @@ class RePdfGenerator:
     @property
     def CW(self): return self.W - self.ML - self.MR
 
-    def generate(self, rv_data, celdas=None, inspeccion=None, perifericos=None, output_path=None):
+    def generate(self, rv_data=None, celdas=None, inspeccion=None, perifericos=None, output_path=None, os_data=None, force=False, digital=False, **kwargs):
         if not _RL_OK:
             raise RuntimeError("ReportLab no instalado")
+
+        raw_in = dict(os_data or rv_data or {})
+        dt_raw = raw_in.get("datos_tecnicos_json")
+        if dt_raw:
+            import json
+            try:
+                dt_parsed = json.loads(dt_raw) if isinstance(dt_raw, str) else dict(dt_raw)
+                if isinstance(dt_parsed, dict):
+                    # Merge preserving top-level non-empty values unless nested has specific RE keys
+                    merged = dict(dt_parsed)
+                    for k, v in raw_in.items():
+                        if v is not None and v != "":
+                            merged[k] = v
+                    # Always prefer RE-specific captured payloads from datos_tecnicos_json if present
+                    for re_k in (
+                        "lecturas_ohms", "func_indicador", "estado_celdas",
+                        "estado_cables", "estado_conectores", "num_celdas", "puntos_apoyo",
+                        "indicador_marca", "indicador_modelo", "indicador_serie", "indicador_id",
+                        "cap_maxima", "div_minima", "celda_a_marca", "celda_a_modelo",
+                        "celda_a_capacidad", "celda_a_cantidad", "celdas_mixtas",
+                        "celda_b_marca", "celda_b_modelo", "celda_b_capacidad", "celda_b_cantidad",
+                        "tipo_estructura", "tipo_instalacion_camionera", "secciones_camionera",
+                    ):
+                        if dt_parsed.get(re_k) not in (None, "", [], {}):
+                            merged[re_k] = dt_parsed[re_k]
+                    raw_in = merged
+            except Exception:
+                pass
+        rv_data = raw_in
+
         if output_path is None:
             import tempfile
             folio = rv_data.get("folio_re") or rv_data.get("folio_os", "RE")
             output_path = str(Path(tempfile.gettempdir()) / f"{folio}.pdf")
 
-        n_a = int(rv_data.get("celda_a_cantidad") or 4)
+        if not force and Path(output_path).exists():
+            logger.info("PDF RE ya existe, omitiendo regeneración: %s", output_path)
+            return output_path
+
+        n_override = rv_data.get("num_celdas") or rv_data.get("puntos_apoyo")
+        n_a = int(rv_data.get("celda_a_cantidad") or n_override or 4)
         mixtas = bool(rv_data.get("celdas_mixtas"))
         n_b = int(rv_data.get("celda_b_cantidad") or 0) if mixtas else 0
-        n_celdas = max(1, n_a + n_b)
+        if n_override:
+            try:
+                n_celdas = max(1, min(12, int(n_override)))
+            except Exception:
+                n_celdas = max(1, n_a + n_b)
+        else:
+            n_celdas = max(1, n_a + n_b)
 
         c = rl_canvas.Canvas(output_path, pagesize=letter)
         folio_txt = rv_data.get("folio_re") or rv_data.get("folio_os", "—")
@@ -101,9 +142,9 @@ class RePdfGenerator:
                 y = self._draw_estructura_diagrama(canvas_obj, y, rv_data)
             lbl_celdas = f"LECTURAS SIN CARGA — {n_celdas} CELDA{'S' if n_celdas > 1 else ''}  (Ohms / mV)"
             y = self._draw_section(canvas_obj, 3, lbl_celdas, y)
-            y = self._draw_ohms_table_re(canvas_obj, y, n_celdas, mixtas, n_a, n_b)
+            y = self._draw_ohms_table_re(canvas_obj, y, n_celdas, mixtas, n_a, n_b, rv_data)
             y = self._draw_section(canvas_obj, 4, "FUNCIONALIDAD DE CELDAS E INDICADOR", y)
-            y = self._draw_funcionalidad_re(canvas_obj, y, n_celdas)
+            y = self._draw_funcionalidad_re(canvas_obj, y, n_celdas, rv_data)
             y = self._draw_section(canvas_obj, 5, "OBSERVACIONES Y FIRMAS", y)
             self._draw_firmas(canvas_obj, y, rv_data)
 
@@ -111,8 +152,16 @@ class RePdfGenerator:
         _render_all(c)
         c.showPage()
 
-        # ── Página 2 — Copia calca idéntica ──────────────────────────────
-        _render_all(c)
+        # ── Página 2 — Copia calca idéntica (solo en modo físico en blanco) ─
+        has_digital = bool(
+            digital
+            or rv_data.get("lecturas_ohms")
+            or rv_data.get("firma_cliente")
+            or rv_data.get("firma_receptor_b64")
+            or str(rv_data.get("estado") or "").upper() in ("FINALIZADA", "CERRADA", "REALIZADO", "SINCRONIZADO")
+        )
+        if not has_digital:
+            _render_all(c)
 
         c.save()
         logger.info("PDF RE (diagnostico) generado: %s", output_path)
@@ -179,7 +228,19 @@ class RePdfGenerator:
         # Línea divisoria removida según solicitud
         sep_y = top - 52
         c.setFillColor(_BLACK); c.setFont("Helvetica-Bold", 8)
-        c.drawString(self.ML, sep_y - 10, "FECHA: _______________________________")
+        fecha_val = str(rv.get("fecha") or rv.get("fecha_servicio") or "").strip()
+        has_dig = bool(
+            rv.get("lecturas_ohms")
+            or rv.get("firma_cliente")
+            or rv.get("firma_receptor_b64")
+            or str(rv.get("estado") or "").upper() in ("FINALIZADA", "CERRADA", "REALIZADO", "SINCRONIZADO")
+        )
+        if fecha_val and has_dig:
+            c.drawString(self.ML, sep_y - 10, f"FECHA: {fecha_val}")
+            c.setStrokeColor(_GRAY_MED); c.setLineWidth(0.4)
+            c.line(self.ML + 34, sep_y - 11.5, self.ML + 180, sep_y - 11.5)
+        else:
+            c.drawString(self.ML, sep_y - 10, "FECHA: _______________________________")
         return sep_y - 14
 
     def _draw_section(self, c, num, title, y, gap=2):
@@ -236,11 +297,17 @@ class RePdfGenerator:
     def _draw_equipo(self, c, y, rv):
         fh = 18; y -= 1
 
+        def _pick(*keys):
+            for k in keys:
+                v = rv.get(k)
+                if v is not None and str(v).strip() not in ("", "None", "null"):
+                    return str(v).strip()
+            return ""
+
         def field_row(items):
             nonlocal y
             x = self.ML
-            for lbl, key, w in items:
-                raw = str(rv.get(key, "") or "").strip()
+            for lbl, raw, w in items:
                 c.setFillColor(_GRAY_DK); c.setFont("Helvetica-Bold", 6)
                 c.drawString(x + 1, y - 4, lbl + ":")
                 if raw:
@@ -253,15 +320,19 @@ class RePdfGenerator:
 
         cw = self.CW
         field_row([
-            ("MARCA INDICADOR",   "indicador_marca",  cw * 0.22),
-            ("MODELO INDICADOR",  "indicador_modelo", cw * 0.26),
-            ("No. DE SERIE",      "indicador_serie",  cw * 0.22),
-            ("ID INDICADOR",      "indicador_id",     cw * 0.22),
+            ("MARCA INDICADOR",   _pick("indicador_marca", "marca", "instrumento_marca"),  cw * 0.22),
+            ("MODELO INDICADOR",  _pick("indicador_modelo", "modelo", "instrumento_modelo"), cw * 0.26),
+            ("No. DE SERIE",      _pick("indicador_serie", "ns", "serie", "numero_serie", "instrumento_serie"),  cw * 0.22),
+            ("ID INDICADOR",      _pick("indicador_id", "id_indicador", "id_equipo", "instrumento_id"),     cw * 0.22),
         ])
-        field_row([
-            ("CAPACIDAD MAX.",    "cap_maxima",  cw * 0.25),
-            ("DIVISION MIN. (d)", "div_minima",  cw * 0.25),
-        ])
+        ub_val = _pick("ubicacion", "ubicacion_interna", "planta")
+        row2 = [
+            ("CAPACIDAD MAX.",    _pick("cap_maxima", "capacidad_maxima", "alcance_max", "instrumento_capacidad"),  cw * 0.25),
+            ("DIVISION MIN. (d)", _pick("div_minima", "division_minima", "instrumento_division"),  cw * 0.25),
+        ]
+        if ub_val:
+            row2.append(("UBICACION", ub_val, cw * 0.42))
+        field_row(row2)
         return y - 2
 
 
@@ -304,9 +375,10 @@ class RePdfGenerator:
             c.rect(self.ML, y - row_h, cw, row_h, fill=0, stroke=1)
             y -= row_h
 
+        n_cant_a = rv.get("celda_a_cantidad") or rv.get("num_celdas") or rv.get("puntos_apoyo") or 4
         if not mixtas:
             draw_row("Unico", rv.get("celda_a_marca"), rv.get("celda_a_modelo"),
-                     rv.get("celda_a_capacidad"), rv.get("celda_a_cantidad"), _WHITE)
+                     rv.get("celda_a_capacidad"), n_cant_a, _WHITE)
         else:
             draw_row("Tipo A", rv.get("celda_a_marca"), rv.get("celda_a_modelo"),
                      rv.get("celda_a_capacidad"), rv.get("celda_a_cantidad"), _GRAY_LT)
@@ -315,7 +387,37 @@ class RePdfGenerator:
         return y - 2
 
 
-    def _draw_ohms_table_re(self, c, y, n, mixtas, n_a, n_b):
+    def _get_ohms_cell_val(self, rv, row_idx, key, param_lbl, cell_idx):
+        """Extrae el valor digital capturado para la fila `row_idx` (0..10) y celda `cell_idx` (0..n-1)."""
+        if not rv:
+            return ""
+        raw = rv.get("lecturas_ohms")
+        if isinstance(raw, list):
+            if row_idx < len(raw):
+                row_item = raw[row_idx]
+                if isinstance(row_item, list) and cell_idx < len(row_item):
+                    return str(row_item[cell_idx] or "").strip()
+                if isinstance(row_item, dict):
+                    for ck in (f"C-{cell_idx+1}", f"c{cell_idx+1}", str(cell_idx), str(cell_idx+1)):
+                        if ck in row_item and row_item[ck] is not None:
+                            return str(row_item[ck]).strip()
+        elif isinstance(raw, dict):
+            for rk in (str(row_idx), key, param_lbl, param_lbl.replace("  ", " ")):
+                if rk in raw:
+                    row_item = raw[rk]
+                    if isinstance(row_item, list) and cell_idx < len(row_item):
+                        return str(row_item[cell_idx] or "").strip()
+                    if isinstance(row_item, dict):
+                        for ck in (f"C-{cell_idx+1}", f"c{cell_idx+1}", str(cell_idx), str(cell_idx+1)):
+                            if ck in row_item and row_item[ck] is not None:
+                                return str(row_item[ck]).strip()
+            # O estructura por celda {"C-1": [v0..v10]}
+            c_key = f"C-{cell_idx+1}"
+            if c_key in raw and isinstance(raw[c_key], list) and row_idx < len(raw[c_key]):
+                return str(raw[c_key][row_idx] or "").strip()
+        return ""
+
+    def _draw_ohms_table_re(self, c, y, n, mixtas, n_a, n_b, rv=None):
         cw = self.CW; lbl_w = 114; unit_w = 26
         avail_w = cw - lbl_w - unit_w
         cell_w = max(26, avail_w / n)
@@ -349,10 +451,15 @@ class RePdfGenerator:
             c.drawCentredString(self.ML + lbl_w + unit_w / 2, y - row_h + 3.5, unit)
             for i in range(n):
                 cx_cell = self.ML + lbl_w + unit_w + i * cell_w
-                mid_y = y - row_h + 5.5
-                # Línea sólida fina y limpia, sin guiones
-                c.setStrokeColor(colors.HexColor("#DDDDDD")); c.setLineWidth(0.5)
-                c.line(cx_cell + 2, mid_y, cx_cell + cell_w - 2, mid_y)
+                val_cell = self._get_ohms_cell_val(rv, row_idx, key, param_lbl, i)
+                if val_cell:
+                    c.setFillColor(_BLACK); c.setFont("Helvetica-Bold", 6.8)
+                    c.drawCentredString(cx_cell + cell_w / 2, y - row_h + 3.2, val_cell[:12])
+                else:
+                    mid_y = y - row_h + 5.5
+                    # Línea sólida fina y limpia, sin guiones
+                    c.setStrokeColor(colors.HexColor("#DDDDDD")); c.setLineWidth(0.5)
+                    c.line(cx_cell + 2, mid_y, cx_cell + cell_w - 2, mid_y)
             c.setStrokeColor(_GRAY_MED); c.setLineWidth(0.2)
             c.rect(self.ML, y - row_h, cw, row_h, fill=0, stroke=1)
             for i in range(n + 1):
@@ -362,7 +469,7 @@ class RePdfGenerator:
             y -= row_h
         return y - 3
 
-    def _draw_funcionalidad_re(self, c, y, n):
+    def _draw_funcionalidad_re(self, c, y, n, rv=None):
         cw = self.CW; col_ind_w = cw * 0.46; col_cel_w = cw * 0.50; hdr_h = 16; row_h = 12
         y -= 1
         c.setFillColor(_GRAY_HDR); c.rect(self.ML, y - hdr_h, col_ind_w, hdr_h, fill=1, stroke=0)
@@ -373,54 +480,123 @@ class RePdfGenerator:
         c.setFillColor(_WHITE); c.setFont("Helvetica-Bold", 7.5)
         c.drawString(cel_x + 4, y - hdr_h + 5, "ESTADO INDIVIDUAL DE CELDAS")
         y -= hdr_h
-        max_rows = max(len(_INDICADOR_ITEMS), n)
 
-        def chk(cx, cy, size=6):
-            c.setStrokeColor(_BLACK); c.setLineWidth(0.6); c.rect(cx, cy, size, size, fill=0, stroke=1)
+        ind_items = [
+            "Indicador de Peso",
+            "Teclado / Botones",
+            "Luminosidad / Display",
+            "Convertidor Analogico",
+            "Caja Sumadora",
+        ] + [f"Potenciometro {k+1}" for k in range(n)]
+
+        max_rows = max(len(ind_items), n)
+        if max_rows > 9:
+            row_h = max(9.0, 108.0 / max_rows)
+
+        func_ind = (rv or {}).get("func_indicador") or {}
+        est_celdas = (rv or {}).get("estado_celdas") or {}
+        est_cables = str((rv or {}).get("estado_cables") or "").strip().upper()
+        est_conect = str((rv or {}).get("estado_conectores") or "").strip().upper()
+
+        def _is_ind_checked(item_label, idx):
+            if isinstance(func_ind, dict):
+                for k in (item_label, str(idx)):
+                    if k in func_ind:
+                        v = func_ind[k]
+                        return bool(v) and str(v).upper() not in ("FALSE", "0", "NO", "FALLA")
+            elif isinstance(func_ind, list) and idx < len(func_ind):
+                return bool(func_ind[idx])
+            return False
+
+        def _get_celda_state(idx):
+            if isinstance(est_celdas, dict):
+                for k in (f"Celda {idx+1}", f"C-{idx+1}", str(idx+1), str(idx)):
+                    if k in est_celdas and est_celdas[k]:
+                        return str(est_celdas[k]).strip().upper()
+            elif isinstance(est_celdas, list) and idx < len(est_celdas):
+                val = est_celdas[idx]
+                if isinstance(val, dict):
+                    return str(val.get("estado") or "").strip().upper()
+                return str(val or "").strip().upper()
+            return ""
+
+        def chk(cx, cy, size=6, checked=False):
+            c.setStrokeColor(_BLACK); c.setLineWidth(0.6)
+            if checked:
+                c.setFillColor(_DARK_HDR)
+                c.rect(cx, cy, size, size, fill=1, stroke=1)
+                c.setFillColor(_WHITE); c.setFont("Helvetica-Bold", 5.5)
+                c.drawCentredString(cx + size / 2, cy + 1.1, "X")
+            else:
+                c.rect(cx, cy, size, size, fill=0, stroke=1)
 
         for i in range(max_rows):
             bg = colors.HexColor("#F8F9FA") if i % 2 == 0 else _WHITE
             c.setFillColor(bg)
             
             # Left block (Indicador)
-            if i < len(_INDICADOR_ITEMS):
+            if i < len(ind_items):
                 c.rect(self.ML, y - row_h, col_ind_w, row_h, fill=1, stroke=0)
-                chk(self.ML + 3, y - row_h + 3)
+                chk(self.ML + 3, y - row_h + (row_h - 6) / 2, checked=_is_ind_checked(ind_items[i], i))
                 c.setFillColor(_BLACK); c.setFont("Helvetica", 6.5)
-                c.drawString(self.ML + 12, y - row_h + 4, _INDICADOR_ITEMS[i])
+                c.drawString(self.ML + 12, y - row_h + (row_h - 5) / 2, ind_items[i])
                 c.setStrokeColor(_GRAY_MED); c.setLineWidth(0.2)
                 c.rect(self.ML, y - row_h, col_ind_w, row_h, fill=0, stroke=1)
             
             # Right block (Celdas)
             if i < n:
+                c_st = _get_celda_state(i)
                 c.setFillColor(bg)
                 c.rect(cel_x, y - row_h, col_cel_w, row_h, fill=1, stroke=0)
                 c.setFillColor(_BLACK); c.setFont("Helvetica-Bold", 6.5)
-                c.drawString(cel_x + 3, y - row_h + 4, f"Celda {i+1}:")
-                chk(cel_x + 46, y - row_h + 3)
-                c.setFont("Helvetica", 6.5); c.drawString(cel_x + 55, y - row_h + 4, "OK")
-                chk(cel_x + 75, y - row_h + 3); c.drawString(cel_x + 84, y - row_h + 4, "Falla")
+                c.drawString(cel_x + 3, y - row_h + (row_h - 5) / 2, f"Celda {i+1}:")
+                chk(cel_x + 46, y - row_h + (row_h - 6) / 2, checked=(c_st == "OK"))
+                c.setFillColor(_BLACK); c.setFont("Helvetica", 6.5)
+                c.drawString(cel_x + 55, y - row_h + (row_h - 5) / 2, "OK")
+                chk(cel_x + 75, y - row_h + (row_h - 6) / 2, checked=(c_st in ("FALLA", "MAL", "DEFECTUOSA")))
+                c.setFillColor(_BLACK); c.setFont("Helvetica", 6.5)
+                c.drawString(cel_x + 84, y - row_h + (row_h - 5) / 2, "Falla")
                 c.setStrokeColor(_GRAY_MED); c.setLineWidth(0.2)
                 c.rect(cel_x, y - row_h, col_cel_w, row_h, fill=0, stroke=1)
 
             y -= row_h
             
-        c.setFillColor(colors.HexColor("#F8F9FA")); c.rect(self.ML, y - row_h, cw, row_h, fill=1, stroke=0)
+        row_h_bot = 12
+        c.setFillColor(colors.HexColor("#F8F9FA")); c.rect(self.ML, y - row_h_bot, cw, row_h_bot, fill=1, stroke=0)
         c.setFillColor(_BLACK); c.setFont("Helvetica-Bold", 6.5)
-        c.drawString(self.ML + 4, y - row_h + 4, "Cables:")
-        chk(self.ML + 44, y - row_h + 3)
-        c.setFont("Helvetica", 6.5); c.drawString(self.ML + 53, y - row_h + 4, "OK")
-        chk(self.ML + 70, y - row_h + 3); c.drawString(self.ML + 79, y - row_h + 4, "Falla")
+        c.drawString(self.ML + 4, y - row_h_bot + 4, "Cables:")
+        chk(self.ML + 44, y - row_h_bot + 3, checked=(est_cables == "OK"))
+        c.setFillColor(_BLACK); c.setFont("Helvetica", 6.5); c.drawString(self.ML + 53, y - row_h_bot + 4, "OK")
+        chk(self.ML + 70, y - row_h_bot + 3, checked=(est_cables == "FALLA"))
+        c.setFillColor(_BLACK); c.setFont("Helvetica", 6.5); c.drawString(self.ML + 79, y - row_h_bot + 4, "Falla")
         
-        c.setFont("Helvetica-Bold", 6.5); c.drawString(self.ML + 110, y - row_h + 4, "Conectores:")
-        chk(self.ML + 162, y - row_h + 3); c.setFont("Helvetica", 6.5)
-        c.drawString(self.ML + 171, y - row_h + 4, "OK")
-        chk(self.ML + 188, y - row_h + 3); c.drawString(self.ML + 197, y - row_h + 4, "Falla")
+        c.setFillColor(_BLACK); c.setFont("Helvetica-Bold", 6.5); c.drawString(self.ML + 110, y - row_h_bot + 4, "Conectores:")
+        chk(self.ML + 162, y - row_h_bot + 3, checked=(est_conect == "OK"))
+        c.setFillColor(_BLACK); c.setFont("Helvetica", 6.5); c.drawString(self.ML + 171, y - row_h_bot + 4, "OK")
+        chk(self.ML + 188, y - row_h_bot + 3, checked=(est_conect == "FALLA"))
+        c.setFillColor(_BLACK); c.setFont("Helvetica", 6.5); c.drawString(self.ML + 197, y - row_h_bot + 4, "Falla")
         
         c.setStrokeColor(_GRAY_MED); c.setLineWidth(0.2)
-        c.rect(self.ML, y - row_h, cw, row_h, fill=0, stroke=1)
-        return y - row_h - 4
+        c.rect(self.ML, y - row_h_bot, cw, row_h_bot, fill=0, stroke=1)
+        return y - row_h_bot - 4
 
+
+    def _draw_b64_sig(self, c, b64_str, x, y, w, h):
+        if not b64_str:
+            return
+        try:
+            import base64, io
+            from reportlab.lib.utils import ImageReader
+            s = str(b64_str).strip()
+            if "," in s and s.lower().startswith("data:"):
+                s = s.split(",", 1)[1].strip()
+            if len(s) < 50:
+                return
+            raw = base64.b64decode(s + "=" * (-len(s) % 4))
+            img = ImageReader(io.BytesIO(raw))
+            c.drawImage(img, x, y, width=w, height=h, preserveAspectRatio=True, mask="auto")
+        except Exception:
+            pass
 
     def _draw_firmas(self, c, y, rv):
         cw = self.CW; obs_h = 25
@@ -429,10 +605,10 @@ class RePdfGenerator:
         c.rect(self.ML, y - obs_h, cw, obs_h, fill=0, stroke=1)
         c.setFillColor(_GRAY_DK); c.setFont("Helvetica-Bold", 6)
         c.drawString(self.ML + 4, y - 8, "OBSERVACIONES:")
-        obs_txt = rv.get("observaciones", "") or rv.get("observaciones_tecnico", "") or ""
+        obs_txt = str(rv.get("observaciones", "") or rv.get("observaciones_tecnico", "") or "")
         c.setFont("Helvetica", 6.5); c.setFillColor(_BLACK)
-        for ln_idx, line in enumerate(obs_txt.splitlines()[:1]):
-            c.drawString(self.ML + 6, y - 18, line[:120])
+        for ln_idx, line in enumerate(obs_txt.splitlines()[:2]):
+            c.drawString(self.ML + 6, y - 16 - ln_idx * 7, line[:130])
         y -= obs_h + 35
         col_w = cw * 0.42
         
@@ -443,9 +619,26 @@ class RePdfGenerator:
         else:
             tecnico_texto = str(tecnico_raw).strip()
 
+        cliente_company = str(rv.get("cliente") or rv.get("razon_social") or "").strip().lower()
+        rec_raw = (
+            rv.get("firma_cliente_nombre")
+            or rv.get("nombre_quien_recibe")
+            or rv.get("nombre_receptor")
+            or rv.get("nombre_ing")
+            or ""
+        )
+        rec_texto = str(rec_raw).strip()
+        if rec_texto.lower() == cliente_company:
+            rec_texto = ""
+
+        firma_tec_b64 = rv.get("firma_tecnico") or rv.get("firma_tecnico_b64") or rv.get("firma_digital")
+        firma_cli_b64 = rv.get("firma_cliente") or rv.get("firma_receptor_b64") or rv.get("firma_cliente_b64")
+        self._draw_b64_sig(c, firma_tec_b64, self.ML + col_w * 0.15, y + 2, col_w * 0.7, 30)
+        self._draw_b64_sig(c, firma_cli_b64, self.ML + cw - col_w + col_w * 0.15, y + 2, col_w * 0.7, 30)
+
         for lbl, name, x_pos in [
             ("TECNICO RESPONSABLE", tecnico_texto, self.ML),
-            ("FIRMA CLIENTE", "", self.ML + cw - col_w),
+            ("FIRMA CLIENTE", rec_texto, self.ML + cw - col_w),
         ]:
             c.setStrokeColor(_GRAY_DK); c.setLineWidth(0.5)
             c.line(x_pos, y, x_pos + col_w, y)

@@ -3892,12 +3892,12 @@ class BatchGeneratorWidget(QWidget):
 
                         # ── Extraer datos del primer equipo (instrumento principal) ──
                         _eq1 = _equipos[0] if _equipos else {}
-                        _marca    = _eq1.get("marca", "").strip() or None
-                        _modelo   = _eq1.get("modelo", "").strip() or None
-                        _ns       = (_eq1.get("numero_serie") or _eq1.get("ns") or _eq1.get("serie", "")).strip() or None
-                        _id_eq    = (_eq1.get("id_indicador") or _eq1.get("id_equipo", "")).strip() or None
-                        _ubicacion = (_eq1.get("ubicacion_interna") or _eq1.get("ubicacion", "")).strip() or None
-                        _tipo_ins_nombre = _eq1.get("tipo_instrumento", "").strip() or None
+                        _marca    = (_eq1.get("marca") or datos.get("indicador_marca") or datos.get("celda_a_marca") or "").strip() or None
+                        _modelo   = (_eq1.get("modelo") or datos.get("indicador_modelo") or datos.get("celda_a_modelo") or "").strip() or None
+                        _ns       = (_eq1.get("numero_serie") or _eq1.get("ns") or _eq1.get("serie") or datos.get("indicador_serie") or "").strip() or None
+                        _id_eq    = (_eq1.get("id_indicador") or _eq1.get("id_equipo") or datos.get("indicador_id") or "").strip() or None
+                        _ubicacion = (_eq1.get("ubicacion_interna") or _eq1.get("ubicacion") or datos.get("ubicacion") or "").strip() or None
+                        _tipo_ins_nombre = (_eq1.get("tipo_instrumento") or datos.get("tipo_estructura") or "").strip() or None
                         # capacidad y división: normalizar a numérico
                         def _to_num(v):
                             if v is None: return None
@@ -3905,8 +3905,8 @@ class BatchGeneratorWidget(QWidget):
                                 return float(str(v).replace(",", ".").replace(" ", "").split()[0])
                             except Exception:
                                 return None
-                        _cap_raw  = _eq1.get("capacidad_max") or _eq1.get("capacidad") or ""
-                        _div_raw  = _eq1.get("division_min")  or _eq1.get("division")  or ""
+                        _cap_raw  = _eq1.get("capacidad_max") or _eq1.get("capacidad") or datos.get("cap_maxima") or datos.get("celda_a_capacidad") or ""
+                        _div_raw  = _eq1.get("division_min")  or _eq1.get("division")  or datos.get("div_minima") or ""
                         _cap_num  = _to_num(_cap_raw)
                         _div_num  = _to_num(_div_raw)
                         _cap_str  = str(_cap_raw).strip() or None
