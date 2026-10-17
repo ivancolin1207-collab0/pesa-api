@@ -50,7 +50,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QHeaderView, QDoubleSpinBox,
     QAbstractSpinBox, QGroupBox, QSizePolicy, QFrame, QButtonGroup,
     QRadioButton, QScrollArea, QCheckBox, QSpinBox, QStackedWidget,
-    QAbstractItemView, QAbstractScrollArea, QComboBox,
+    QAbstractItemView, QAbstractScrollArea, QComboBox, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QLocale
 from PyQt6.QtGui import QColor, QFont, QBrush

@@ -10,6 +10,7 @@ Flujo:
 """
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import datetime
@@ -24,6 +25,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QScrollArea, QSizePolicy,
     QButtonGroup, QRadioButton, QMessageBox,
     QProgressBar, QAbstractItemView, QTextEdit, QLineEdit, QCompleter, QListView,
+    QTabWidget,
 )
 
 logger = logging.getLogger(__name__)
@@ -671,13 +673,16 @@ class EquipoCard(QFrame):
 
     def _on_tipo_inst_changed(self) -> None:
         """
-        Detecta si el tipo de instrumento es 'Báscula tipo Tanque'.
-        Fuerza Excentricidad = NO y muestra bloque de enlaces.
+        Detecta el tipo de instrumento y ajusta automáticamente Excentricidad,
+        Motivo No Aplica y Puntos de Apoyo por defecto.
         """
         if not hasattr(self, '_cmb_aplica_exc') or not hasattr(self, '_cmb_tipo_inst'):
             return
         tipo_txt = self._cmb_tipo_inst.currentText()
-        es_tanque = "Tanque" in tipo_txt
+        t_low = tipo_txt.lower()
+        es_tanque = "tanque" in t_low or "silo" in t_low
+        es_colgante = any(k in t_low for k in ["colgante", "grúa", "grua", "gancho"])
+        es_tolva = "tolva" in t_low
 
         if es_tanque:
             self._cmb_aplica_exc.setCurrentText("NO")
@@ -686,11 +691,25 @@ class EquipoCard(QFrame):
                 self._cmb_no.setCurrentText("Báscula tipo Tanque")
             except Exception:
                 pass
+        elif es_colgante:
+            self._cmb_aplica_exc.setEnabled(True)
+            self._cmb_aplica_exc.setCurrentText("NO")
+            try:
+                self._cmb_no.setCurrentText("Báscula tipo Gancho / Grúa suspendida")
+            except Exception:
+                pass
+        elif es_tolva:
+            self._cmb_aplica_exc.setEnabled(True)
+            self._cmb_aplica_exc.setCurrentText("NO")
+            try:
+                self._cmb_no.setCurrentText("Báscula tipo Tolva")
+            except Exception:
+                pass
         else:
             self._cmb_aplica_exc.setEnabled(True)
+            self._cmb_aplica_exc.setCurrentText("SÍ")
 
         # Regla metrológica de Puntos de Apoyo por default según Tipo de Instrumento
-        t_low = tipo_txt.lower()
         if "plataforma" in t_low or "piso" in t_low:
             def_pa = "5"
         elif "camionera" in t_low or "puente" in t_low or "ferrocarril" in t_low or "ferrovi" in t_low:
@@ -703,6 +722,8 @@ class EquipoCard(QFrame):
             def_pa = "4"
         else:
             def_pa = "5"
+
+        self._puntos_apoyo_default = int(def_pa)
 
         p = self.parent()
         while p is not None:
@@ -845,7 +866,7 @@ class EquipoCard(QFrame):
         aplica_exc = aplica_txt in ("SÍ", "SI", "Sí", "Yes", "yes", "true", "True")
 
         # ── Puntos / Filas de Excentricidad (spinbox dedicado) ────────────────
-        puntos_exc = _spin("_spin_filas_exc", 5) if aplica_exc else 5
+        puntos_exc = _spin("_spin_filas_exc", 5) if aplica_exc else getattr(self, "_puntos_apoyo_default", 1)
 
         # ── Geometría y Secciones ─────────────────────────────────────────────
         geo = None
@@ -871,7 +892,7 @@ class EquipoCard(QFrame):
                 tipo_no = "tanque"
             elif "Tolva" in no_txt or "Tolva" in tipo_inst_txt:
                 tipo_no = "tolva"
-            elif "Gancho" in no_txt or "Grúa" in no_txt or "Gancho" in tipo_inst_txt or "Grúa" in tipo_inst_txt:
+            elif "Gancho" in no_txt or "Grúa" in no_txt or "Colgante" in tipo_inst_txt or "Gancho" in tipo_inst_txt or "Grúa" in tipo_inst_txt:
                 tipo_no = "gancho"
             elif "Patín" in no_txt or "Transpaleta" in no_txt or "Patín" in tipo_inst_txt or "Transpaleta" in tipo_inst_txt:
                 tipo_no = "patin"
@@ -884,6 +905,8 @@ class EquipoCard(QFrame):
         ) and _cmb("_cmb_usa_enlaces", "SÍ") == "SÍ"
         
         num_enlace_val = _spin("_spin_enlaces", 8) if es_enlace_val else None
+        filas_exc_val = max(puntos_exc, secciones) if (aplica_exc and secciones) else puntos_exc
+        pts_exact_val = self._spin_pts_exact.value()
 
         return {
             # ── Folio Manual ───────────────────────────────────────────────────
@@ -897,13 +920,18 @@ class EquipoCard(QFrame):
             "equipo_division":     _v("_inp_division") or None,
             "equipo_dve":          _v("_inp_dve")      or None,
             "equipo_ubicacion":    _v("_inp_ubicacion") or None,
-            # Alias adicionales para compatibilidad con os_pdf_generator
+            # Alias adicionales para compatibilidad con os_pdf_generator y tablet
             "marca":               _v("_inp_marca"),
             "modelo":              _v("_inp_modelo"),
             "serie":               _v("_inp_ns"),
             "ns":                  _v("_inp_ns"),
+            "id_indicador":        _v("_inp_id"),
             "id_equipo":           _v("_inp_id"),
+            "capacidad_maxima":    _v("_inp_alcance"),
+            "capacidad_max":       _v("_inp_alcance"),
             "alcance_max":         _v("_inp_alcance"),
+            "division_minima":     _v("_inp_division"),
+            "division_min":        _v("_inp_division"),
             "div_minima":          _v("_inp_division"),
             "dve":                 _v("_inp_dve"),
             "ubicacion":           _v("_inp_ubicacion"),
@@ -919,19 +947,21 @@ class EquipoCard(QFrame):
             "aplica_excentricidad":    aplica_exc,
             "geometria_plataforma":    geo,
             "tipo_no_aplica_exc":      tipo_no,
-            # Spinbox dedicado de filas de excentricidad.
-            # Para Camionera, se toma el mayor entre filas y secciones para no recortar.
+            "puntos_apoyo":            filas_exc_val,
             "puntos_excentricidad":    puntos_exc,
-            "filas_excentricidad":     max(puntos_exc, secciones) if (aplica_exc and secciones) else puntos_exc,
+            "filas_excentricidad":     filas_exc_val,
             "num_secciones":           secciones if secciones else puntos_exc,  # alias Camionera
             # ── Enlaces de Sustitución (Báscula tipo Tanque) ───────────────────
+            "aplica_sustitucion":      es_enlace_val,
+            "usa_sustitucion":         es_enlace_val,
             "es_enlace_sustitucion":   es_enlace_val,
             "num_enlaces_sustitucion": num_enlace_val,
             "es_sustitucion":          es_enlace_val,       # Alias pedido
             "num_enlaces":             num_enlace_val,      # Alias pedido
             # ── Puntos de Exactitud por instrumento ────────────────────────────
-            "filas_exactitud":         self._spin_pts_exact.value(),
-            "puntos_exactitud":        self._spin_pts_exact.value(),
+            "pts_exactitud":           pts_exact_val,
+            "filas_exactitud":         pts_exact_val,
+            "puntos_exactitud":        pts_exact_val,
             # ── Hologramas (solo relevante si el servicio contiene 'inspección') ──
             "holograma_anterior":      _v("_inp_holograma_ant"),
             "holograma_actualizado":   _v("_inp_holograma_act"),
@@ -3854,50 +3884,53 @@ class BatchGeneratorWidget(QWidget):
                         _rango_lote = f"{folio_ini} al {folio_fin}"
                         logger.info("[RESERVAR] rango_lote=%r  id_lote=%s", _rango_lote, id_lote)
 
+                    # ── Extraer lista de paneles de instrumentos (_equipos) antes del bucle ──
+                    _equipos = []
+                    if hasattr(self, 'obtener_datos_instrumentos'):
+                        try:
+                            _equipos = self.obtener_datos_instrumentos() or []
+                        except Exception:
+                            _equipos = []
+                    elif hasattr(self, '_equipo_cards') and self._equipo_cards:
+                        try:
+                            _equipos = [card.get_data() for card in self._equipo_cards]
+                        except Exception:
+                            _equipos = []
+                    if not _equipos and 'equipos' in datos and datos.get('equipos'):
+                        _equipos = datos.get('equipos') or []
+                    if not _equipos:
+                        _equipos = [datos]
+
                     for i in range(cant):
                         consec = consec_base + i
                         folio = f"{prefix}-{consec}"
 
-                        # Serializar datos_tecnicos_json (partidas, refacciones, items y snapshot)
-                        _rma_items = datos.get("items") or datos.get("partidas") or []
-                        _dt_dict = {
-                            "partidas": _rma_items,
-                            "refacciones": _rma_items,
-                            "items": _rma_items,
-                        }
-                        if tipo == "RMA":
-                            _dt_dict["folio_rma"] = folio
-                        for _k, _v in datos.items():
-                            if _k not in ("fecha", "items", "partidas", "refacciones") and _v is not None:
-                                try:
-                                    _dt_dict[_k] = _v
-                                except Exception:
-                                    pass
-                        _dt_json_str = json.dumps(_dt_dict, ensure_ascii=False, default=str)
+                        # ── Obtener diccionario exclusivo del instrumento i (NUNCA compartir referencia al primero) ──
+                        datos_eq = copy.deepcopy(_equipos[i]) if i < len(_equipos) else copy.deepcopy(_equipos[0])
 
-                        # ── Inicializar _equipos y datos del instrumento de forma segura antes de cualquier bloque ──
-                        _equipos = []
-                        if hasattr(self, 'obtener_datos_instrumentos'):
-                            try:
-                                _equipos = self.obtener_datos_instrumentos() or []
-                            except Exception:
-                                _equipos = []
-                        elif 'equipos' in datos and datos.get('equipos'):
-                            _equipos = datos.get('equipos') or []
-                        else:
-                            _equipos = [datos]
+                        marca                = datos_eq.get('marca') or datos_eq.get('equipo_marca') or datos.get('indicador_marca') or datos.get('celda_a_marca') or ""
+                        modelo               = datos_eq.get('modelo') or datos_eq.get('equipo_modelo') or datos.get('indicador_modelo') or datos.get('celda_a_modelo') or ""
+                        serie                = datos_eq.get('serie') or datos_eq.get('ns') or datos_eq.get('numero_serie') or datos_eq.get('equipo_ns') or datos.get('indicador_serie') or ""
+                        id_indicador         = datos_eq.get('id_indicador') or datos_eq.get('id_equipo') or datos_eq.get('equipo_id') or datos.get('indicador_id') or ""
+                        capacidad_maxima     = datos_eq.get('capacidad_maxima') or datos_eq.get('alcance_max') or datos_eq.get('capacidad_max') or datos_eq.get('equipo_alcance') or datos.get('cap_maxima') or datos.get('celda_a_capacidad') or ""
+                        division_minima      = datos_eq.get('division_minima') or datos_eq.get('div_minima') or datos_eq.get('division_min') or datos_eq.get('equipo_division') or datos.get('div_minima') or ""
+                        ubicacion            = datos_eq.get('ubicacion') or datos_eq.get('ubicacion_interna') or datos_eq.get('equipo_ubicacion') or datos.get('ubicacion') or ""
+                        tipo_instrumento     = datos_eq.get('tipo_instrumento') or datos.get('tipo_estructura') or ""
+                        aplica_excentricidad = datos_eq.get('aplica_excentricidad')
+                        puntos_apoyo         = datos_eq.get('puntos_apoyo') or datos_eq.get('filas_excentricidad') or datos.get('puntos_apoyo')
+                        pts_exactitud        = datos_eq.get('pts_exactitud') or datos_eq.get('filas_exactitud') or datos_eq.get('puntos_exactitud') or datos.get('filas_exactitud') or 5
+                        aplica_sustitucion   = bool(datos_eq.get('aplica_sustitucion') or datos_eq.get('es_enlace_sustitucion') or datos_eq.get('es_sustitucion') or False)
 
-                        if not _equipos:
-                            _equipos = [datos]
+                        _marca           = str(marca).strip() or None
+                        _modelo          = str(modelo).strip() or None
+                        _ns              = str(serie).strip() or None
+                        _id_eq           = str(id_indicador).strip() or None
+                        _ubicacion       = str(ubicacion).strip() or None
+                        _tipo_ins_nombre = str(tipo_instrumento).strip() or None
+                        _id_tipo_inst    = datos_eq.get("id_tipo_instrumento")
+                        if _id_tipo_inst is None:
+                            _id_tipo_inst = datos.get("id_tipo_instrumento")
 
-                        # ── Extraer datos del primer equipo (instrumento principal) ──
-                        _eq1 = _equipos[0] if _equipos else {}
-                        _marca    = (_eq1.get("marca") or datos.get("indicador_marca") or datos.get("celda_a_marca") or "").strip() or None
-                        _modelo   = (_eq1.get("modelo") or datos.get("indicador_modelo") or datos.get("celda_a_modelo") or "").strip() or None
-                        _ns       = (_eq1.get("numero_serie") or _eq1.get("ns") or _eq1.get("serie") or datos.get("indicador_serie") or "").strip() or None
-                        _id_eq    = (_eq1.get("id_indicador") or _eq1.get("id_equipo") or datos.get("indicador_id") or "").strip() or None
-                        _ubicacion = (_eq1.get("ubicacion_interna") or _eq1.get("ubicacion") or datos.get("ubicacion") or "").strip() or None
-                        _tipo_ins_nombre = (_eq1.get("tipo_instrumento") or datos.get("tipo_estructura") or "").strip() or None
                         # capacidad y división: normalizar a numérico
                         def _to_num(v):
                             if v is None: return None
@@ -3905,28 +3938,86 @@ class BatchGeneratorWidget(QWidget):
                                 return float(str(v).replace(",", ".").replace(" ", "").split()[0])
                             except Exception:
                                 return None
-                        _cap_raw  = _eq1.get("capacidad_max") or _eq1.get("capacidad") or datos.get("cap_maxima") or datos.get("celda_a_capacidad") or ""
-                        _div_raw  = _eq1.get("division_min")  or _eq1.get("division")  or datos.get("div_minima") or ""
+
+                        _cap_raw  = capacidad_maxima
+                        _div_raw  = division_minima
                         _cap_num  = _to_num(_cap_raw)
                         _div_num  = _to_num(_div_raw)
                         _cap_str  = str(_cap_raw).strip() or None
                         _div_str  = str(_div_raw).strip() or None
+
                         # secciones: del eq o del campo general
-                        _secciones = datos.get("secciones_camionera") or None
-                        if not _secciones:
-                            _secciones_raw = _eq1.get("secciones") or _eq1.get("num_secciones")
-                            try: _secciones = int(_secciones_raw) if _secciones_raw else None
-                            except Exception: _secciones = None
+                        _secciones = datos_eq.get("secciones") or datos_eq.get("num_secciones") or datos.get("secciones_camionera") or None
+                        try:
+                            _secciones = int(_secciones) if _secciones else None
+                        except Exception:
+                            _secciones = None
+
                         # aplica_excentricidad: inferir de tipo instrumento si no hay dato
-                        _aplica_exc = datos.get("aplica_excentricidad")
+                        _aplica_exc = aplica_excentricidad
                         if _aplica_exc is None:
                             _tipo_low = (_tipo_ins_nombre or "").lower()
-                            _TIPOS_SIN_EXC = ["tolva", "tanque", "silo", "grúa", "grua", "colgante"]
+                            _TIPOS_SIN_EXC = ["tolva", "tanque", "silo", "grúa", "grua", "colgante", "gancho"]
                             _aplica_exc = not any(k in _tipo_low for k in _TIPOS_SIN_EXC)
-                        # filas_excentricidad: del campo o por defecto 4 para camionera
-                        _filas_exc = datos.get("filas_excentricidad")
+                        else:
+                            _aplica_exc = bool(_aplica_exc)
+
+                        # filas_excentricidad: del instrumento i o por defecto según secciones
+                        _filas_exc = datos_eq.get("filas_excentricidad") or puntos_apoyo
+                        try:
+                            _filas_exc = int(_filas_exc) if _filas_exc is not None and str(_filas_exc).strip() != "" else None
+                        except Exception:
+                            _filas_exc = None
                         if not _filas_exc and _secciones:
                             _filas_exc = _secciones
+
+                        # Asegurar que datos_eq tenga normalizados todos sus campos individuales
+                        datos_eq["marca"]                = _marca or ""
+                        datos_eq["modelo"]               = _modelo or ""
+                        datos_eq["serie"]                = _ns or ""
+                        datos_eq["ns"]                   = _ns or ""
+                        datos_eq["id_indicador"]         = _id_eq or ""
+                        datos_eq["id_equipo"]            = _id_eq or ""
+                        datos_eq["capacidad_maxima"]     = _cap_str or ""
+                        datos_eq["alcance_max"]          = _cap_str or ""
+                        datos_eq["division_minima"]      = _div_str or ""
+                        datos_eq["div_minima"]           = _div_str or ""
+                        datos_eq["ubicacion"]            = _ubicacion or ""
+                        datos_eq["id_tipo_instrumento"]  = _id_tipo_inst
+                        datos_eq["tipo_instrumento"]     = _tipo_ins_nombre or ""
+                        datos_eq["aplica_excentricidad"] = _aplica_exc
+                        datos_eq["puntos_apoyo"]         = puntos_apoyo if puntos_apoyo is not None else (_filas_exc or 5)
+                        datos_eq["filas_excentricidad"]  = _filas_exc or 5
+                        datos_eq["pts_exactitud"]        = pts_exactitud
+                        datos_eq["filas_exactitud"]      = pts_exactitud
+                        datos_eq["puntos_exactitud"]     = pts_exactitud
+                        datos_eq["aplica_sustitucion"]   = aplica_sustitucion
+                        datos_eq["usa_sustitucion"]      = aplica_sustitucion
+                        datos_eq["es_enlace_sustitucion"] = aplica_sustitucion
+                        datos_eq["es_sustitucion"]       = aplica_sustitucion
+
+                        # Serializar datos_tecnicos_json independiente para el folio i
+                        _rma_items = copy.deepcopy(datos.get("items") or datos.get("partidas") or [])
+                        _dt_dict = {
+                            "folio_os": folio,
+                            "partidas": _rma_items,
+                            "refacciones": _rma_items,
+                            "items": _rma_items,
+                        }
+                        if tipo == "RMA":
+                            _dt_dict["folio_rma"] = folio
+                        for _k, _v in datos.items():
+                            if _k not in ("fecha", "items", "partidas", "refacciones", "equipos") and _v is not None:
+                                try:
+                                    _dt_dict[_k] = copy.deepcopy(_v)
+                                except Exception:
+                                    _dt_dict[_k] = _v
+                        # Sobrescribir con los campos exclusivos del instrumento i (datos_eq)
+                        for _k, _v in datos_eq.items():
+                            if _v is not None:
+                                _dt_dict[_k] = copy.deepcopy(_v)
+                        _dt_dict["equipos"] = [copy.deepcopy(datos_eq)]
+                        _dt_json_str = json.dumps(_dt_dict, ensure_ascii=False, default=str)
 
                         # Upsert seguro sin ON CONFLICT: verificar si el folio ya existe
                         cur.execute(
@@ -3938,17 +4029,30 @@ class BatchGeneratorWidget(QWidget):
                             cur.execute(
                                 """
                                 UPDATE ordenes_servicio
-                                SET datos_tecnicos_json = %s,
-                                    tipo_documento      = %s,
-                                    modalidad           = %s,
-                                    id_cliente          = COALESCE(%s, id_cliente),
-                                    id_tecnico          = COALESCE(%s, id_tecnico),
-                                    sucursal_id         = COALESCE(%s, sucursal_id),
-                                    observaciones       = COALESCE(%s, observaciones),
-                                    estado              = %s,
-                                    sync_status         = 'PENDIENTE',
-                                    sync_check_status   = 'ASIGNADA',
-                                    updated_at          = NOW()
+                                SET datos_tecnicos_json   = %s,
+                                    tipo_documento        = %s,
+                                    modalidad             = %s,
+                                    id_cliente            = COALESCE(%s, id_cliente),
+                                    id_tecnico            = COALESCE(%s, id_tecnico),
+                                    sucursal_id           = COALESCE(%s, sucursal_id),
+                                    observaciones         = COALESCE(%s, observaciones),
+                                    estado                = %s,
+                                    id_tipo_instrumento   = %s,
+                                    aplica_excentricidad  = %s,
+                                    filas_excentricidad   = %s,
+                                    marca                 = %s,
+                                    modelo                = %s,
+                                    ns                    = %s,
+                                    id_equipo             = %s,
+                                    ubicacion             = %s,
+                                    alcance_max           = %s,
+                                    div_minima            = %s,
+                                    instrumento_capacidad = %s,
+                                    instrumento_division  = %s,
+                                    num_secciones         = %s,
+                                    sync_status           = 'PENDIENTE',
+                                    sync_check_status     = 'ASIGNADA',
+                                    updated_at            = NOW()
                                 WHERE id = %s
                                 """,
                                 (
@@ -3960,6 +4064,13 @@ class BatchGeneratorWidget(QWidget):
                                     datos.get("sucursal_id"),
                                     datos.get("observaciones_tecnico"),
                                     estado,
+                                    _id_tipo_inst,
+                                    _aplica_exc,
+                                    _filas_exc,
+                                    _marca, _modelo, _ns, _id_eq, _ubicacion,
+                                    _cap_num, _div_num,
+                                    _cap_str, _div_str,
+                                    _secciones,
                                     os_existente[0],
                                 ),
                             )
@@ -4000,7 +4111,7 @@ class BatchGeneratorWidget(QWidget):
                                     datos.get("id_tecnico"),
                                     datos.get("observaciones_tecnico"),
                                     estado, id_lote, _rango_lote,
-                                    datos.get("id_tipo_instrumento"),
+                                    _id_tipo_inst,
                                     _aplica_exc,
                                     _filas_exc,
                                     datos.get("tipo_estructura"),
@@ -4121,7 +4232,7 @@ class BatchGeneratorWidget(QWidget):
             sucursal_dir_re = self._get_direccion_sucursal(datos.get("sucursal_id")) or direccion_cliente
             tmp_paths = []
             for i, folio in enumerate(folios):
-                equipo_data = equipos[i] if i < len(equipos) else (equipos[-1] if equipos else {})
+                equipo_data = copy.deepcopy(equipos[i]) if (equipos and i < len(equipos)) else (copy.deepcopy(equipos[0]) if equipos else {})
                 re_data = {
                     **datos,
                     "folio_re":            folio,
@@ -4215,7 +4326,7 @@ class BatchGeneratorWidget(QWidget):
             sucursal_dir_lp = self._get_direccion_sucursal(datos.get("sucursal_id")) or direccion_cliente
             tmp_paths = []
             for i, folio in enumerate(folios):
-                equipo_data = equipos[i] if i < len(equipos) else (equipos[-1] if equipos else {})
+                equipo_data = copy.deepcopy(equipos[i]) if (equipos and i < len(equipos)) else (copy.deepcopy(equipos[0]) if equipos else {})
                 lp_data = {
                     **datos,
                     "folio_os":              folio,
@@ -4324,34 +4435,10 @@ class BatchGeneratorWidget(QWidget):
         tipo_inst    = datos.get("tipo_instrumento") or datos.get("tipo_instrumento_nombre") or ""
         puntos_apoyo = datos.get("puntos_apoyo") or ""
 
-        # ── Regla de herencia: encontrar la tarjeta con más datos capturados ────
-        # Claves del instrumento que determinan si una tarjeta «tiene datos»
-        _INST_KEYS = ('marca', 'modelo', 'ns', 'id_equipo', 'alcance_max',
-                      'div_minima', 'dve', 'ubicacion', 'equipo_marca')
-
-        def _riqueza(eq_dict: dict) -> int:
-            """Cuenta cuántas claves de instrumento no están vacías."""
-            return sum(1 for k in _INST_KEYS if str(eq_dict.get(k, '')).strip())
-
-        # Tarjeta de respaldo: la que tenga más campos rellenos
-        _fallback_equipo: dict = {}
-        if equipos:
-            _mejor = max(equipos, key=_riqueza, default=None)
-            if _mejor is not None and _riqueza(_mejor) > 0:
-                _fallback_equipo = _mejor
-            else:
-                _fallback_equipo = equipos[0]   # si todas están vacías, usar la primera
-
         for i, folio in enumerate(folios):
-            # Usar la tarjeta propia si tiene datos; si no, heredar la más completa.
-            # Casos cubiertos:
-            #   a) 1 tarjeta llena + cantidad 16  → todos heredan la tarjeta 1
-            #   b) 16 tarjetas, solo algunas llenas → las vacías heredan la mejor
-            #   c) Cada tarjeta con su propio equipo → cada folio usa su propia tarjeta
-            if equipos and i < len(equipos) and _riqueza(equipos[i]) > 0:
-                equipo_data = equipos[i]
-            elif _fallback_equipo:
-                equipo_data = _fallback_equipo
+            # Cada folio usa su propio diccionario independiente equipos[i]
+            if equipos:
+                equipo_data = copy.deepcopy(equipos[i]) if i < len(equipos) else copy.deepcopy(equipos[0])
             else:
                 equipo_data = {}
 

@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
     QStyle, QComboBox, QMenu, QDialog, QFormLayout, QDialogButtonBox,
     QTextEdit, QLineEdit, QDateEdit, QSpacerItem, QProgressDialog,
     QGraphicsDropShadowEffect, QCheckBox, QFileDialog,
-    QTreeWidget, QTreeWidgetItem,
+    QTreeWidget, QTreeWidgetItem, QTabWidget,
 )
 from PyQt6.QtGui import (
     QColor, QBrush, QFont, QAction, QPainter, QPainterPath, QFontMetrics, QPen

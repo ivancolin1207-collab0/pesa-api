@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QLineEdit, QTextEdit, QComboBox, QScrollArea, QWidget,
     QFrame, QFormLayout, QGroupBox, QCheckBox, QMessageBox, QSpinBox,
-    QCompleter,
+    QCompleter, QTabWidget,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QStringListModel, QThread
 

@@ -766,7 +766,7 @@ async def sync_pull(
                     d["sync_check_status"] = "RECIBIDA_TABLET"
                 d.pop("has_pdf_db", None)
 
-                # Extraer partidas/refacciones de datos_tecnicos_json para entrega directa a la tablet
+                # Extraer partidas/refacciones y campos de instrumento de datos_tecnicos_json para entrega directa a la tablet
                 raw_dt = d.get("datos_tecnicos_json")
                 partidas_list = None
                 if raw_dt:
@@ -774,6 +774,15 @@ async def sync_pull(
                         dt_obj = json.loads(raw_dt) if isinstance(raw_dt, str) else raw_dt
                         if isinstance(dt_obj, dict):
                             partidas_list = dt_obj.get("partidas") or dt_obj.get("refacciones") or dt_obj.get("items")
+                            if not d.get("tipo_instrumento") and dt_obj.get("tipo_instrumento"):
+                                d["tipo_instrumento"] = str(dt_obj.get("tipo_instrumento"))
+                            if dt_obj.get("aplica_excentricidad") is not None:
+                                d["aplica_excentricidad"] = bool(dt_obj.get("aplica_excentricidad"))
+                            for str_key in ("marca", "modelo", "ns", "serie", "ubicacion", "id_equipo"):
+                                if not d.get(str_key) and dt_obj.get(str_key):
+                                    d[str_key] = str(dt_obj.get(str_key))
+                            if not d.get("id_equipo") and dt_obj.get("id_indicador"):
+                                d["id_equipo"] = str(dt_obj.get("id_indicador"))
                     except Exception:
                         pass
                 d["partidas"] = partidas_list

@@ -273,6 +273,14 @@ async def get_ordenes(
             COALESCE(tc.nombre_completo, '') AS tecnico_nombre,
             os.id_tipo_servicio,
             COALESCE(ts.nombre, '') AS tipo_servicio,
+            os.id_tipo_instrumento,
+            COALESCE(ti.nombre, '') AS tipo_instrumento,
+            COALESCE(os.aplica_excentricidad, true) AS aplica_excentricidad,
+            COALESCE(os.filas_excentricidad, 4) AS filas_excentricidad,
+            COALESCE(os.num_secciones, 0) AS num_secciones,
+            COALESCE(os.secciones_camionera, 0) AS secciones_camionera,
+            COALESCE(os.instrumento_capacidad, '') AS instrumento_capacidad,
+            COALESCE(os.instrumento_division, '') AS instrumento_division,
             os.sucursal_id,
             COALESCE(cs.nombre_sucursal, '') AS sucursal_nombre,
             COALESCE(os.estatus, '') AS estatus,
@@ -298,6 +306,7 @@ async def get_ordenes(
         LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
         LEFT JOIN cat_tecnicos tc ON os.id_tecnico = tc.id
         LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
+        LEFT JOIN cat_tipo_instrumento ti ON os.id_tipo_instrumento = ti.id
         LEFT JOIN cliente_sucursales cs ON os.sucursal_id = cs.id
         WHERE (os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')
     """
@@ -349,6 +358,15 @@ async def get_ordenes(
                     dt_obj = json.loads(raw_dt) if isinstance(raw_dt, str) else raw_dt
                     if isinstance(dt_obj, dict):
                         partidas_list = dt_obj.get("partidas") or dt_obj.get("refacciones") or dt_obj.get("items")
+                        if not d.get("tipo_instrumento") and dt_obj.get("tipo_instrumento"):
+                            d["tipo_instrumento"] = str(dt_obj.get("tipo_instrumento"))
+                        if dt_obj.get("aplica_excentricidad") is not None:
+                            d["aplica_excentricidad"] = bool(dt_obj.get("aplica_excentricidad"))
+                        for str_key in ("marca", "modelo", "ns", "serie", "ubicacion", "id_equipo"):
+                            if not d.get(str_key) and dt_obj.get(str_key):
+                                d[str_key] = str(dt_obj.get(str_key))
+                        if not d.get("id_equipo") and dt_obj.get("id_indicador"):
+                            d["id_equipo"] = str(dt_obj.get("id_indicador"))
                 except Exception:
                     pass
             d["partidas"] = partidas_list

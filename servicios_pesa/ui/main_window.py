@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QStackedWidget, QStatusBar,
     QFrame, QMessageBox, QSizePolicy, QScrollArea,
-    QApplication,
+    QApplication, QTabWidget,
 )
 
 from config import APP_NAME, APP_VERSION, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT
