@@ -128,9 +128,10 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
       );
 
   String get _formatoLabel => switch (_formato) {
-        FormatoDocumento.remision       => 'Remisión de Servicio',
-        FormatoDocumento.revisionCeldas => 'Revisión de Celdas de Carga',
-        FormatoDocumento.ordenServicio  => 'Orden de Servicio',
+        FormatoDocumento.remision             => 'Remisión de Servicio',
+        FormatoDocumento.revisionCeldas       => 'Revisión de Celdas de Carga',
+        FormatoDocumento.observacionesBascula => 'Formato de Inspección y Revisión de Básculas (OSOB)',
+        FormatoDocumento.ordenServicio        => 'Orden de Servicio',
       };
 
   /// Campos que el formato físico debe contener (verificación visual previa).
@@ -143,6 +144,13 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
           'Identificación del instrumento', 'Capacidad y marca/modelo de celda',
           'Resistencia entrada/salida (Ω)', 'Señal (mV/V)', 'Aislamiento (MΩ)',
           'Balance de cero', 'Diagnóstico final',
+        ],
+        FormatoDocumento.observacionesBascula => const [
+          'Datos del Cliente y del Equipo',
+          'Checklist de Inspección Física y Mecánica (14 puntos)',
+          'Pruebas Rápidas de Funcionamiento',
+          'Diagnóstico General, Observaciones y Refacciones',
+          'Firmas de Conformidad',
         ],
         FormatoDocumento.ordenServicio => const [
           'Datos del instrumento', 'Lecturas de prueba', 'Dictamen', 'Firmas',
