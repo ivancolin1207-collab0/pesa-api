@@ -99,7 +99,7 @@ class DrawingCanvas(QWidget):
     signature_changed = pyqtSignal()   # emitido cada vez que se dibuja algo
 
     def __init__(self, placeholder: str = "Firme aquí", parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._placeholder = placeholder
         self._strokes: list[list[QPointF]] = []   # cada trazo es una lista de puntos
         self._current_stroke: list[QPointF] = []
@@ -273,7 +273,7 @@ class MetrologicalTable(QFrame):
         color:    str       = _RED,
         parent               = None,
     ):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._title   = title
         self._columns = columns
         self._rows    = rows
@@ -463,7 +463,7 @@ class MetrologicalTable(QFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 class SectionTitle(QWidget):
     def __init__(self, number: str, title: str, icon: str, color: str = _RED, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setFixedHeight(52)
         self.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(self)
@@ -531,9 +531,9 @@ class DigitalServiceDialog(QDialog):
         id_cliente: int  = 0,   # ID del cliente en cat_clientes — para autocompletado de equipos
         parent           = None,
     ):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._folio_os   = folio_os or "OS-??-???"
-        self._os_data    = os_data or {}
+        self._os_data    = os_data if isinstance(os_data, dict) else {}
         self._os_id      = os_id
         self._id_cliente = id_cliente   # filtra cat_equipos por este cliente
         self._equipos: list[dict] = []  # lista de IDs de equipos del cliente

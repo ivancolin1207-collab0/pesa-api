@@ -33,7 +33,16 @@ def get_app_data_dir() -> Path:
     else:                                                        # Linux / otros
         base = Path.home() / ".pesaservicios"
 
-    base.mkdir(parents=True, exist_ok=True)
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+        # Verificar permiso de lectura/escritura
+        test_env = base / ".env"
+        if test_env.exists():
+            with open(test_env, "r", encoding="utf-8"):
+                pass
+    except (PermissionError, OSError):
+        base = Path("/tmp") / "PesaServicios"
+        base.mkdir(parents=True, exist_ok=True)
     return base
 
 
@@ -77,11 +86,17 @@ def _cargar_env() -> None:
         candidatos.append(Path(sys._MEIPASS) / ".env")  # type: ignore[attr-defined]
 
     for ruta in candidatos:
-        if ruta.exists():
-            load_dotenv(ruta, override=True)
-            return  # Carga solo el primero encontrado
+        try:
+            if ruta.exists():
+                load_dotenv(ruta, override=True)
+                return  # Carga solo el primero encontrado
+        except (PermissionError, OSError):
+            continue
 
-    load_dotenv(override=True)   # no-op silencioso si no hay .env
+    try:
+        load_dotenv(override=True)   # no-op silencioso si no hay .env
+    except (PermissionError, OSError):
+        pass
 
 
 _cargar_env()
@@ -224,11 +239,12 @@ LOG_LEVEL = os.getenv("PESA_LOG_LEVEL", "INFO")
 # FOLIOS
 # ══════════════════════════════════════════════════════════════════════════════
 FOLIO_TIPOS: dict[str, str] = {
-    "OS":  "Orden de Servicio",
-    "RMA": "Remisión",
-    "RE":  "Revisión / Revisión Externa",
-    "LP":  "Levantamiento de Proyecto",
-    "LV":  "Levantamiento Metrológico y Logística de Pesas",
+    "OS":   "Orden de Servicio",
+    "RMA":  "Remisión",
+    "RE":   "Revisión / Revisión Externa",
+    "OSOB": "Formato de Inspección y Revisión de Básculas (Observaciones)",
+    "LP":   "Levantamiento de Proyecto",
+    "LV":   "Levantamiento Metrológico y Logística de Pesas",
 }
 
 

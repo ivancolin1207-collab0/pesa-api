@@ -72,6 +72,7 @@ class TipoInstrumentoOut(BaseModel):
 class CrearOrdenBody(BaseModel):
     tipo:                 str = "Individual"   # Individual | Lote
     modalidad:            str = "Digital"      # Digital | Físico
+    tipo_documento:       Optional[str] = None # OS | RMA | RE | OSOB | LV | LP
     id_cliente:           Optional[int] = None
     id_tecnico:           Optional[int] = None
     id_tipo_servicio:     Optional[int] = None
@@ -410,18 +411,22 @@ async def crear_orden(
         id_tecnico_asignado = id_tecnico_de(current_user)
 
     # Obtener el siguiente número de secuencia
+    pref = (body.tipo_documento or "OS").strip().upper()
+    if pref not in ("OS", "RMA", "RE", "OSOB", "LV", "LP"):
+        pref = "OS"
+
     seq_row = await db.fetchrow(
-        """
+        f"""
         SELECT COALESCE(MAX(
             NULLIF(
-                REGEXP_REPLACE(folio_os, '^OS-\\d+-', '', 'g'),
+                REGEXP_REPLACE(folio_os, '^{pref}-\\d+-', '', 'g'),
                 ''
             )::integer
         ), 0) + 1 AS siguiente
         FROM ordenes_servicio
         WHERE folio_os LIKE $1
         """,
-        f"OS-{year_short}-%"
+        f"{pref}-{year_short}-%"
     )
     siguiente = seq_row["siguiente"] if seq_row else 1
 
@@ -429,21 +434,24 @@ async def crear_orden(
     folios_creados = []
 
     for i in range(cantidad):
-        folio = f"OS-{year_short}-{siguiente + i:03d}"
+        folio = f"{pref}-{year_short}-{siguiente + i:03d}"
+        tipo_srv_txt = "Formato de Inspección y Revisión de Básculas" if pref == "OSOB" else None
         await db.execute(
             """
             INSERT INTO ordenes_servicio (
-                folio_os, estado, modalidad, fecha,
+                folio_os, tipo_documento, tipo_servicio, estado, modalidad, fecha,
                 id_cliente, id_tecnico, id_tipo_servicio,
                 observaciones, sync_version, updated_at
             ) VALUES (
-                $1, 'PROCESO', $2, NOW()::date,
-                $3, $4, $5,
-                $6, 1, NOW()
+                $1, $2, $3, 'PROCESO', $4, NOW()::date,
+                $5, $6, $7,
+                $8, 1, NOW()
             )
             ON CONFLICT (folio_os) DO NOTHING
             """,
             folio,
+            pref,
+            tipo_srv_txt,
             body.modalidad.upper(),
             body.id_cliente,
             id_tecnico_asignado,
@@ -768,6 +776,12 @@ async def upload_pdf_tablet(
                 p.get("nombre_ing") or p.get("firma_cliente_nombre"), p.get("puesto_ing"),
                 p.get("unidad_medida"), actual_id,
             )
+            if p.get("datos_tecnicos_json"):
+                try:
+                    dt_str = json.dumps(p["datos_tecnicos_json"], ensure_ascii=False) if isinstance(p["datos_tecnicos_json"], dict) else str(p["datos_tecnicos_json"])
+                    await db.execute("UPDATE ordenes_servicio SET datos_tecnicos_json = $1 WHERE id = $2", dt_str, actual_id)
+                except Exception as e_dt:
+                    logger.warning("[UPLOAD-PDF] No se pudo guardar datos_tecnicos_json: %s", e_dt)
             fecha_raw = str(p.get("fecha") or p.get("fecha_servicio") or "").strip()
             if fecha_raw:
                 fecha_iso = fecha_raw[:10]

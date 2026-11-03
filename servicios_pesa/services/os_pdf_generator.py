@@ -381,7 +381,24 @@ class OsPdfGenerator:
         if not _RL_OK:
             raise RuntimeError("ReportLab no instalado. Ejecutar: pip install reportlab")
 
-        folio_check = str((os_data or {}).get("folio_os") or (os_data or {}).get("folio_re") or "").strip().upper()
+        folio_check = str((os_data or {}).get("folio_os") or (os_data or {}).get("folio_re") or (os_data or {}).get("folio") or "").strip().upper()
+        tipo_doc_check = str((os_data or {}).get("tipo_documento") or "").strip().upper()
+        if folio_check.startswith("OSOB-") or tipo_doc_check == "OSOB":
+            try:
+                merged_osob = dict(os_data or {})
+                if tecnico_nombre and not merged_osob.get("tecnico_nombre"):
+                    merged_osob["tecnico_nombre"] = tecnico_nombre
+                if firma_tecnico_b64 and not merged_osob.get("firma_tecnico"):
+                    merged_osob["firma_tecnico"] = firma_tecnico_b64
+                return osob_pdf_generator.generate(
+                    os_data=merged_osob,
+                    output_path=output_path,
+                    force=force,
+                    digital=digital,
+                )
+            except Exception as exc_osob:
+                logger.warning("Delegación a osob_pdf_generator falló (%s); usando flujo estándar.", exc_osob)
+
         if folio_check.startswith("RE-"):
             try:
                 from services.re_pdf_generator import re_pdf_generator
@@ -2467,10 +2484,11 @@ class OsPdfGenerator:
 
     def _draw_observaciones(self, c, y: float, os_data: dict) -> float:
         """
-        Sección OBSERVACIONES: líneas en blanco proporcionales al espacio disponible.
-        Espaciado de líneas ampliado (18 pt) y margen inferior respetado.
-        Se preserva un bloque amplio con 5-6 renglones visibles para anotaciones a mano.
+        Sección OBSERVACIONES con ajuste multilínea dinámico usando simpleSplit.
+        Respeta saltos de línea \n y adapta el tamaño de fuente según la longitud.
         """
+        from reportlab.lib.utils import simpleSplit
+
         y -= 18  # Espaciado moderado antes del encabezado
         c.setFillColor(_RED)
         c.setFont("Helvetica-Bold", 9)
@@ -2481,69 +2499,82 @@ class OsPdfGenerator:
         c.line(self.ML, y, self.ML + self.CW, y)
         y -= 8
 
-        obs = os_data.get("observaciones", "") or ""
-        c.setFillColor(_BLACK)
-        c.setFont("Helvetica", 8)
+        orden = os_data
+        obs_raw = str(orden.get("observaciones") or orden.get("observaciones_tecnico") or "").strip()
+        font_name = "Helvetica"
+        font_size = 7.0 if len(obs_raw) > 300 else (7.8 if len(obs_raw) > 160 else 8.5)
+        line_height = font_size + 2.0
+        ancho_tabla = self.CW
+        ancho_util = ancho_tabla - 12
+        x_margen = self.ML
+
+        lineas_totales = []
+        for parrafo in obs_raw.splitlines():
+            if parrafo.strip():
+                lineas_totales.extend(simpleSplit(parrafo.strip(), font_name, font_size, ancho_util))
+            else:
+                lineas_totales.append("")
 
         # Reservar espacio: firmas (65pt) + nota (55pt) + cintillo (28pt) + margen (10pt)
         limit_y = self.MB + 158
-        line_gap = 18   # espacio generoso entre renglones para escritura a mano
+        y_limite_firmas = limit_y
+        line_gap = 18   # espacio entre renglones pautados para escritura a mano
 
-        # Espaciado entre línea roja de "OBSERVACIONES" y primer renglón pautado
-        y -= 14   # 14 pt adicionales para que el texto no choque con el header
+        if lineas_totales:
+            y_inicio_obs = y - 6
+            c.setFillColor(_BLACK)
+            c.setFont(font_name, font_size)
+            y_cursor = y_inicio_obs
+            for linea in lineas_totales:
+                if y_cursor < y_limite_firmas:
+                    break
+                c.setStrokeColor(_GRAY_MED)
+                c.setLineWidth(0.35)
+                c.line(self.ML, y_cursor - 2, self.ML + self.CW, y_cursor - 2)
+                c.setFillColor(_BLACK)
+                c.setFont(font_name, font_size)
+                c.drawString(x_margen + 6, y_cursor, linea)
+                y_cursor -= line_height
 
-        # 1. Calcular cuántas líneas caben
+            # Líneas vacías restantes si aún queda espacio hasta limit_y
+            empty_lines = []
+            _scan_y = y_cursor - 4
+            while _scan_y > limit_y:
+                c.setStrokeColor(_GRAY_MED)
+                c.setLineWidth(0.4)
+                c.line(self.ML, _scan_y, self.ML + self.CW, _scan_y)
+                empty_lines.append(_scan_y)
+                _scan_y -= line_gap
+
+            _is_dig_obs = self._es_digital(os_data)
+            if _is_dig_obs and len(empty_lines) >= 2:
+                c.setStrokeColor(_GRAY_MED)
+                c.setLineWidth(0.5)
+                c.line(self.ML, empty_lines[0], self.ML + self.CW, empty_lines[-1])
+
+            y = (empty_lines[-1] - line_gap) if empty_lines else min(y_cursor, limit_y)
+            return y
+
+        # Caso en blanco (sin texto de observaciones): renglones pautados para llenado manual
+        y -= 14
         all_lines_y = []
         _scan_y = y
         while _scan_y > limit_y:
             all_lines_y.append(_scan_y)
             _scan_y -= line_gap
 
-        # 2. Preparar líneas de texto (word-wrap)
-        text_lines = []
-        if obs:
-            words = obs.split()
-            cur_line = ""
-            for word in words:
-                test = (cur_line + " " + word).strip()
-                if c.stringWidth(test, "Helvetica", 8) < self.CW - 4:
-                    cur_line = test
-                else:
-                    if cur_line:
-                        text_lines.append(cur_line)
-                    cur_line = word
-            if cur_line:
-                text_lines.append(cur_line)
-
-        # 3. Dibujar: primero la línea pautada, luego el texto sobre ella
-        first_empty_idx = len(text_lines)   # índice de la primera línea sin texto
-        for idx, line_y in enumerate(all_lines_y):
-            # Línea pautada gris
+        for line_y in all_lines_y:
             c.setStrokeColor(_GRAY_MED)
             c.setLineWidth(0.4)
             c.line(self.ML, line_y, self.ML + self.CW, line_y)
-            # Texto (si corresponde a esta línea)
-            if idx < len(text_lines):
-                c.setFillColor(_BLACK)
-                c.setFont("Helvetica", 8)
-                # +2 pt sobre la línea para que el texto descanse sobre ella
-                c.drawString(self.ML + 2, line_y + 2, text_lines[idx])
 
-        # 4. Diagonal de cancelación en las líneas vacías
-        # REGLA FÍSICA: en formato físico NUNCA se dibuja la diagonal — el técnico
-        # escribe a mano sobre las líneas pautadas. Solo se dibuja en digital/cerrado.
-        # REGLA FÍSICA: solo diagonal en observaciones cuando es DIGITAL explícito.
         _is_dig_obs = self._es_digital(os_data)
-        empty_lines = all_lines_y[first_empty_idx:]
-        if _is_dig_obs and len(empty_lines) >= 2:
-            top_y    = empty_lines[0]
-            bot_y    = empty_lines[-1]
+        if _is_dig_obs and len(all_lines_y) >= 2:
             c.setStrokeColor(_GRAY_MED)
             c.setLineWidth(0.5)
-            c.line(self.ML, top_y, self.ML + self.CW, bot_y)
+            c.line(self.ML, all_lines_y[0], self.ML + self.CW, all_lines_y[-1])
 
         y = (all_lines_y[-1] - line_gap) if all_lines_y else limit_y
-
         return y
 
 
@@ -2843,6 +2874,903 @@ class OsPdfGenerator:
 
 
 # ---------------------------------------------------------------------------
-# Instancia singleton
+# Generador Oficial Formato de Inspección y Revisión de Básculas (OSOB-26-XXX)
 # ---------------------------------------------------------------------------
+
+class OsobPdfGenerator:
+    """
+    Generador de PDF del FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS (OSOB-26-XXX).
+    Soporta modalidad Física (calca=True o campos en blanco para llenado a mano)
+    y Digital (campos completos, casillas marcadas, texto multilínea con simpleSplit
+    sin truncar y firmas digitales incrustadas).
+    """
+
+    W, H = 612.0, 792.0
+    ML = 20.0
+    MR = 20.0
+    MT = 14.0
+    MB = 14.0
+
+    CHECKLIST_GROUPS = [
+        (
+            "A) Estructura y Receptor de Carga",
+            [
+                (1, "1. Charola / Plato / Cubierta (Sin golpes, deformaciones ni corrosión)"),
+                (2, "2. Estructura inferior / Chasis (Soldaduras íntegras, sin fracturas ni óxido severo)"),
+                (3, "3. Patas niveladoras (Completas, roscas en buen estado, gomas antiderrapantes firmes)"),
+                (4, "4. Nivelación - Gota / Burbuja (Burbuja centrada y nivel visible sin daños)"),
+                (5, "5. Topes de sobrecarga y laterales (Con holgura adecuada, sin rozamiento ni obstrucciones)"),
+                (6, "6. Limpieza general (Libre de residuos, polvo acumulado, humedad o fauna nociva bajo el plato)"),
+            ],
+        ),
+        (
+            "B) Celdas y Transmisión",
+            [
+                (7, "7. Celda(s) de carga (Sin golpes visibles, corrosión, humedad ni deformación)"),
+                (8, "8. Cableado y blindaje (Sin cortes, empalmes improvisados ni aplastamiento; prensaestopas firmes)"),
+                (9, "9. Caja suma (Sellada herméticamente, sin sulfatación en bornes ni humedad)"),
+            ],
+        ),
+        (
+            "C) Indicador y Electrónica",
+            [
+                (10, "10. Carcasa y soporte / columna (Fijación firme, sellos en buen estado)"),
+                (11, "11. Display / Pantalla (Segmentos o píxeles completos, retroiluminación funcional)"),
+                (12, "12. Teclado / Botonera (Membrana íntegra sin perforaciones, respuesta táctil correcta)"),
+                (13, "13. Alimentación / Batería (Cable de poder/eliminador sin daños; retención de carga en batería)"),
+                (14, "14. Puertos de comunicación (RS-232 / USB / Ethernet / Wi-Fi operando correctamente)"),
+            ],
+        ),
+    ]
+
+    PRUEBAS_RAPIDAS = [
+        ("estabilidad_cero", "Estabilidad de Cero al encendido", "Comentarios"),
+        ("retorno_cero", "Retorno a Cero tras descarga", "Comentarios"),
+        ("excentricidad_esquinas", "Prueba de Excentricidad (Esquinas)", "Dif. máx. detectada"),
+        ("repetibilidad_lectura", "Repetibilidad de lectura", "Carga de prueba"),
+        ("exactitud_preliminar", "Exactitud preliminar de pesaje", "Requiere ajuste"),
+    ]
+
+    ACCIONES_REVISION = [
+        ("limpieza", "Limpieza superficial e interna"),
+        ("nivelacion", "Nivelación de patas y ajuste de topes"),
+        ("ajuste_peso", "Ajuste de peso (calibración interna / ajuste con masa patrón)"),
+        ("revision_electrica", "Revisión eléctrica y reapriete de conexiones"),
+    ]
+
+    DICTAMENES_EQUIPO = [
+        ("OPERATIVO", "OPERATIVO (Apto para uso normal / Listo para calibración)"),
+        ("OPERATIVO CON OBSERVACIONES", "OPERATIVO CON OBSERVACIONES (Funciona, pero requiere mantenimiento preventivo/correctivo pronto)"),
+        ("FUERA DE SERVICIO", "FUERA DE SERVICIO (No apto para uso hasta reparación)"),
+    ]
+
+    @property
+    def CW(self) -> float:
+        return self.W - self.ML - self.MR
+
+    @staticmethod
+    def _unpack_data(raw: dict) -> dict:
+        import json as _json
+        data = dict(raw or {})
+        dt_raw = data.get("datos_tecnicos_json")
+        if dt_raw:
+            try:
+                dt = _json.loads(dt_raw) if isinstance(dt_raw, str) else dt_raw
+                if isinstance(dt, dict):
+                    merged = dict(dt)
+                    for k, v in data.items():
+                        if v not in (None, "", [], {}):
+                            merged[k] = v
+                    data = merged
+            except Exception:
+                pass
+        return data
+
+    def generate(
+        self,
+        os_data: dict,
+        output_path: Optional[str] = None,
+        calca: bool = False,
+        force: bool = True,
+        digital: Optional[bool] = None,
+    ) -> str:
+        if not _RL_OK:
+            raise RuntimeError("ReportLab no instalado.")
+
+        os_data = self._unpack_data(os_data)
+        folio = str(os_data.get("folio_os") or os_data.get("folio") or "OSOB-26-001").strip()
+
+        if digital is None:
+            mod = str(os_data.get("modalidad") or "").strip().upper().replace("Í", "I")
+            has_cap = bool(
+                os_data.get("checklist")
+                or os_data.get("pruebas_rapidas")
+                or os_data.get("dictamen")
+                or os_data.get("firma_cliente")
+                or os_data.get("firma_cliente_b64")
+            )
+            digital = (mod == "DIGITAL") or has_cap
+
+        if output_path is None:
+            try:
+                from config import PDF_OS_DIR
+                out_dir = Path(PDF_OS_DIR)
+                out_dir.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                out_dir = Path.home() / "PesaServidorLocal" / "PDF_OS"
+                out_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(out_dir / f"{folio}.pdf")
+
+        if not force and Path(output_path).exists():
+            return output_path
+
+        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = f"{output_path}.tmp"
+        c = rl_canvas.Canvas(tmp_path, pagesize=letter)
+        c.setTitle(f"Formato de Inspección y Revisión de Básculas - {folio}")
+        c.setAuthor("Básculas PESA")
+        c.setSubject("FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS")
+
+        try:
+            if calca and not digital:
+                for copy_label in ("ORIGINAL", "COPIA"):
+                    self.draw_on_canvas(c, os_data, digital=False, copy_label=copy_label)
+                    c.showPage()
+            else:
+                self.draw_on_canvas(c, os_data, digital=bool(digital), copy_label="")
+                c.showPage()
+            c.save()
+            _os.replace(tmp_path, output_path)
+        except Exception:
+            try:
+                Path(tmp_path).unlink()
+            except OSError:
+                pass
+            raise
+
+        logger.info("PDF OSOB generado: %s", output_path)
+        return output_path
+
+    def draw_on_canvas(
+        self,
+        c,
+        raw_data: dict,
+        digital: bool = False,
+        copy_label: str = "",
+    ) -> None:
+        from reportlab.lib.utils import simpleSplit
+
+        d = self._unpack_data(raw_data)
+        y = self.H - self.MT
+
+        # Marca de agua opcional para calca
+        if copy_label:
+            c.saveState()
+            c.setFillColor(colors.Color(0.1, 0.5, 0.1, alpha=0.07) if copy_label == "ORIGINAL" else colors.Color(0.0, 0.3, 0.8, alpha=0.07))
+            c.setFont("Helvetica-Bold", 54)
+            c.translate(self.W / 2, self.H / 2)
+            c.rotate(35)
+            c.drawCentredString(0, 0, copy_label)
+            c.restoreState()
+
+        # ── CABECERA INSTITUCIONAL Y TÍTULO ──────────────────────────────────
+        y = self._draw_header(c, y, d, digital=digital, copy_label=copy_label)
+        y -= 3
+
+        # ── SECCIÓN 1. Datos del Cliente y del Equipo ────────────────────────
+        y = self._draw_section_bar(c, y, "SECCIÓN 1. Datos del Cliente y del Equipo")
+        y = self._draw_seccion_1(c, y, d, digital=digital)
+        y -= 3
+
+        # ── SECCIÓN 2. Checklist de Inspección Física y Mecánica ─────────────
+        y = self._draw_section_bar(c, y, "SECCIÓN 2. Checklist de Inspección Física y Mecánica")
+        y = self._draw_seccion_2(c, y, d, digital=digital)
+        y -= 3
+
+        # ── SECCIÓN 3. Pruebas Rápidas de Funcionamiento ─────────────────────
+        y = self._draw_section_bar(c, y, "SECCIÓN 3. Pruebas Rápidas de Funcionamiento")
+        y = self._draw_seccion_3(c, y, d, digital=digital)
+        y -= 3
+
+        # ── SECCIÓN 4. Diagnóstico General, Observaciones y Refacciones ──────
+        y = self._draw_section_bar(c, y, "SECCIÓN 4. Diagnóstico General, Observaciones y Refacciones")
+        y = self._draw_seccion_4(c, y, d, digital=digital, simpleSplit=simpleSplit)
+        y -= 3
+
+        # ── SECCIÓN 5. Firmas de Conformidad ─────────────────────────────────
+        y = self._draw_section_bar(c, y, "SECCIÓN 5. Firmas de Conformidad")
+        self._draw_seccion_5(c, y, d, digital=digital)
+
+        # ── PIE DE PÁGINA ────────────────────────────────────────────────────
+        folio = str(d.get("folio_os") or d.get("folio") or "OSOB-26-001").strip()
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica", 5.8)
+        c.drawString(self.ML, 7, f"Folio: {folio}  |  BÁSCULAS PESA — Pesaje, Sistemas y Automatización")
+        if copy_label:
+            c.setFont("Helvetica-Bold", 6)
+            c.drawRightString(self.ML + self.CW, 7, copy_label)
+
+    def _draw_header(self, c, y: float, d: dict, digital: bool = False, copy_label: str = "") -> float:
+        hdr_h = 34.0
+        folio = str(d.get("folio_os") or d.get("folio") or "OSOB-26-001").strip()
+        orden_vinculada = str(
+            d.get("orden_servicio_vinculada")
+            or d.get("os_vinculada")
+            or d.get("orden_servicio")
+            or ""
+        ).strip()
+
+        # Fecha: en digital o si viene fecha, formatear DD / MM / 2026
+        fecha_raw = d.get("fecha") or d.get("fecha_servicio")
+        fecha_str = "____ / ____ / 2026"
+        if fecha_raw:
+            try:
+                if isinstance(fecha_raw, (date, datetime)):
+                    fecha_str = fecha_raw.strftime("%d / %m / %Y")
+                else:
+                    s = str(fecha_raw).strip()[:10]
+                    dt_p = datetime.strptime(s, "%Y-%m-%d")
+                    fecha_str = dt_p.strftime("%d / %m / %Y")
+            except Exception:
+                fecha_str = str(fecha_raw)
+        elif digital:
+            fecha_str = datetime.now().strftime("%d / %m / %Y")
+
+        # Logos institucionales a la izquierda
+        logo_x = self.ML
+        if _LOGO_PESA_PATH and _LOGO_PESA_PATH.exists():
+            try:
+                c.drawImage(str(_LOGO_PESA_PATH), logo_x, y - hdr_h + 2, width=68, height=hdr_h - 4,
+                            preserveAspectRatio=True, mask="auto")
+                logo_x += 72
+            except Exception:
+                pass
+        if _LOGO_RL_PATH and _LOGO_RL_PATH.exists():
+            try:
+                c.drawImage(str(_LOGO_RL_PATH), logo_x, y - hdr_h + 4, width=54, height=hdr_h - 8,
+                            preserveAspectRatio=True, mask="auto")
+                logo_x += 58
+            except Exception:
+                pass
+
+        # Título principal centrado/institucional
+        title_cx = self.ML + self.CW / 2 + 12
+        c.setFillColor(_RED)
+        c.setFont("Helvetica-Bold", 10.5)
+        c.drawCentredString(title_cx, y - 12, "FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS")
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.2)
+        c.drawCentredString(title_cx, y - 21, "PESAJE, SISTEMAS Y AUTOMATIZACIÓN S.A. DE C.V.  |  RFC: PSA040611L90")
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica", 5.6)
+        c.drawCentredString(title_cx, y - 29, "recepcion@basculaspesa.com.mx  |  Tel: (442) 215-2409")
+
+        # Recuadro de folio a la derecha
+        fb_w = 112.0
+        fb_x = self.ML + self.CW - fb_w
+        c.setStrokeColor(_RED)
+        c.setLineWidth(1.0)
+        c.rect(fb_x, y - hdr_h + 2, fb_w, hdr_h - 2, fill=0, stroke=1)
+        c.setFillColor(_RED)
+        c.rect(fb_x, y - 10, fb_w, 10, fill=1, stroke=0)
+        c.setFillColor(_WHITE)
+        c.setFont("Helvetica-Bold", 6.2)
+        c.drawCentredString(fb_x + fb_w / 2, y - 8, "FOLIO INSPECCIÓN")
+        c.setFillColor(_RED)
+        c.setFont("Helvetica-Bold", 10.5)
+        c.drawCentredString(fb_x + fb_w / 2, y - 24, folio)
+
+        y -= hdr_h + 2
+
+        # Subtítulo / Cabecera de control:
+        # Folio: OSOB-26-XXX | Fecha: DD / MM / 2026 | Orden de Servicio: _______________
+        ctrl_h = 13.5
+        c.setFillColor(_GRAY_LIGHT)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.5)
+        c.rect(self.ML, y - ctrl_h, self.CW, ctrl_h, fill=1, stroke=1)
+
+        c.setFillColor(_BLACK)
+        c.setFont("Helvetica-Bold", 7.0)
+        c.drawString(self.ML + 6, y - 9.5, f"Folio: {folio}")
+        c.drawString(self.ML + 175, y - 9.5, f"|   Fecha: {fecha_str}")
+        os_lbl = "|   Orden de Servicio: "
+        c.drawString(self.ML + 355, y - 9.5, os_lbl)
+        os_val_x = self.ML + 355 + c.stringWidth(os_lbl, "Helvetica-Bold", 7.0)
+        if orden_vinculada:
+            c.setFont("Helvetica-Bold", 7.2)
+            c.drawString(os_val_x + 2, y - 9.5, orden_vinculada[:28])
+        c.setStrokeColor(_GRAY_DARK)
+        c.setLineWidth(0.4)
+        c.line(os_val_x, y - 11, self.ML + self.CW - 8, y - 11)
+
+        return y - ctrl_h
+
+    def _draw_section_bar(self, c, y: float, title: str) -> float:
+        bar_h = 11.5
+        c.setFillColor(_DARK_HDR)
+        c.rect(self.ML, y - bar_h, self.CW, bar_h, fill=1, stroke=0)
+        c.setFillColor(_RED)
+        c.rect(self.ML, y - bar_h, 4.0, bar_h, fill=1, stroke=0)
+        c.setFillColor(_WHITE)
+        c.setFont("Helvetica-Bold", 6.8)
+        c.drawString(self.ML + 8, y - bar_h + 3.2, title)
+        return y - bar_h
+
+    @staticmethod
+    def _draw_checkbox(c, x: float, y: float, size: float = 7.5, checked: bool = False, label_inside: str = "") -> None:
+        c.setFillColor(colors.HexColor("#FDECEC") if checked else _WHITE)
+        c.setStrokeColor(_RED if checked else _GRAY_DARK)
+        c.setLineWidth(0.9 if checked else 0.5)
+        c.rect(x, y, size, size, fill=1, stroke=1)
+        if checked:
+            c.setStrokeColor(_RED)
+            c.setLineWidth(1.1)
+            c.line(x + 1.0, y + 1.0, x + size - 1.0, y + size - 1.0)
+            c.line(x + 1.0, y + size - 1.0, x + size - 1.0, y + 1.0)
+        elif label_inside:
+            c.setFillColor(_GRAY_DARK)
+            c.setFont("Helvetica-Bold", 5.0)
+            c.drawCentredString(x + size / 2, y + 1.8, label_inside)
+
+    def _draw_seccion_1(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cliente = str(d.get("cliente") or d.get("cliente_nombre") or "").strip()
+        planta = str(d.get("planta") or d.get("ubicacion") or d.get("sucursal_nombre") or d.get("direccion_cliente") or "").strip()
+        id_tag = str(d.get("id_equipo") or d.get("id_indicador") or d.get("tag") or "").strip()
+        marca = str(d.get("marca") or "").strip()
+        modelo = str(d.get("modelo") or "").strip()
+        serie = str(d.get("ns") or d.get("serie") or "").strip()
+
+        unidad = str(d.get("unidad_medida") or "kg").strip()
+        cap_raw = d.get("capacidad_maxima") if d.get("capacidad_maxima") not in (None, "") else d.get("alcance_max")
+        if cap_raw in (None, "", 0, "0", 0.0):
+            cap_raw = d.get("instrumento_capacidad") or ""
+        cap_str = str(cap_raw).strip()
+        if cap_str and unidad.lower() not in cap_str.lower():
+            cap_str = f"{cap_str} {unidad}"
+
+        div_raw = d.get("division_minima") if d.get("division_minima") not in (None, "") else d.get("div_minima")
+        if div_raw in (None, "", 0, "0", 0.0):
+            div_raw = d.get("instrumento_division") or ""
+        div_str = str(div_raw).strip()
+        if div_str and unidad.lower() not in div_str.lower():
+            div_str = f"{div_str} {unidad}"
+
+        indicador = str(d.get("indicador_marca_modelo") or d.get("indicador") or "").strip()
+        tipo_inst = str(d.get("tipo_instrumento") or "").strip()
+        tipo_otro = str(d.get("tipo_instrumento_otro") or "").strip()
+
+        row_h = 16.5
+        cw = self.CW
+
+        def draw_cell(x: float, top_y: float, w: float, h: float, lbl: str, val: str):
+            c.setFillColor(_WHITE)
+            c.setStrokeColor(_GRAY_MED)
+            c.setLineWidth(0.4)
+            c.rect(x, top_y - h, w, h, fill=1, stroke=1)
+            c.setFillColor(_GRAY_DARK)
+            c.setFont("Helvetica-Bold", 5.5)
+            c.drawString(x + 4, top_y - 6.2, lbl)
+            if val:
+                c.setFillColor(_BLACK)
+                c.setFont("Helvetica-Bold", 7.2)
+                c.drawString(x + 4, top_y - h + 3.2, val[:55])
+
+        # Fila 1: Cliente / Empresa (60%) | Planta / Ubicación (40%)
+        w1 = cw * 0.58
+        draw_cell(self.ML, y, w1, row_h, "Cliente / Empresa:", cliente)
+        draw_cell(self.ML + w1, y, cw - w1, row_h, "Planta / Ubicación:", planta)
+        y -= row_h
+
+        # Fila 2: ID Interno / Tag | Marca | Modelo | Número de Serie
+        w_f2 = cw / 4.0
+        draw_cell(self.ML, y, w_f2, row_h, "ID Interno / Tag:", id_tag)
+        draw_cell(self.ML + w_f2, y, w_f2, row_h, "Marca:", marca)
+        draw_cell(self.ML + w_f2 * 2, y, w_f2, row_h, "Modelo:", modelo)
+        draw_cell(self.ML + w_f2 * 3, y, w_f2, row_h, "Número de Serie:", serie)
+        y -= row_h
+
+        # Fila 3: Capacidad Máx. (Max) | División Mínima (d / e) | Indicador (Marca / Modelo)
+        w_f3_a = cw * 0.30
+        w_f3_b = cw * 0.30
+        w_f3_c = cw - w_f3_a - w_f3_b
+        draw_cell(self.ML, y, w_f3_a, row_h, "Capacidad Máx. (Max):", cap_str)
+        draw_cell(self.ML + w_f3_a, y, w_f3_b, row_h, "División Mínima (d / e):", div_str)
+        draw_cell(self.ML + w_f3_a + w_f3_b, y, w_f3_c, row_h, "Indicador (Marca / Modelo):", indicador)
+        y -= row_h
+
+        # Fila 4: Tipo de Instrumento: [ ] Mesa  [ ] Camionera  [ ] Colgante  [ ] Tolva  [ ] Tanque  [ ] Otro (especifique): ___
+        inst_h = 14.5
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.4)
+        c.rect(self.ML, y - inst_h, cw, inst_h, fill=1, stroke=1)
+
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawString(self.ML + 4, y - 9.8, "Tipo de Instrumento:")
+
+        tipos_std = ["Mesa", "Camionera", "Colgante", "Tolva", "Tanque"]
+        tipo_norm = tipo_inst.lower().strip()
+        es_otro = bool(tipo_otro) or (bool(tipo_norm) and not any(t.lower() in tipo_norm for t in tipos_std))
+        if es_otro and not tipo_otro and tipo_inst:
+            tipo_otro = tipo_inst
+
+        x_cur = self.ML + 76
+        for t_lbl in tipos_std:
+            marked = (t_lbl.lower() in tipo_norm) and not es_otro
+            self._draw_checkbox(c, x_cur, y - 11.2, size=7.2, checked=marked)
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold" if marked else "Helvetica", 6.3)
+            c.drawString(x_cur + 9.5, y - 9.8, t_lbl)
+            x_cur += 9.5 + c.stringWidth(t_lbl, "Helvetica", 6.3) + 14
+
+        # Otro (especifique): _________________
+        self._draw_checkbox(c, x_cur, y - 11.2, size=7.2, checked=es_otro)
+        otro_lbl = "Otro (especifique):"
+        c.setFillColor(_BLACK)
+        c.setFont("Helvetica-Bold" if es_otro else "Helvetica", 6.3)
+        c.drawString(x_cur + 9.5, y - 9.8, otro_lbl)
+        line_x0 = x_cur + 9.5 + c.stringWidth(otro_lbl, "Helvetica", 6.3) + 4
+        c.setStrokeColor(_GRAY_DARK)
+        c.setLineWidth(0.4)
+        c.line(line_x0, y - 11.2, self.ML + cw - 6, y - 11.2)
+        if es_otro and tipo_otro:
+            c.setFont("Helvetica-Bold", 6.5)
+            c.drawString(line_x0 + 2, y - 9.8, tipo_otro[:32])
+
+        return y - inst_h
+
+    def _draw_seccion_2(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        # Instrucción
+        inst_h = 11.0
+        c.setFillColor(_GRAY_LIGHT)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.4)
+        c.rect(self.ML, y - inst_h, cw, inst_h, fill=1, stroke=1)
+        c.setFillColor(_BLACK)
+        c.setFont("Helvetica-Bold", 5.7)
+        c.drawString(
+            self.ML + 4,
+            y - 8.0,
+            'Instrucción: Marcar con una "X" el estado actual de cada componente '
+            '(B = Bueno / Operativo, R = Regular / Requiere ajuste o limpieza, M = Malo / Requiere reemplazo, N/A = No aplica).',
+        )
+        y -= inst_h
+
+        checklist_data = d.get("checklist") or {}
+        if isinstance(checklist_data, list):
+            # Convertir lista a dict por índice 1..14
+            tmp_chk = {}
+            for idx, item in enumerate(checklist_data):
+                if isinstance(item, dict):
+                    k = str(item.get("id") or (idx + 1))
+                    tmp_chk[k] = item
+            checklist_data = tmp_chk
+
+        grp_h = 10.5
+        row_h = 12.2
+        col_comp_w = 278.0
+        col_opt_w = 112.0
+        col_obs_w = cw - col_comp_w - col_opt_w
+
+        for grp_title, items in self.CHECKLIST_GROUPS:
+            # Barra de subgrupo A, B, C
+            c.setFillColor(colors.HexColor("#EAEAEA"))
+            c.setStrokeColor(_GRAY_MED)
+            c.setLineWidth(0.4)
+            c.rect(self.ML, y - grp_h, cw, grp_h, fill=1, stroke=1)
+            c.setFillColor(_RED)
+            c.setFont("Helvetica-Bold", 6.3)
+            c.drawString(self.ML + 4, y - 7.8, grp_title)
+            c.setFillColor(_GRAY_DARK)
+            c.setFont("Helvetica-Bold", 5.5)
+            c.drawCentredString(self.ML + col_comp_w + col_opt_w / 2, y - 7.8, "ESTADO [ B ] [ R ] [ M ] [ N/A ]")
+            c.drawString(self.ML + col_comp_w + col_opt_w + 4, y - 7.8, "Observaciones")
+            y -= grp_h
+
+            for item_num, item_label in items:
+                item_info = checklist_data.get(str(item_num)) or checklist_data.get(item_num) or {}
+                if not isinstance(item_info, dict):
+                    item_info = {"estado": str(item_info)}
+                estado_sel = str(item_info.get("estado") or "").strip().upper() if digital else ""
+                obs_item = str(item_info.get("observaciones") or "").strip() if digital else ""
+
+                c.setFillColor(_WHITE if item_num % 2 == 1 else colors.HexColor("#FAFAFA"))
+                c.setStrokeColor(_GRAY_MED)
+                c.setLineWidth(0.35)
+                c.rect(self.ML, y - row_h, cw, row_h, fill=1, stroke=1)
+                c.line(self.ML + col_comp_w, y, self.ML + col_comp_w, y - row_h)
+                c.line(self.ML + col_comp_w + col_opt_w, y, self.ML + col_comp_w + col_opt_w, y - row_h)
+
+                # Texto del punto
+                c.setFillColor(_BLACK)
+                c.setFont("Helvetica", 5.8)
+                c.drawString(self.ML + 4, y - 8.5, item_label)
+
+                # Casillas [ B ] [ R ] [ M ] [ N/A ]
+                opts = [("B", "B", 22), ("R", "R", 22), ("M", "M", 22), ("N/A", "N/A", 30)]
+                ox = self.ML + col_comp_w + 6
+                for code, disp, step_w in opts:
+                    is_sel = (estado_sel == code)
+                    box_w = 18.0 if code == "N/A" else 13.0
+                    box_h = 8.4
+                    by = y - row_h + 1.9
+                    c.setFillColor(colors.HexColor("#FDECEC") if is_sel else _WHITE)
+                    c.setStrokeColor(_RED if is_sel else _GRAY_DARK)
+                    c.setLineWidth(0.9 if is_sel else 0.45)
+                    c.rect(ox, by, box_w, box_h, fill=1, stroke=1)
+                    c.setFillColor(_RED if is_sel else _BLACK)
+                    c.setFont("Helvetica-Bold", 5.6)
+                    txt_box = f"X:{disp}" if is_sel else disp
+                    c.drawCentredString(ox + box_w / 2, by + 2.0, txt_box)
+                    ox += step_w + 2
+
+                # Observaciones: _________________
+                obs_x = self.ML + col_comp_w + col_opt_w + 4
+                c.setFillColor(_GRAY_DARK)
+                c.setFont("Helvetica", 5.4)
+                c.drawString(obs_x, y - 8.5, "Obs.:")
+                val_x = obs_x + 16
+                c.setStrokeColor(_GRAY_MED)
+                c.setLineWidth(0.35)
+                c.line(val_x, y - row_h + 2.2, self.ML + cw - 4, y - row_h + 2.2)
+                if obs_item:
+                    c.setFillColor(_BLACK)
+                    c.setFont("Helvetica", 5.8)
+                    c.drawString(val_x + 1, y - 8.5, obs_item[:48])
+
+                y -= row_h
+
+        return y
+
+    def _draw_seccion_3(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        pruebas = d.get("pruebas_rapidas") or {}
+        if not isinstance(pruebas, dict):
+            pruebas = {}
+
+        row_h = 12.6
+        col_lbl_w = 165.0
+        col_cumple_w = 135.0
+
+        for idx, (key, title_lbl, sec_lbl) in enumerate(self.PRUEBAS_RAPIDAS):
+            p_info = pruebas.get(key) or {}
+            if not isinstance(p_info, dict):
+                p_info = {}
+            res_val = str(p_info.get("resultado") or "").strip().upper() if digital else ""
+            sec_val = str(p_info.get("valor") or p_info.get("comentarios") or "").strip() if digital else ""
+            req_ajuste = str(p_info.get("requiere_ajuste") or "").strip().upper() if digital else ""
+
+            c.setFillColor(_WHITE if idx % 2 == 0 else colors.HexColor("#FAFAFA"))
+            c.setStrokeColor(_GRAY_MED)
+            c.setLineWidth(0.35)
+            c.rect(self.ML, y - row_h, cw, row_h, fill=1, stroke=1)
+            c.line(self.ML + col_lbl_w, y, self.ML + col_lbl_w, y - row_h)
+            c.line(self.ML + col_lbl_w + col_cumple_w, y, self.ML + col_lbl_w + col_cumple_w, y - row_h)
+
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 6.1)
+            c.drawString(self.ML + 4, y - 8.6, f"{title_lbl}:")
+
+            # [ ] Cumple   [ ] No cumple
+            cx = self.ML + col_lbl_w + 8
+            is_cumple = res_val == "CUMPLE"
+            is_no_cumple = res_val in ("NO CUMPLE", "NO_CUMPLE")
+            self._draw_checkbox(c, cx, y - 10.0, size=7.2, checked=is_cumple)
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold" if is_cumple else "Helvetica", 6.0)
+            c.drawString(cx + 9.5, y - 8.6, "Cumple")
+
+            cx2 = cx + 56
+            self._draw_checkbox(c, cx2, y - 10.0, size=7.2, checked=is_no_cumple)
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold" if is_no_cumple else "Helvetica", 6.0)
+            c.drawString(cx2 + 9.5, y - 8.6, "No cumple")
+
+            # Columna secundaria
+            sx = self.ML + col_lbl_w + col_cumple_w + 6
+            c.setFillColor(_GRAY_DARK)
+            c.setFont("Helvetica-Bold", 5.9)
+            c.drawString(sx, y - 8.6, f"{sec_lbl}:")
+            sx_after = sx + c.stringWidth(f"{sec_lbl}:", "Helvetica-Bold", 5.9) + 5
+
+            if key == "exactitud_preliminar":
+                is_si = req_ajuste in ("SI", "SÍ", "TRUE", "1")
+                is_no = req_ajuste in ("NO", "FALSE", "0")
+                self._draw_checkbox(c, sx_after, y - 10.0, size=7.2, checked=is_si)
+                c.setFillColor(_BLACK)
+                c.setFont("Helvetica-Bold" if is_si else "Helvetica", 6.0)
+                c.drawString(sx_after + 9.5, y - 8.6, "Sí")
+
+                sx_no = sx_after + 36
+                self._draw_checkbox(c, sx_no, y - 10.0, size=7.2, checked=is_no)
+                c.setFillColor(_BLACK)
+                c.setFont("Helvetica-Bold" if is_no else "Helvetica", 6.0)
+                c.drawString(sx_no + 9.5, y - 8.6, "No")
+            else:
+                c.setStrokeColor(_GRAY_MED)
+                c.setLineWidth(0.35)
+                c.line(sx_after, y - row_h + 2.2, self.ML + cw - 5, y - row_h + 2.2)
+                if sec_val:
+                    c.setFillColor(_BLACK)
+                    c.setFont("Helvetica", 6.1)
+                    c.drawString(sx_after + 2, y - 8.6, sec_val[:52])
+
+            y -= row_h
+
+        return y
+
+    def _draw_seccion_4(self, c, y: float, d: dict, digital: bool = False, simpleSplit=None) -> float:
+        if simpleSplit is None:
+            from reportlab.lib.utils import simpleSplit
+
+        cw = self.CW
+        obs_raw = str(
+            d.get("observaciones_tecnicas")
+            or d.get("observaciones")
+            or ""
+        ).strip() if digital else ""
+
+        ref_raw = str(
+            d.get("refacciones_requeridas")
+            or d.get("refacciones_texto")
+            or ""
+        ).strip() if digital else ""
+
+        acciones_raw = d.get("acciones_realizadas") or {}
+        if isinstance(acciones_raw, list):
+            acciones_raw = {str(k): True for k in acciones_raw}
+        elif not isinstance(acciones_raw, dict):
+            acciones_raw = {}
+
+        dictamen_val = str(d.get("dictamen") or d.get("estado_operativo") or "").strip().upper() if digital else ""
+
+        # 1) Observaciones técnicas y hallazgos detallados (Multilínea con word-wrap dinámico sin truncar)
+        ancho_util = cw - 12.0
+        obs_font_size = 6.8 if len(obs_raw) > 350 else (7.4 if len(obs_raw) > 180 else 8.0)
+        obs_lh = obs_font_size + 1.8
+        obs_lines = []
+        if obs_raw:
+            for parrafo in obs_raw.splitlines():
+                if parrafo.strip():
+                    obs_lines.extend(simpleSplit(parrafo.strip(), "Helvetica", obs_font_size, ancho_util))
+                else:
+                    obs_lines.append("")
+
+        obs_box_h = max(36.0, min(68.0, len(obs_lines) * obs_lh + 13.0))
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(self.ML, y - obs_box_h, cw, obs_box_h, fill=1, stroke=1)
+        c.setFillColor(_RED)
+        c.setFont("Helvetica-Bold", 6.2)
+        c.drawString(self.ML + 5, y - 8.2, "Observaciones técnicas y hallazgos detallados:")
+
+        if obs_lines:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica", obs_font_size)
+            yc = y - 17.5
+            for ln in obs_lines:
+                if yc < (y - obs_box_h + 3):
+                    break
+                c.drawString(self.ML + 6, yc, ln)
+                yc -= obs_lh
+        elif not digital:
+            # Renglones guía para llenado manual
+            c.setStrokeColor(_GRAY_MED)
+            c.setLineWidth(0.3)
+            for ry in (y - 19.0, y - 30.0):
+                c.line(self.ML + 6, ry, self.ML + cw - 6, ry)
+        else:
+            c.setFillColor(_GRAY_DARK)
+            c.setFont("Helvetica-Oblique", 7.0)
+            c.drawString(self.ML + 6, y - 20.0, "Sin observaciones adicionales.")
+
+        y -= obs_box_h
+
+        # 2) Acciones realizadas durante la revisión (4 checkboxes en grid 2x2)
+        acc_h = 28.0
+        c.setFillColor(colors.HexColor("#FAFAFA"))
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(self.ML, y - acc_h, cw, acc_h, fill=1, stroke=1)
+        c.setFillColor(_BLACK)
+        c.setFont("Helvetica-Bold", 6.1)
+        c.drawString(self.ML + 5, y - 8.0, "Acciones realizadas durante la revisión:")
+
+        half_w = cw / 2.0
+        for idx, (ak, albl) in enumerate(self.ACCIONES_REVISION):
+            col = idx % 2
+            row = idx // 2
+            ax = self.ML + 8 + col * half_w
+            ay = y - 16.5 - row * 9.2
+            is_chk = bool(acciones_raw.get(ak) or acciones_raw.get(albl)) if digital else False
+            self._draw_checkbox(c, ax, ay - 1.2, size=6.8, checked=is_chk)
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold" if is_chk else "Helvetica", 5.9)
+            c.drawString(ax + 9.0, ay, albl)
+
+        y -= acc_h
+
+        # 3) Refacciones o servicios adicionales requeridos (Multilínea con word-wrap dinámico)
+        ref_font_size = 6.8 if len(ref_raw) > 300 else (7.4 if len(ref_raw) > 150 else 8.0)
+        ref_lh = ref_font_size + 1.8
+        ref_lines = []
+        if ref_raw:
+            for parrafo in ref_raw.splitlines():
+                if parrafo.strip():
+                    ref_lines.extend(simpleSplit(parrafo.strip(), "Helvetica", ref_font_size, ancho_util))
+                else:
+                    ref_lines.append("")
+
+        ref_box_h = max(28.0, min(52.0, len(ref_lines) * ref_lh + 12.0))
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(self.ML, y - ref_box_h, cw, ref_box_h, fill=1, stroke=1)
+        c.setFillColor(_RED)
+        c.setFont("Helvetica-Bold", 6.2)
+        c.drawString(self.ML + 5, y - 8.2, "Refacciones o servicios adicionales requeridos:")
+
+        if ref_lines:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica", ref_font_size)
+            yc = y - 17.0
+            for ln in ref_lines:
+                if yc < (y - ref_box_h + 3):
+                    break
+                c.drawString(self.ML + 6, yc, ln)
+                yc -= ref_lh
+        elif not digital:
+            c.setStrokeColor(_GRAY_MED)
+            c.setLineWidth(0.3)
+            c.line(self.ML + 6, y - 20.0, self.ML + cw - 6, y - 20.0)
+        else:
+            c.setFillColor(_GRAY_DARK)
+            c.setFont("Helvetica-Oblique", 7.0)
+            c.drawString(self.ML + 6, y - 19.0, "Ninguna requerida.")
+
+        y -= ref_box_h
+
+        # 4) Dictamen de Estado Operativo del Equipo
+        dict_h = 35.0
+        c.setFillColor(_GRAY_LIGHT)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(self.ML, y - dict_h, cw, dict_h, fill=1, stroke=1)
+        c.setFillColor(_BLACK)
+        c.setFont("Helvetica-Bold", 6.2)
+        c.drawString(self.ML + 5, y - 8.0, "Dictamen de Estado Operativo del Equipo:")
+
+        for idx, (d_code, d_text) in enumerate(self.DICTAMENES_EQUIPO):
+            dy = y - 16.2 - idx * 8.2
+            is_d = (dictamen_val == d_code) or (d_code in dictamen_val and (d_code != "OPERATIVO" or "OBSERVACIONES" not in dictamen_val))
+            if not dictamen_val:
+                is_d = False
+            self._draw_checkbox(c, self.ML + 8, dy - 1.2, size=6.8, checked=is_d)
+            c.setFillColor(_RED if is_d else _BLACK)
+            c.setFont("Helvetica-Bold" if is_d else "Helvetica", 5.9)
+            c.drawString(self.ML + 17.5, dy, d_text)
+
+        return y - dict_h
+
+    def _draw_seccion_5(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        box_h = 62.0
+        half_w = (cw - 8.0) / 2.0
+
+        tec_nombre = str(d.get("tecnico_nombre") or d.get("tecnico") or "").strip()
+        tec_puesto = str(d.get("puesto_tecnico") or "Técnico de Servicio").strip() if (digital or d.get("puesto_tecnico")) else ""
+        cli_nombre = str(d.get("nombre_ing") or d.get("firma_cliente_nombre") or "").strip() if digital else ""
+        cli_puesto = str(d.get("puesto_ing") or d.get("area_cliente") or "").strip() if digital else ""
+
+        firma_tec_b64 = d.get("firma_tecnico") or d.get("firma_tecnico_b64") or _firma_perfil_tecnico(d)
+        firma_cli_b64 = d.get("firma_cliente") or d.get("firma_cliente_b64")
+
+        # Columna Izquierda: Realizó Revisión (Técnico)
+        lx = self.ML
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(lx, y - box_h, half_w, box_h, fill=1, stroke=1)
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(lx + 6, y - 9.0, "Realizó Revisión (Técnico):")
+
+        # Nombre
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(lx + 6, y - 20.0, "Nombre:")
+        c.setStrokeColor(_GRAY_DARK)
+        c.setLineWidth(0.35)
+        c.line(lx + 36, y - 21.0, lx + half_w - 6, y - 21.0)
+        if tec_nombre:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 6.3)
+            c.drawString(lx + 38, y - 19.8, tec_nombre[:40])
+
+        # Puesto
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(lx + 6, y - 31.0, "Puesto:")
+        c.line(lx + 36, y - 32.0, lx + half_w - 6, y - 32.0)
+        if tec_puesto:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica", 6.2)
+            c.drawString(lx + 38, y - 30.8, tec_puesto[:40])
+
+        # Firma
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(lx + 6, y - 54.0, "Firma:")
+        c.line(lx + 36, y - 55.0, lx + half_w - 6, y - 55.0)
+        if digital and firma_tec_b64:
+            self._draw_sig_b64(c, firma_tec_b64, lx + 45, y - 54.0, width=110, height=21)
+
+        # Columna Derecha: Recibió de Conformidad (Cliente / Usuario)
+        rx = self.ML + half_w + 8.0
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(rx, y - box_h, half_w, box_h, fill=1, stroke=1)
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(rx + 6, y - 9.0, "Recibió de Conformidad (Cliente / Usuario):")
+
+        # Nombre
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(rx + 6, y - 20.0, "Nombre:")
+        c.setStrokeColor(_GRAY_DARK)
+        c.setLineWidth(0.35)
+        c.line(rx + 36, y - 21.0, rx + half_w - 6, y - 21.0)
+        if cli_nombre:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 6.3)
+            c.drawString(rx + 38, y - 19.8, cli_nombre[:40])
+
+        # Área / Puesto
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(rx + 6, y - 31.0, "Área / Puesto:")
+        c.line(rx + 52, y - 32.0, rx + half_w - 6, y - 32.0)
+        if cli_puesto:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica", 6.2)
+            c.drawString(rx + 54, y - 30.8, cli_puesto[:36])
+
+        # Firma
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(rx + 6, y - 54.0, "Firma:")
+        c.line(rx + 36, y - 55.0, rx + half_w - 6, y - 55.0)
+        if digital and firma_cli_b64:
+            self._draw_sig_b64(c, firma_cli_b64, rx + 45, y - 54.0, width=110, height=21)
+
+        return y - box_h
+
+    @staticmethod
+    def _draw_sig_b64(c, b64_str: str, x: float, y: float, width: float, height: float) -> None:
+        if not b64_str or len(str(b64_str).strip()) < 20:
+            return
+        try:
+            import base64
+            import io
+            from reportlab.lib.utils import ImageReader
+            clean = str(b64_str).strip()
+            if "," in clean:
+                clean = clean.split(",", 1)[1]
+            raw = base64.b64decode(clean)
+            img = ImageReader(io.BytesIO(raw))
+            c.drawImage(img, x, y, width=width, height=height, preserveAspectRatio=True, mask="auto")
+        except Exception as exc:
+            logger.debug("No se pudo incrustar firma en OSOB PDF: %s", exc)
+
+
+# ---------------------------------------------------------------------------
+# Instancias singleton
+# ---------------------------------------------------------------------------
+osob_pdf_generator = OsobPdfGenerator()
 os_pdf_generator = OsPdfGenerator()

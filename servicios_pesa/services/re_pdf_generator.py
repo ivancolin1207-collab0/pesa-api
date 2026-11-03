@@ -599,16 +599,42 @@ class RePdfGenerator:
             pass
 
     def _draw_firmas(self, c, y, rv):
-        cw = self.CW; obs_h = 25
+        from reportlab.lib.utils import simpleSplit
+
+        cw = self.CW
+        ancho_util = cw - 12
+        obs_raw = str(rv.get("observaciones", "") or rv.get("observaciones_tecnico", "") or "").strip()
+        font_name = "Helvetica"
+        font_size = 7.0 if len(obs_raw) > 300 else (7.8 if len(obs_raw) > 160 else 8.5)
+        line_height = font_size + 2.0
+
+        lineas_totales = []
+        for parrafo in obs_raw.splitlines():
+            if parrafo.strip():
+                lineas_totales.extend(simpleSplit(parrafo.strip(), font_name, font_size, ancho_util))
+            else:
+                lineas_totales.append("")
+
+        y_limite_firmas = self.MB + 55
+        max_obs_h = max(28, y - y_limite_firmas)
+        needed_h = max(28, 12 + len(lineas_totales) * line_height + 4)
+        obs_h = min(needed_h, max_obs_h)
+
         c.setFillColor(_GRAY_LT); c.rect(self.ML, y - obs_h, cw, obs_h, fill=1, stroke=0)
         c.setStrokeColor(_GRAY_MED); c.setLineWidth(0.3)
         c.rect(self.ML, y - obs_h, cw, obs_h, fill=0, stroke=1)
         c.setFillColor(_GRAY_DK); c.setFont("Helvetica-Bold", 6)
         c.drawString(self.ML + 4, y - 8, "OBSERVACIONES:")
-        obs_txt = str(rv.get("observaciones", "") or rv.get("observaciones_tecnico", "") or "")
-        c.setFont("Helvetica", 6.5); c.setFillColor(_BLACK)
-        for ln_idx, line in enumerate(obs_txt.splitlines()[:2]):
-            c.drawString(self.ML + 6, y - 16 - ln_idx * 7, line[:130])
+
+        c.setFont(font_name, font_size); c.setFillColor(_BLACK)
+        y_inicio_obs = y - 16
+        y_cursor = y_inicio_obs
+        for linea in lineas_totales:
+            if y_cursor < (y - obs_h + 3) or y_cursor < y_limite_firmas:
+                break
+            c.drawString(self.ML + 6, y_cursor, linea)
+            y_cursor -= line_height
+
         y -= obs_h + 35
         col_w = cw * 0.42
         

@@ -64,7 +64,8 @@ class ModoFormatoDialog(QDialog):
     _TIPO_LABELS = {"OS": "Orden de Servicio", "RMA": "Remisión", "RE": "Revisión de Báscula"}
 
     def __init__(self, tipo_formato: str = "OS", parent=None):
-        super().__init__(parent)
+        from PyQt6.QtWidgets import QWidget as _QW
+        super().__init__(parent if isinstance(parent, _QW) else None)
         self._tipo = tipo_formato
         self._tecnicos: list[dict] = []
         self._resultado: Optional[dict] = None

@@ -36,7 +36,7 @@ class RMAFormWidget(QWidget):
     rma_saved = pyqtSignal(str)   # folio_rma
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._clientes:   list[dict] = []
         self._tecnicos:   list[dict] = []
         self._sucursales: list[dict] = []

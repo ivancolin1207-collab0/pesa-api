@@ -174,25 +174,37 @@ class RmaPdfService {
               // 5. Tabla de Refacciones / Partidas
               _buildItemsTable(items),
 
-              // 6. Observaciones (si existen)
-              if (observaciones != null && observaciones.trim().isNotEmpty) ...[
-                pw.SizedBox(height: 6),
-                pw.Container(
-                  padding: const pw.EdgeInsets.all(5),
+              // 6. Observaciones (ajuste multilínea dinámico sin cortes)
+              pw.SizedBox(height: 6),
+              pw.Text(
+                'OBSERVACIONES',
+                style: pw.TextStyle(color: _red, fontSize: 8.5, fontWeight: pw.FontWeight.bold),
+              ),
+              pw.SizedBox(height: 2),
+              () {
+                final String obsTexto = (observaciones ?? rmaData['observaciones'] ?? rmaData['observaciones_tecnico'] ?? '').toString().trim();
+                final double obsFontSize = obsTexto.length > 350
+                    ? 6.8
+                    : (obsTexto.length > 200 ? 7.5 : 8.5);
+                return pw.Container(
+                  width: double.infinity,
+                  constraints: const pw.BoxConstraints(minHeight: 38),
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
                   decoration: pw.BoxDecoration(
-                    border: pw.Border.all(color: _grayMed, width: 0.5),
+                    border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
                     color: PdfColors.grey100,
                   ),
-                  child: pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.start,
-                    children: [
-                      pw.Text('OBSERVACIONES:', style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: _red)),
-                      pw.SizedBox(height: 2),
-                      pw.Text(observaciones.trim(), style: const pw.TextStyle(fontSize: 7)),
-                    ],
+                  child: pw.Text(
+                    obsTexto.isEmpty ? 'Sin observaciones adicionales.' : obsTexto,
+                    style: pw.TextStyle(
+                      fontSize: obsFontSize,
+                      lineSpacing: 1.5,
+                    ),
+                    softWrap: true,
+                    textAlign: pw.TextAlign.left,
                   ),
-                ),
-              ],
+                );
+              }(),
 
               pw.Spacer(),
 

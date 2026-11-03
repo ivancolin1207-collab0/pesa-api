@@ -113,7 +113,7 @@ class ConfiguracionWidget(QWidget):
     folios_reseteados = pyqtSignal()
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._build_ui()
         QTimer.singleShot(200, self._check_connection)
 

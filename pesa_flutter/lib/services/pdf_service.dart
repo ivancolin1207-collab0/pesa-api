@@ -1508,31 +1508,38 @@ class PdfService {
   );
 
   // ══════════════════════════════════════════════════════════════════════════
-  // 8. OBSERVACIONES — con líneas horizontales pautadas
+  // 8. OBSERVACIONES — ajuste multilínea dinámico sin cortes
   // ══════════════════════════════════════════════════════════════════════════
-  pw.Widget _buildObservaciones(Map<String, dynamic> os) {
-    final obs     = _s(os, 'observaciones', '');
-    const nLineas = 3;
-    const lineH   = 11.0;
+  pw.Widget _buildObservaciones(Map<String, dynamic> orden) {
+    final String obsTexto = (orden['observaciones'] ?? orden['observaciones_tecnico'] ?? '').toString().trim();
+    final double obsFontSize = obsTexto.length > 350
+        ? 6.8
+        : (obsTexto.length > 200 ? 7.5 : 8.5);
 
-    return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
-      _sectionTitle('OBSERVACIONES'),
-      pw.SizedBox(height: 2),
-      // Área pautada — únicamente texto de observaciones sin dictamen
-      ...List.generate(nLineas, (i) => pw.Container(
-        height: lineH,
-        decoration: const pw.BoxDecoration(
-          border: pw.Border(bottom: pw.BorderSide(color: _grayL, width: 0.5))),
-        child: i == 0 && obs.isNotEmpty
-            ? pw.Padding(
-                padding: const pw.EdgeInsets.only(left: 3, bottom: 2),
-                child: pw.Text(
-                  obs,
-                  style: const pw.TextStyle(fontSize: 7.5)),
-              )
-            : null,
-      )),
-    ]);
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: [
+        _sectionTitle('OBSERVACIONES'),
+        pw.SizedBox(height: 2),
+        pw.Container(
+          width: double.infinity,
+          constraints: const pw.BoxConstraints(minHeight: 38),
+          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+          ),
+          child: pw.Text(
+            obsTexto.isEmpty ? 'Sin observaciones adicionales.' : obsTexto,
+            style: pw.TextStyle(
+              fontSize: obsFontSize,
+              lineSpacing: 1.5,
+            ),
+            softWrap: true,
+            textAlign: pw.TextAlign.left,
+          ),
+        ),
+      ],
+    );
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1753,6 +1760,1485 @@ class PdfService {
     if (v is int) return v != 0;
     final s = v.toString().trim().toUpperCase();
     return s != 'NO' && s != 'FALSE' && s != '0' && s != 'N';
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // GENERADOR DE PDF OFICIAL — REVISIÓN DE CELDAS DE CARGA Y BÁSCULA (RE)
+  // Homologado 1:1 con servicios_pesa/services/re_pdf_generator.py
+  // ══════════════════════════════════════════════════════════════════════════
+  static const List<List<String>> ohmsParamsOficiales = [
+    ['A', 'Excitacion Exc+ / Exc-', 'Ohms'],
+    ['B', 'Resistencia Sig+ / Sig-', 'Ohms'],
+    ['C', 'Resistencia Exc+ / Sig+', 'Ohms'],
+    ['D', 'Resistencia Exc+ / Sig-', 'Ohms'],
+    ['E', 'Resistencia Exc- / Sig+', 'Ohms'],
+    ['F', 'Resistencia Exc- / Sig-', 'Ohms'],
+    ['G', 'Resistencia Sig- + Exc+', 'Ohms'],
+    ['H', 'Resistencia Sig- + Exc-', 'Ohms'],
+    ['I', 'Resistencia Exc-+ / Sig+', 'Ohms'],
+    ['J', 'Resistencia Exc-+ / Sig-', 'Ohms'],
+    ['K', 'Señal de Salida (Milivoltaje)', 'mV'],
+  ];
+
+  Future<String> generarPdfRevisionCeldas({
+    required Map<String, dynamic> rvData,
+    required int numCeldas,
+    required List<List<String>> lecturasOhms,
+    required Map<String, bool> funcIndicador,
+    required List<String> estadoCeldas,
+    required String estadoCables,
+    required String estadoConectores,
+    String? firmaTecBase64,
+    String? firmaCliBase64,
+  }) async {
+    final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
+    rvData['fecha_creacion_logistica'] ??= rvData['fecha'];
+    rvData['fecha'] = fechaEjecucionHoy;
+    rvData['fecha_servicio'] = fechaEjecucionHoy;
+    rvData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+
+    final bytes = await buildPdfRevisionCeldasBytes(
+      rvData: rvData,
+      numCeldas: numCeldas,
+      lecturasOhms: lecturasOhms,
+      funcIndicador: funcIndicador,
+      estadoCeldas: estadoCeldas,
+      estadoCables: estadoCables,
+      estadoConectores: estadoConectores,
+      firmaTecBase64: firmaTecBase64,
+      firmaCliBase64: firmaCliBase64,
+    );
+
+    final dir = await getApplicationDocumentsDirectory();
+    final pdfDir = Directory('${dir.path}/pdfs');
+    if (!await pdfDir.exists()) {
+      await pdfDir.create(recursive: true);
+    }
+    final folio = _s(rvData, 'folio_os', _s(rvData, 'folio_re', 'RE')).trim();
+    final safeFolio = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final filePath = '${pdfDir.path}/$safeFolio.pdf';
+    await _writeAtomic(File(filePath), bytes);
+
+    try {
+      final legacyDir = Directory('${dir.path}/Pesa_PDFs');
+      if (!await legacyDir.exists()) await legacyDir.create(recursive: true);
+      await _writeAtomic(File('${legacyDir.path}/$safeFolio.pdf'), bytes);
+    } catch (_) {}
+
+    return filePath;
+  }
+
+  Future<Uint8List> buildPdfRevisionCeldasBytes({
+    required Map<String, dynamic> rvData,
+    required int numCeldas,
+    required List<List<String>> lecturasOhms,
+    required Map<String, bool> funcIndicador,
+    required List<String> estadoCeldas,
+    required String estadoCables,
+    required String estadoConectores,
+    String? firmaTecBase64,
+    String? firmaCliBase64,
+  }) async {
+    final folio = _s(rvData, 'folio_os', _s(rvData, 'folio_re', '—'));
+    final doc = pw.Document(
+      title: 'RE — $folio',
+      author: 'Servicios PESA',
+      subject: 'Ficha Tecnica Diagnostica — Revision de Celdas de Carga y Bascula',
+      creator: 'PESA Tablet App v3',
+    );
+
+    pw.ImageProvider? logoPesa;
+    pw.ImageProvider? logoRl;
+    for (final p in ['Img/logo_pesa.png', 'assets/logo_pesa.png']) {
+      try {
+        final b = await rootBundle.load(p);
+        logoPesa = pw.MemoryImage(b.buffer.asUint8List());
+        break;
+      } catch (_) {}
+    }
+    for (final p in ['Img/RiceLake.png', 'assets/RiceLake.png']) {
+      try {
+        final b = await rootBundle.load(p);
+        logoRl = pw.MemoryImage(b.buffer.asUint8List());
+        break;
+      } catch (_) {}
+    }
+
+    pw.ImageProvider? firmaTecImg;
+    pw.ImageProvider? firmaCliImg;
+    if (firmaTecBase64 != null && firmaTecBase64.isNotEmpty) {
+      try {
+        final raw = firmaTecBase64.contains(',') ? firmaTecBase64.split(',').last : firmaTecBase64;
+        firmaTecImg = pw.MemoryImage(base64Decode(raw));
+      } catch (_) {}
+    }
+    if (firmaCliBase64 != null && firmaCliBase64.isNotEmpty) {
+      try {
+        final raw = firmaCliBase64.contains(',') ? firmaCliBase64.split(',').last : firmaCliBase64;
+        firmaCliImg = pw.MemoryImage(base64Decode(raw));
+      } catch (_) {}
+    }
+
+    final int n = numCeldas.clamp(1, 12);
+    const redRe = PdfColor.fromInt(0xFFCC1F1F);
+    const darkHdr = PdfColor.fromInt(0xFF1C1C1C);
+    const grayHdr = PdfColor.fromInt(0xFF2D2D2D);
+    const grayLt = PdfColor.fromInt(0xFFF5F5F5);
+    const grayMed = PdfColor.fromInt(0xFFCCCCCC);
+    const grayDk = PdfColor.fromInt(0xFF888888);
+
+    String pick(List<String> keys, [String def = '']) {
+      for (final k in keys) {
+        final v = rvData[k];
+        if (v != null && v.toString().trim().isNotEmpty && v.toString().trim() != 'null') {
+          return v.toString().trim();
+        }
+      }
+      return def;
+    }
+
+    pw.Widget buildSectionBar(int numSec, String title) {
+      return pw.Container(
+        height: 16,
+        margin: const pw.EdgeInsets.only(top: 2, bottom: 2),
+        color: darkHdr,
+        padding: const pw.EdgeInsets.symmetric(horizontal: 5),
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Container(
+              width: 12,
+              height: 12,
+              decoration: const pw.BoxDecoration(color: redRe, shape: pw.BoxShape.circle),
+              child: pw.Center(
+                child: pw.Text(
+                  '$numSec',
+                  style: pw.TextStyle(color: _white, fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+                ),
+              ),
+            ),
+            pw.SizedBox(width: 6),
+            pw.Text(
+              title.toUpperCase(),
+              style: pw.TextStyle(color: _white, fontSize: 8.5, fontWeight: pw.FontWeight.bold),
+            ),
+          ],
+        ),
+      );
+    }
+
+    pw.Widget buildCheckbox(bool checked) {
+      return pw.Container(
+        width: 7,
+        height: 7,
+        decoration: pw.BoxDecoration(
+          color: checked ? darkHdr : _white,
+          border: pw.Border.all(color: _black, width: 0.7),
+        ),
+        child: checked
+            ? pw.Center(
+                child: pw.Text(
+                  'X',
+                  style: pw.TextStyle(color: _white, fontSize: 5.5, fontWeight: pw.FontWeight.bold),
+                ),
+              )
+            : null,
+      );
+    }
+
+    final indItems = <String>[
+      'Indicador de Peso',
+      'Teclado / Botones',
+      'Luminosidad / Display',
+      'Convertidor Analogico',
+      'Caja Sumadora',
+      for (int k = 1; k <= n; k++) 'Potenciometro $k',
+    ];
+    final int maxFuncRows = indItems.length > n ? indItems.length : n;
+    final double funcRowH = maxFuncRows > 9 ? (108.0 / maxFuncRows).clamp(8.5, 12.0) : 11.5;
+
+    final clienteVal = pick(['cliente', 'razon_social']);
+    final direccionVal = pick([
+      'direccion',
+      'sucursal_direccion',
+      'direccion_planta',
+      'cliente_direccion',
+      'sucursal',
+    ]);
+    final marcaInd = pick(['indicador_marca', 'marca', 'instrumento_marca']);
+    final modeloInd = pick(['indicador_modelo', 'modelo', 'instrumento_modelo']);
+    final serieInd = pick(['indicador_serie', 'ns', 'serie', 'numero_serie', 'instrumento_serie']);
+    final idInd = pick(['indicador_id', 'id_indicador', 'id_equipo', 'instrumento_id']);
+    final capMax = pick(['cap_maxima', 'capacidad_maxima', 'alcance_max', 'instrumento_capacidad']);
+    final divMin = pick(['div_minima', 'division_minima', 'instrumento_division']);
+    final ubicacion = pick(['ubicacion', 'ubicacion_interna', 'planta']);
+
+    final celdaAMarca = pick(['celda_a_marca', 'marca_celda'], marcaInd);
+    final celdaAModelo = pick(['celda_a_modelo', 'modelo_celda'], modeloInd);
+    final celdaACap = pick(['celda_a_capacidad', 'capacidad_celda'], capMax);
+    final celdaACant = pick(['celda_a_cantidad'], '$n');
+    final mixtas = rvData['celdas_mixtas'] == true || rvData['celdas_mixtas'] == 1;
+    final celdaBMarca = pick(['celda_b_marca']);
+    final celdaBModelo = pick(['celda_b_modelo']);
+    final celdaBCap = pick(['celda_b_capacidad']);
+    final celdaBCant = pick(['celda_b_cantidad']);
+
+    final fechaStr = pick(['fecha', 'fecha_servicio'], DateTime.now().toIso8601String().substring(0, 10));
+    final obsTxt = pick(['observaciones', 'observaciones_tecnico']);
+    final tecnicoRaw = pick(['tecnico_nombre', 'tecnico']);
+    final tecnicoTxt = ['sin asignar', 'none', 'null'].contains(tecnicoRaw.toLowerCase()) ? '' : tecnicoRaw;
+    final recRaw = pick(['firma_cliente_nombre', 'nombre_quien_recibe', 'nombre_receptor', 'nombre_ing']);
+    final recTxt = (recRaw.toLowerCase() == clienteVal.toLowerCase()) ? '' : recRaw;
+
+    pw.Widget buildLabeledLine(String label, String val) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.only(bottom: 2),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text('$label:', style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold, color: grayDk)),
+            pw.SizedBox(height: 1),
+            pw.Container(
+              width: double.infinity,
+              padding: const pw.EdgeInsets.only(bottom: 1.5),
+              decoration: const pw.BoxDecoration(
+                border: pw.Border(bottom: pw.BorderSide(color: grayMed, width: 0.5)),
+              ),
+              child: pw.Text(
+                val.isNotEmpty ? val : ' ',
+                style: const pw.TextStyle(fontSize: 7.5, color: _black),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.letter,
+        margin: const pw.EdgeInsets.fromLTRB(20, 15, 20, 15),
+        build: (ctx) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              // ── ENCABEZADO OFICIAL ─────────────────────────────────────────
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.SizedBox(
+                    width: 95,
+                    height: 32,
+                    child: logoPesa != null
+                        ? pw.Image(logoPesa, fit: pw.BoxFit.contain)
+                        : pw.Container(
+                            color: redRe,
+                            child: pw.Center(
+                              child: pw.Text('BASCULAS PESA',
+                                  style: pw.TextStyle(color: _white, fontSize: 7, fontWeight: pw.FontWeight.bold)),
+                            ),
+                          ),
+                  ),
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.center,
+                      children: [
+                        pw.Text('FICHA TECNICA DIAGNOSTICA',
+                            style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold, color: _black)),
+                        pw.SizedBox(height: 2),
+                        pw.Text('REVISION DE CELDAS DE CARGA Y BASCULA',
+                            style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: grayDk)),
+                        pw.SizedBox(height: 1),
+                        pw.Text('PESAJE SISTEMAS Y AUTOMATIZACION',
+                            style: const pw.TextStyle(fontSize: 6.5, color: grayDk)),
+                      ],
+                    ),
+                  ),
+                  pw.SizedBox(
+                    width: 110,
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                      children: [
+                        pw.SizedBox(
+                          height: 18,
+                          child: logoRl != null
+                              ? pw.Image(logoRl, fit: pw.BoxFit.contain)
+                              : pw.Center(
+                                  child: pw.Text('RICE LAKE',
+                                      style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                                ),
+                        ),
+                        pw.SizedBox(height: 3),
+                        pw.Container(
+                          height: 28,
+                          decoration: pw.BoxDecoration(
+                            border: pw.Border.all(color: redRe, width: 1.5),
+                          ),
+                          child: pw.Column(
+                            children: [
+                              pw.Container(
+                                height: 11,
+                                width: double.infinity,
+                                color: redRe,
+                                child: pw.Center(
+                                  child: pw.Text('FOLIO / RE',
+                                      style: pw.TextStyle(color: _white, fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
+                                ),
+                              ),
+                              pw.Expanded(
+                                child: pw.Center(
+                                  child: pw.Text(folio,
+                                      style: pw.TextStyle(color: redRe, fontSize: 11, fontWeight: pw.FontWeight.bold)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 3),
+              pw.Row(
+                children: [
+                  pw.Text('FECHA: ', style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: _black)),
+                  pw.Container(
+                    width: 150,
+                    padding: const pw.EdgeInsets.only(bottom: 1),
+                    decoration: const pw.BoxDecoration(
+                      border: pw.Border(bottom: pw.BorderSide(color: _black, width: 0.6)),
+                    ),
+                    child: pw.Text(fechaStr, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 3),
+
+              // ── SECCIÓN 1: DATOS DEL CLIENTE ───────────────────────────────
+              buildSectionBar(1, 'DATOS DEL CLIENTE'),
+              buildLabeledLine('RAZON SOCIAL / CLIENTE', clienteVal),
+              buildLabeledLine('DIRECCION COMPLETA', direccionVal),
+
+              // ── SECCIÓN 2: DATOS DEL EQUIPO / INDICADOR ────────────────────
+              buildSectionBar(2, 'DATOS DEL EQUIPO / INDICADOR'),
+              pw.Row(
+                children: [
+                  pw.Expanded(flex: 23, child: buildLabeledLine('MARCA INDICADOR', marcaInd)),
+                  pw.SizedBox(width: 6),
+                  pw.Expanded(flex: 27, child: buildLabeledLine('MODELO INDICADOR', modeloInd)),
+                  pw.SizedBox(width: 6),
+                  pw.Expanded(flex: 25, child: buildLabeledLine('No. DE SERIE', serieInd)),
+                  pw.SizedBox(width: 6),
+                  pw.Expanded(flex: 25, child: buildLabeledLine('ID INDICADOR', idInd)),
+                ],
+              ),
+              pw.Row(
+                children: [
+                  pw.Expanded(flex: 25, child: buildLabeledLine('CAPACIDAD MAX.', capMax)),
+                  pw.SizedBox(width: 6),
+                  pw.Expanded(flex: 25, child: buildLabeledLine('DIVISION MIN. (d)', divMin)),
+                  pw.SizedBox(width: 6),
+                  pw.Expanded(flex: 50, child: buildLabeledLine('UBICACION', ubicacion)),
+                ],
+              ),
+              pw.SizedBox(height: 2),
+              // Subtabla CELDAS DE CARGA
+              pw.Container(
+                height: 13,
+                color: grayHdr,
+                padding: const pw.EdgeInsets.symmetric(horizontal: 4),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('CELDAS DE CARGA',
+                        style: pw.TextStyle(color: _white, fontSize: 7, fontWeight: pw.FontWeight.bold)),
+                    pw.Text(mixtas ? 'ARREGLO MIXTO (A + B)' : 'HOMOGENEO',
+                        style: pw.TextStyle(color: _white, fontSize: 7, fontWeight: pw.FontWeight.bold)),
+                  ],
+                ),
+              ),
+              pw.Container(
+                height: 11,
+                color: darkHdr,
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(flex: 10, child: pw.Center(child: pw.Text('TIPO', style: pw.TextStyle(color: _white, fontSize: 6, fontWeight: pw.FontWeight.bold)))),
+                    pw.Expanded(flex: 26, child: pw.Center(child: pw.Text('MARCA', style: pw.TextStyle(color: _white, fontSize: 6, fontWeight: pw.FontWeight.bold)))),
+                    pw.Expanded(flex: 30, child: pw.Center(child: pw.Text('MODELO', style: pw.TextStyle(color: _white, fontSize: 6, fontWeight: pw.FontWeight.bold)))),
+                    pw.Expanded(flex: 20, child: pw.Center(child: pw.Text('CAPACIDAD INDIV.', style: pw.TextStyle(color: _white, fontSize: 6, fontWeight: pw.FontWeight.bold)))),
+                    pw.Expanded(flex: 14, child: pw.Center(child: pw.Text('CANTIDAD', style: pw.TextStyle(color: _white, fontSize: 6, fontWeight: pw.FontWeight.bold)))),
+                  ],
+                ),
+              ),
+              pw.Container(
+                height: 12,
+                decoration: pw.BoxDecoration(
+                  color: _white,
+                  border: pw.Border.all(color: grayMed, width: 0.3),
+                ),
+                child: pw.Row(
+                  children: [
+                    pw.Expanded(flex: 10, child: pw.Center(child: pw.Text(mixtas ? 'Tipo A' : 'Unico', style: const pw.TextStyle(fontSize: 6.8)))),
+                    pw.Expanded(flex: 26, child: pw.Center(child: pw.Text(celdaAMarca.isNotEmpty ? celdaAMarca : '—', style: const pw.TextStyle(fontSize: 6.8)))),
+                    pw.Expanded(flex: 30, child: pw.Center(child: pw.Text(celdaAModelo.isNotEmpty ? celdaAModelo : '—', style: const pw.TextStyle(fontSize: 6.8)))),
+                    pw.Expanded(flex: 20, child: pw.Center(child: pw.Text(celdaACap.isNotEmpty ? celdaACap : '—', style: const pw.TextStyle(fontSize: 6.8)))),
+                    pw.Expanded(flex: 14, child: pw.Center(child: pw.Text(celdaACant, style: pw.TextStyle(fontSize: 6.8, fontWeight: pw.FontWeight.bold)))),
+                  ],
+                ),
+              ),
+              if (mixtas)
+                pw.Container(
+                  height: 12,
+                  decoration: pw.BoxDecoration(
+                    color: grayLt,
+                    border: pw.Border.all(color: grayMed, width: 0.3),
+                  ),
+                  child: pw.Row(
+                    children: [
+                      pw.Expanded(flex: 10, child: pw.Center(child: pw.Text('Tipo B', style: const pw.TextStyle(fontSize: 6.8)))),
+                      pw.Expanded(flex: 26, child: pw.Center(child: pw.Text(celdaBMarca.isNotEmpty ? celdaBMarca : '—', style: const pw.TextStyle(fontSize: 6.8)))),
+                      pw.Expanded(flex: 30, child: pw.Center(child: pw.Text(celdaBModelo.isNotEmpty ? celdaBModelo : '—', style: const pw.TextStyle(fontSize: 6.8)))),
+                      pw.Expanded(flex: 20, child: pw.Center(child: pw.Text(celdaBCap.isNotEmpty ? celdaBCap : '—', style: const pw.TextStyle(fontSize: 6.8)))),
+                      pw.Expanded(flex: 14, child: pw.Center(child: pw.Text(celdaBCant.isNotEmpty ? celdaBCant : '—', style: pw.TextStyle(fontSize: 6.8, fontWeight: pw.FontWeight.bold)))),
+                    ],
+                  ),
+                ),
+              // Diagrama de Estructura con Celdas de Carga
+              pw.SizedBox(height: 3),
+              () {
+                final rawEst = pick(['tipo_estructura', 'tipo_instrumento', 'tipo_equipo'], 'PLATAFORMA').toUpperCase();
+                final isCamionera = rawEst.contains('CAMION') || n >= 6;
+                final isTolva = rawEst.contains('TOLVA') || rawEst.contains('TANQUE') || rawEst.contains('SILO');
+                final estLabel = isCamionera
+                    ? 'CAMIONERA'
+                    : (isTolva ? 'TOLVA / TANQUE' : 'PLATAFORMA');
+                final secCount = (int.tryParse(pick(['secciones_camionera'], '')) ?? (n ~/ 2)).clamp(2, 6);
+                return pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                  children: [
+                    pw.Container(
+                      height: 11,
+                      color: darkHdr,
+                      padding: const pw.EdgeInsets.symmetric(horizontal: 4),
+                      alignment: pw.Alignment.centerLeft,
+                      child: pw.Text(
+                        'DIAGRAMA DE ESTRUCTURA — $estLabel',
+                        style: pw.TextStyle(color: _white, fontSize: 6.5, fontWeight: pw.FontWeight.bold),
+                      ),
+                    ),
+                    pw.Container(
+                      height: 46,
+                      decoration: pw.BoxDecoration(
+                        color: grayLt,
+                        border: pw.Border.all(color: grayMed, width: 0.4),
+                      ),
+                      child: pw.Center(
+                        child: isCamionera
+                            ? pw.Container(
+                                width: 250,
+                                height: 32,
+                                decoration: pw.BoxDecoration(
+                                  color: _white,
+                                  border: pw.Border.all(color: darkHdr, width: 1.2),
+                                ),
+                                child: pw.Row(
+                                  mainAxisAlignment: pw.MainAxisAlignment.spaceEvenly,
+                                  children: List.generate(secCount, (sIdx) {
+                                    return pw.Expanded(
+                                      child: pw.Container(
+                                        decoration: pw.BoxDecoration(
+                                          border: sIdx < secCount - 1
+                                              ? const pw.Border(right: pw.BorderSide(color: grayDk, width: 0.7))
+                                              : null,
+                                        ),
+                                        child: pw.Column(
+                                          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                          children: [
+                                            pw.Row(
+                                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                pw.Container(
+                                                  width: 9,
+                                                  height: 9,
+                                                  color: redRe,
+                                                  child: pw.Center(
+                                                    child: pw.Text('C',
+                                                        style: pw.TextStyle(
+                                                            color: _white, fontSize: 5, fontWeight: pw.FontWeight.bold)),
+                                                  ),
+                                                ),
+                                                if (sIdx == secCount - 1)
+                                                  pw.Container(
+                                                    width: 9,
+                                                    height: 9,
+                                                    color: redRe,
+                                                    child: pw.Center(
+                                                      child: pw.Text('C',
+                                                          style: pw.TextStyle(
+                                                              color: _white, fontSize: 5, fontWeight: pw.FontWeight.bold)),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                            pw.Text('Sec ${sIdx + 1}', style: const pw.TextStyle(fontSize: 6, color: darkHdr)),
+                                            pw.Row(
+                                              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                              children: [
+                                                pw.Container(
+                                                  width: 9,
+                                                  height: 9,
+                                                  color: redRe,
+                                                  child: pw.Center(
+                                                    child: pw.Text('C',
+                                                        style: pw.TextStyle(
+                                                            color: _white, fontSize: 5, fontWeight: pw.FontWeight.bold)),
+                                                  ),
+                                                ),
+                                                if (sIdx == secCount - 1)
+                                                  pw.Container(
+                                                    width: 9,
+                                                    height: 9,
+                                                    color: redRe,
+                                                    child: pw.Center(
+                                                      child: pw.Text('C',
+                                                          style: pw.TextStyle(
+                                                              color: _white, fontSize: 5, fontWeight: pw.FontWeight.bold)),
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  }),
+                                ),
+                              )
+                            : pw.Container(
+                                width: 92,
+                                height: 34,
+                                decoration: pw.BoxDecoration(
+                                  color: _white,
+                                  border: pw.Border.all(color: darkHdr, width: 1.2),
+                                ),
+                                child: pw.Column(
+                                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    pw.Row(
+                                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        pw.Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: pw.BoxDecoration(
+                                            color: const PdfColor.fromInt(0xFFFEE2E2),
+                                            border: pw.Border.all(color: redRe, width: 0.8),
+                                          ),
+                                          child: pw.Center(
+                                            child: pw.Text('C',
+                                                style: pw.TextStyle(
+                                                    color: redRe, fontSize: 5.5, fontWeight: pw.FontWeight.bold)),
+                                          ),
+                                        ),
+                                        pw.Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: pw.BoxDecoration(
+                                            color: const PdfColor.fromInt(0xFFFEE2E2),
+                                            border: pw.Border.all(color: redRe, width: 0.8),
+                                          ),
+                                          child: pw.Center(
+                                            child: pw.Text('C',
+                                                style: pw.TextStyle(
+                                                    color: redRe, fontSize: 5.5, fontWeight: pw.FontWeight.bold)),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    pw.Text(estLabel, style: const pw.TextStyle(fontSize: 6.2, color: darkHdr)),
+                                    pw.Row(
+                                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        pw.Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: pw.BoxDecoration(
+                                            color: const PdfColor.fromInt(0xFFFEE2E2),
+                                            border: pw.Border.all(color: redRe, width: 0.8),
+                                          ),
+                                          child: pw.Center(
+                                            child: pw.Text('C',
+                                                style: pw.TextStyle(
+                                                    color: redRe, fontSize: 5.5, fontWeight: pw.FontWeight.bold)),
+                                          ),
+                                        ),
+                                        pw.Container(
+                                          width: 10,
+                                          height: 10,
+                                          decoration: pw.BoxDecoration(
+                                            color: const PdfColor.fromInt(0xFFFEE2E2),
+                                            border: pw.Border.all(color: redRe, width: 0.8),
+                                          ),
+                                          child: pw.Center(
+                                            child: pw.Text('C',
+                                                style: pw.TextStyle(
+                                                    color: redRe, fontSize: 5.5, fontWeight: pw.FontWeight.bold)),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                      ),
+                    ),
+                  ],
+                );
+              }(),
+
+              // ── SECCIÓN 3: LECTURAS SIN CARGA — N CELDAS (OHMS / MV) ───────
+              buildSectionBar(3, 'LECTURAS SIN CARGA — $n CELDA${n > 1 ? 'S' : ''}  (OHMS / MV)'),
+              pw.Container(
+                height: 13,
+                color: darkHdr,
+                child: pw.Row(
+                  children: [
+                    pw.SizedBox(
+                      width: 118,
+                      child: pw.Padding(
+                        padding: const pw.EdgeInsets.only(left: 4),
+                        child: pw.Align(
+                          alignment: pw.Alignment.centerLeft,
+                          child: pw.Text('PARAMETRO ELECTRICO',
+                              style: pw.TextStyle(color: _white, fontSize: 7, fontWeight: pw.FontWeight.bold)),
+                        ),
+                      ),
+                    ),
+                    pw.SizedBox(
+                      width: 28,
+                      child: pw.Center(
+                        child: pw.Text('UND',
+                            style: pw.TextStyle(color: _white, fontSize: 7, fontWeight: pw.FontWeight.bold)),
+                      ),
+                    ),
+                    for (int cIdx = 0; cIdx < n; cIdx++)
+                      pw.Expanded(
+                        child: pw.Center(
+                          child: pw.Text('C-${cIdx + 1}',
+                              style: pw.TextStyle(color: _white, fontSize: 7, fontWeight: pw.FontWeight.bold)),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              for (int rIdx = 0; rIdx < ohmsParamsOficiales.length; rIdx++)
+                pw.Container(
+                  height: 11,
+                  decoration: pw.BoxDecoration(
+                    color: rIdx.isEven ? grayLt : _white,
+                    border: pw.Border.all(color: grayMed, width: 0.25),
+                  ),
+                  child: pw.Row(
+                    children: [
+                      pw.Container(
+                        width: 118,
+                        padding: const pw.EdgeInsets.only(left: 3),
+                        alignment: pw.Alignment.centerLeft,
+                        decoration: const pw.BoxDecoration(
+                          border: pw.Border(right: pw.BorderSide(color: grayMed, width: 0.25)),
+                        ),
+                        child: pw.Text(ohmsParamsOficiales[rIdx][1],
+                            style: const pw.TextStyle(fontSize: 6.5, color: _black)),
+                      ),
+                      pw.Container(
+                        width: 28,
+                        alignment: pw.Alignment.center,
+                        decoration: const pw.BoxDecoration(
+                          border: pw.Border(right: pw.BorderSide(color: grayMed, width: 0.25)),
+                        ),
+                        child: pw.Text(ohmsParamsOficiales[rIdx][2],
+                            style: pw.TextStyle(fontSize: 6.3, fontWeight: pw.FontWeight.bold, color: grayDk)),
+                      ),
+                      for (int cIdx = 0; cIdx < n; cIdx++)
+                        pw.Expanded(
+                          child: pw.Container(
+                            alignment: pw.Alignment.center,
+                            decoration: const pw.BoxDecoration(
+                              border: pw.Border(right: pw.BorderSide(color: grayMed, width: 0.25)),
+                            ),
+                            child: () {
+                              final v = (rIdx < lecturasOhms.length && cIdx < lecturasOhms[rIdx].length)
+                                  ? lecturasOhms[rIdx][cIdx].trim()
+                                  : '';
+                              if (v.isNotEmpty) {
+                                return pw.Text(v,
+                                    style: pw.TextStyle(fontSize: 6.8, fontWeight: pw.FontWeight.bold, color: _black));
+                              }
+                              return pw.Container(
+                                margin: const pw.EdgeInsets.symmetric(horizontal: 4),
+                                height: 0.5,
+                                color: const PdfColor.fromInt(0xFFDDDDDD),
+                              );
+                            }(),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+
+              // ── SECCIÓN 4: FUNCIONALIDAD DE CELDAS E INDICADOR ─────────────
+              buildSectionBar(4, 'FUNCIONALIDAD DE CELDAS E INDICADOR'),
+              pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  // Columna Izquierda: INDICADOR / DISPLAY
+                  pw.Expanded(
+                    flex: 48,
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                      children: [
+                        pw.Container(
+                          height: 14,
+                          color: grayHdr,
+                          padding: const pw.EdgeInsets.only(left: 4),
+                          alignment: pw.Alignment.centerLeft,
+                          child: pw.Text('INDICADOR / DISPLAY',
+                              style: pw.TextStyle(color: _white, fontSize: 7, fontWeight: pw.FontWeight.bold)),
+                        ),
+                        for (int i = 0; i < maxFuncRows; i++)
+                          if (i < indItems.length)
+                            pw.Container(
+                              height: funcRowH,
+                              padding: const pw.EdgeInsets.symmetric(horizontal: 4),
+                              decoration: pw.BoxDecoration(
+                                color: i.isEven ? const PdfColor.fromInt(0xFFF8F9FA) : _white,
+                                border: pw.Border.all(color: grayMed, width: 0.25),
+                              ),
+                              child: pw.Row(
+                                children: [
+                                  buildCheckbox(funcIndicador[indItems[i]] == true),
+                                  pw.SizedBox(width: 5),
+                                  pw.Text(indItems[i], style: const pw.TextStyle(fontSize: 6.5, color: _black)),
+                                ],
+                              ),
+                            )
+                          else
+                            pw.SizedBox(height: funcRowH),
+                      ],
+                    ),
+                  ),
+                  pw.SizedBox(width: 8),
+                  // Columna Derecha: ESTADO INDIVIDUAL DE CELDAS
+                  pw.Expanded(
+                    flex: 52,
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                      children: [
+                        pw.Container(
+                          height: 14,
+                          color: grayHdr,
+                          padding: const pw.EdgeInsets.only(left: 4),
+                          alignment: pw.Alignment.centerLeft,
+                          child: pw.Text('ESTADO INDIVIDUAL DE CELDAS',
+                              style: pw.TextStyle(color: _white, fontSize: 7, fontWeight: pw.FontWeight.bold)),
+                        ),
+                        for (int i = 0; i < maxFuncRows; i++)
+                          if (i < n)
+                            pw.Container(
+                              height: funcRowH,
+                              padding: const pw.EdgeInsets.symmetric(horizontal: 4),
+                              decoration: pw.BoxDecoration(
+                                color: i.isEven ? const PdfColor.fromInt(0xFFF8F9FA) : _white,
+                                border: pw.Border.all(color: grayMed, width: 0.25),
+                              ),
+                              child: pw.Row(
+                                children: [
+                                  pw.SizedBox(
+                                    width: 42,
+                                    child: pw.Text('Celda ${i + 1}:',
+                                        style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: _black)),
+                                  ),
+                                  buildCheckbox(i < estadoCeldas.length && estadoCeldas[i].toUpperCase() == 'OK'),
+                                  pw.SizedBox(width: 3),
+                                  pw.Text('OK', style: const pw.TextStyle(fontSize: 6.5, color: _black)),
+                                  pw.SizedBox(width: 14),
+                                  buildCheckbox(i < estadoCeldas.length && estadoCeldas[i].toUpperCase() == 'FALLA'),
+                                  pw.SizedBox(width: 3),
+                                  pw.Text('Falla', style: const pw.TextStyle(fontSize: 6.5, color: _black)),
+                                ],
+                              ),
+                            )
+                          else
+                            pw.SizedBox(height: funcRowH),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              // Barra inferior Cables y Conectores
+              pw.Container(
+                height: 13,
+                padding: const pw.EdgeInsets.symmetric(horizontal: 4),
+                decoration: pw.BoxDecoration(
+                  color: const PdfColor.fromInt(0xFFF8F9FA),
+                  border: pw.Border.all(color: grayMed, width: 0.25),
+                ),
+                child: pw.Row(
+                  children: [
+                    pw.Text('Cables:', style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: _black)),
+                    pw.SizedBox(width: 8),
+                    buildCheckbox(estadoCables.toUpperCase() == 'OK'),
+                    pw.SizedBox(width: 3),
+                    pw.Text('OK', style: const pw.TextStyle(fontSize: 6.5)),
+                    pw.SizedBox(width: 10),
+                    buildCheckbox(estadoCables.toUpperCase() == 'FALLA'),
+                    pw.SizedBox(width: 3),
+                    pw.Text('Falla', style: const pw.TextStyle(fontSize: 6.5)),
+                    pw.SizedBox(width: 32),
+                    pw.Text('Conectores:', style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: _black)),
+                    pw.SizedBox(width: 8),
+                    buildCheckbox(estadoConectores.toUpperCase() == 'OK'),
+                    pw.SizedBox(width: 3),
+                    pw.Text('OK', style: const pw.TextStyle(fontSize: 6.5)),
+                    pw.SizedBox(width: 10),
+                    buildCheckbox(estadoConectores.toUpperCase() == 'FALLA'),
+                    pw.SizedBox(width: 3),
+                    pw.Text('Falla', style: const pw.TextStyle(fontSize: 6.5)),
+                  ],
+                ),
+              ),
+
+              // ── SECCIÓN 5: OBSERVACIONES Y FIRMAS ──────────────────────────
+              buildSectionBar(5, 'OBSERVACIONES Y FIRMAS'),
+              () {
+                final String obsTexto = obsTxt.trim();
+                final double obsFontSize = obsTexto.length > 350
+                    ? 6.8
+                    : (obsTexto.length > 200 ? 7.5 : 8.5);
+                return pw.Container(
+                  width: double.infinity,
+                  constraints: const pw.BoxConstraints(minHeight: 38),
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  decoration: pw.BoxDecoration(
+                    color: grayLt,
+                    border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('OBSERVACIONES:',
+                          style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold, color: grayDk)),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        obsTexto.isEmpty ? 'Sin observaciones adicionales.' : obsTexto,
+                        style: pw.TextStyle(
+                          fontSize: obsFontSize,
+                          lineSpacing: 1.5,
+                          color: _black,
+                        ),
+                        softWrap: true,
+                        textAlign: pw.TextAlign.left,
+                      ),
+                    ],
+                  ),
+                );
+              }(),
+              pw.SizedBox(height: 6),
+              pw.Row(
+                children: [
+                  pw.Expanded(
+                    child: _firmaBox('TECNICO RESPONSABLE', tecnicoTxt, firmaTecImg),
+                  ),
+                  pw.SizedBox(width: 36),
+                  pw.Expanded(
+                    child: _firmaBox('FIRMA CLIENTE', recTxt, firmaCliImg),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    return doc.save();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS (OSOB-26-XXX)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<String> generarPdfObservacionesBascula({
+    required Map<String, dynamic> osData,
+    String? firmaTecBase64,
+    String? firmaCliBase64,
+  }) async {
+    final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
+    osData['fecha_creacion_logistica'] ??= osData['fecha'];
+    osData['fecha'] = fechaEjecucionHoy;
+    osData['fecha_servicio'] = fechaEjecucionHoy;
+    osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+
+    final bytes = await buildPdfObservacionesBasculaBytes(
+      osData: osData,
+      firmaTecBase64: firmaTecBase64,
+      firmaCliBase64: firmaCliBase64,
+    );
+
+    final dir = await getApplicationDocumentsDirectory();
+    final pdfDir = Directory('${dir.path}/pdfs');
+    if (!await pdfDir.exists()) {
+      await pdfDir.create(recursive: true);
+    }
+    final folio = _s(osData, 'folio_os', _s(osData, 'folio', 'OSOB-26-001')).trim();
+    final safeFolio = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final fileName = '$safeFolio.pdf';
+    final filePath = '${pdfDir.path}/$fileName';
+    await _writeAtomic(File(filePath), bytes);
+
+    try {
+      final legacyDir = Directory('${dir.path}/Pesa_PDFs');
+      if (!await legacyDir.exists()) await legacyDir.create(recursive: true);
+      await _writeAtomic(File('${legacyDir.path}/$fileName'), bytes);
+    } catch (_) {}
+
+    return filePath;
+  }
+
+  Future<Uint8List> buildPdfObservacionesBasculaBytes({
+    required Map<String, dynamic> osData,
+    String? firmaTecBase64,
+    String? firmaCliBase64,
+  }) async {
+    final folio = _s(osData, 'folio_os', _s(osData, 'folio', 'OSOB-26-001'));
+    final doc = pw.Document(
+      title: 'FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS - $folio',
+      author: 'Servicios PESA',
+      subject: 'Formato de Inspección y Revisión de Básculas (OSOB)',
+      creator: 'PESA Tablet App v3',
+    );
+
+    pw.ImageProvider? logoPesa;
+    pw.ImageProvider? logoRl;
+    for (final p in ['Img/logo_pesa.png', 'assets/logo_pesa.png']) {
+      try {
+        final b = await rootBundle.load(p);
+        logoPesa = pw.MemoryImage(b.buffer.asUint8List());
+        break;
+      } catch (_) {}
+    }
+    for (final p in ['Img/RiceLake.png', 'assets/RiceLake.png']) {
+      try {
+        final b = await rootBundle.load(p);
+        logoRl = pw.MemoryImage(b.buffer.asUint8List());
+        break;
+      } catch (_) {}
+    }
+
+    pw.ImageProvider? firmaTecImg;
+    pw.ImageProvider? firmaCliImg;
+    final rawTec = firmaTecBase64 ?? _s(osData, 'firma_tecnico', _s(osData, 'firma_tecnico_b64', ''));
+    final rawCli = firmaCliBase64 ?? _s(osData, 'firma_cliente', _s(osData, 'firma_receptor_b64', ''));
+    if (rawTec.isNotEmpty) {
+      try {
+        final clean = rawTec.contains(',') ? rawTec.split(',').last : rawTec;
+        firmaTecImg = pw.MemoryImage(base64Decode(clean));
+      } catch (_) {}
+    }
+    if (rawCli.isNotEmpty) {
+      try {
+        final clean = rawCli.contains(',') ? rawCli.split(',').last : rawCli;
+        firmaCliImg = pw.MemoryImage(base64Decode(clean));
+      } catch (_) {}
+    }
+
+    // Fecha de finalización en formato DD / MM / 2026
+    String fechaRaw = _s(osData, 'fecha', _s(osData, 'fecha_servicio', ''));
+    String fechaFmt = '';
+    if (fechaRaw.length >= 10 && fechaRaw.contains('-')) {
+      final parts = fechaRaw.substring(0, 10).split('-');
+      if (parts.length == 3) {
+        fechaFmt = '${parts[2]} / ${parts[1]} / ${parts[0]}';
+      }
+    }
+    if (fechaFmt.isEmpty) {
+      final now = DateTime.now();
+      fechaFmt = '${now.day.toString().padLeft(2, '0')} / ${now.month.toString().padLeft(2, '0')} / ${now.year}';
+    }
+
+    final ordenServicioRef = _s(osData, 'orden_servicio_ref', _s(osData, 'orden_servicio', '_______________'));
+
+    // Datos Sección 1
+    final cliente = _s(osData, 'cliente', _s(osData, 'razon_social', ''));
+    final planta = _s(osData, 'ubicacion', _s(osData, 'sucursal', _s(osData, 'direccion', '')));
+    final idTag = _s(osData, 'id_equipo', _s(osData, 'id_indicador', _s(osData, 'indicador_id', '')));
+    final marca = _s(osData, 'marca', _s(osData, 'equipo_marca', ''));
+    final modelo = _s(osData, 'modelo', _s(osData, 'equipo_modelo', ''));
+    final serie = _s(osData, 'serie', _s(osData, 'ns', _s(osData, 'numero_serie', '')));
+    final capMax = formatoMilesEspacio(_s(osData, 'capacidad_maxima', _s(osData, 'alcance_max', _s(osData, 'cap_maxima', ''))));
+    final divMin = formatoMilesEspacio(_s(osData, 'division_minima', _s(osData, 'div_minima', '')));
+    String indMarcaModelo = _s(osData, 'indicador_marca_modelo', '');
+    if (indMarcaModelo.isEmpty) {
+      final im = _s(osData, 'indicador_marca', '');
+      final imod = _s(osData, 'indicador_modelo', '');
+      indMarcaModelo = '$im $imod'.trim();
+    }
+    final tipoInst = _s(osData, 'tipo_instrumento', '').toLowerCase();
+    final tipoInstOtro = _s(osData, 'tipo_instrumento_otro', '');
+
+    final isMesa = tipoInst.contains('mesa') || tipoInst.contains('mostrador') || tipoInst.contains('banco');
+    final isCam = tipoInst.contains('camion');
+    final isColg = tipoInst.contains('colg') || tipoInst.contains('grua') || tipoInst.contains('grúa');
+    final isTolva = tipoInst.contains('tolva');
+    final isTanque = tipoInst.contains('tanque') || tipoInst.contains('silo');
+    final isOtro = tipoInstOutroCheck(tipoInst, tipoInstOtro, isMesa, isCam, isColg, isTolva, isTanque);
+    final txtOtro = tipoInstOtro.isNotEmpty
+        ? tipoInstOtro
+        : (isOtro && !tipoInst.contains('otro') ? _s(osData, 'tipo_instrumento', '') : '_________________');
+
+    // Datos Sección 2 (Checklist 1..14)
+    final Map<String, dynamic> checklistRaw = (osData['checklist_inspeccion'] is Map)
+        ? Map<String, dynamic>.from(osData['checklist_inspeccion'] as Map)
+        : {};
+
+    String chkEst(int idx) {
+      final item = checklistRaw['$idx'] ?? checklistRaw[idx];
+      if (item is Map) return (item['estado'] ?? '').toString().trim().toUpperCase();
+      return _s(osData, 'chk_${idx}_estado', '').toUpperCase();
+    }
+
+    String chkObs(int idx) {
+      final item = checklistRaw['$idx'] ?? checklistRaw[idx];
+      if (item is Map) return (item['observaciones'] ?? '').toString().trim();
+      return _s(osData, 'chk_${idx}_obs', '');
+    }
+
+    // Datos Sección 3 (Pruebas Rápidas)
+    final Map<String, dynamic> pruebasRaw = (osData['pruebas_rapidas'] is Map)
+        ? Map<String, dynamic>.from(osData['pruebas_rapidas'] as Map)
+        : {};
+
+    Map<String, dynamic> prMap(String key) {
+      final v = pruebasRaw[key];
+      if (v is Map) return Map<String, dynamic>.from(v);
+      return {};
+    }
+
+    // Datos Sección 4 (Diagnóstico General, Observaciones y Refacciones)
+    final String obsTecnicas = _s(osData, 'observaciones', _s(osData, 'observaciones_tecnicas', ''));
+    final String refaccionesTxt = _s(osData, 'refacciones_requeridas', _s(osData, 'refacciones_adicionales', ''));
+
+    final dynamic accRaw = osData['acciones_realizadas'];
+    bool hasAccion(String key, String keyword) {
+      if (accRaw is Map) {
+        final v = accRaw[key];
+        if (v != null) return v == true || v.toString().toLowerCase() == 'true' || v.toString() == '1';
+      } else if (accRaw is List) {
+        return accRaw.any((e) => e.toString().toLowerCase().contains(keyword) || e.toString().toLowerCase() == key);
+      } else if (accRaw is String) {
+        return accRaw.toLowerCase().contains(keyword) || accRaw.toLowerCase().contains(key);
+      }
+      return false;
+    }
+
+    final accLimp = hasAccion('limpieza', 'limpieza');
+    final accNiv = hasAccion('nivelacion', 'nivelac');
+    final accAj = hasAccion('ajuste_peso', 'ajuste');
+    final accElec = hasAccion('revision_electrica', 'eléctric') || hasAccion('revision_electrica', 'electric');
+
+    final dictamenUp = _s(osData, 'dictamen_estado', _s(osData, 'dictamen', '')).toUpperCase();
+    final isOpObs = dictamenUp.contains('OBSERVACION');
+    final isFuera = dictamenUp.contains('FUERA') || dictamenUp == 'NO APTO';
+    final isOp = !isOpObs && !isFuera && (dictamenUp.contains('OPERATIVO') || dictamenUp == 'APTO');
+
+    // Datos Sección 5 (Firmas)
+    final tecNombre = _s(osData, 'tecnico', _s(osData, 'tecnico_nombre', ''));
+    final tecPuesto = _s(osData, 'puesto_tecnico', 'Técnico de Servicio');
+    final cliNombre = _s(osData, 'nombre_receptor', _s(osData, 'firma_cliente_nombre', _s(osData, 'nombre_ing', '')));
+    final cliPuesto = _s(osData, 'puesto_receptor', _s(osData, 'area_puesto_cliente', _s(osData, 'puesto_ing', '')));
+
+    pw.Widget secHeader(String title) => pw.Container(
+          width: double.infinity,
+          color: _dark,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+          child: pw.Text(
+            title,
+            style: pw.TextStyle(color: _white, fontSize: 7.2, fontWeight: pw.FontWeight.bold),
+          ),
+        );
+
+    pw.Widget subCatHeader(String title) => pw.Container(
+          width: double.infinity,
+          color: const PdfColor.fromInt(0xFFEAEAEA),
+          padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 1.8),
+          child: pw.Text(
+            title,
+            style: pw.TextStyle(color: _red, fontSize: 6.5, fontWeight: pw.FontWeight.bold),
+          ),
+        );
+
+    String markBox(bool active, [String inner = 'X']) {
+      if (inner == 'X') return active ? '[ X ]' : '[   ]';
+      return active ? '[X $inner]' : '[ $inner ]';
+    }
+
+    pw.Widget buildChecklistRow(int num, String label) {
+      final est = chkEst(num);
+      final obs = chkObs(num);
+      return pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+        decoration: pw.BoxDecoration(
+          color: num.isEven ? const PdfColor.fromInt(0xFFF9FAFB) : _white,
+          border: pw.Border(
+            bottom: const pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+            left: const pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+            right: const pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+          ),
+        ),
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Expanded(
+              flex: 52,
+              child: pw.Text(
+                '$num. $label',
+                style: const pw.TextStyle(fontSize: 5.8, color: _black),
+              ),
+            ),
+            pw.SizedBox(
+              width: 112,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(markBox(est == 'B', 'B'),
+                      style: pw.TextStyle(fontSize: 5.6, fontWeight: est == 'B' ? pw.FontWeight.bold : pw.FontWeight.normal, color: est == 'B' ? _redBright : _black)),
+                  pw.Text(markBox(est == 'R', 'R'),
+                      style: pw.TextStyle(fontSize: 5.6, fontWeight: est == 'R' ? pw.FontWeight.bold : pw.FontWeight.normal, color: est == 'R' ? _redBright : _black)),
+                  pw.Text(markBox(est == 'M', 'M'),
+                      style: pw.TextStyle(fontSize: 5.6, fontWeight: est == 'M' ? pw.FontWeight.bold : pw.FontWeight.normal, color: est == 'M' ? _redBright : _black)),
+                  pw.Text(markBox(est == 'N/A' || est == 'NA', 'N/A'),
+                      style: pw.TextStyle(fontSize: 5.6, fontWeight: (est == 'N/A' || est == 'NA') ? pw.FontWeight.bold : pw.FontWeight.normal, color: (est == 'N/A' || est == 'NA') ? _redBright : _black)),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 4),
+            pw.Expanded(
+              flex: 28,
+              child: pw.Text(
+                '| Observaciones: ${obs.isNotEmpty ? obs : "_________________"}',
+                style: const pw.TextStyle(fontSize: 5.6, color: _grayD),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    pw.Widget buildPruebaRow({
+      required String label,
+      required String key,
+      required String extraLabel,
+      required String extraKey,
+      bool isExactitud = false,
+    }) {
+      final m = prMap(key);
+      final est = (m['estado'] ?? _s(osData, '${key}_estado', '')).toString().toUpperCase();
+      final cumple = est == 'CUMPLE' || est == 'SI' || est == 'SÍ' || est == 'OK';
+      final noCumple = est == 'NO CUMPLE' || est == 'NO' || est == 'FALLA';
+      final extraVal = (m[extraKey] ?? _s(osData, '${key}_$extraKey', '')).toString().trim();
+
+      String rightText;
+      if (isExactitud) {
+        final reqUp = extraVal.toUpperCase();
+        final reqSi = reqUp == 'SI' || reqUp == 'SÍ' || reqUp == 'TRUE' || reqUp == '1';
+        final reqNo = reqUp == 'NO' || reqUp == 'FALSE' || reqUp == '0';
+        rightText = '| Requiere ajuste: ${markBox(reqSi)} Sí   ${markBox(reqNo)} No';
+      } else {
+        rightText = '| $extraLabel: ${extraVal.isNotEmpty ? extraVal : "_________________"}';
+      }
+
+      return pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: const pw.BoxDecoration(
+          border: pw.Border(
+            bottom: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+            left: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+            right: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+          ),
+        ),
+        child: pw.Row(
+          children: [
+            pw.Expanded(
+              flex: 36,
+              child: pw.Text('- $label:', style: pw.TextStyle(fontSize: 6.0, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.SizedBox(
+              width: 118,
+              child: pw.Text(
+                '${markBox(cumple)} Cumple   ${markBox(noCumple)} No cumple',
+                style: const pw.TextStyle(fontSize: 5.8),
+              ),
+            ),
+            pw.Expanded(
+              flex: 38,
+              child: pw.Text(rightText, style: const pw.TextStyle(fontSize: 5.8, color: _grayD)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    pw.Widget buildAdaptiveMultilineBox(String label, String rawText) {
+      final String obsTexto = rawText.trim();
+      final double obsFontSize = obsTexto.length > 350
+          ? 6.8
+          : (obsTexto.length > 200 ? 7.5 : 8.5);
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(fontSize: 6.2, fontWeight: pw.FontWeight.bold, color: _black),
+          ),
+          pw.SizedBox(height: 1.5),
+          pw.Container(
+            width: double.infinity,
+            constraints: const pw.BoxConstraints(minHeight: 38),
+            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+            ),
+            child: pw.Text(
+              obsTexto.isEmpty ? 'Sin observaciones adicionales.' : obsTexto,
+              style: pw.TextStyle(
+                fontSize: obsFontSize,
+                lineSpacing: 1.5,
+              ),
+              softWrap: true,
+              textAlign: pw.TextAlign.left,
+            ),
+          ),
+        ],
+      );
+    }
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.letter,
+        margin: const pw.EdgeInsets.fromLTRB(22, 14, 22, 14),
+        build: (ctx) => [
+          // Cabecera con logos y título oficial
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              _logoBox(logoPesa, 'BP BÁSCULAS PESA', 95, 28),
+              pw.Expanded(
+                child: pw.Column(
+                  children: [
+                    pw.Text(
+                      'FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(fontSize: 10.5, fontWeight: pw.FontWeight.bold, color: _red),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.Text(
+                      'Folio: $folio | Fecha: $fechaFmt | Orden de Servicio: ${ordenServicioRef.isEmpty ? "_______________" : ordenServicioRef}',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(fontSize: 7.2, fontWeight: pw.FontWeight.bold, color: _dark),
+                    ),
+                  ],
+                ),
+              ),
+              _logoBox(logoRl, 'RICE LAKE', 85, 28),
+            ],
+          ),
+          pw.SizedBox(height: 4),
+
+          // ── SECCIÓN 1. Datos del Cliente y del Equipo ─────────────────────
+          secHeader('SECCIÓN 1. Datos del Cliente y del Equipo'),
+          pw.Container(
+            padding: const pw.EdgeInsets.all(4),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Row(children: [
+                  pw.Expanded(child: pw.Text('Cliente / Empresa: $cliente', style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold))),
+                  pw.Expanded(child: pw.Text('Planta / Ubicación: $planta', style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold))),
+                ]),
+                pw.SizedBox(height: 2),
+                pw.Row(children: [
+                  pw.Expanded(child: pw.Text('ID Interno / Tag: $idTag', style: const pw.TextStyle(fontSize: 6.3))),
+                  pw.Expanded(child: pw.Text('Marca: $marca', style: const pw.TextStyle(fontSize: 6.3))),
+                  pw.Expanded(child: pw.Text('Modelo: $modelo', style: const pw.TextStyle(fontSize: 6.3))),
+                  pw.Expanded(child: pw.Text('Número de Serie: $serie', style: const pw.TextStyle(fontSize: 6.3))),
+                ]),
+                pw.SizedBox(height: 2),
+                pw.Row(children: [
+                  pw.Expanded(child: pw.Text('Capacidad Máx. (Max): $capMax', style: const pw.TextStyle(fontSize: 6.3))),
+                  pw.Expanded(child: pw.Text('División Mínima (d / e): $divMin', style: const pw.TextStyle(fontSize: 6.3))),
+                  pw.Expanded(flex: 2, child: pw.Text('Indicador (Marca / Modelo): $indMarcaModelo', style: const pw.TextStyle(fontSize: 6.3))),
+                ]),
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  'Tipo de Instrumento:  ${markBox(isMesa)} Mesa   ${markBox(isCam)} Camionera   ${markBox(isColg)} Colgante   ${markBox(isTolva)} Tolva   ${markBox(isTanque)} Tanque   ${markBox(isOtro)} Otro (especifique): $txtOtro',
+                  style: const pw.TextStyle(fontSize: 6.2),
+                ),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 3),
+
+          // ── SECCIÓN 2. Checklist de Inspección Física y Mecánica ──────────
+          secHeader('SECCIÓN 2. Checklist de Inspección Física y Mecánica'),
+          pw.Container(
+            width: double.infinity,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            color: const PdfColor.fromInt(0xFFF5F5F7),
+            child: pw.Text(
+              'Instrucción: Marcar con una "X" el estado actual de cada componente (B = Bueno / Operativo, R = Regular / Requiere ajuste o limpieza, M = Malo / Requiere reemplazo, N/A = No aplica).',
+              style: pw.TextStyle(fontSize: 5.7, fontStyle: pw.FontStyle.italic, color: _grayD),
+            ),
+          ),
+          subCatHeader('A) Estructura y Receptor de Carga'),
+          buildChecklistRow(1, 'Charola / Plato / Cubierta (Sin golpes, deformaciones ni corrosión)'),
+          buildChecklistRow(2, 'Estructura inferior / Chasis (Soldaduras íntegras, sin fracturas ni óxido severo)'),
+          buildChecklistRow(3, 'Patas niveladoras (Completas, roscas en buen estado, gomas antiderrapantes firmes)'),
+          buildChecklistRow(4, 'Nivelación - Gota / Burbuja (Burbuja centrada y nivel visible sin daños)'),
+          buildChecklistRow(5, 'Topes de sobrecarga y laterales (Con holgura adecuada, sin rozamiento ni obstrucciones)'),
+          buildChecklistRow(6, 'Limpieza general (Libre de residuos, polvo acumulado, humedad o fauna nociva bajo el plato)'),
+          subCatHeader('B) Celdas y Transmisión'),
+          buildChecklistRow(7, 'Celda(s) de carga (Sin golpes visibles, corrosión, humedad ni deformación)'),
+          buildChecklistRow(8, 'Cableado y blindaje (Sin cortes, empalmes improvisados ni aplastamiento; prensaestopas firmes)'),
+          buildChecklistRow(9, 'Caja suma (Sellada herméticamente, sin sulfatación en bornes ni humedad)'),
+          subCatHeader('C) Indicador y Electrónica'),
+          buildChecklistRow(10, 'Carcasa y soporte / columna (Fijación firme, sellos en buen estado)'),
+          buildChecklistRow(11, 'Display / Pantalla (Segmentos o píxeles completos, retroiluminación funcional)'),
+          buildChecklistRow(12, 'Teclado / Botonera (Membrana íntegra sin perforaciones, respuesta táctil correcta)'),
+          buildChecklistRow(13, 'Alimentación / Batería (Cable de poder/eliminador sin daños; retención de carga en batería)'),
+          buildChecklistRow(14, 'Puertos de comunicación (RS-232 / USB / Ethernet / Wi-Fi operando correctamente)'),
+          pw.SizedBox(height: 3),
+
+          // ── SECCIÓN 3. Pruebas Rápidas de Funcionamiento ──────────────────
+          secHeader('SECCIÓN 3. Pruebas Rápidas de Funcionamiento'),
+          buildPruebaRow(label: 'Estabilidad de Cero al encendido', key: 'estabilidad_cero', extraLabel: 'Comentarios', extraKey: 'comentarios'),
+          buildPruebaRow(label: 'Retorno a Cero tras descarga', key: 'retorno_cero', extraLabel: 'Comentarios', extraKey: 'comentarios'),
+          buildPruebaRow(label: 'Prueba de Excentricidad (Esquinas)', key: 'excentricidad', extraLabel: 'Dif. máx. detectada', extraKey: 'dif_max'),
+          buildPruebaRow(label: 'Repetibilidad de lectura', key: 'repetibilidad', extraLabel: 'Carga de prueba', extraKey: 'carga_prueba'),
+          buildPruebaRow(label: 'Exactitud preliminar de pesaje', key: 'exactitud', extraLabel: 'Requiere ajuste', extraKey: 'requiere_ajuste', isExactitud: true),
+          pw.SizedBox(height: 3),
+
+          // ── SECCIÓN 4. Diagnóstico General, Observaciones y Refacciones ───
+          secHeader('SECCIÓN 4. Diagnóstico General, Observaciones y Refacciones'),
+          pw.SizedBox(height: 2),
+          buildAdaptiveMultilineBox('- Observaciones técnicas y hallazgos detallados:', obsTecnicas),
+          pw.SizedBox(height: 2.5),
+          pw.Text('- Acciones realizadas durante la revisión:', style: pw.TextStyle(fontSize: 6.2, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 1.5),
+          pw.Row(children: [
+            pw.Expanded(child: pw.Text('  ${markBox(accLimp)} Limpieza superficial e interna', style: const pw.TextStyle(fontSize: 5.9))),
+            pw.Expanded(child: pw.Text('  ${markBox(accNiv)} Nivelación de patas y ajuste de topes', style: const pw.TextStyle(fontSize: 5.9))),
+          ]),
+          pw.SizedBox(height: 1),
+          pw.Row(children: [
+            pw.Expanded(child: pw.Text('  ${markBox(accAj)} Ajuste de peso (calibración interna / ajuste con masa patrón)', style: const pw.TextStyle(fontSize: 5.9))),
+            pw.Expanded(child: pw.Text('  ${markBox(accElec)} Revisión eléctrica y reapriete de conexiones', style: const pw.TextStyle(fontSize: 5.9))),
+          ]),
+          pw.SizedBox(height: 2.5),
+          buildAdaptiveMultilineBox('- Refacciones o servicios adicionales requeridos:', refaccionesTxt),
+          pw.SizedBox(height: 2.5),
+          pw.Text('- Dictamen de Estado Operativo del Equipo:', style: pw.TextStyle(fontSize: 6.2, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 1),
+          pw.Text('  ${markBox(isOp)} OPERATIVO (Apto para uso normal / Listo para calibración)',
+              style: pw.TextStyle(fontSize: 5.9, fontWeight: isOp ? pw.FontWeight.bold : pw.FontWeight.normal)),
+          pw.Text('  ${markBox(isOpObs)} OPERATIVO CON OBSERVACIONES (Funciona, pero requiere mantenimiento preventivo/correctivo pronto)',
+              style: pw.TextStyle(fontSize: 5.9, fontWeight: isOpObs ? pw.FontWeight.bold : pw.FontWeight.normal)),
+          pw.Text('  ${markBox(isFuera)} FUERA DE SERVICIO (No apto para uso hasta reparación)',
+              style: pw.TextStyle(fontSize: 5.9, fontWeight: isFuera ? pw.FontWeight.bold : pw.FontWeight.normal)),
+          pw.SizedBox(height: 3),
+
+          // ── SECCIÓN 5. Firmas de Conformidad ──────────────────────────────
+          secHeader('SECCIÓN 5. Firmas de Conformidad'),
+          pw.SizedBox(height: 3),
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(5),
+                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400, width: 0.6)),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Realizó Revisión (Técnico)', style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: _red)),
+                      pw.SizedBox(height: 2),
+                      pw.Text('Nombre: $tecNombre', style: const pw.TextStyle(fontSize: 6.2)),
+                      pw.Text('Puesto: $tecPuesto', style: const pw.TextStyle(fontSize: 6.2)),
+                      pw.SizedBox(height: 2),
+                      pw.SizedBox(
+                        height: 32,
+                        width: double.infinity,
+                        child: firmaTecImg != null
+                            ? pw.Center(child: pw.Image(firmaTecImg, fit: pw.BoxFit.contain))
+                            : pw.SizedBox(),
+                      ),
+                      pw.Divider(height: 1, thickness: 0.5, color: PdfColors.grey600),
+                      pw.Center(child: pw.Text('Firma', style: const pw.TextStyle(fontSize: 5.8, color: _grayD))),
+                    ],
+                  ),
+                ),
+              ),
+              pw.SizedBox(width: 14),
+              pw.Expanded(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(5),
+                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400, width: 0.6)),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Recibió de Conformidad (Cliente / Usuario)', style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: _red)),
+                      pw.SizedBox(height: 2),
+                      pw.Text('Nombre: $cliNombre', style: const pw.TextStyle(fontSize: 6.2)),
+                      pw.Text('Área / Puesto: $cliPuesto', style: const pw.TextStyle(fontSize: 6.2)),
+                      pw.SizedBox(height: 2),
+                      pw.SizedBox(
+                        height: 32,
+                        width: double.infinity,
+                        child: firmaCliImg != null
+                            ? pw.Center(child: pw.Image(firmaCliImg, fit: pw.BoxFit.contain))
+                            : pw.SizedBox(),
+                      ),
+                      pw.Divider(height: 1, thickness: 0.5, color: PdfColors.grey600),
+                      pw.Center(child: pw.Text('Firma', style: const pw.TextStyle(fontSize: 5.8, color: _grayD))),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    return doc.save();
+  }
+
+  bool tipoInstOutroCheck(
+    String tipoInst,
+    String tipoInstOtro,
+    bool isMesa,
+    bool isCam,
+    bool isColg,
+    bool isTolva,
+    bool isTanque,
+  ) {
+    if (tipoInst.contains('otro') || tipoInstOtro.isNotEmpty) return true;
+    if (tipoInst.isNotEmpty && !isMesa && !isCam && !isColg && !isTolva && !isTanque) return true;
+    return false;
   }
 }
 

@@ -191,6 +191,8 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         "revision":     ("#F5F5F7", "#48484A", "#E5E5EA"),
         "refacciones":  ("#F5F5F7", "#48484A", "#E5E5EA"),
         "levantamiento":("#EDE7F6", "#4A148C", "#D1C4E9"),
+        "observaciones":("#FFF7ED", "#C2410C", "#FED7AA"),
+        "formato de inspección": ("#FFF7ED", "#C2410C", "#FED7AA"),
     }
 
     def _resolve_colors(self, text: str):
@@ -208,6 +210,8 @@ class StatusBadgeDelegate(QStyledItemDelegate):
             "Entrega Refacciones": "Refacciones",
             "Calibracion + Ajuste": "Calibración + Ajuste",
             "Inspeccion Visual":   "Inspección",
+            "Formato de Inspección y Revisión de Básculas (Observaciones)": "Observaciones (OSOB)",
+            "Formato de Inspección y Revisión de Básculas": "Observaciones (OSOB)",
         }
         for long, short in abbr.items():
             if long.lower() in text.lower():
@@ -427,7 +431,7 @@ class QuickEditOSDialog(QDialog):
     _ESTADOS_VALIDOS = ["PROCESO", "ESCANEADA", "COMPLETADA", "CANCELADA"]
 
     def __init__(self, os_id: int, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setWindowTitle("Editar Orden de Servicio")
         self.setMinimumWidth(440)
         self.os_id = os_id
@@ -546,7 +550,7 @@ class KPICard(QFrame):
 
     def __init__(self, title: str, value: str, subtitle: str = "",
                  value_color: str = "#1D1D1F", parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._value_color = value_color
         self.setObjectName("kpi_card")
         self.setStyleSheet("""
@@ -673,7 +677,7 @@ class _DashboardLoader(QThread):
         load_filters: bool = False,
         parent=None,
     ):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._fd          = fecha_desde
         self._fh          = fecha_hasta
         self._roles       = roles
@@ -1010,7 +1014,7 @@ class EditarActividadDialog(QDialog):
     """
 
     def __init__(self, os_id: int, folio: str, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._os_id  = os_id
         self._folio  = folio
         self._tecnicos: list[tuple[int, str]] = []
@@ -1244,7 +1248,7 @@ class _SearchWorker(QThread):
     error = pyqtSignal(str)
 
     def __init__(self, search_text: str, tec_id_filter: Optional[int], parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.search_text = search_text
         self.tec_id_filter = tec_id_filter
 
@@ -1386,7 +1390,7 @@ class DashboardWidget(QWidget):
     _sig_os_email_result   = pyqtSignal(bool, str, str, str, object)
 
     def __init__(self, title: str = "Dashboard", rbac_filter: Optional[str] = None, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._title        = title
         self._rbac_filter  = rbac_filter
         self._sig_lote_email_result.connect(self._on_lote_email_finished)
@@ -1584,14 +1588,16 @@ class DashboardWidget(QWidget):
                 QMenu::item:selected { background: #F5F5F7; }
                 QMenu::separator { height: 1px; background: #E5E5EA; margin: 3px 8px; }
             """)
-            act_os  = menu.addAction("Orden de Servicio (OS)")
-            act_rma = menu.addAction("Remisión (RMA)")
-            act_re  = menu.addAction("Revisión (RE)")
+            act_os   = menu.addAction("Orden de Servicio (OS)")
+            act_rma  = menu.addAction("Remisión (RMA)")
+            act_re   = menu.addAction("Revisión (RE)")
+            act_osob = menu.addAction("Observaciones (OSOB)")
             menu.addSeparator()
-            act_lp  = menu.addAction("Levantamiento de Planta (LP)")
+            act_lp   = menu.addAction("Levantamiento de Planta (LP)")
             act_os.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("OS"))
             act_rma.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("RMA"))
             act_re.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("RE"))
+            act_osob.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("OSOB"))
             act_lp.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("LP"))
             self.btn_nueva_os.setMenu(menu)
             lay.addWidget(self.btn_nueva_os)
@@ -4739,11 +4745,17 @@ recepcion@basculaspesa.com.mx
         msg["From"] = f"Básculas PESA <{smtp_user}>"
         msg["To"] = destinatario_to
         msg["Cc"] = smtp_cc
-        msg["Subject"] = f"Orden de Servicio {clean_folio} — Básculas PESA"
+        if clean_folio.upper().startswith("OSOB-"):
+            id_lbl = f" ({id_eq})" if id_eq else ""
+            msg["Subject"] = f"Formato de Inspección y Revisión {clean_folio}{id_lbl} - {empresa} | Básculas PESA"
+            doc_desc = f"el Formato de Inspección y Revisión de Básculas {clean_folio}"
+        else:
+            msg["Subject"] = f"Orden de Servicio {clean_folio} — Básculas PESA"
+            doc_desc = f"la Orden de Servicio {clean_folio}"
 
         cuerpo = f"""Estimado Cliente ({empresa}),
 
-Adjunto a este correo encontrará la Orden de Servicio {clean_folio} correspondiente a los trabajos realizados por Básculas PESA.
+Adjunto a este correo encontrará {doc_desc} correspondiente a los trabajos realizados por Básculas PESA.
 
 Agradecemos su preferencia y quedamos a sus órdenes para cualquier duda o aclaración.
 
@@ -5170,7 +5182,7 @@ recepcion@basculaspesa.com.mx
         _is_numeric_search = search_term.isdigit()
 
         # Prefijo de folio (ej. "OS-26", "RMA-26") â†’ solo folio.
-        _FOLIO_PREFIXES = ("os-", "rma-", "re-", "lp-", "lv-")
+        _FOLIO_PREFIXES = ("os-", "rma-", "re-", "lp-", "lv-", "osob-")
         _is_folio_prefix = any(search_term.startswith(p) for p in _FOLIO_PREFIXES)
 
         _folio_only = _is_numeric_search or _is_folio_prefix

@@ -59,7 +59,7 @@ class OSFormWidget(QWidget):
         os_id: Optional[int] = None,
         parent: Optional[QWidget] = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._os_id   = os_id
         self._is_edit = os_id is not None
         self._folio_os: str = ""

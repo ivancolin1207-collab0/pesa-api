@@ -91,7 +91,7 @@ class LoginDialog(QDialog):
 
     def __init__(self, parent=None):
         try:
-            super().__init__(parent)
+            super().__init__(parent if isinstance(parent, QWidget) else None)
             self._attempts   = 0
             self._locked     = False
             self._eye_action = None

@@ -25,6 +25,7 @@ import 'calibraciones_repositorio_view.dart';
 import 'captura_screen.dart';
 import 'remision_captura_screen.dart';
 import 'revision_bascula_screen.dart';
+import 'observaciones_bascula_screen.dart';
 import 'levantamiento_proyecto_screen.dart';
 import 'levantamiento_metrologico_screen.dart';
 
@@ -77,6 +78,8 @@ void navegarCapturaSegunTipo(BuildContext context, Map<String, dynamic> orden) {
 
   if (tipo.contains('RMA') || tipo.contains('REMISI')) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => RemisionCapturaScreen(orden: orden)));
+  } else if (tipoDoc == 'OSOB' || folio.startsWith('OSOB-') || tipo.contains('OSOB') || tipoSrv.contains('OBSERVACIONES')) {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => ObservacionesBasculaScreen(orden: orden)));
   } else if (tipo.contains('REVISI') || tipoDoc == 'RE' || folio.startsWith('RE-')) {
     Navigator.push(context, MaterialPageRoute(builder: (_) => RevisionBasculaScreen(orden: orden)));
   } else if (tipo.contains('PROYECTO') || tipoDoc == 'LP' || folio.startsWith('LP-')) {
@@ -138,6 +141,7 @@ class _OsListScreenState extends State<OsListScreen> {
       'Levantamiento',
       'Calibración',
       'Mantenimiento',
+      'Observaciones',
     };
 
     for (final o in _all) {

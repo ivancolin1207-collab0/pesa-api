@@ -22,7 +22,7 @@
 import 'package:flutter/foundation.dart';
 
 /// Formato del documento según folio / tipo de servicio.
-enum FormatoDocumento { ordenServicio, remision, revisionCeldas }
+enum FormatoDocumento { ordenServicio, remision, revisionCeldas, observacionesBascula }
 
 class ServiceRules {
   final int    tipoServicioId;
@@ -60,6 +60,7 @@ class ServiceRules {
 
   bool get esRemision          => formato == FormatoDocumento.remision;
   bool get esRevisionCeldas    => formato == FormatoDocumento.revisionCeldas;
+  bool get esObservaciones     => formato == FormatoDocumento.observacionesBascula;
 
   /// True si la OS llegó sin tipo de servicio (ni nombre ni ID).
   bool get sinTipo             => tipoServicioId == 0 && formato == FormatoDocumento.ordenServicio;
@@ -79,6 +80,7 @@ class ServiceRules {
   String get etiquetaCorta {
     if (esRemision) return 'Remisión';
     if (esRevisionCeldas) return 'Revisión';
+    if (esObservaciones) return 'Observaciones';
     if (sinTipo) return 'Sin tipo';
     final partes = <String>[
       if (pideCca) 'Calibración',
@@ -92,6 +94,7 @@ class ServiceRules {
   String get etiquetaLarga {
     if (esRemision) return 'Remisión — sin CCA ni DVE';
     if (esRevisionCeldas) return 'Revisión de Celdas — sin CCA ni DVE';
+    if (esObservaciones) return 'Formato de Inspección y Revisión de Básculas (OSOB)';
     if (sinTipo) return 'Tipo de servicio no recibido — sincroniza la orden';
     if (pideCca && pideDve) return '$etiquetaCorta (CCA + DVE)';
     if (pideCca) return '$etiquetaCorta (CCA)';
@@ -152,13 +155,17 @@ String _normalize(String s) => s
     .replaceAll('ñ', 'n')
     .trim();
 
-/// Detecta Remisión / Revisión de Celdas por prefijo de folio o por nombre.
+/// Detecta Remisión / Revisión de Celdas / Observaciones por prefijo de folio o por nombre.
 FormatoDocumento detectarFormato({String? folio, String? nombre}) {
   final f = (folio ?? '').trim().toUpperCase();
-  if (f.startsWith('RMA-')) return FormatoDocumento.remision;
-  if (f.startsWith('RE-'))  return FormatoDocumento.revisionCeldas;
+  if (f.startsWith('RMA-'))  return FormatoDocumento.remision;
+  if (f.startsWith('OSOB-')) return FormatoDocumento.observacionesBascula;
+  if (f.startsWith('RE-'))   return FormatoDocumento.revisionCeldas;
   final n = _normalize(nombre ?? '');
   if (n.contains('refacci') || n.contains('remisi')) return FormatoDocumento.remision;
+  if (n.contains('osob') || n.contains('observaciones') || (n.contains('inspeccion') && n.contains('revision'))) {
+    return FormatoDocumento.observacionesBascula;
+  }
   if (n.contains('revisi') || n.contains('celda'))   return FormatoDocumento.revisionCeldas;
   return FormatoDocumento.ordenServicio;
 }
@@ -190,7 +197,11 @@ ServiceRules _formatoSinMetrologia(FormatoDocumento formato, String nombre) => S
       tipoServicioId: formato == FormatoDocumento.remision ? 8 : 0,
       nombre: nombre.isNotEmpty
           ? nombre
-          : (formato == FormatoDocumento.remision ? 'Remisión de Servicio' : 'Revisión de Celdas'),
+          : (formato == FormatoDocumento.remision
+              ? 'Remisión de Servicio'
+              : (formato == FormatoDocumento.observacionesBascula
+                  ? 'Formato de Inspección y Revisión de Básculas'
+                  : 'Revisión de Celdas')),
       pideCca: false,
       pideHologramaAnterior: false,
       pideHologramaActualizado: false,

@@ -130,12 +130,69 @@ class LocalDbService {
 
   bool _borradoresVerificada = false;
 
+  static const Set<String> _loteLimpiarManualFolios = {
+    'OS-26-725', 'OS-26-726', 'OS-26-727', 'OS-26-728',
+    'OS-26-729', 'OS-26-730', 'OS-26-731', 'OS-26-732',
+  };
+
   Future<void> _asegurarTablaBorradores(Database db) async {
     try {
       await db.execute(_createTableBorradoresSql);
+      await _limpiarLoteInstrumentosClonados(db);
       _borradoresVerificada = true;
     } catch (e) {
       debugPrint('[LocalDB] Error creando borradores_captura: $e');
+    }
+  }
+
+  /// Limpia datos clonados previos ("Kubota / KS-C880-P / Báscula colgante")
+  /// en los folios OS-26-725 a OS-26-732 que aún no estén cerrados,
+  /// dejando la captura 100% manual y libre para el técnico.
+  Future<void> _limpiarLoteInstrumentosClonados(Database db) async {
+    try {
+      const folios = [
+        'OS-26-725', 'OS-26-726', 'OS-26-727', 'OS-26-728',
+        'OS-26-729', 'OS-26-730', 'OS-26-731', 'OS-26-732',
+      ];
+      final ph = List.filled(folios.length, '?').join(',');
+      await db.rawUpdate('''
+        UPDATE ordenes_servicio
+        SET marca = '',
+            modelo = '',
+            ns = '',
+            id_equipo = '',
+            ubicacion = '',
+            tipo_instrumento = '',
+            alcance_max = NULL,
+            div_minima = NULL,
+            instrumento_capacidad = '',
+            instrumento_division = '',
+            aplica_excentricidad = 1,
+            usa_sustitucion = 0
+        WHERE folio_os IN ($ph)
+          AND UPPER(COALESCE(estado, '')) NOT IN ('CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA')
+          AND COALESCE(pdf_path_local, '') = ''
+          AND (
+            LOWER(COALESCE(marca, '')) = 'kubota'
+            OR LOWER(COALESCE(modelo, '')) = 'ks-c880-p'
+            OR LOWER(COALESCE(id_equipo, '')) = 'slitter 2'
+            OR COALESCE(datos_tecnicos_json, '') LIKE '%"instrumento_limpio_manual": true%'
+            OR COALESCE(datos_tecnicos_json, '') LIKE '%"instrumento_limpio_manual":true%'
+          )
+      ''', folios);
+
+      await db.rawDelete('''
+        DELETE FROM borradores_captura
+        WHERE folio_os IN ($ph)
+          AND (
+            LOWER(COALESCE(draft_json, '')) LIKE '%kubota%'
+            OR LOWER(COALESCE(draft_json, '')) LIKE '%ks-c880-p%'
+            OR LOWER(COALESCE(draft_json, '')) LIKE '%slitter 2%'
+            OR COALESCE(draft_json, '') LIKE '%"instrumento_limpio_manual"%'
+          )
+      ''', folios);
+    } catch (e) {
+      debugPrint('[LocalDB] _limpiarLoteInstrumentosClonados warning: $e');
     }
   }
 
@@ -693,14 +750,33 @@ class LocalDbService {
           'updated_at':        raw['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
         };
 
-        if (mapped['partidas'] == null && raw['datos_tecnicos_json'] != null) {
+        if (raw['datos_tecnicos_json'] != null) {
           try {
             final dtRaw = raw['datos_tecnicos_json'];
             final dt = dtRaw is String ? jsonDecode(dtRaw) : dtRaw;
             if (dt is Map) {
-              final p = dt['partidas'] ?? dt['refacciones'] ?? dt['items'];
-              if (p != null) {
-                mapped['partidas'] = p is String ? p : jsonEncode(p);
+              if (mapped['partidas'] == null) {
+                final p = dt['partidas'] ?? dt['refacciones'] ?? dt['items'];
+                if (p != null) {
+                  mapped['partidas'] = p is String ? p : jsonEncode(p);
+                }
+              }
+              if ((mapped['tipo_instrumento'] == null || mapped['tipo_instrumento'].toString().trim().isEmpty) &&
+                  dt['tipo_instrumento'] != null && dt['tipo_instrumento'].toString().trim().isNotEmpty) {
+                mapped['tipo_instrumento'] = dt['tipo_instrumento'].toString().trim();
+              }
+              if (dt['aplica_excentricidad'] != null) {
+                mapped['aplica_excentricidad'] = _toBoolInt(dt['aplica_excentricidad']);
+              }
+              for (final k in ['marca', 'modelo', 'ns', 'ubicacion', 'id_equipo']) {
+                if ((mapped[k] == null || mapped[k].toString().trim().isEmpty) &&
+                    dt[k] != null && dt[k].toString().trim().isNotEmpty) {
+                  mapped[k] = dt[k].toString().trim();
+                }
+              }
+              if ((mapped['id_equipo'] == null || mapped['id_equipo'].toString().trim().isEmpty) &&
+                  dt['id_indicador'] != null && dt['id_indicador'].toString().trim().isNotEmpty) {
+                mapped['id_equipo'] = dt['id_indicador'].toString().trim();
               }
             }
           } catch (_) {}
@@ -715,12 +791,23 @@ class LocalDbService {
 
         batch.insert('ordenes_servicio', safeRow, conflictAlgorithm: ConflictAlgorithm.replace);
         final dt = raw['datos_tecnicos_json'];
-        if (dt != null && dt.toString().trim() != '{}' && dt.toString().trim().isNotEmpty) {
-           batch.insert('borradores_captura', {
-             'folio_os': folio,
-             'draft_json': dt.toString(),
-             'updated_at': DateTime.now().toUtc().toIso8601String()
-           }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        final String dtStr = dt?.toString().trim() ?? '';
+        final bool instrumentoVacioServidor = !esCerrada && (
+          _loteLimpiarManualFolios.contains(folio) ||
+          dtStr.contains('"instrumento_limpio_manual":true') ||
+          dtStr.contains('"instrumento_limpio_manual": true') ||
+          ((safeRow['marca'] == null || safeRow['marca'].toString().trim().isEmpty) &&
+           (safeRow['modelo'] == null || safeRow['modelo'].toString().trim().isEmpty) &&
+           (safeRow['tipo_instrumento'] == null || safeRow['tipo_instrumento'].toString().trim().isEmpty))
+        );
+        if (instrumentoVacioServidor) {
+          batch.delete('borradores_captura', where: 'folio_os = ?', whereArgs: [folio]);
+        } else if (dtStr.isNotEmpty && dtStr != '{}') {
+          batch.insert('borradores_captura', {
+            'folio_os': folio,
+            'draft_json': dtStr,
+            'updated_at': DateTime.now().toUtc().toIso8601String()
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
         count++;
       }
@@ -735,6 +822,7 @@ class LocalDbService {
         debugPrint('[LocalDB] Merge protegido falló para ${raw['folio_os']}: $e');
       }
     }
+    await _limpiarLoteInstrumentosClonados(db);
     return count;
   }
 

@@ -66,6 +66,7 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
+        ('.env', '.'),
         ('Img', 'Img'),
         ('ui', 'ui'),
         ('services', 'services'),
@@ -99,7 +100,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['Img\\logo_pesa.png'],
+    icon=['Img/logo_pesa.png'],
 )
 coll = COLLECT(
     exe,
@@ -110,3 +111,11 @@ coll = COLLECT(
     upx_exclude=[],
     name='Servicios_PESA',
 )
+import sys
+if sys.platform == 'darwin':
+    app = BUNDLE(
+        coll,
+        name='Servicios_PESA.app',
+        icon='Img/logo_pesa.png',
+        bundle_identifier='com.pesaservicios.erp',
+    )

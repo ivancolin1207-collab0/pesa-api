@@ -223,7 +223,7 @@ class MetrologicaTableWidget(QWidget):
     ROW_ID_KEY:   str       = "posicion_id"
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._blocking = False
         self._setup_ui()
 
@@ -729,7 +729,7 @@ class ExcentricidadCondicionalWidget(QWidget):
     }
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._blocking = False
         self._setup_ui()
 
@@ -1290,7 +1290,7 @@ class ExactitudWidget(MetrologicaTableWidget):
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         self._modo_sustitucion = False
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
 
     def _build_extra(self, layout) -> None:
         """Bloque condicional para registro de Cargas / Materiales Sustitutos."""
@@ -1775,9 +1775,15 @@ class PruebasMetrologicasWidget(QWidget):
 
     data_changed = pyqtSignal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+    def __init__(self, parent: Optional[QWidget] = None, orden_data: Optional[dict] = None) -> None:
+        if isinstance(parent, dict) and orden_data is None:
+            orden_data = parent
+            parent = None
+        super().__init__(parent if isinstance(parent, QWidget) else None)
+        self._orden_data: dict = orden_data or {}
         self._setup_ui()
+        if self._orden_data:
+            self.set_os_config(self._orden_data)
 
     def _setup_ui(self) -> None:
         root_layout = QVBoxLayout(self)
@@ -1794,6 +1800,7 @@ class PruebasMetrologicasWidget(QWidget):
         )
 
         self.repetibilidad = RepetibilidadWidget()
+        self.repetibilidad_widget = self.repetibilidad
         self.repetibilidad.data_changed.connect(self.data_changed)
         w_rep = QWidget()
         w_rep.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1804,6 +1811,7 @@ class PruebasMetrologicasWidget(QWidget):
         self._tabs.addTab(w_rep, "1. Repetibilidad")
 
         self.excentricidad = ExcentricidadCondicionalWidget()
+        self.excentricidad_widget = self.excentricidad
         self.excentricidad.data_changed.connect(self.data_changed)
         w_exc = QWidget()
         w_exc.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1814,6 +1822,7 @@ class PruebasMetrologicasWidget(QWidget):
         self._tabs.addTab(w_exc, "2. Excentricidad")
 
         self.exactitud = ExactitudWidget()
+        self.exactitud_widget = self.exactitud
         self.exactitud.data_changed.connect(self.data_changed)
         w_exa = QWidget()
         w_exa.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
@@ -1825,6 +1834,26 @@ class PruebasMetrologicasWidget(QWidget):
 
         self._tabs.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root_layout.addWidget(self._tabs)
+
+    def set_os_config(self, config: dict) -> None:
+        """Aplica configuración inicial de la OS a los sub-widgets."""
+        if not isinstance(config, dict):
+            return
+        try:
+            aplica_exc = config.get("aplica_excentricidad")
+            num_celdas = config.get("num_celdas_camionera") or config.get("numero_celdas")
+            tipo_inst = config.get("tipo_instrumento") or ""
+            clase_exac = config.get("clase_exactitud")
+            if aplica_exc is not None:
+                self.excentricidad.set_excentricidad_config(bool(aplica_exc), int(num_celdas or 5))
+                if self._tabs.count() > 1:
+                    self._tabs.setTabEnabled(1, bool(aplica_exc))
+            elif tipo_inst:
+                self.excentricidad.set_tipo_instrumento(str(tipo_inst), num_celdas)
+            if clase_exac:
+                self.exactitud.set_clase_exactitud(str(clase_exac))
+        except Exception:
+            pass
 
     # ── API de datos ──────────────────────────────────────────────────────────
 
@@ -1871,12 +1900,14 @@ class PruebasMetrologicasWidget(QWidget):
                 self.exactitud.set_sustitutos(sustitutos)
             if es_tanque:
                 self.excentricidad.set_excentricidad_config(False, 0)
-                self._tabs.setTabEnabled(1, False)
+                if self._tabs.count() > 1:
+                    self._tabs.setTabEnabled(1, False)
 
         if not es_tanque:
             if aplica_excentricidad is not None:
                 self.excentricidad.set_excentricidad_config(aplica_excentricidad, filas_excentricidad or 5)
-                self._tabs.setTabEnabled(1, aplica_excentricidad)
+                if self._tabs.count() > 1:
+                    self._tabs.setTabEnabled(1, aplica_excentricidad)
             elif tipo_instrumento:
                 self.excentricidad.set_tipo_instrumento(tipo_instrumento, numero_celdas)
 

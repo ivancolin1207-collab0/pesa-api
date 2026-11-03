@@ -648,6 +648,8 @@ class PdfGenerator:
     # ── SECCIÓN 6: Observaciones ──────────────────────────────────────────────
 
     def _draw_observaciones(self, c, y: float, os_data: dict) -> float:
+        from reportlab.lib.utils import simpleSplit
+
         y -= 8
         c.setFillColor(_RED)
         c.setFont("Helvetica-Bold", 9)
@@ -656,35 +658,33 @@ class PdfGenerator:
         c.setStrokeColor(_RED)
         c.setLineWidth(1)
         c.line(self.ML, y, self.ML + self.CW, y)
-        y -= 6
+        y -= 10
 
-        obs = os_data.get("observaciones", "") or ""
-        c.setFillColor(_BLACK)
-        c.setFont("Helvetica", 8)
+        obs_raw = str(os_data.get("observaciones") or os_data.get("observaciones_tecnico") or "").strip()
+        font_name = "Helvetica"
+        font_size = 7.0 if len(obs_raw) > 300 else (7.8 if len(obs_raw) > 160 else 8.5)
+        line_height = font_size + 2.0
+        ancho_util = self.CW - 12
 
-        # Dividir observaciones en líneas de texto
-        words = obs.split()
-        line = ""
-        max_w = self.CW
-        
-        limit_y = self.MB + 140  # Límite inferior seguro arriba de la nota y firmas
-        
-        for word in words:
-            if y <= limit_y: break
-            test = (line + " " + word).strip()
-            if c.stringWidth(test, "Helvetica", 8) < max_w:
-                line = test
+        lineas_totales = []
+        for parrafo in obs_raw.splitlines():
+            if parrafo.strip():
+                lineas_totales.extend(simpleSplit(parrafo.strip(), font_name, font_size, ancho_util))
             else:
-                c.drawString(self.ML, y, line)
-                y -= 14
-                line = word
-                
-        if line and y > limit_y:
-            c.drawString(self.ML, y, line)
-            y -= 14
+                lineas_totales.append("")
 
-        # Líneas vacías llenando el espacio
-        while y > limit_y:
+        y_limite_firmas = self.MB + 140
+        c.setFillColor(_BLACK)
+        c.setFont(font_name, font_size)
+        y_cursor = y
+        for linea in lineas_totales:
+            if y_cursor < y_limite_firmas:
+                break
+            c.drawString(self.ML + 6, y_cursor, linea)
+            y_cursor -= line_height
+
+        y = y_cursor
+        while y > y_limite_firmas:
             c.setStrokeColor(_GRAY_MED)
             c.setLineWidth(0.4)
             c.line(self.ML, y, self.ML + self.CW, y)

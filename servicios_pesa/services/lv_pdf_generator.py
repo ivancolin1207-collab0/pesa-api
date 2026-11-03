@@ -416,27 +416,30 @@ class LvPdfGenerator:
         # =====================================================================
         # 4. BLOQUE UNICO DE OBSERVACIONES -- ANCHO COMPLETO, RENGLON DINAMICO
         # =====================================================================
-        # Calculo dinamico de renglones: 2 renglones por bascula identificada.
-        # El numero de basculas ya fue calculado arriba al construir tbl_data.
+        obs_raw = str(lv.get("observaciones_generales") or os_data.get("observaciones") or "").strip()
+        font_name = "Helvetica"
+        font_size = 7.0 if len(obs_raw) > 300 else (7.8 if len(obs_raw) > 160 else 8.5)
+        NUM_W   = 22   # ancho reservado para el numero [N]
+        ancho_util = self.CW - NUM_W - 12
+
+        lineas_totales = []
+        for parrafo in obs_raw.splitlines():
+            if parrafo.strip():
+                lineas_totales.extend(simpleSplit(parrafo.strip(), font_name, font_size, ancho_util))
+            else:
+                lineas_totales.append("")
+
         num_basculas     = max(len(basculas), 1)   # al menos 1 grupo de renglones
-        # Limitar a máximo 6 renglones de observaciones para no desbordar página
-        total_renglones  = min(num_basculas * 2, 6)
+        base_renglones   = min(num_basculas * 2, 6)
 
-        # Altura de cabecera del bloque (reducida a 13pt)
         OBS_HDR_H = 13
-
-        # Espacio de la pagina reservado para la firma y su spacer:
-        #   Spacer(1, 9) entre bloque y firma   =  9 pt
-        #   Altura texto firma (linea + nombre) = 34 pt
-        #   Margen inferior (MB)                = 15 pt
-        SPACER_FIRMA  = 9    # separador reducido entre recuadro y firma
-        FIRMA_TOTAL_H = 34   # alto reservado para el texto de firma
-        # Base inferior del recuadro:
-        # MB(15) + FIRMA_TOTAL_H(34) + SPACER_FIRMA(9) = 58 pt
+        SPACER_FIRMA  = 9
+        FIRMA_TOTAL_H = 34
         BLK_BASE_Y    = self.MB + FIRMA_TOTAL_H + SPACER_FIRMA
-        espacio_disponible = y - OBS_HDR_H - BLK_BASE_Y
-        # Altura de renglon fija a 11 pt para que quepan en página
-        ROW_H_OBS = 11.0
+        espacio_disponible = max(22.0, y - OBS_HDR_H - BLK_BASE_Y - 8)
+        ROW_H_OBS = max(font_size + 2.5, 11.0)
+        max_renglones_pagina = max(base_renglones, int(espacio_disponible // ROW_H_OBS))
+        total_renglones = min(max(base_renglones, len(lineas_totales)), max_renglones_pagina)
         BLK_OBS_H = total_renglones * ROW_H_OBS   # altura total del cuerpo
 
         # -- Cabecera del bloque (azul marino, ancho completo) ----------------
@@ -452,9 +455,7 @@ class LvPdfGenerator:
         y -= OBS_HDR_H
 
         # -- Cuerpo del bloque (borde azul marino) ----------------------------
-        # TOP_PAD: margen interno superior para despegar [1] del encabezado azul
         TOP_PAD   = 8    # pt de respiro entre barra de titulo y primer renglon
-        # El rectangulo crece TOP_PAD hacia abajo para absorber el padding interno
         RECT_H    = BLK_OBS_H + TOP_PAD
 
         c.setStrokeColor(_BLUE_DARK)
@@ -462,8 +463,6 @@ class LvPdfGenerator:
         c.rect(self.ML, y - RECT_H, self.CW, RECT_H, stroke=1, fill=0)
 
         # -- Numeracion lateral y renglones horizontales ----------------------
-        # Los renglones empiezan TOP_PAD pt por debajo del borde superior
-        NUM_W   = 22   # ancho reservado para el numero [N]
         LINE_X1 = self.ML + NUM_W
         LINE_X2 = self.ML + self.CW - 4
 
@@ -473,43 +472,36 @@ class LvPdfGenerator:
         c.setFillColor(_GRAY_MED)
 
         for i in range(total_renglones):
-            # ry: posicion Y de la linea horizontal del renglon i
-            # Se desplaza TOP_PAD desde el borde superior del recuadro
             ry = y - TOP_PAD - (i + 1) * ROW_H_OBS
-            # Linea horizontal de renglon (solo si esta dentro del recuadro)
             if ry >= y - RECT_H + 1:
                 c.line(LINE_X1, ry, LINE_X2, ry)
 
-            # Numero de equipo cada 2 renglones (inicio del par)
             if i % 2 == 0:
                 equipo_num = (i // 2) + 1
-                # Vertline separador de numeracion (muy suave)
                 c.setStrokeColor(_GRAY_BORDER)
                 c.setLineWidth(0.25)
-                top_seg = y - TOP_PAD - i * ROW_H_OBS        # borde superior del par
-                bot_seg = y - TOP_PAD - (i + 2) * ROW_H_OBS  # borde inferior del par
-                # Limitar al interior del recuadro
+                top_seg = y - TOP_PAD - i * ROW_H_OBS
+                bot_seg = y - TOP_PAD - (i + 2) * ROW_H_OBS
                 top_seg = min(top_seg, y - 1)
                 bot_seg = max(bot_seg, y - RECT_H + 1)
                 c.line(self.ML + NUM_W - 1, top_seg, self.ML + NUM_W - 1, bot_seg)
-                # Numero centrado verticalmente en el par de renglones
-                mid_y = (top_seg + bot_seg) / 2 - 2   # -2 para ajuste optico
+                mid_y = (top_seg + bot_seg) / 2 - 2
                 c.setFillColor(_GRAY_MED)
                 c.drawCentredString(self.ML + NUM_W / 2, mid_y, f"[{equipo_num}]")
 
-            # Restablecer color de linea para el siguiente renglon
             c.setStrokeColor(_GRAY_BORDER)
             c.setLineWidth(0.35)
 
         # -- Texto de observaciones almacenado (si existe) --------------------
-        obs_texto = lv.get("observaciones_generales") or ""
-        if obs_texto:
-            c.setFont("Helvetica", 7)
+        if lineas_totales:
+            c.setFont(font_name, font_size)
             c.setFillColor(_BLACK)
-            obs_lines = simpleSplit(obs_texto, "Helvetica", 7, self.CW - NUM_W - 8)
-            for idx, ln in enumerate(obs_lines[:total_renglones]):
-                line_y = y - TOP_PAD - (idx + 1) * ROW_H_OBS + (ROW_H_OBS - 7) / 2 + 1
-                c.drawString(LINE_X1 + 3, line_y, ln)
+            y_limite_firmas = y - RECT_H + 2
+            for idx, linea in enumerate(lineas_totales):
+                line_y = y - TOP_PAD - (idx + 1) * ROW_H_OBS + (ROW_H_OBS - font_size) / 2 + 1
+                if line_y < y_limite_firmas:
+                    break
+                c.drawString(LINE_X1 + 6, line_y, linea)
 
         y -= RECT_H + 6
 

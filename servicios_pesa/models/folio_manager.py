@@ -65,6 +65,13 @@ class FolioManager:
             )
 
         folio = row["folio"]
+        if tipo == "OSOB":
+            try:
+                parts = str(folio).split("-")
+                if len(parts) == 3:
+                    folio = f"OSOB-{parts[1]}-{int(parts[2]):03d}"
+            except Exception:
+                pass
         logger.info(f"Folio generado: {folio}")
         return folio
 

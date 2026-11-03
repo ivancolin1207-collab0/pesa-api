@@ -107,7 +107,7 @@ class BasculaCard(QFrame):
     remove_requested = pyqtSignal(object)  # emite self
 
     def __init__(self, index: int, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._index = index
         self._expanded = True
         self._build()
@@ -287,7 +287,7 @@ class LVFormWidget(QWidget):
     os_saved = pyqtSignal(str)  # folio_os
 
     def __init__(self, os_id: Optional[int] = None, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._os_id   = os_id
         self._is_edit = os_id is not None
         self._folio_os: str = ""

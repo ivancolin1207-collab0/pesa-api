@@ -86,7 +86,7 @@ class EquipoCard(QFrame):
     los llena en campo.
     """
     def __init__(self, index: int, parent=None, tipos_inst: list = None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._index = index
         self._expanded = True
         self._catalog = []
@@ -273,6 +273,21 @@ class EquipoCard(QFrame):
 
         self._inp_ubicacion = self._make_input("Ubicación (ej: Planta Norte)",     row2, "Ubicación")
         fields_lay.addLayout(row2)
+
+        # ── Fila Extra OSOB: Indicador (Marca / Modelo) y Orden de Servicio vinculada ──
+        self._wgt_osob_extra = QWidget()
+        self._wgt_osob_extra.setStyleSheet("background: transparent;")
+        _osob_lay = QHBoxLayout(self._wgt_osob_extra)
+        _osob_lay.setContentsMargins(0, 0, 0, 0)
+        _osob_lay.setSpacing(12)
+        self._inp_indicador_mm = self._make_input(
+            "Indicador (Marca / Modelo, ej: Rice Lake 480)", _osob_lay, "Indicador (Marca / Modelo)"
+        )
+        self._inp_os_vinculada = self._make_input(
+            "Orden de Servicio vinculada (ej: OS-26-700, opcional)", _osob_lay, "Orden de Servicio"
+        )
+        self._wgt_osob_extra.setVisible(False)
+        fields_lay.addWidget(self._wgt_osob_extra)
 
         # ── Fila 3: Capacidad / División / DVE / Puntos de Apoyo ──────────────
         self._wgt_hologramas = QWidget()
@@ -816,6 +831,21 @@ class EquipoCard(QFrame):
         except Exception:
             pass
 
+    def set_osob_mode(self, is_osob: bool) -> None:
+        """Adapta la tarjeta de instrumento para el formato OSOB (Sección 1)."""
+        try:
+            if hasattr(self, '_wgt_osob_extra'):
+                self._wgt_osob_extra.setVisible(is_osob)
+            if hasattr(self, '_fields_row3'):
+                self._fields_row3.setVisible(not is_osob)
+            if is_osob:
+                self.set_calibracion_visible(False)
+                self.set_inspeccion_visible(False)
+                if hasattr(self, '_wgt_enlaces'):
+                    self._wgt_enlaces.setVisible(False)
+        except Exception:
+            pass
+
     def _toggle(self) -> None:
         self._expanded = not self._expanded
         self._fields_widget.setVisible(self._expanded)
@@ -935,6 +965,12 @@ class EquipoCard(QFrame):
             "div_minima":          _v("_inp_division"),
             "dve":                 _v("_inp_dve"),
             "ubicacion":           _v("_inp_ubicacion"),
+            "planta":              _v("_inp_ubicacion"),
+            "indicador_marca_modelo": _v("_inp_indicador_mm"),
+            "indicador":           _v("_inp_indicador_mm"),
+            "orden_servicio_vinculada": _v("_inp_os_vinculada"),
+            "os_vinculada":        _v("_inp_os_vinculada"),
+            "orden_servicio":      _v("_inp_os_vinculada"),
             # ── Calibración ────────────────────────────────────────────────────
             "id_tipo_instrumento":     int(self._cmb_tipo_inst.currentData()) if (hasattr(self, '_cmb_tipo_inst') and self._cmb_tipo_inst.currentData() is not None) else None,
             "tipo_instrumento":        _cmb("_cmb_tipo_inst", "Báscula de plataforma"),
@@ -978,7 +1014,7 @@ class SelectCard(QPushButton):
     """
     def __init__(self, icon: str, title: str, desc: str,
                  accent: str = _RED, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._accent = accent
         self._selected = False
         self.setCheckable(True)
@@ -1047,7 +1083,7 @@ class SelectCard(QPushButton):
 class StepHeader(QWidget):
     """Cabecera de un paso con número, ícono y título."""
     def __init__(self, step: int, icon: str, title: str, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -1318,7 +1354,7 @@ class BatchGeneratorWidget(QWidget):
     """
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._modalidad:  str = ""   # "DIGITAL" | "FISICO" | "HIBRIDO"
         self._tipo_doc:   str = ""   # "OS" | "RMA" | "RE"
         self._clientes:   list[str] = []
@@ -1505,26 +1541,34 @@ class BatchGeneratorWidget(QWidget):
             "Pre-Visita: N básculas, logística de pesas patrón.",
             accent="#E67E22",
         )
+        self._card_osob = SelectCard(
+            "🔍", "Observaciones (OSOB)",
+            "Formato de Inspección y Revisión de Básculas.",
+            accent="#0D9488",
+        )
 
         self._doc_group = QButtonGroup(self)
         self._doc_group.setExclusive(True)
-        self._doc_group.addButton(self._card_os,  1)
-        self._doc_group.addButton(self._card_rma, 2)
-        self._doc_group.addButton(self._card_re,  3)
-        self._doc_group.addButton(self._card_lp,  4)
-        self._doc_group.addButton(self._card_lv,  5)
+        self._doc_group.addButton(self._card_os,   1)
+        self._doc_group.addButton(self._card_rma,  2)
+        self._doc_group.addButton(self._card_re,   3)
+        self._doc_group.addButton(self._card_lp,   4)
+        self._doc_group.addButton(self._card_lv,   5)
+        self._doc_group.addButton(self._card_osob, 6)
 
         self._card_os.toggled.connect(lambda chk: chk and self._on_tipo_doc("OS"))
         self._card_rma.toggled.connect(lambda chk: chk and self._on_tipo_doc("RMA"))
         self._card_re.toggled.connect(lambda chk: chk and self._on_tipo_doc("RE"))
         self._card_lp.toggled.connect(lambda chk: chk and self._on_tipo_doc("LP"))
         self._card_lv.toggled.connect(lambda chk: chk and self._on_tipo_doc("LV"))
+        self._card_osob.toggled.connect(lambda chk: chk and self._on_tipo_doc("OSOB"))
 
         row.addWidget(self._card_os)
         row.addWidget(self._card_rma)
         row.addWidget(self._card_re)
         row.addWidget(self._card_lp)
         row.addWidget(self._card_lv)
+        row.addWidget(self._card_osob)
         return w
 
     # ── PASO 3 ────────────────────────────────────────────────────────────────
@@ -2657,7 +2701,10 @@ class BatchGeneratorWidget(QWidget):
                 # 3. Usar el mayor de las dos fuentes
                 ultimo = max(max_control, max_os)
                 siguiente = ultimo + 1
-                folio_preview = f"{tipo_doc}-{anio2}-{siguiente}"
+                if str(tipo_doc).upper() == "OSOB":
+                    folio_preview = f"OSOB-{anio2}-{siguiente:03d}"
+                else:
+                    folio_preview = f"{tipo_doc}-{anio2}-{siguiente}"
                 logger.debug(
                     "Folio sugerido: %s (control_folios=%d, os_max=%d → siguiente=%d)",
                     folio_preview, max_control, max_os, siguiente
@@ -2667,6 +2714,8 @@ class BatchGeneratorWidget(QWidget):
             pass
         # Fallback genérico si no hay BD
         anio2 = str(QDate.currentDate().year())[2:]
+        if str(tipo_doc).upper() == "OSOB":
+            return f"OSOB-{anio2}-001"
         return f"{tipo_doc}-{anio2}-1"
 
     def _actualizar_resumen(self):
@@ -2712,7 +2761,7 @@ class BatchGeneratorWidget(QWidget):
                         )
                     else:
                         num_fin    = num_inicio + cant - 1
-                        folio_fin  = f"{prefix}-{num_fin}"
+                        folio_fin  = f"{prefix}-{num_fin:03d}" if prefix.upper().startswith("OSOB") else f"{prefix}-{num_fin}"
                         self.lbl_folio_rango.setText(
                             f"▶  Se generará el lote de <b>{cant} folios</b>: "
                             f"<b>{folio_base}</b> al <b>{folio_fin}</b>"
@@ -2768,7 +2817,7 @@ class BatchGeneratorWidget(QWidget):
             card.blockSignals(False)
 
         # Restablecer selección de documento
-        for btn in [self._card_os, self._card_rma, self._card_re, self._card_lp, self._card_lv]:
+        for btn in [self._card_os, self._card_rma, self._card_re, self._card_lp, self._card_lv, self._card_osob]:
             btn.blockSignals(True)
             btn.setChecked(False)
             if hasattr(btn, '_apply_style'): btn._apply_style(False)
@@ -3007,19 +3056,21 @@ class BatchGeneratorWidget(QWidget):
         
         # Forzar visualmente el estado de selección de la tarjeta de documento
         for c, t in [(self._card_os, "OS"), (self._card_rma, "RMA"), 
-                     (self._card_re, "RE"), (self._card_lp, "LP"), (self._card_lv, "LV")]:
+                     (self._card_re, "RE"), (self._card_lp, "LP"),
+                     (self._card_lv, "LV"), (self._card_osob, "OSOB")]:
             c.blockSignals(True)
             c.setChecked(tipo == t)
             if hasattr(c, '_apply_style'): c._apply_style(tipo == t)
             c.blockSignals(False)
 
-        es_re  = (tipo == "RE")
-        es_rma = (tipo == "RMA")
-        es_os  = (tipo == "OS")
-        es_lv  = (tipo == "LV")
+        es_re   = (tipo == "RE")
+        es_rma  = (tipo == "RMA")
+        es_os   = (tipo == "OS")
+        es_lv   = (tipo == "LV")
+        es_osob = (tipo == "OSOB")
         # LV redirige al formulario dedicado al ejecutar — no necesita campos extra en paso 3
         # Los campos de OS / RE / RMA se ocultan para LP y LV
-        es_os_fields = es_os  # solo OS muestra tipo servicio, excentricidad, equipo
+        es_os_fields = es_os  # solo OS muestra tipo servicio, excentricidad
 
         # Bloque estructura RE
         if hasattr(self, "_frame_re_estructura"):
@@ -3041,9 +3092,18 @@ class BatchGeneratorWidget(QWidget):
         if hasattr(self, "_widget_row_exc"):
             self._widget_row_exc.setVisible(es_os_fields)
 
-        # Datos del Instrumento por Equipo → visible solo para OS
+        # Datos del Instrumento por Equipo → visible para OS y OSOB (Sección 1)
         if hasattr(self, "_widget_equipos_section"):
-            self._widget_equipos_section.setVisible(es_os_fields)
+            self._widget_equipos_section.setVisible(es_os or es_osob)
+
+        # Adaptar tarjetas de instrumento según sea OS u OSOB
+        if hasattr(self, "_equipo_cards"):
+            for card in self._equipo_cards:
+                if hasattr(card, "set_osob_mode"):
+                    card.set_osob_mode(es_osob)
+                if es_os:
+                    card.set_calibracion_visible(self._servicio_requiere_calibracion())
+                    card.set_inspeccion_visible(self._servicio_requiere_inspeccion())
 
         # Frame de Calibración → siempre oculto al cambiar tipo de doc;
         # _on_params_changed lo mostrará si aplica según el tipo de servicio.
@@ -3132,15 +3192,15 @@ class BatchGeneratorWidget(QWidget):
                 conn = _db_pool.get_connection()
                 try:
                     with conn.cursor() as cur:
-                        # control_folios tiene consecutivo, tipo_documento, anio
                         cur.execute(
-                            "UPDATE control_folios SET consecutivo = %s WHERE tipo_documento = %s AND anio = %s",
+                            "UPDATE control_folios SET ultimo_consecutivo = %s, updated_at = NOW() WHERE tipo_folio = %s AND anio = %s",
                             (nuevo_consecutivo - 1, tipo, anio)
                         )
                     conn.commit()
                 finally:
                     _db_pool.release_connection(conn)
-                QMessageBox.information(self, "Éxito", f"El próximo folio será {tipo}-{str(anio)[2:]}-{nuevo_consecutivo:04d}")
+                fmt_num = f"{nuevo_consecutivo:03d}" if str(tipo).upper() == "OSOB" else f"{nuevo_consecutivo}"
+                QMessageBox.information(self, "Éxito", f"El próximo folio será {tipo}-{str(anio)[2:]}-{fmt_num}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al actualizar consecutivo: {e}")
 
@@ -3432,6 +3492,8 @@ class BatchGeneratorWidget(QWidget):
             card.set_calibracion_visible(es_calib)   # visibilidad inmediata
             card.set_inspeccion_visible(es_inspec)   # visibilidad de hologramas
             card.set_puntos_exactitud(_n_pts_global) # sembrar con valor global
+            if hasattr(card, "set_osob_mode"):
+                card.set_osob_mode(getattr(self, "_tipo_doc", "") == "OSOB")
             self._equipo_cards.append(card)
             self._equipos_container.addWidget(card)
 
@@ -3682,6 +3744,8 @@ class BatchGeneratorWidget(QWidget):
             tipo_servicio_mapped = "Revisión"
         elif self._tipo_doc == "RMA":
             tipo_servicio_mapped = "Entrega Refacciones"
+        elif self._tipo_doc == "OSOB":
+            tipo_servicio_mapped = "Formato de Inspección y Revisión de Básculas"
         
         puntos_exactitud = int(self.cmb_puntos_exactitud.currentText()) if hasattr(self, "cmb_puntos_exactitud") else 5
 
@@ -3878,9 +3942,10 @@ class BatchGeneratorWidget(QWidget):
                                        folio_base, prefix, consec_base)
 
                     # Calcular rango_lote una sola vez (antes del loop)
+                    _is_osob_fmt = (str(tipo).upper() == "OSOB") or prefix.upper().startswith("OSOB")
                     if cant > 1:
-                        folio_ini = f"{prefix}-{consec_base}"
-                        folio_fin = f"{prefix}-{consec_base + cant - 1}"
+                        folio_ini = f"{prefix}-{consec_base:03d}" if _is_osob_fmt else f"{prefix}-{consec_base}"
+                        folio_fin = f"{prefix}-{consec_base + cant - 1:03d}" if _is_osob_fmt else f"{prefix}-{consec_base + cant - 1}"
                         _rango_lote = f"{folio_ini} al {folio_fin}"
                         logger.info("[RESERVAR] rango_lote=%r  id_lote=%s", _rango_lote, id_lote)
 
@@ -3901,12 +3966,13 @@ class BatchGeneratorWidget(QWidget):
                     if not _equipos:
                         _equipos = [datos]
 
-                    for i in range(cant):
-                        consec = consec_base + i
-                        folio = f"{prefix}-{consec}"
+                    for idx in range(cant):
+                        i = idx
+                        consec = consec_base + idx
+                        folio = f"{prefix}-{consec:03d}" if _is_osob_fmt else f"{prefix}-{consec}"
 
-                        # ── Obtener diccionario exclusivo del instrumento i (NUNCA compartir referencia al primero) ──
-                        datos_eq = copy.deepcopy(_equipos[i]) if i < len(_equipos) else copy.deepcopy(_equipos[0])
+                        # ── Obtener diccionario exclusivo del instrumento idx (NUNCA compartir referencia al primero) ──
+                        datos_eq = copy.deepcopy(_equipos[idx]) if idx < len(_equipos) else {}
 
                         marca                = datos_eq.get('marca') or datos_eq.get('equipo_marca') or datos.get('indicador_marca') or datos.get('celda_a_marca') or ""
                         modelo               = datos_eq.get('modelo') or datos_eq.get('equipo_modelo') or datos.get('indicador_modelo') or datos.get('celda_a_modelo') or ""
@@ -3928,7 +3994,7 @@ class BatchGeneratorWidget(QWidget):
                         _ubicacion       = str(ubicacion).strip() or None
                         _tipo_ins_nombre = str(tipo_instrumento).strip() or None
                         _id_tipo_inst    = datos_eq.get("id_tipo_instrumento")
-                        if _id_tipo_inst is None:
+                        if _id_tipo_inst is None and idx == 0:
                             _id_tipo_inst = datos.get("id_tipo_instrumento")
 
                         # capacidad y división: normalizar a numérico
@@ -4012,10 +4078,9 @@ class BatchGeneratorWidget(QWidget):
                                     _dt_dict[_k] = copy.deepcopy(_v)
                                 except Exception:
                                     _dt_dict[_k] = _v
-                        # Sobrescribir con los campos exclusivos del instrumento i (datos_eq)
+                        # Sobrescribir con los campos exclusivos del instrumento idx (datos_eq)
                         for _k, _v in datos_eq.items():
-                            if _v is not None:
-                                _dt_dict[_k] = copy.deepcopy(_v)
+                            _dt_dict[_k] = copy.deepcopy(_v)
                         _dt_dict["equipos"] = [copy.deepcopy(datos_eq)]
                         _dt_json_str = json.dumps(_dt_dict, ensure_ascii=False, default=str)
 
@@ -4223,6 +4288,53 @@ class BatchGeneratorWidget(QWidget):
         direccion_cliente = self._get_direccion_cliente(datos.get("id_cliente"))
 
         tipo_doc = datos.get("tipo_doc", "OS")
+
+        # ── OSOB: Formato de Inspección y Revisión de Básculas ────────────────
+        if tipo_doc == "OSOB":
+            from services.os_pdf_generator import osob_pdf_generator as _osob_gen
+            import shutil as _shutil_osob
+            sucursal_dir_osob = self._get_direccion_sucursal(datos.get("sucursal_id")) or direccion_cliente
+            tmp_paths_osob = []
+            is_calca_osob = (self._modalidad == "FISICO")
+            for i, folio in enumerate(folios):
+                equipo_data = copy.deepcopy(equipos[i]) if (equipos and i < len(equipos)) else (copy.deepcopy(equipos[0]) if equipos else {})
+                osob_data = {
+                    **datos,
+                    "folio_os":           folio,
+                    "folio":              folio,
+                    "cliente":            datos.get("cliente", "—"),
+                    "planta":             equipo_data.get("ubicacion") or datos.get("sucursal_nombre") or sucursal_dir_osob,
+                    "ubicacion":          equipo_data.get("ubicacion") or datos.get("sucursal_nombre") or sucursal_dir_osob,
+                    "direccion":          sucursal_dir_osob,
+                    "sucursal_direccion": sucursal_dir_osob,
+                    "tecnico_nombre":     datos.get("tecnico_nombre", ""),
+                    "fecha":              datos.get("fecha"),
+                    "observaciones":      datos.get("observaciones_tecnico", ""),
+                    **equipo_data,
+                }
+                tmp = str(output_dir / f"{folio}_tmp.pdf")
+                _osob_gen.generate(osob_data, output_path=tmp, calca=is_calca_osob, force=True, digital=(self._modalidad == "DIGITAL"))
+                tmp_paths_osob.append(tmp)
+            if len(tmp_paths_osob) == 1:
+                _shutil_osob.move(tmp_paths_osob[0], pdf_path)
+            else:
+                try:
+                    from pypdf import PdfWriter, PdfReader
+                    writer = PdfWriter()
+                    for tmp in tmp_paths_osob:
+                        for page in PdfReader(tmp).pages:
+                            writer.add_page(page)
+                    with open(pdf_path, "wb") as fh:
+                        writer.write(fh)
+                except ImportError:
+                    _shutil_osob.copy(tmp_paths_osob[0], pdf_path)
+                finally:
+                    import os as _os
+                    for tmp in tmp_paths_osob:
+                        try: _os.remove(tmp)
+                        except: pass
+            logger.info("PDF OSOB lote generado: %s (%d folios)", pdf_path, len(folios))
+            return pdf_path
 
         # ── RE: Ficha Técnica Diagnóstica (RePdfGenerator) ────────────────────
         if tipo_doc == "RE":
@@ -4623,6 +4735,15 @@ class BatchGeneratorWidget(QWidget):
             os_data['aplica_excentricidad']    = False
             os_data['tipo_no_aplica_exc']      = os_data.get('tipo_no_aplica_exc') or 'tanque'
 
+        # ── OSOB: Formato de Inspección y Revisión de Básculas (individual) ───────
+        if datos.get("tipo_doc") == "OSOB":
+            from services.os_pdf_generator import osob_pdf_generator as _osob_gen
+            is_calca = (self._modalidad == "FISICO")
+            os_data["planta"] = os_data.get("ubicacion") or datos.get("sucursal_nombre") or sucursal_dir or direccion_cliente
+            _osob_gen.generate(os_data, output_path=pdf_path, calca=is_calca, force=True, digital=(self._modalidad == "DIGITAL"))
+            logger.info("PDF OSOB individual generado: %s", pdf_path)
+            return pdf_path
+
         # ── RMA: Remision de Material (folio individual) ──────────────────────────
         if datos.get("tipo_doc") == "RMA":
             from services.rma_pdf_generator import rma_pdf_generator as _rma_gen
@@ -4715,6 +4836,9 @@ class BatchGeneratorWidget(QWidget):
         elif tipo == "LV":
             if hasattr(self, "_card_lv"):
                 self._card_lv.setChecked(True)
+        elif tipo == "OSOB":
+            if hasattr(self, "_card_osob"):
+                self._card_osob.setChecked(True)
 
     def _abrir_pdf_preview(self, pdf_path: str) -> None:
         """
@@ -4777,6 +4901,8 @@ class BatchGeneratorWidget(QWidget):
             _btn.setChecked(False)
         if hasattr(self, "_card_lv"):
             self._card_lv.setChecked(False)
+        if hasattr(self, "_card_osob"):
+            self._card_osob.setChecked(False)
 
         # Resetear parámetros
         self.cmb_cliente.setCurrentIndex(0)

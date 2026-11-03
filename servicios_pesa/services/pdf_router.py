@@ -308,6 +308,16 @@ def regenerar_pdf(os_id: int, folio: str, force: bool = True) -> Optional[str]:
                 logger.warning("LvPdfGenerator no disponible: %s", exc)
                 return None
 
+        # OSOB -- Formato de Inspección y Revisión de Básculas (Observaciones)
+        elif folio_upper.startswith("OSOB-") or str(os_data.get("tipo_documento") or "").strip().upper() == "OSOB":
+            try:
+                from services.os_pdf_generator import osob_pdf_generator
+                output_path = _get_output_path(folio, "PDF_OS")
+                return osob_pdf_generator.generate(os_data=os_data, output_path=output_path, force=force)
+            except (ImportError, AttributeError) as exc:
+                logger.warning("osob_pdf_generator no disponible: %s", exc)
+                return None
+
         # OS -- Orden de Servicio Metrologica (default)
         else:
             from services.os_pdf_generator import os_pdf_generator

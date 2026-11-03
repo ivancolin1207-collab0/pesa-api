@@ -46,7 +46,7 @@ class _TecnicoEditDialog(QDialog):
     """
 
     def __init__(self, is_new: bool = True, data: dict = None, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._is_new = is_new
         self._data   = data or {}
         title = "Nuevo T\u00e9cnico / Usuario" if is_new else "Editar T\u00e9cnico / Usuario"
@@ -287,7 +287,7 @@ class _EditDialog(QDialog):
     """Diálogo genérico para crear/editar un registro de catálogo simple."""
 
     def __init__(self, title: str, fields: list[tuple[str, str, str]], data: dict = None, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setWindowTitle(title)
         self.setMinimumWidth(420)
         self._fields: dict[str, QLineEdit] = {}
@@ -371,7 +371,7 @@ class _CatalogTab(QWidget):
     COLUMNS: list[str] = ["ID", "Nombre"]
 
     def __init__(self, repo, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._repo = repo
         self._setup_ui()
         self._load()
@@ -525,7 +525,7 @@ class _FusionClientesDialog(QDialog):
     """
 
     def __init__(self, clientes: list[dict], parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setWindowTitle("🔗  Fusionar Clientes Duplicados")
         self.setMinimumSize(640, 500)
         self.setModal(True)
@@ -647,7 +647,7 @@ class _FusionSucursalesDialog(QDialog):
     """Modal para fusionar sucursales duplicadas dentro del mismo cliente."""
 
     def __init__(self, sucursales: list[dict], cliente_nombre: str, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setWindowTitle("🔗  Fusionar Sucursales Duplicadas")
         self.setMinimumSize(580, 440)
         self.setModal(True)
@@ -737,7 +737,7 @@ class _SucursalEditDialog(QDialog):
     def __init__(self, cliente_id: int, cliente_nombre: str,
                  data: dict = None, parent=None):
 
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._cliente_id = cliente_id
         self._data = data or {}
         is_new = not bool(data)
@@ -827,7 +827,7 @@ class _EquipoEditDialog(QDialog):
 
     def __init__(self, sucursal_id: int, sucursal_nombre: str,
                  data: dict = None, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._sucursal_id = sucursal_id
         self._data = data or {}
         is_new = not bool(data)
@@ -923,7 +923,7 @@ class ClientesSucursalesTab(QWidget):
     """
 
     def __init__(self, cliente_repo, sucursal_repo, equipo_repo, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._cliente_repo  = cliente_repo
         self._sucursal_repo = sucursal_repo
         self._equipo_repo   = equipo_repo
@@ -1889,7 +1889,7 @@ class CatalogosWidget(QWidget):
     """Widget principal de cat\u00e1logos con tabs para cada entidad."""
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._setup_ui()
 
     def _setup_ui(self) -> None:

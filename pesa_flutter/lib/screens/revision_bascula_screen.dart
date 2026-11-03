@@ -1,21 +1,29 @@
 // lib/screens/revision_bascula_screen.dart
+// Pantalla Digital Homologada 1:1 con el Formato Físico Oficial:
+// "FICHA TECNICA DIAGNOSTICA — REVISION DE CELDAS DE CARGA Y BASCULA (RE)"
+// Secciones:
+//   1. Datos del Cliente
+//   2. Datos del Equipo / Indicador + Celdas de Carga + Selector de Número de Celdas (1..12)
+//   3. Lecturas Sin Carga — N Celdas (Ohms / mV) — 11 filas oficiales al 100% de ancho
+//   4. Funcionalidad de Celdas e Indicador (Indicador/Display + Estado Individual de Celdas + Cables/Conectores)
+//   5. Observaciones y Firmas (Nombre de quien recibe obligatorio y vacío por defecto)
+
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:provider/provider.dart';
-import '../widgets/nombre_recibe.dart';
 import 'package:open_filex/open_filex.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart';
-import 'package:pdf/widgets.dart' as pw;
+import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:signature/signature.dart';
 
 import '../services/api_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
+import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
-import '../widgets/signature_shield.dart';
+import '../widgets/nombre_recibe.dart';
 
 class RevisionBasculaScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
@@ -26,137 +34,488 @@ class RevisionBasculaScreen extends StatefulWidget {
 }
 
 class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
-  static const Color _red = Color(0xFFC8102E);
-  static const Color _dark = Color(0xFF1A1A2E);
+  static const Color _pesaRed = Color(0xFFB71C1C);
+  static const Color _pesaDark = Color(0xFF1C1C1C);
+  static const Color _pesaSlate = Color(0xFF2D2D2D);
 
-  // Controladores de equipo
-  final _marcaCtrl = TextEditingController();
-  final _modeloCtrl = TextEditingController();
-  final _serieCtrl = TextEditingController();
-  final _capacidadCtrl = TextEditingController();
-  final _divisionCtrl = TextEditingController();
+  /// 11 filas exactas del formato físico oficial (Sección 3)
+  static const List<List<String>> _ohmsParams = [
+    ['A', 'Excitacion Exc+ / Exc-', 'Ohms'],
+    ['B', 'Resistencia Sig+ / Sig-', 'Ohms'],
+    ['C', 'Resistencia Exc+ / Sig+', 'Ohms'],
+    ['D', 'Resistencia Exc+ / Sig-', 'Ohms'],
+    ['E', 'Resistencia Exc- / Sig+', 'Ohms'],
+    ['F', 'Resistencia Exc- / Sig-', 'Ohms'],
+    ['G', 'Resistencia Sig- + Exc+', 'Ohms'],
+    ['H', 'Resistencia Sig- + Exc-', 'Ohms'],
+    ['I', 'Resistencia Exc-+ / Sig+', 'Ohms'],
+    ['J', 'Resistencia Exc-+ / Sig-', 'Ohms'],
+    ['K', 'Señal de Salida (Milivoltaje)', 'mV'],
+  ];
+
+  static const List<String> _baseIndicadorItems = [
+    'Indicador de Peso',
+    'Teclado / Botones',
+    'Luminosidad / Display',
+    'Convertidor Analogico',
+    'Caja Sumadora',
+  ];
+
+  // Controladores Sección 1 y 2 (Equipo / Indicador / Celdas)
+  final _marcaIndCtrl = TextEditingController();
+  final _modeloIndCtrl = TextEditingController();
+  final _serieIndCtrl = TextEditingController();
+  final _idIndCtrl = TextEditingController();
+  final _capMaxCtrl = TextEditingController();
+  final _divMinCtrl = TextEditingController();
   final _ubicacionCtrl = TextEditingController();
 
-  // Controladores de diagnóstico
-  final _diagnosticoCtrl = TextEditingController();
+  final _celdaAMarcaCtrl = TextEditingController();
+  final _celdaAModeloCtrl = TextEditingController();
+  final _celdaACapCtrl = TextEditingController();
+
+  String _tipoEstructura = 'PLATAFORMA';
+  int _numCeldas = 4; // Soportando 1 a 12 celdas
+
+  // Sección 3: Matriz 11 filas x 12 columnas máximas de TextEditingControllers
+  late final List<List<TextEditingController>> _ohmsCtrls;
+
+  // Sección 4: Funcionalidad de Celdas e Indicador
+  final Map<String, bool> _funcIndicador = {};
+  late final List<String> _estadoCeldas; // 'OK' | 'Falla' | '' para hasta 12 celdas
+  String _estadoCables = 'OK';
+  String _estadoConectores = 'OK';
+
+  // Sección 5: Observaciones y Firmas
   final _observacionesCtrl = TextEditingController();
-
-  // Controladores de firmas
   final _nombreReceptorCtrl = TextEditingController();
-  bool _errNombreRecibe = false;
-  final _puestoReceptorCtrl = TextEditingController();
+  List<String> _contactosSugeridos = [];
 
-  final SignatureController _ctrlFirmaCli = SignatureController(
-    penStrokeWidth: 3,
-    penColor: const Color(0xFF1D1D1F),
+  final _sigClienteCtrl = SignatureController(
+    penStrokeWidth: 2.5,
+    penColor: Colors.black,
+    exportBackgroundColor: Colors.white,
+  );
+  final _sigTecnicoCtrl = SignatureController(
+    penStrokeWidth: 2.5,
+    penColor: Colors.black,
+    exportBackgroundColor: Colors.white,
   );
 
-  bool _saving = false;
-  
-  int _puntosApoyo = 4;
-  
-  // Inspección Visual
-  bool _chkCajaSuma = true;
-  bool _chkTopesLongitudinales = true;
-  bool _chkTopesTransversales = true;
-  bool _chkEstadoCables = true;
+  Uint8List? _firmaTecPre;
+  bool _usarFirmaPre = false;
+  bool _guardando = false;
 
-  // Celdas data
-  List<Map<String, dynamic>> _celdasData = [];
-
-  String? _firmaTecnicoB64;
+  Map<String, dynamic> _datosCombinados = {};
 
   @override
   void initState() {
     super.initState();
-    _puntosApoyo = int.tryParse(widget.orden['puntos_apoyo']?.toString() ?? '4') ?? 4;
-    _initCeldas();
+    _ohmsCtrls = List.generate(
+      _ohmsParams.length,
+      (_) => List.generate(12, (_) => TextEditingController()),
+    );
+    _estadoCeldas = List.generate(12, (_) => 'OK');
+    for (final item in _baseIndicadorItems) {
+      _funcIndicador[item] = true;
+    }
+    for (int k = 1; k <= 12; k++) {
+      _funcIndicador['Potenciometro $k'] = true;
+    }
     _cargarDatos();
   }
-  
-  void _initCeldas() {
-    _celdasData = List.generate(_puntosApoyo, (i) => {
-      'capacidad': TextEditingController(),
-      'serie': TextEditingController(),
-      'mv_cero': TextEditingController(),
-      'mv_carga': TextEditingController(),
-      'resistencia': TextEditingController(),
-    });
-  }
 
-  @override
-  void dispose() {
-    _marcaCtrl.dispose();
-    _modeloCtrl.dispose();
-    _serieCtrl.dispose();
-    _capacidadCtrl.dispose();
-    _divisionCtrl.dispose();
-    _ubicacionCtrl.dispose();
-    _diagnosticoCtrl.dispose();
-    _observacionesCtrl.dispose();
-    _nombreReceptorCtrl.dispose();
-    _puestoReceptorCtrl.dispose();
-    _ctrlFirmaCli.dispose();
-    for (var row in _celdasData) {
-      row['capacidad'].dispose();
-      row['serie'].dispose();
-      row['mv_cero'].dispose();
-      row['mv_carga'].dispose();
-      row['resistencia'].dispose();
+  String _pickFromMap(Map<String, dynamic> m, List<String> keys, [String def = '']) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v != null) {
+        final s = v.toString().trim();
+        if (s.isNotEmpty && s.toLowerCase() != 'null' && s.toLowerCase() != 'none') {
+          return s;
+        }
+      }
     }
-    super.dispose();
+    return def;
   }
 
   Future<void> _cargarDatos() async {
-    final o = widget.orden;
-    _marcaCtrl.text = (o['marca'] ?? '').toString();
-    _modeloCtrl.text = (o['modelo'] ?? '').toString();
-    _serieCtrl.text = (o['serie'] ?? o['numero_serie'] ?? '').toString();
-    _capacidadCtrl.text = (o['capacidad_max'] ?? o['capacidad'] ?? '').toString();
-    _divisionCtrl.text = (o['division_min'] ?? o['d'] ?? '').toString();
-    _ubicacionCtrl.text = (o['ubicacion'] ?? o['planta'] ?? '').toString();
-    _observacionesCtrl.text = (o['observaciones'] ?? '').toString();
-    _nombreReceptorCtrl.text = (o['firma_cliente_nombre'] ?? o['nombre_ing'] ?? '').toString();
-    _puestoReceptorCtrl.text = (o['puesto_ing'] ?? '').toString();
-    
-    // Load pre-saved tech signature
-    _firmaTecnicoB64 = (o['firma_tecnico_descargada'] ?? o['firma_tecnico'])?.toString();
-    if (_firmaTecnicoB64 == null || _firmaTecnicoB64!.isEmpty) {
-       final username = (o['tecnico_username'] ?? o['tecnico'] ?? '').toString();
-       _firmaTecnicoB64 = await FirmaTecnicoService.instance.getFirma(username);
+    final prefs = await SharedPreferences.getInstance();
+    final b64 = prefs.getString('firma_tecnico_b64');
+    if (b64 != null && b64.isNotEmpty) {
+      try {
+        final clean = b64.contains(',') ? b64.split(',').last : b64;
+        _firmaTecPre = base64Decode(clean);
+        _usarFirmaPre = true;
+      } catch (_) {}
     }
+
+    final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? '').toString().trim();
+    Map<String, dynamic> merged = Map<String, dynamic>.from(widget.orden);
+
+    // 1. Leer fila completa de SQLite si existe
+    if (folio.isNotEmpty) {
+      try {
+        final dbRow = await LocalDbService.instance.getOsByFolio(folio);
+        if (dbRow != null) {
+          for (final entry in dbRow.entries) {
+            if (entry.value != null && entry.value.toString().trim().isNotEmpty) {
+              merged[entry.key] = entry.value;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 2. Desempaquetar datos_tecnicos_json enviado desde logística / escritorio
+    void unpackJsonField(dynamic rawJson) {
+      if (rawJson == null) return;
+      try {
+        final Map<String, dynamic> parsed = rawJson is String
+            ? Map<String, dynamic>.from(jsonDecode(rawJson) as Map)
+            : Map<String, dynamic>.from(rawJson as Map);
+        // Si tiene lista 'equipos', extraer primer equipo como respaldo
+        if (parsed['equipos'] is List && (parsed['equipos'] as List).isNotEmpty) {
+          final firstEq = parsed['equipos'][0];
+          if (firstEq is Map) {
+            for (final e in firstEq.entries) {
+              if (e.value != null && e.value.toString().trim().isNotEmpty) {
+                merged.putIfAbsent(e.key.toString(), () => e.value);
+              }
+            }
+          }
+        }
+        for (final e in parsed.entries) {
+          if (e.value != null && e.value.toString().trim().isNotEmpty) {
+            merged[e.key] = e.value;
+          }
+        }
+      } catch (_) {}
+    }
+
+    unpackJsonField(widget.orden['datos_tecnicos_json']);
+    unpackJsonField(merged['datos_tecnicos_json']);
+
+    // 3. Leer borrador local (si el técnico ya había capturado avances)
+    if (folio.isNotEmpty) {
+      try {
+        final draft = await LocalDbService.instance.getDraft(folio);
+        if (draft != null) {
+          for (final e in draft.entries) {
+            if (e.value != null && e.value.toString().trim().isNotEmpty) {
+              merged[e.key] = e.value;
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    _datosCombinados = merged;
+
+    // Precargar datos del instrumento/indicador enviados desde logística
+    _marcaIndCtrl.text = _pickFromMap(merged, [
+      'indicador_marca',
+      'marca',
+      'instrumento_marca',
+      'celda_a_marca',
+    ]);
+    _modeloIndCtrl.text = _pickFromMap(merged, [
+      'indicador_modelo',
+      'modelo',
+      'instrumento_modelo',
+      'celda_a_modelo',
+    ]);
+    _serieIndCtrl.text = _pickFromMap(merged, [
+      'indicador_serie',
+      'ns',
+      'serie',
+      'numero_serie',
+      'instrumento_serie',
+    ]);
+    _idIndCtrl.text = _pickFromMap(merged, [
+      'indicador_id',
+      'id_indicador',
+      'id_equipo',
+      'instrumento_id',
+    ]);
+    _capMaxCtrl.text = _pickFromMap(merged, [
+      'cap_maxima',
+      'capacidad_maxima',
+      'alcance_max',
+      'instrumento_capacidad',
+      'capacidad',
+    ]);
+    _divMinCtrl.text = _pickFromMap(merged, [
+      'div_minima',
+      'division_minima',
+      'instrumento_division',
+      'division',
+    ]);
+    _ubicacionCtrl.text = _pickFromMap(merged, [
+      'ubicacion',
+      'ubicacion_interna',
+      'planta',
+    ]);
+
+    _celdaAMarcaCtrl.text = _pickFromMap(merged, ['celda_a_marca', 'marca_celda'], _marcaIndCtrl.text);
+    _celdaAModeloCtrl.text = _pickFromMap(merged, ['celda_a_modelo', 'modelo_celda'], _modeloIndCtrl.text);
+    _celdaACapCtrl.text = _pickFromMap(merged, ['celda_a_capacidad', 'capacidad_celda'], _capMaxCtrl.text);
+
+    final rawEst = _pickFromMap(merged, ['tipo_estructura', 'tipo_instrumento', 'tipo_equipo'], 'PLATAFORMA').toUpperCase();
+    if (rawEst.contains('CAMION')) {
+      _tipoEstructura = 'CAMIONERA';
+    } else if (rawEst.contains('TOLVA') || rawEst.contains('TANQUE') || rawEst.contains('SILO')) {
+      _tipoEstructura = 'TOLVA_TANQUE';
+    } else {
+      _tipoEstructura = 'PLATAFORMA';
+    }
+
+    // Número de celdas (puntos_apoyo / num_celdas / celda_a_cantidad + celda_b_cantidad)
+    int nCeldas = 4;
+    final rawN = _pickFromMap(merged, ['num_celdas', 'puntos_apoyo']);
+    if (rawN.isNotEmpty) {
+      nCeldas = int.tryParse(rawN) ?? 4;
+    } else {
+      final nA = int.tryParse(_pickFromMap(merged, ['celda_a_cantidad'], '4')) ?? 4;
+      final mixtas = merged['celdas_mixtas'] == true || merged['celdas_mixtas'] == 1;
+      final nB = mixtas ? (int.tryParse(_pickFromMap(merged, ['celda_b_cantidad'], '0')) ?? 0) : 0;
+      nCeldas = nA + nB;
+    }
+    _numCeldas = nCeldas.clamp(1, 12);
+
+    // Restaurar lecturas_ohms si existen en borrador o JSON
+    final rawOhms = merged['lecturas_ohms'];
+    if (rawOhms is List) {
+      for (int r = 0; r < rawOhms.length && r < _ohmsParams.length; r++) {
+        final row = rawOhms[r];
+        if (row is List) {
+          for (int c = 0; c < row.length && c < 12; c++) {
+            _ohmsCtrls[r][c].text = (row[c] ?? '').toString();
+          }
+        } else if (row is Map) {
+          for (int c = 0; c < 12; c++) {
+            final v = row['C-${c + 1}'] ?? row['$c'] ?? row['${c + 1}'];
+            if (v != null) _ohmsCtrls[r][c].text = v.toString();
+          }
+        }
+      }
+    }
+
+    // Restaurar func_indicador
+    final rawFunc = merged['func_indicador'];
+    if (rawFunc is Map) {
+      for (final e in rawFunc.entries) {
+        _funcIndicador[e.key.toString()] = e.value == true || e.value.toString().toUpperCase() == 'TRUE' || e.value.toString() == '1';
+      }
+    }
+
+    // Restaurar estado_celdas
+    final rawEstCeldas = merged['estado_celdas'];
+    if (rawEstCeldas is List) {
+      for (int i = 0; i < rawEstCeldas.length && i < 12; i++) {
+        final v = (rawEstCeldas[i] ?? '').toString().trim();
+        if (v.isNotEmpty) {
+          _estadoCeldas[i] = v.toUpperCase() == 'FALLA' ? 'Falla' : 'OK';
+        }
+      }
+    } else if (rawEstCeldas is Map) {
+      for (int i = 0; i < 12; i++) {
+        final v = rawEstCeldas['Celda ${i + 1}'] ?? rawEstCeldas['C-${i + 1}'] ?? rawEstCeldas['$i'];
+        if (v != null && v.toString().trim().isNotEmpty) {
+          _estadoCeldas[i] = v.toString().trim().toUpperCase() == 'FALLA' ? 'Falla' : 'OK';
+        }
+      }
+    }
+
+    // Restaurar estado_cables y estado_conectores
+    final rawCables = _pickFromMap(merged, ['estado_cables']);
+    if (rawCables.isNotEmpty) {
+      _estadoCables = rawCables.toUpperCase() == 'FALLA' ? 'Falla' : 'OK';
+    }
+    final rawConect = _pickFromMap(merged, ['estado_conectores']);
+    if (rawConect.isNotEmpty) {
+      _estadoConectores = rawConect.toUpperCase() == 'FALLA' ? 'Falla' : 'OK';
+    }
+
+    // Observaciones
+    _observacionesCtrl.text = _pickFromMap(merged, ['observaciones', 'observaciones_tecnico']);
+
+    // Nombre de quien recibe: NUNCA precargar con la razón social del cliente
+    final clienteNombre = _pickFromMap(merged, ['cliente', 'razon_social']);
+    for (final k in ['nombre_receptor', 'firma_cliente_nombre', 'nombre_quien_recibe', 'recibido_por']) {
+      final v = (merged[k] ?? '').toString().trim();
+      if (v.isNotEmpty && !esRazonSocialEmpresa(v, clienteNombre)) {
+        _nombreReceptorCtrl.text = v;
+        break;
+      }
+    }
+
+    // Contactos frecuentes de planta
+    final dirPlanta = _pickFromMap(merged, ['direccion', 'sucursal_direccion', 'direccion_planta', 'sucursal']);
+    try {
+      final cs = await LocalDbService.instance.getContactosPlanta(
+        cliente: clienteNombre,
+        planta: dirPlanta,
+      );
+      if (mounted) {
+        setState(() {
+          _contactosSugeridos = cs.where((c) => !esRazonSocialEmpresa(c, clienteNombre)).toList();
+        });
+      }
+    } catch (_) {}
+
+    // Firma del técnico desde FirmaTecnicoService si no estaba en SharedPreferences
+    if (_firmaTecPre == null) {
+      try {
+        final username = (merged['tecnico_username'] ?? merged['tecnico'] ?? '').toString();
+        final savedFirmaTec = await FirmaTecnicoService.instance.getFirma(username);
+        if (savedFirmaTec != null && savedFirmaTec.isNotEmpty) {
+          final clean = savedFirmaTec.contains(',') ? savedFirmaTec.split(',').last : savedFirmaTec;
+          _firmaTecPre = base64Decode(clean);
+          _usarFirmaPre = true;
+        }
+      } catch (_) {}
+    }
+
     if (mounted) setState(() {});
   }
 
-  Future<void> _finalizarRevision() async {
+  List<String> get _currentIndicadorItems => [
+        ..._baseIndicadorItems,
+        for (int k = 1; k <= _numCeldas; k++) 'Potenciometro $k',
+      ];
+
+  List<List<String>> _obtenerMatrizOhms() {
+    return List.generate(
+      _ohmsParams.length,
+      (r) => List.generate(_numCeldas, (c) => _ohmsCtrls[r][c].text.trim()),
+    );
+  }
+
+  Map<String, dynamic> _construirPayloadRevision({
+    String? fechaEjecucionHoy,
+    String? firmaTecB64,
+    String? firmaCliB64,
+  }) {
+    final ohmsMatrix = _obtenerMatrizOhms();
+    final funcMap = <String, bool>{};
+    for (final item in _currentIndicadorItems) {
+      funcMap[item] = _funcIndicador[item] ?? false;
+    }
+    final celdasEstadoList = List.generate(_numCeldas, (i) => _estadoCeldas[i]);
+
+    final payload = Map<String, dynamic>.from(_datosCombinados);
+    payload['tipo_documento'] = 'RE';
+    payload['indicador_marca'] = _marcaIndCtrl.text.trim();
+    payload['marca'] = _marcaIndCtrl.text.trim();
+    payload['indicador_modelo'] = _modeloIndCtrl.text.trim();
+    payload['modelo'] = _modeloIndCtrl.text.trim();
+    payload['indicador_serie'] = _serieIndCtrl.text.trim();
+    payload['ns'] = _serieIndCtrl.text.trim();
+    payload['serie'] = _serieIndCtrl.text.trim();
+    payload['indicador_id'] = _idIndCtrl.text.trim();
+    payload['id_equipo'] = _idIndCtrl.text.trim();
+    payload['id_indicador'] = _idIndCtrl.text.trim();
+    payload['cap_maxima'] = _capMaxCtrl.text.trim();
+    payload['alcance_max'] = _capMaxCtrl.text.trim();
+    payload['instrumento_capacidad'] = _capMaxCtrl.text.trim();
+    payload['div_minima'] = _divMinCtrl.text.trim();
+    payload['instrumento_division'] = _divMinCtrl.text.trim();
+    payload['ubicacion'] = _ubicacionCtrl.text.trim();
+    payload['celda_a_marca'] = _celdaAMarcaCtrl.text.trim();
+    payload['celda_a_modelo'] = _celdaAModeloCtrl.text.trim();
+    payload['celda_a_capacidad'] = _celdaACapCtrl.text.trim();
+    payload['celda_a_cantidad'] = _numCeldas;
+    payload['num_celdas'] = _numCeldas;
+    payload['puntos_apoyo'] = _numCeldas;
+    payload['tipo_estructura'] = _tipoEstructura;
+    payload['lecturas_ohms'] = ohmsMatrix;
+    payload['func_indicador'] = funcMap;
+    payload['estado_celdas'] = celdasEstadoList;
+    payload['estado_cables'] = _estadoCables;
+    payload['estado_conectores'] = _estadoConectores;
+    payload['observaciones'] = _observacionesCtrl.text.trim();
+    payload['observaciones_tecnico'] = _observacionesCtrl.text.trim();
+    payload['nombre_receptor'] = _nombreReceptorCtrl.text.trim();
+    payload['firma_cliente_nombre'] = _nombreReceptorCtrl.text.trim();
+    payload['nombre_quien_recibe'] = _nombreReceptorCtrl.text.trim();
+
+    if (fechaEjecucionHoy != null) {
+      payload['fecha_creacion_logistica'] ??= payload['fecha'];
+      payload['fecha'] = fechaEjecucionHoy;
+      payload['fecha_servicio'] = fechaEjecucionHoy;
+      payload['fecha_cierre'] = DateTime.now().toIso8601String();
+    }
+    if (firmaTecB64 != null && firmaTecB64.isNotEmpty) {
+      payload['firma_tecnico'] = firmaTecB64;
+      payload['firma_tecnico_b64'] = firmaTecB64;
+    }
+    if (firmaCliB64 != null && firmaCliB64.isNotEmpty) {
+      payload['firma_cliente'] = firmaCliB64;
+      payload['firma_receptor_b64'] = firmaCliB64;
+    }
+    return payload;
+  }
+
+  Future<void> _guardarBorradorSilencioso() async {
+    final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? '').toString().trim();
+    if (folio.isEmpty) return;
+    try {
+      final payload = _construirPayloadRevision();
+      await LocalDbService.instance.saveDraft(folio, payload);
+    } catch (_) {}
+  }
+
+  Future<void> _finalizar() async {
+    final cliente = _pickFromMap(_datosCombinados, ['cliente', 'razon_social']);
     final nombreReceptor = _nombreReceptorCtrl.text.trim();
-    if (!exigirNombreRecibe(context, nombreReceptor)) {
-      setState(() => _errNombreRecibe = true);
+    if (!exigirNombreRecibe(context, nombreReceptor, clienteEmpresa: cliente)) {
       return;
     }
 
-    String? fCliB64;
-    if (_ctrlFirmaCli.isNotEmpty) {
-      final b = await _ctrlFirmaCli.toPngBytes();
-      if (b != null) fCliB64 = base64Encode(b);
+    if (_sigClienteCtrl.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('La firma del cliente es obligatoria para finalizar la Revisión de Celdas'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
     }
-    // Firma del cliente OPCIONAL (si no puede firmar en pantalla); el nombre es obligatorio.
 
-    setState(() => _saving = true);
+    final tieneFirmaTec = (_usarFirmaPre && _firmaTecPre != null) || _sigTecnicoCtrl.isNotEmpty;
+    if (!tieneFirmaTec) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Falta la firma del técnico responsable'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
 
+    setState(() => _guardando = true);
     try {
       final localId = widget.orden['local_id'] as int? ?? 0;
-      final folio = (widget.orden['folio_os'] ?? 'RE-00-000').toString();
+      final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'RE-LOCAL').toString().trim();
 
+      final sigCliBytes = await _sigClienteCtrl.toPngBytes();
+      final Uint8List? sigTecBytes =
+          (_usarFirmaPre && _firmaTecPre != null) ? _firmaTecPre : await _sigTecnicoCtrl.toPngBytes();
+
+      final String? firmaCliB64 = sigCliBytes != null ? base64Encode(sigCliBytes) : null;
+      final String? firmaTecB64 = sigTecBytes != null ? base64Encode(sigTecBytes) : null;
+
+      // Fecha real de ejecución y cierre
       final String fechaEjecucionHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final String fechaCierreIso = DateTime.now().toIso8601String();
 
-      final ordenMutable = Map<String, dynamic>.from(widget.orden);
-      ordenMutable['fecha_creacion_logistica'] = ordenMutable['fecha_creacion_logistica'] ?? ordenMutable['fecha'];
-      ordenMutable['fecha'] = fechaEjecucionHoy;
-      ordenMutable['fecha_servicio'] = fechaEjecucionHoy;
-      ordenMutable['fecha_cierre'] = fechaCierreIso;
+      final payload = _construirPayloadRevision(
+        fechaEjecucionHoy: fechaEjecucionHoy,
+        firmaTecB64: firmaTecB64,
+        firmaCliB64: firmaCliB64,
+      );
 
+      widget.orden['fecha_creacion_logistica'] ??= widget.orden['fecha'];
       widget.orden['fecha'] = fechaEjecucionHoy;
       widget.orden['fecha_servicio'] = fechaEjecucionHoy;
       widget.orden['fecha_cierre'] = fechaCierreIso;
@@ -166,158 +525,104 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         fechaEjecucionHoy,
         localId: localId,
         fechaCierre: fechaCierreIso,
-        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
+        fechaCreacionLogistica: payload['fecha_creacion_logistica']?.toString(),
       );
 
-      // Generar PDF RE
-      final pdf = pw.Document(title: 'Revisión de Báscula - $folio');
-      
-      final headerColor = PdfColor.fromInt(0xFF1D1D1B);
-      final redColor = PdfColor.fromInt(0xFFC8102E);
-      
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.letter,
-          margin: const pw.EdgeInsets.all(36),
-          build: (ctx) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('REVISIÓN DE CELDAS DE CARGA', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: redColor)),
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text('FOLIO: $folio', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-                      pw.Text('FECHA: $fechaEjecucionHoy', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                    ],
-                  ),
-                ],
-              ),
-              pw.Divider(color: PdfColors.grey),
-              pw.SizedBox(height: 10),
-              pw.Text('DATOS DEL INSTRUMENTO:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.Text('Cliente: ${(ordenMutable['cliente'] ?? '').toString()} | Fecha: $fechaEjecucionHoy', style: const pw.TextStyle(fontSize: 9)),
-              pw.Text('Ubicación: ${_ubicacionCtrl.text.trim()}', style: const pw.TextStyle(fontSize: 9)),
-              pw.Text('Marca: ${_marcaCtrl.text.trim()} | Modelo: ${_modeloCtrl.text.trim()} | Serie: ${_serieCtrl.text.trim()}', style: const pw.TextStyle(fontSize: 9)),
-              pw.Text('Capacidad: ${_capacidadCtrl.text.trim()} | División mínima: ${_divisionCtrl.text.trim()} | Puntos de Apoyo: $_puntosApoyo', style: const pw.TextStyle(fontSize: 9)),
-              pw.SizedBox(height: 15),
-              
-              pw.Text('INSPECCIÓN VISUAL Y FUNCIONAL:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 5),
-              pw.Row(
-                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                 children: [
-                    pw.Text('Caja Suma: ${_chkCajaSuma ? 'OK' : 'REVISAR'}', style: const pw.TextStyle(fontSize: 9)),
-                    pw.Text('Topes Longitudinales: ${_chkTopesLongitudinales ? 'OK' : 'REVISAR'}', style: const pw.TextStyle(fontSize: 9)),
-                 ]
-              ),
-              pw.Row(
-                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                 children: [
-                    pw.Text('Estado Cables: ${_chkEstadoCables ? 'OK' : 'REVISAR'}', style: const pw.TextStyle(fontSize: 9)),
-                    pw.Text('Topes Transversales: ${_chkTopesTransversales ? 'OK' : 'REVISAR'}', style: const pw.TextStyle(fontSize: 9)),
-                 ]
-              ),
-              pw.SizedBox(height: 15),
-              
-              pw.Text('TABLA TÉCNICA DE CELDAS DE CARGA:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 5),
-              pw.Table(
-                 border: pw.TableBorder.all(color: PdfColors.grey400),
-                 columnWidths: {
-                    0: const pw.FlexColumnWidth(0.5),
-                    1: const pw.FlexColumnWidth(1),
-                    2: const pw.FlexColumnWidth(1.2),
-                    3: const pw.FlexColumnWidth(1),
-                    4: const pw.FlexColumnWidth(1),
-                    5: const pw.FlexColumnWidth(1.2),
-                 },
-                 children: [
-                    pw.TableRow(
-                       decoration: pw.BoxDecoration(color: headerColor),
-                       children: ['Nº', 'Capacidad', 'Nº Serie', 'mV/V Cero', 'mV/V Carga', 'Resistencia'].map((t) => 
-                          pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(t, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.white)))
-                       ).toList(),
-                    ),
-                    for (int i=0; i<_puntosApoyo; i++)
-                       pw.TableRow(
-                          children: [
-                             pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text('${i + 1}', textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
-                             pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(_celdasData[i]['capacidad'].text, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
-                             pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(_celdasData[i]['serie'].text, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
-                             pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(_celdasData[i]['mv_cero'].text, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
-                             pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(_celdasData[i]['mv_carga'].text, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
-                             pw.Padding(padding: const pw.EdgeInsets.all(4), child: pw.Text(_celdasData[i]['resistencia'].text, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 8))),
-                          ]
-                       )
-                 ]
-              ),
-              pw.SizedBox(height: 15),
-              
-              pw.Text('DIAGNÓSTICO Y OBSERVACIONES:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.Text(_diagnosticoCtrl.text.isNotEmpty ? _diagnosticoCtrl.text : 'Sin fallas mayores detectadas.', style: const pw.TextStyle(fontSize: 9)),
-              pw.Spacer(),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                children: [
-                  pw.Column(children: [
-                    _firmaTecnicoB64 != null && _firmaTecnicoB64!.isNotEmpty ? pw.Image(pw.MemoryImage(base64Decode(_firmaTecnicoB64!)), width: 120, height: 60) : pw.SizedBox(height: 60),
-                    pw.Container(width: 160, height: 1, color: PdfColors.black),
-                    pw.Text('Técnico Responsable', style: const pw.TextStyle(fontSize: 8)),
-                  ]),
-                  pw.Column(children: [
-                    (fCliB64 != null && fCliB64.isNotEmpty) ? pw.Image(pw.MemoryImage(base64Decode(fCliB64)), width: 120, height: 60) : pw.SizedBox(height: 60),
-                    pw.Container(width: 160, height: 1, color: PdfColors.black),
-                    pw.Text('Recibido por: $nombreReceptor', style: const pw.TextStyle(fontSize: 8)),
-                  ]),
-                ],
-              ),
-            ],
-          ),
-        ),
+      final funcMap = <String, bool>{};
+      for (final item in _currentIndicadorItems) {
+        funcMap[item] = _funcIndicador[item] ?? false;
+      }
+
+      // Generar PDF Oficial homologado con el formato físico RE
+      final pdfPath = await PdfService.instance.generarPdfRevisionCeldas(
+        rvData: payload,
+        numCeldas: _numCeldas,
+        lecturasOhms: _obtenerMatrizOhms(),
+        funcIndicador: funcMap,
+        estadoCeldas: List.generate(_numCeldas, (i) => _estadoCeldas[i]),
+        estadoCables: _estadoCables,
+        estadoConectores: _estadoConectores,
+        firmaTecBase64: firmaTecB64,
+        firmaCliBase64: firmaCliB64,
       );
 
-      final pdfBytes = await pdf.save();
-      final dir = await getApplicationDocumentsDirectory();
-      final pdfDir = Directory('${dir.path}/pdfs');
-      if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
-      final pdfPath = '${pdfDir.path}/$folio.pdf';
-      final file = File(pdfPath);
-      await file.writeAsBytes(pdfBytes, flush: true);
+      final pdfBytes = await File(pdfPath).readAsBytes();
+      final pdfB64 = base64Encode(pdfBytes);
+      final datosJsonStr = jsonEncode(payload);
+
+      await LocalDbService.instance.saveDraft(folio, {
+        ...payload,
+        'pdf_path': pdfPath,
+        'estado': 'FINALIZADA',
+      });
+
+      final dirPlanta = _pickFromMap(_datosCombinados, ['direccion', 'sucursal_direccion', 'direccion_planta', 'sucursal']);
+      await LocalDbService.instance.saveContactoPlanta(
+        cliente: cliente,
+        planta: dirPlanta,
+        nombreContacto: nombreReceptor,
+      );
+      final loteKey = _pickFromMap(_datosCombinados, ['lote_id', 'id_lote', 'sucursal_id', 'cliente'], cliente);
+      LoteSession.registrarResponsable(loteKey, nombreReceptor);
 
       await LocalDbService.instance.saveFirmas(
         localId: localId,
         folio: folio,
-        firmaTecBase64: _firmaTecnicoB64 ?? '',
-        firmaCliBase64: fCliB64 ?? '',
+        firmaTecBase64: firmaTecB64 ?? '',
+        firmaCliBase64: firmaCliB64 ?? '',
         nombreIng: nombreReceptor,
-        puestoIng: _puestoReceptorCtrl.text.trim(),
+        puestoIng: '',
         fechaEjecucion: fechaEjecucionHoy,
         fechaCierre: fechaCierreIso,
-        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
+        fechaCreacionLogistica: payload['fecha_creacion_logistica']?.toString(),
       );
+
+      try {
+        final db = await LocalDbService.instance.database;
+        await db.rawUpdate(
+          '''UPDATE ordenes_servicio
+             SET fecha = ?,
+                 marca = ?,
+                 modelo = ?,
+                 ns = ?,
+                 id_equipo = ?,
+                 alcance_max = ?,
+                 div_minima = ?,
+                 ubicacion = ?,
+                 observaciones = ?,
+                 tipo_documento = 'RE',
+                 datos_tecnicos_json = ?
+             WHERE folio_os = ? OR folio = ?''',
+          [
+            fechaEjecucionHoy,
+            _marcaIndCtrl.text.trim(),
+            _modeloIndCtrl.text.trim(),
+            _serieIndCtrl.text.trim(),
+            _idIndCtrl.text.trim(),
+            _capMaxCtrl.text.trim(),
+            _divMinCtrl.text.trim(),
+            _ubicacionCtrl.text.trim(),
+            _observacionesCtrl.text.trim(),
+            datosJsonStr,
+            folio,
+            folio,
+          ],
+        );
+      } catch (_) {}
 
       bool subio = false;
       try {
         subio = await ApiService.instance.uploadPdf(
           folio,
-          file,
+          File(pdfPath),
           osId: localId,
           data: {
+            ...payload,
             'tipo_documento': 'RE',
             'fecha': fechaEjecucionHoy,
             'fecha_servicio': fechaEjecucionHoy,
             'fecha_cierre': fechaCierreIso,
-            'marca': _marcaCtrl.text.trim(),
-            'modelo': _modeloCtrl.text.trim(),
-            'ns': _serieCtrl.text.trim(),
-            'ubicacion': _ubicacionCtrl.text.trim(),
-            'observaciones': _diagnosticoCtrl.text.trim(),
-            'nombre_ing': nombreReceptor,
-            'puesto_ing': _puestoReceptorCtrl.text.trim(),
-            'firma_cliente_nombre': nombreReceptor,
+            'datos_tecnicos_json': datosJsonStr,
           },
         );
       } catch (_) {}
@@ -326,12 +631,12 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         localId,
         pdfPath,
         folio: folio,
-        pdfB64: base64Encode(pdfBytes),
+        pdfB64: pdfB64,
         isOnline: subio,
         uploadOk: subio,
         fechaEjecucion: fechaEjecucionHoy,
         fechaCierre: fechaCierreIso,
-        fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
+        fechaCreacionLogistica: payload['fecha_creacion_logistica']?.toString(),
       );
 
       if (mounted) {
@@ -340,7 +645,15 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
             'fecha': fechaEjecucionHoy,
             'fecha_servicio': fechaEjecucionHoy,
             'fecha_cierre': fechaCierreIso,
+            'marca': _marcaIndCtrl.text.trim(),
+            'modelo': _modeloIndCtrl.text.trim(),
+            'ns': _serieIndCtrl.text.trim(),
+            'id_equipo': _idIndCtrl.text.trim(),
+            'alcance_max': _capMaxCtrl.text.trim(),
+            'div_minima': _divMinCtrl.text.trim(),
+            'ubicacion': _ubicacionCtrl.text.trim(),
             'pdf_path_local': pdfPath,
+            'datos_tecnicos_json': datosJsonStr,
             'estado': 'COMPLETADA_DIGITAL',
             'estatus': 'Cerrado',
             'sync_check_status': subio ? 'SUBIDA_SERVIDOR' : 'PENDIENTE_SUBIDA',
@@ -350,177 +663,1153 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
       }
 
       if (mounted) {
-        setState(() => _saving = false);
-        OpenFilex.open(pdfPath);
-        Navigator.pop(context, true);
+        setState(() => _guardando = false);
+        _mostrarDialogoExito(pdfPath, folio);
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _saving = false);
+        setState(() => _guardando = false);
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: _red, content: Text('Error: $e')),
+          SnackBar(content: Text('Error al finalizar Revisión de Celdas: $e'), backgroundColor: Colors.red),
         );
       }
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final folio = (widget.orden['folio_os'] ?? 'RE-00-000').toString();
-    final cliente = (widget.orden['cliente'] ?? '').toString();
-
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: _dark,
-        foregroundColor: Colors.white,
-        title: Text('Revisión Celdas ($folio)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-      ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _red,
-              foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(48),
-            ),
-            onPressed: _saving ? null : _finalizarRevision,
-            icon: const Icon(Icons.check_circle_outline),
-            label: const Text('Finalizar Revisión de Celdas', style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ),
-      ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('FOLIO: $folio', style: const TextStyle(fontWeight: FontWeight.bold, color: _red)),
-                  Text('Cliente: $cliente'),
-                ],
+  void _mostrarDialogoExito(String pdfPath, String folio) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Ficha Diagnóstica RE Finalizada',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
               ),
             ),
+          ],
+        ),
+        content: Text(
+          'El formato $folio de Revisión de Celdas de Carga y Báscula fue generado y firmado exitosamente.',
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(ctx);
+              OpenFilex.open(pdfPath);
+            },
+            icon: const Icon(Icons.picture_as_pdf_outlined),
+            label: const Text('Ver PDF Oficial'),
           ),
-          const SizedBox(height: 12),
-          const Text('DATOS DEL INSTRUMENTO', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark)),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: TextFormField(controller: _marcaCtrl, decoration: const InputDecoration(labelText: 'Marca', isDense: true, border: OutlineInputBorder()))),
-              const SizedBox(width: 8),
-              Expanded(child: TextFormField(controller: _modeloCtrl, decoration: const InputDecoration(labelText: 'Modelo', isDense: true, border: OutlineInputBorder()))),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              Expanded(child: TextFormField(controller: _serieCtrl, decoration: const InputDecoration(labelText: 'N° de Serie', isDense: true, border: OutlineInputBorder()))),
-              const SizedBox(width: 8),
-              Expanded(child: TextFormField(controller: _capacidadCtrl, decoration: const InputDecoration(labelText: 'Capacidad Máx.', isDense: true, border: OutlineInputBorder()))),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Text('INSPECCIÓN VISUAL', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark)),
-          CheckboxListTile(title: const Text('Caja de Sumas'), value: _chkCajaSuma, onChanged: (v) => setState(() => _chkCajaSuma = v ?? false)),
-          CheckboxListTile(title: const Text('Topes Longitudinales'), value: _chkTopesLongitudinales, onChanged: (v) => setState(() => _chkTopesLongitudinales = v ?? false)),
-          CheckboxListTile(title: const Text('Topes Transversales'), value: _chkTopesTransversales, onChanged: (v) => setState(() => _chkTopesTransversales = v ?? false)),
-          CheckboxListTile(title: const Text('Estado de Cables'), value: _chkEstadoCables, onChanged: (v) => setState(() => _chkEstadoCables = v ?? false)),
-          const SizedBox(height: 16),
-          Row(
-             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-             children: [
-                const Text('TABLA DE CELDAS DE CARGA', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark)),
-                Row(
-                   children: [
-                      const Text('Puntos de Apoyo: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      DropdownButton<int>(
-                         value: _puntosApoyo,
-                         items: [4, 6, 8, 10, 12, 14, 16].map((e) => DropdownMenuItem(value: e, child: Text(e.toString()))).toList(),
-                         onChanged: (v) {
-                            if (v != null) {
-                               setState(() {
-                                  _puntosApoyo = v;
-                                  _initCeldas();
-                               });
-                            }
-                         }
-                      )
-                   ]
-                )
-             ]
-          ),
-          const SizedBox(height: 8),
-          SingleChildScrollView(
-             scrollDirection: Axis.horizontal,
-             child: SizedBox(
-                width: 600,
-                child: Table(
-                   border: TableBorder.all(color: Colors.grey.shade300),
-                   columnWidths: const {
-                      0: FlexColumnWidth(0.5),
-                      1: FlexColumnWidth(1),
-                      2: FlexColumnWidth(1),
-                      3: FlexColumnWidth(1),
-                      4: FlexColumnWidth(1),
-                      5: FlexColumnWidth(1),
-                   },
-                   children: [
-                      TableRow(
-                         decoration: const BoxDecoration(color: _dark),
-                         children: ['Nº', 'Capacidad', 'Nº Serie', 'mV/V Cero', 'mV/V Carga', 'Resistencia Ohms'].map((t) => 
-                            Padding(padding: const EdgeInsets.all(8), child: Text(t, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)))
-                         ).toList()
-                      ),
-                      for (int i=0; i<_puntosApoyo; i++)
-                         TableRow(
-                            children: [
-                               Padding(padding: const EdgeInsets.all(8), child: Text('', textAlign: TextAlign.center)),
-                               _celdaInput(_celdasData[i]['capacidad']),
-                               _celdaInput(_celdasData[i]['serie']),
-                               _celdaInput(_celdasData[i]['mv_cero']),
-                               _celdaInput(_celdasData[i]['mv_carga']),
-                               _celdaInput(_celdasData[i]['resistencia']),
-                            ]
-                         )
-                   ]
-                )
-             )
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            controller: _diagnosticoCtrl,
-            maxLines: 3,
-            decoration: const InputDecoration(labelText: 'Diagnóstico y Hallazgos', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 16),
-          const Text('FIRMA DEL CLIENTE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark)),
-          const SizedBox(height: 8),
-          TextFormField(controller: _nombreReceptorCtrl, onChanged: (_) { if (_errNombreRecibe) setState(() => _errNombreRecibe = false); }, decoration: InputDecoration(labelText: 'Nombre de quien recibe *', errorText: _errNombreRecibe ? kMsgNombreRecibeObligatorio : null, isDense: true, border: const OutlineInputBorder())),
-          const SizedBox(height: 6),
-          SizedBox(
-             height: 180,
-             child: SignatureGestureShield(child: Signature(controller: _ctrlFirmaCli, backgroundColor: Colors.white)),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _pesaRed,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.pop(context, true);
+            },
+            child: const Text('Volver al Listado'),
           ),
         ],
       ),
     );
   }
-  
-  Widget _celdaInput(TextEditingController c) => Padding(
-     padding: const EdgeInsets.all(4),
-     child: TextField(
-        controller: c,
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 11),
-        decoration: InputDecoration(
-           isDense: true,
-           contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
-           border: OutlineInputBorder(borderRadius: BorderRadius.circular(4)),
+
+  @override
+  void dispose() {
+    _marcaIndCtrl.dispose();
+    _modeloIndCtrl.dispose();
+    _serieIndCtrl.dispose();
+    _idIndCtrl.dispose();
+    _capMaxCtrl.dispose();
+    _divMinCtrl.dispose();
+    _ubicacionCtrl.dispose();
+    _celdaAMarcaCtrl.dispose();
+    _celdaAModeloCtrl.dispose();
+    _celdaACapCtrl.dispose();
+    for (final row in _ohmsCtrls) {
+      for (final ctrl in row) {
+        ctrl.dispose();
+      }
+    }
+    _observacionesCtrl.dispose();
+    _nombreReceptorCtrl.dispose();
+    _sigClienteCtrl.dispose();
+    _sigTecnicoCtrl.dispose();
+    super.dispose();
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // UI PRINCIPAL
+  // ══════════════════════════════════════════════════════════════════════════
+  @override
+  Widget build(BuildContext context) {
+    final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'RE').toString();
+    final cliente = _pickFromMap(_datosCombinados, ['cliente', 'razon_social'], 'Cliente');
+    final direccion = _pickFromMap(_datosCombinados, [
+      'direccion',
+      'sucursal_direccion',
+      'direccion_planta',
+      'cliente_direccion',
+      'sucursal',
+    ]);
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Scaffold(
+      resizeToAvoidBottomInset: true,
+      backgroundColor: const Color(0xFFF3F4F6),
+      appBar: AppBar(
+        backgroundColor: _pesaRed,
+        foregroundColor: Colors.white,
+        elevation: 2,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Ficha Técnica Diagnóstica · $folio',
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            Text(
+              'REVISIÓN DE CELDAS DE CARGA Y BÁSCULA · $cliente',
+              style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+            ),
+          ],
         ),
-     ),
-  );
+        actions: [
+          IconButton(
+            tooltip: 'Guardar avance local',
+            icon: const Icon(Icons.save_outlined),
+            onPressed: () async {
+              await _guardarBorradorSilencioso();
+              if (!mounted) return;
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Avance guardado localmente'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+      body: ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+        padding: EdgeInsets.fromLTRB(14, 14, 14, bottomInset + 36),
+        children: [
+          // ── SECCIÓN 1 Y 2: CLIENTE, INDICADOR, CELDAS Y SELECTOR N CELDAS ──
+          _buildSeccion1y2Card(cliente, direccion),
+          const SizedBox(height: 14),
+
+          // ── SECCIÓN 3: LECTURAS SIN CARGA — N CELDAS (OHMS / MV) ───────────
+          _buildSeccion3OhmsCard(),
+          const SizedBox(height: 14),
+
+          // ── SECCIÓN 4: FUNCIONALIDAD DE CELDAS E INDICADOR ─────────────────
+          _buildSeccion4FuncionalidadCard(),
+          const SizedBox(height: 14),
+
+          // ── SECCIÓN 5: OBSERVACIONES Y FIRMAS ──────────────────────────────
+          _buildSeccion5ObservacionesFirmasCard(cliente),
+          const SizedBox(height: 20),
+
+          // ── BOTÓN FINALIZAR Y GENERAR PDF OFICIAL ──────────────────────────
+          SizedBox(
+            height: 54,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _pesaRed,
+                foregroundColor: Colors.white,
+                elevation: 3,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: _guardando ? null : _finalizar,
+              icon: _guardando
+                  ? const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                    )
+                  : const Icon(Icons.picture_as_pdf_rounded, size: 24),
+              label: Text(
+                _guardando
+                    ? 'GENERANDO FICHA TÉCNICA PDF...'
+                    : 'FINALIZAR REVISIÓN Y GENERAR PDF OFICIAL',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Encabezado numerado estilo formato físico oficial ──────────────────────
+  Widget _buildOfficialSectionHeader(int number, String title, {Widget? trailing}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      decoration: const BoxDecoration(
+        color: _pesaDark,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            decoration: const BoxDecoration(color: _pesaRed, shape: BoxShape.circle),
+            child: Center(
+              child: Text(
+                '$number',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              title.toUpperCase(),
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 13.5,
+                letterSpacing: 0.4,
+              ),
+            ),
+          ),
+          if (trailing != null) trailing,
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TARJETA SECCIONES 1 Y 2: DATOS DEL CLIENTE, EQUIPO / INDICADOR Y N° CELDAS
+  // ══════════════════════════════════════════════════════════════════════════
+  Widget _buildSeccion1y2Card(String cliente, String direccion) {
+    return Card(
+      elevation: 1.5,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildOfficialSectionHeader(2, 'DATOS DEL EQUIPO / INDICADOR Y CELDAS DE CARGA'),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Resumen de Cliente y Dirección (Sección 1)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '1. RAZÓN SOCIAL / CLIENTE: $cliente',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                      ),
+                      if (direccion.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          'DIRECCIÓN: $direccion',
+                          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Selector superior de Número de Celdas (1 a 12)
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFF5F5),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _pesaRed.withOpacity(0.35)),
+                  ),
+                  child: Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    alignment: WrapAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.linear_scale, color: _pesaRed, size: 20),
+                          const SizedBox(width: 8),
+                          const Text(
+                            'NÚMERO DE CELDAS (PUNTOS DE APOYO):',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaDark),
+                          ),
+                        ],
+                      ),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          for (final preset in [1, 2, 3, 4, 6, 8, 10, 12])
+                            ChoiceChip(
+                              label: Text(
+                                '$preset',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  color: _numCeldas == preset ? Colors.white : _pesaDark,
+                                ),
+                              ),
+                              selected: _numCeldas == preset,
+                              selectedColor: _pesaRed,
+                              backgroundColor: Colors.white,
+                              onSelected: (_) {
+                                setState(() => _numCeldas = preset);
+                                _guardarBorradorSilencioso();
+                              },
+                            ),
+                          const SizedBox(width: 4),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: Colors.grey.shade400),
+                            ),
+                            child: DropdownButtonHideUnderline(
+                              child: DropdownButton<int>(
+                                value: _numCeldas,
+                                isDense: true,
+                                items: List.generate(
+                                  12,
+                                  (i) => DropdownMenuItem(
+                                    value: i + 1,
+                                    child: Text('${i + 1} Celdas', style: const TextStyle(fontSize: 12.5)),
+                                  ),
+                                ),
+                                onChanged: (v) {
+                                  if (v != null) {
+                                    setState(() => _numCeldas = v);
+                                    _guardarBorradorSilencioso();
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Fila 1 de Indicador: Marca, Modelo, Serie, ID Indicador
+                Row(
+                  children: [
+                    Expanded(child: _buildCompactField('MARCA INDICADOR', _marcaIndCtrl)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildCompactField('MODELO INDICADOR', _modeloIndCtrl)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildCompactField('No. DE SERIE', _serieIndCtrl)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildCompactField('ID INDICADOR', _idIndCtrl)),
+                  ],
+                ),
+                const SizedBox(height: 8),
+
+                // Fila 2 de Indicador: Capacidad Máx., División Mín., Ubicación, Estructura
+                Row(
+                  children: [
+                    Expanded(child: _buildCompactField('CAPACIDAD MÁX.', _capMaxCtrl)),
+                    const SizedBox(width: 8),
+                    Expanded(child: _buildCompactField('DIVISIÓN MÍN. (d)', _divMinCtrl)),
+                    const SizedBox(width: 8),
+                    Expanded(flex: 2, child: _buildCompactField('UBICACIÓN', _ubicacionCtrl)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+
+                // Subbloque CELDAS DE CARGA + TIPO DE ESTRUCTURA
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'DATOS DE CELDAS DE CARGA',
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _pesaSlate),
+                          ),
+                          DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _tipoEstructura,
+                              isDense: true,
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _pesaRed),
+                              items: const [
+                                DropdownMenuItem(value: 'PLATAFORMA', child: Text('Estructura: PLATAFORMA')),
+                                DropdownMenuItem(value: 'CAMIONERA', child: Text('Estructura: CAMIONERA')),
+                                DropdownMenuItem(value: 'TOLVA_TANQUE', child: Text('Estructura: TOLVA / TANQUE')),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) setState(() => _tipoEstructura = v);
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Expanded(child: _buildCompactField('MARCA CELDA', _celdaAMarcaCtrl)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _buildCompactField('MODELO CELDA', _celdaAModeloCtrl)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _buildCompactField('CAPACIDAD INDIV.', _celdaACapCtrl)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactField(String label, TextEditingController ctrl) {
+    return TextField(
+      controller: ctrl,
+      scrollPadding: const EdgeInsets.only(bottom: 180),
+      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      onChanged: (_) => _guardarBorradorSilencioso(),
+      decoration: InputDecoration(
+        labelText: label,
+        labelStyle: const TextStyle(fontSize: 11),
+        isDense: true,
+        filled: true,
+        fillColor: Colors.white,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TARJETA SECCIÓN 3: LECTURAS SIN CARGA — N CELDAS (OHMS / MV)
+  // 11 filas oficiales x C-1..C-N expandida al 100% del ancho
+  // ══════════════════════════════════════════════════════════════════════════
+  Widget _buildSeccion3OhmsCard() {
+    final sPlural = _numCeldas > 1 ? 'S' : '';
+    return Card(
+      elevation: 1.5,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildOfficialSectionHeader(
+            3,
+            'LECTURAS SIN CARGA — $_numCeldas CELDA$sPlural (OHMS / MV)',
+          ),
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                // Si hay 6 o menos celdas se ajusta al 100% del ancho sin scroll horizontal;
+                // si hay más de 6 celdas, permite scroll horizontal cómodo manteniendo 100% mínimo.
+                const double paramColW = 190.0;
+                const double unitColW = 48.0;
+                final double availForCells = constraints.maxWidth - paramColW - unitColW;
+                final double minCellW = _numCeldas <= 6 ? 68.0 : 76.0;
+                final double calcCellW = availForCells / _numCeldas;
+                final double cellW = calcCellW > minCellW ? calcCellW : minCellW;
+                final double totalTableW = paramColW + unitColW + (cellW * _numCeldas);
+
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: totalTableW < constraints.maxWidth ? constraints.maxWidth : totalTableW,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        // Encabezado oscuro [PARAMETRO ELECTRICO | UND | C-1 .. C-N]
+                        Container(
+                          height: 34,
+                          decoration: const BoxDecoration(
+                            color: _pesaDark,
+                            borderRadius: BorderRadius.vertical(top: Radius.circular(6)),
+                          ),
+                          child: Row(
+                            children: [
+                              const SizedBox(
+                                width: paramColW,
+                                child: Padding(
+                                  padding: EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text(
+                                    'PARAMETRO ELECTRICO',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(
+                                width: unitColW,
+                                child: Center(
+                                  child: Text(
+                                    'UND',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 11.5,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              for (int c = 0; c < _numCeldas; c++)
+                                Expanded(
+                                  child: Center(
+                                    child: Text(
+                                      'C-${c + 1}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+
+                        // 11 Filas de parámetros eléctricos
+                        for (int r = 0; r < _ohmsParams.length; r++)
+                          Container(
+                            decoration: BoxDecoration(
+                              color: r.isEven ? const Color(0xFFF9FAFB) : Colors.white,
+                              border: Border(
+                                left: BorderSide(color: Colors.grey.shade300),
+                                right: BorderSide(color: Colors.grey.shade300),
+                                bottom: BorderSide(color: Colors.grey.shade300),
+                              ),
+                            ),
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: paramColW,
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                    child: Text(
+                                      _ohmsParams[r][1],
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                        color: _pesaDark,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(
+                                  width: unitColW,
+                                  child: Center(
+                                    child: Text(
+                                      _ohmsParams[r][2],
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.bold,
+                                        color: _ohmsParams[r][2] == 'mV' ? _pesaRed : Colors.grey.shade700,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                for (int c = 0; c < _numCeldas; c++)
+                                  Expanded(
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(horizontal: 3),
+                                      child: TextField(
+                                        controller: _ohmsCtrls[r][c],
+                                        keyboardType: const TextInputType.numberWithOptions(
+                                          decimal: true,
+                                          signed: true,
+                                        ),
+                                        textInputAction: TextInputAction.next,
+                                        scrollPadding: const EdgeInsets.only(bottom: 220),
+                                        textAlign: TextAlign.center,
+                                        onChanged: (_) => _guardarBorradorSilencioso(),
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.bold,
+                                          color: _pesaDark,
+                                        ),
+                                        decoration: InputDecoration(
+                                          hintText: '—',
+                                          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                                          isDense: true,
+                                          filled: true,
+                                          fillColor: Colors.white,
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+                                          border: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(5),
+                                            borderSide: BorderSide(color: Colors.grey.shade300),
+                                          ),
+                                          focusedBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(5),
+                                            borderSide: const BorderSide(color: _pesaRed, width: 1.5),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TARJETA SECCIÓN 4: FUNCIONALIDAD DE CELDAS E INDICADOR
+  // Izquierda: INDICADOR / DISPLAY | Derecha: ESTADO INDIVIDUAL DE CELDAS
+  // Barra inferior: Cables [OK] [Falla] | Conectores [OK] [Falla]
+  // ══════════════════════════════════════════════════════════════════════════
+  Widget _buildSeccion4FuncionalidadCard() {
+    final indItems = _currentIndicadorItems;
+
+    return Card(
+      elevation: 1.5,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildOfficialSectionHeader(4, 'FUNCIONALIDAD DE CELDAS E INDICADOR'),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide = constraints.maxWidth >= 620;
+                    final colIndicador = _buildIndicadorDisplayBox(indItems);
+                    final colCeldas = _buildEstadoIndividualCeldasBox();
+
+                    if (isWide) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(flex: 48, child: colIndicador),
+                          const SizedBox(width: 12),
+                          Expanded(flex: 52, child: colCeldas),
+                        ],
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        colIndicador,
+                        const SizedBox(height: 12),
+                        colCeldas,
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
+
+                // Barra inferior: Cables y Conectores
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8F9FA),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: Wrap(
+                    spacing: 28,
+                    runSpacing: 10,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      _buildOkFallaSelector(
+                        label: 'Cables:',
+                        currentValue: _estadoCables,
+                        onChanged: (val) {
+                          setState(() => _estadoCables = val);
+                          _guardarBorradorSilencioso();
+                        },
+                      ),
+                      _buildOkFallaSelector(
+                        label: 'Conectores:',
+                        currentValue: _estadoConectores,
+                        onChanged: (val) {
+                          setState(() => _estadoConectores = val);
+                          _guardarBorradorSilencioso();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildIndicadorDisplayBox(List<String> indItems) {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: const BoxDecoration(
+              color: _pesaSlate,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'INDICADOR / DISPLAY',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+                InkWell(
+                  onTap: () {
+                    final allChecked = indItems.every((k) => _funcIndicador[k] == true);
+                    setState(() {
+                      for (final k in indItems) {
+                        _funcIndicador[k] = !allChecked;
+                      }
+                    });
+                    _guardarBorradorSilencioso();
+                  },
+                  child: const Text(
+                    'Marcar/Desmarcar todo',
+                    style: TextStyle(color: Colors.white70, fontSize: 11, decoration: TextDecoration.underline),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (int i = 0; i < indItems.length; i++)
+            Container(
+              color: i.isEven ? const Color(0xFFF8F9FA) : Colors.white,
+              child: CheckboxListTile(
+                dense: true,
+                visualDensity: const VisualDensity(horizontal: -2, vertical: -3),
+                controlAffinity: ListTileControlAffinity.leading,
+                activeColor: _pesaRed,
+                title: Text(
+                  indItems[i],
+                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                ),
+                value: _funcIndicador[indItems[i]] ?? false,
+                onChanged: (v) {
+                  setState(() => _funcIndicador[indItems[i]] = v ?? false);
+                  _guardarBorradorSilencioso();
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEstadoIndividualCeldasBox() {
+    return Container(
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: const BoxDecoration(
+              color: _pesaSlate,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'ESTADO INDIVIDUAL DE CELDAS',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                ),
+                InkWell(
+                  onTap: () {
+                    setState(() {
+                      for (int i = 0; i < _numCeldas; i++) {
+                        _estadoCeldas[i] = 'OK';
+                      }
+                    });
+                    _guardarBorradorSilencioso();
+                  },
+                  child: const Text(
+                    'Todas OK',
+                    style: TextStyle(color: Colors.white70, fontSize: 11, decoration: TextDecoration.underline),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          for (int i = 0; i < _numCeldas; i++)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: i.isEven ? const Color(0xFFF8F9FA) : Colors.white,
+                border: Border(
+                  bottom: i < _numCeldas - 1 ? BorderSide(color: Colors.grey.shade200) : BorderSide.none,
+                ),
+              ),
+              child: _buildOkFallaSelector(
+                label: 'Celda ${i + 1}:',
+                currentValue: _estadoCeldas[i],
+                onChanged: (val) {
+                  setState(() => _estadoCeldas[i] = val);
+                  _guardarBorradorSilencioso();
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOkFallaSelector({
+    required String label,
+    required String currentValue,
+    required ValueChanged<String> onChanged,
+  }) {
+    final isOk = currentValue.toUpperCase() == 'OK';
+    final isFalla = currentValue.toUpperCase() == 'FALLA';
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          width: 82,
+          child: Text(
+            label,
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaDark),
+          ),
+        ),
+        InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => onChanged('OK'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: isOk ? Colors.green.shade700 : Colors.white,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: isOk ? Colors.green.shade700 : Colors.grey.shade400),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isOk ? Icons.check_box : Icons.check_box_outline_blank,
+                  size: 17,
+                  color: isOk ? Colors.white : Colors.grey.shade700,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  'OK',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12.5,
+                    color: isOk ? Colors.white : _pesaDark,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 10),
+        InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: () => onChanged('Falla'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: isFalla ? _pesaRed : Colors.white,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: isFalla ? _pesaRed : Colors.grey.shade400),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  isFalla ? Icons.check_box : Icons.check_box_outline_blank,
+                  size: 17,
+                  color: isFalla ? Colors.white : Colors.grey.shade700,
+                ),
+                const SizedBox(width: 5),
+                Text(
+                  'Falla',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12.5,
+                    color: isFalla ? Colors.white : _pesaDark,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // TARJETA SECCIÓN 5: OBSERVACIONES Y FIRMAS
+  // ══════════════════════════════════════════════════════════════════════════
+  Widget _buildSeccion5ObservacionesFirmasCard(String cliente) {
+    final loteKey = _pickFromMap(_datosCombinados, ['lote_id', 'id_lote', 'sucursal_id', 'cliente'], cliente);
+    final sugerenciaLote = LoteSession.getUltimoResponsable(loteKey);
+    final mostrarChipLote = sugerenciaLote != null &&
+        sugerenciaLote.isNotEmpty &&
+        !esRazonSocialEmpresa(sugerenciaLote, cliente) &&
+        _nombreReceptorCtrl.text.trim() != sugerenciaLote;
+
+    return Card(
+      elevation: 1.5,
+      margin: EdgeInsets.zero,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildOfficialSectionHeader(5, 'OBSERVACIONES Y FIRMAS'),
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // OBSERVACIONES
+                TextField(
+                  controller: _observacionesCtrl,
+                  maxLines: 3,
+                  scrollPadding: const EdgeInsets.only(bottom: 180),
+                  onChanged: (_) => _guardarBorradorSilencioso(),
+                  decoration: InputDecoration(
+                    labelText: 'OBSERVACIONES DIAGNÓSTICAS',
+                    hintText: 'Anote hallazgos sobre celdas, caja sumadora, humedad, blindaje de cables...',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Chip de autocompletado si pertenece a un lote
+                if (mostrarChipLote)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: ActionChip(
+                      avatar: const Icon(Icons.person_pin_circle, size: 18, color: Color(0xFF1565C0)),
+                      backgroundColor: const Color(0xFFE3F2FD),
+                      label: Text(
+                        'Usar receptor del lote: $sugerenciaLote',
+                        style: const TextStyle(color: Color(0xFF0D47A1), fontWeight: FontWeight.w600),
+                      ),
+                      onPressed: () {
+                        setState(() => _nombreReceptorCtrl.text = sugerenciaLote);
+                        _guardarBorradorSilencioso();
+                      },
+                    ),
+                  ),
+
+                // Chips de contactos frecuentes de esta planta
+                if (_contactosSugeridos.isNotEmpty) ...[
+                  const Text(
+                    'Contactos frecuentes en planta:',
+                    style: TextStyle(fontSize: 11.5, color: Colors.grey),
+                  ),
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: _contactosSugeridos
+                        .map(
+                          (c) => ActionChip(
+                            label: Text(c, style: const TextStyle(fontSize: 12)),
+                            onPressed: () {
+                              setState(() => _nombreReceptorCtrl.text = c);
+                              _guardarBorradorSilencioso();
+                            },
+                          ),
+                        )
+                        .toList(),
+                  ),
+                  const SizedBox(height: 8),
+                ],
+
+                // Nombre de quien recibe (Obligatorio, inicia vacío)
+                TextField(
+                  controller: _nombreReceptorCtrl,
+                  scrollPadding: const EdgeInsets.only(bottom: 180),
+                  onChanged: (_) => _guardarBorradorSilencioso(),
+                  decoration: InputDecoration(
+                    labelText: 'Nombre de quien recibe *',
+                    hintText: 'Ej. Ing. Juan Pérez (Persona física que recibe en planta)',
+                    prefixIcon: const Icon(Icons.badge_outlined),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Pads de Firma Cliente y Técnico
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final isWide = constraints.maxWidth >= 600;
+                    final padCliente = _buildFirmaClienteBlock();
+                    final padTecnico = _buildFirmaTecnicoBlock();
+                    if (isWide) {
+                      return Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(child: padCliente),
+                          const SizedBox(width: 16),
+                          Expanded(child: padTecnico),
+                        ],
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        padCliente,
+                        const SizedBox(height: 14),
+                        padTecnico,
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFirmaClienteBlock() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('FIRMA DEL CLIENTE *', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            TextButton.icon(
+              onPressed: () => _sigClienteCtrl.clear(),
+              icon: const Icon(Icons.refresh, size: 16),
+              label: const Text('Limpiar'),
+            ),
+          ],
+        ),
+        Container(
+          height: 145,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: Colors.grey.shade400),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Signature(controller: _sigClienteCtrl, backgroundColor: Colors.white),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFirmaTecnicoBlock() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text('FIRMA DEL TÉCNICO *', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            if (_firmaTecPre != null)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text('Usar precargada', style: TextStyle(fontSize: 12)),
+                  Switch(
+                    value: _usarFirmaPre,
+                    activeColor: _pesaRed,
+                    onChanged: (v) => setState(() => _usarFirmaPre = v),
+                  ),
+                ],
+              )
+            else
+              TextButton.icon(
+                onPressed: () => _sigTecnicoCtrl.clear(),
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Limpiar'),
+              ),
+          ],
+        ),
+        if (_usarFirmaPre && _firmaTecPre != null)
+          Container(
+            height: 145,
+            width: double.infinity,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: Colors.grey.shade400),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Center(child: Image.memory(_firmaTecPre!, height: 110)),
+          )
+        else
+          Container(
+            height: 145,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(color: Colors.grey.shade400),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Signature(controller: _sigTecnicoCtrl, backgroundColor: Colors.white),
+          ),
+      ],
+    );
+  }
 }

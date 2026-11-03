@@ -44,8 +44,8 @@ logger = logging.getLogger("pesa_api.sync")
 # "Calibración + Ajuste") que harían que la tablet exigiera CCA/DVE.
 _TIPO_SERVICIO_SQL = """
             CASE
-                WHEN UPPER(COALESCE(os.tipo_documento, '')) IN ('RE', 'RMA', 'LV')
-                  OR os.folio_os ~* '^(RE|RMA|LV)-'
+                WHEN UPPER(COALESCE(os.tipo_documento, '')) IN ('RE', 'RMA', 'LV', 'OSOB')
+                  OR os.folio_os ~* '^(RE|RMA|LV|OSOB)-'
                 THEN COALESCE(NULLIF(TRIM(os.tipo_servicio), ''), ts.nombre, '')
                 ELSE COALESCE(ts.nombre, os.tipo_servicio, '')
             END"""
@@ -179,8 +179,17 @@ class PushPayload(BaseModel):
     excentricidad:  list[PushDetalle] = Field(default_factory=list)
     exactitud:      list[PushDetalle] = Field(default_factory=list)
     datos_captura:  Optional[str] = None
+    datos_tecnicos_json: Optional[Union[str, dict]] = None
     usa_sustitucion: Optional[bool] = None
     factor_sustitucion: Optional[str] = None
+    capacidad_maxima: Optional[float] = None
+    alcance_max:      Optional[float] = None
+    division_minima:  Optional[float] = None
+    div_minima:       Optional[float] = None
+    tipo_instrumento: Optional[str] = None
+    cliente:          Optional[str] = None
+    area_cliente:     Optional[str] = None
+    puesto_tecnico:   Optional[str] = None
 
     # Estado solicitado por la tablet
     nuevo_estado:   Optional[str] = None
@@ -1034,6 +1043,40 @@ async def sync_push(
             )
 
         # Actualizar fecha real de realización enviada por la tablet al finalizar servicio
+        if payload.datos_tecnicos_json or payload.datos_captura:
+            try:
+                raw_json_str = (
+                    json.dumps(payload.datos_tecnicos_json, ensure_ascii=False)
+                    if isinstance(payload.datos_tecnicos_json, dict)
+                    else str(payload.datos_tecnicos_json or payload.datos_captura)
+                )
+                await db.execute(
+                    "UPDATE ordenes_servicio SET datos_tecnicos_json = $1 WHERE id = $2",
+                    raw_json_str, os_id,
+                )
+            except Exception as e_dtj:
+                logger.warning("[SYNC PUSH] Error guardando datos_tecnicos_json para %s: %s", payload.folio_os, e_dtj)
+
+        if any(v is not None for v in (payload.alcance_max, payload.capacidad_maxima, payload.div_minima, payload.division_minima, payload.cliente, payload.tipo_instrumento)):
+            try:
+                cap_v = payload.alcance_max if payload.alcance_max is not None else payload.capacidad_maxima
+                div_v = payload.div_minima if payload.div_minima is not None else payload.division_minima
+                await db.execute(
+                    """
+                    UPDATE ordenes_servicio SET
+                        alcance_max      = COALESCE($1, alcance_max),
+                        capacidad_maxima = COALESCE($1, capacidad_maxima),
+                        div_minima       = COALESCE($2, div_minima),
+                        division_minima  = COALESCE($2, division_minima),
+                        cliente          = COALESCE($3, cliente),
+                        tipo_instrumento = COALESCE($4, tipo_instrumento)
+                    WHERE id = $5
+                    """,
+                    cap_v, div_v, payload.cliente, payload.tipo_instrumento, os_id,
+                )
+            except Exception as e_ext:
+                logger.warning("[SYNC PUSH] Error guardando campos extra de equipo para %s: %s", payload.folio_os, e_ext)
+
         fecha_ejecucion_raw = (payload.fecha or payload.fecha_servicio or "").strip()
         if fecha_ejecucion_raw:
             fecha_iso = fecha_ejecucion_raw[:10]
@@ -1346,7 +1389,7 @@ async def upload_firmas(
     summary        = "Reservar el siguiente folio para uso offline",
 )
 async def folio_lock(
-    tipo:         str         = Query(..., pattern="^(OS|RMA|RE)$"),
+    tipo:         str         = Query(..., pattern="^(OS|RMA|RE|OSOB|LV|LP)$"),
     db            = Depends(get_db),
     current_user: dict = Depends(require_roles("servicio", "logistica", "admin")),
 ) -> FolioLockResponse:
@@ -1363,9 +1406,16 @@ async def folio_lock(
     import datetime as dt
     anio = dt.date.today().year
     folio: str = await db.fetchval(
-        "SELECT generate_folio($1::CHAR(3), $2::SMALLINT)",
+        "SELECT generate_folio($1::VARCHAR, $2::SMALLINT)",
         tipo, anio,
     )
+    if tipo.upper() == "OSOB" and folio:
+        try:
+            parts = str(folio).split("-")
+            if len(parts) == 3:
+                folio = f"OSOB-{parts[1]}-{int(parts[2]):03d}"
+        except Exception:
+            pass
     logger.info(
         "Folio reservado offline: %s por usuario=%s",
         folio, current_user["username"]

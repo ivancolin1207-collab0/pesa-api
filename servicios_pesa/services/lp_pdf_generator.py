@@ -291,28 +291,51 @@ class LPPdfGenerator:
         equipos = lp.get("equipos_dinamicos", [])
         total_rows = max(len(equipos), 5) # Increased min rows to 5 to loosen layout
         
+        from reportlab.lib.utils import simpleSplit
         c.setStrokeColor(_GRAY_BORDER)
         c.setLineWidth(0.5)
+        w_col0 = cols[1] - cols[0] - 10
+        w_col1 = cols[2] - cols[1] - 10
         for i in range(total_rows):
+            eq = equipos[i] if i < len(equipos) else {}
+            val_tipo = str(eq.get("tipo") or eq.get("marca") or "").strip()
+            obs_eq_raw = str(eq.get("observaciones") or "").strip()
+            eq_font_size = 7.0 if len(obs_eq_raw) > 160 else 8.0
+            eq_lh = eq_font_size + 2.0
+
+            tipo_lines = simpleSplit(val_tipo, "Helvetica", eq_font_size, w_col0) if val_tipo else []
+            obs_eq_lines = []
+            for p_eq in obs_eq_raw.splitlines():
+                if p_eq.strip():
+                    obs_eq_lines.extend(simpleSplit(p_eq.strip(), "Helvetica", eq_font_size, w_col1))
+                else:
+                    obs_eq_lines.append("")
+
+            n_ln = max(1, len(tipo_lines), len(obs_eq_lines))
+            row_h = max(18, n_ln * eq_lh + 6)
+
             if i % 2 == 1:
                 c.setFillColor(_GRAY_LIGHT)
-                c.rect(self.ML, y - 18, self.CW, 18, stroke=0, fill=1)
-            
+                c.rect(self.ML, y - row_h, self.CW, row_h, stroke=0, fill=1)
+
             c.setFillColor(_BLACK)
-            c.setFont("Helvetica", 8)
-            
-            if i < len(equipos):
-                eq = equipos[i]
-                # Fallback "marca" to first col if "tipo" not present (UI compatibility)
-                val_tipo = str(eq.get("tipo") or eq.get("marca") or "")
-                c.drawString(cols[0] + 5, y - 12, val_tipo)
-                c.drawString(cols[1] + 5, y - 12, str(eq.get("observaciones") or ""))
-                
+            c.setFont("Helvetica", eq_font_size)
+
+            ty_cursor = y - 11
+            for tl in tipo_lines:
+                c.drawString(cols[0] + 5, ty_cursor, tl)
+                ty_cursor -= eq_lh
+
+            oy_cursor = y - 11
+            for ol in obs_eq_lines:
+                c.drawString(cols[1] + 5, oy_cursor, ol)
+                oy_cursor -= eq_lh
+
             # Vertical lines
-            c.line(cols[1], y, cols[1], y - 18)
-            c.rect(self.ML, y - 18, self.CW, 18, stroke=1, fill=0) # Outer border of row
-            
-            y -= 18
+            c.line(cols[1], y, cols[1], y - row_h)
+            c.rect(self.ML, y - row_h, self.CW, row_h, stroke=1, fill=0) # Outer border of row
+
+            y -= row_h
         
         y -= 14
         
@@ -371,25 +394,42 @@ class LPPdfGenerator:
         c.setFillColor(_GRAY_DARK)
         c.drawString(self.ML, y, "5. COMENTARIOS TÉCNICOS")
         y -= 12
-        
-        box_h = 55
+
+        obs_raw = str(os_data.get("observaciones") or "").strip()
+        font_name = "Helvetica"
+        font_size = 7.0 if len(obs_raw) > 300 else (7.8 if len(obs_raw) > 160 else 8.5)
+        line_height = font_size + 2.0
+        ancho_util = self.CW - 12
+
+        lineas_totales = []
+        for parrafo in obs_raw.splitlines():
+            if parrafo.strip():
+                lineas_totales.extend(simpleSplit(parrafo.strip(), font_name, font_size, ancho_util))
+            else:
+                lineas_totales.append("")
+
+        y_limite_firmas = self.MB + 55
+        needed_h = max(55, len(lineas_totales) * line_height + 10)
+        box_h = min(needed_h, max(38, y - y_limite_firmas))
+
         c.setStrokeColor(_GRAY_DARK)
         c.rect(self.ML, y - box_h, self.CW, box_h, stroke=1, fill=0)
-        c.setStrokeColor(_GRAY_BORDER)
-        c.setLineWidth(0.5)
-        c.line(self.ML + 5, y - 18, self.W - self.MR - 5, y - 18)
-        c.line(self.ML + 5, y - 36, self.W - self.MR - 5, y - 36)
-            
-        c.setFont("Helvetica", 8)
+        if not lineas_totales:
+            c.setStrokeColor(_GRAY_BORDER)
+            c.setLineWidth(0.5)
+            c.line(self.ML + 5, y - 18, self.W - self.MR - 5, y - 18)
+            c.line(self.ML + 5, y - 36, self.W - self.MR - 5, y - 36)
+
+        c.setFont(font_name, font_size)
         c.setFillColor(_BLACK)
-        obs = str(os_data.get("observaciones") or "")
-        from reportlab.lib.utils import simpleSplit
-        lines = simpleSplit(obs, "Helvetica", 8, self.CW - 10)
-        ly = y - 14
-        for ln in lines[:3]: 
-            c.drawString(self.ML + 5, ly, ln)
-            ly -= 18
-        
+        y_inicio_obs = y - 12
+        y_cursor = y_inicio_obs
+        for linea in lineas_totales:
+            if y_cursor < (y - box_h + 4) or y_cursor < y_limite_firmas:
+                break
+            c.drawString(self.ML + 6, y_cursor, linea)
+            y_cursor -= line_height
+
         y -= box_h + 10
         
         tecnico_raw = os_data.get("tecnico_nombre") or ""

@@ -28,6 +28,11 @@ class FolioService:
         """Genera el siguiente folio de Levantamiento Metrológico y Logística de Pesas."""
         return FolioManager.get_next_folio("LV", anio)
 
+    @staticmethod
+    def nuevo_folio_osob(anio: int | None = None) -> str:
+        """Genera el siguiente folio de Formato de Inspección y Revisión de Básculas (OSOB)."""
+        return FolioManager.get_next_folio("OSOB", anio)
+
 
     @staticmethod
     def get_resumen() -> list[dict]:

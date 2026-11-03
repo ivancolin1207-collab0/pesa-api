@@ -271,73 +271,71 @@ class _CapturaScreenState extends State<CapturaScreen>
 
     if (max != null && max.toString().trim().isNotEmpty) {
       final s = max.toString().replaceAll(RegExp(r'[^0-9.]'), '').trim();
-      if (s.isNotEmpty) _capMaxCtrl.text = s;
+      _capMaxCtrl.text = s;
     } else {
       final capStr = _str('instrumento_capacidad');
-      if (capStr.isNotEmpty) {
-        _capMaxCtrl.text = capStr.replaceAll(RegExp(r'[^0-9.]'), '').trim();
-      }
+      _capMaxCtrl.text = capStr.isNotEmpty
+          ? capStr.replaceAll(RegExp(r'[^0-9.]'), '').trim()
+          : '';
     }
 
     if (div != null && div.toString().trim().isNotEmpty) {
       final s = div.toString().replaceAll(RegExp(r'[^0-9.]'), '').trim();
-      if (s.isNotEmpty) _divMinCtrl.text = s;
+      _divMinCtrl.text = s;
     } else {
       final divStr = _str('instrumento_division');
-      if (divStr.isNotEmpty) {
-        _divMinCtrl.text = divStr.replaceAll(RegExp(r'[^0-9.]'), '').trim();
-      }
+      _divMinCtrl.text = divStr.isNotEmpty
+          ? divStr.replaceAll(RegExp(r'[^0-9.]'), '').trim()
+          : '';
     }
-    if (dve != null) _divVerCtrl.text = dve.toString();
+    _divVerCtrl.text = dve != null ? dve.toString() : '';
 
-    // Tipo de instrumento prellenado desde logística
+    // Tipo de instrumento prellenado desde logística (o null si viene vacío para captura manual)
     final tiRaw = _str('tipo_instrumento').isNotEmpty
         ? _str('tipo_instrumento')
         : (_str('tipo_bascula').isNotEmpty
             ? _str('tipo_bascula')
             : (dj is Map ? (dj['tipo_instrumento'] ?? dj['tipo_bascula'])?.toString() : ''));
 
-    if (tiRaw != null && tiRaw.trim().isNotEmpty) {
-      final ti = tiRaw.trim();
-      if (_tiposInstrumento.contains(ti)) {
-        _tipoInstrumento = ti;
-      } else {
-        final tiLower = ti.toLowerCase();
-        for (final item in _tiposInstrumento) {
-          if (item.toLowerCase() == tiLower) {
-            _tipoInstrumento = item;
-            break;
-          }
-        }
-        if (_tipoInstrumento == null) {
-          if (tiLower.contains('tanque') || tiLower.contains('silo')) {
-            _tipoInstrumento = 'Tanque / Silo';
-          } else if (tiLower.contains('camion') || tiLower.contains('puente')) {
-            _tipoInstrumento = 'Báscula camionera';
-          } else if (tiLower.contains('ferrocarril') || tiLower.contains('ferrovi')) {
-            _tipoInstrumento = 'Báscula de ferrocarril';
-          } else if (tiLower.contains('plataforma')) {
-            _tipoInstrumento = 'Báscula de plataforma';
-          } else if (tiLower.contains('circular')) {
-            _tipoInstrumento = 'Báscula circular';
-          } else if (tiLower.contains('tolva')) {
-            _tipoInstrumento = 'Báscula tolva';
-          } else if (tiLower.contains('colgante') || tiLower.contains('grúa') || tiLower.contains('grua')) {
-            _tipoInstrumento = 'Báscula colgante / grúa';
-          } else if (tiLower.contains('analit') || tiLower.contains('analít')) {
-            _tipoInstrumento = 'Báscula analítica';
-          } else if (tiLower.contains('piso')) {
-            _tipoInstrumento = 'Báscula de piso';
-          } else if (tiLower.contains('mostrador')) {
-            _tipoInstrumento = 'Báscula de mostrador';
-          } else if (tiLower.contains('patron') || tiLower.contains('patrón')) {
-            _tipoInstrumento = 'Pesa patrón';
-          } else {
-            _tipoInstrumento = ti;
-          }
-        }
-      }
+    _tipoInstrumento = _normalizarNombreTipoInstrumento(tiRaw);
+    _aplicarParametrosPostTipoInstrumento();
+  }
+
+  String? _normalizarNombreTipoInstrumento(String? tiRaw) {
+    if (tiRaw == null || tiRaw.trim().isEmpty) return null;
+    final ti = tiRaw.trim();
+    if (_tiposInstrumento.contains(ti)) return ti;
+    final tiLower = ti.toLowerCase();
+    for (final item in _tiposInstrumento) {
+      if (item.toLowerCase() == tiLower) return item;
     }
+    if (tiLower.contains('tanque') || tiLower.contains('silo')) {
+      return 'Tanque / Silo';
+    } else if (tiLower.contains('camion') || tiLower.contains('puente')) {
+      return 'Báscula camionera';
+    } else if (tiLower.contains('ferrocarril') || tiLower.contains('ferrovi')) {
+      return 'Báscula de ferrocarril';
+    } else if (tiLower.contains('plataforma')) {
+      return 'Báscula de plataforma';
+    } else if (tiLower.contains('circular')) {
+      return 'Báscula circular';
+    } else if (tiLower.contains('tolva')) {
+      return 'Báscula tolva';
+    } else if (tiLower.contains('colgante') || tiLower.contains('grúa') || tiLower.contains('grua')) {
+      return 'Báscula colgante / grúa';
+    } else if (tiLower.contains('analit') || tiLower.contains('analít')) {
+      return 'Báscula analítica';
+    } else if (tiLower.contains('piso')) {
+      return 'Báscula de piso';
+    } else if (tiLower.contains('mostrador')) {
+      return 'Báscula de mostrador';
+    } else if (tiLower.contains('patron') || tiLower.contains('patrón')) {
+      return 'Pesa patrón';
+    }
+    return _tiposInstrumento.contains(ti) ? ti : null;
+  }
+
+  void _aplicarParametrosPostTipoInstrumento() {
 
     // Nuevos campos: Funcionamiento y Puntos de Apoyo
     final func = _str('funcionamiento');
@@ -400,6 +398,14 @@ class _CapturaScreenState extends State<CapturaScreen>
       _aplExcOverride = false;
       _os['aplica_excentricidad'] = false;
       _os['motivo_no_aplica'] = 'Tanque';
+    } else if ((_tipoInstrumento ?? '').toLowerCase().contains('plataforma') ||
+               (_tipoInstrumento ?? '').toLowerCase().contains('camion') ||
+               (_tipoInstrumento ?? '').toLowerCase().contains('puente') ||
+               (_tipoInstrumento ?? '').toLowerCase().contains('ferro')) {
+      _aplExcOverride = true;
+      _os['aplica_excentricidad'] = true;
+      _os['motivo_no_aplica'] = '';
+      _os['tipo_no_aplica_exc'] = null;
     }
 
     if (_os['sustitutos'] is List) {
@@ -410,12 +416,21 @@ class _CapturaScreenState extends State<CapturaScreen>
   }
 
   /// Determina si aplica excentricidad:
-  ///   1. Flag asignado por Logística (`aplica_excentricidad`)
-  ///   2. Override manual si aplicara
-  ///   3. Inferencia por tipo de instrumento (Tanque nunca aplica)
+  ///   1. Override manual / dinámico del técnico (`_aplExcOverride`)
+  ///   2. Flag asignado por Logística (`aplica_excentricidad`)
+  ///   3. Inferencia por tipo de instrumento (Tanque y Colgante no aplican por defecto)
   bool get _aplExc {
-    if ((_tipoInstrumento ?? '').toLowerCase().contains('tanque')) {
+    if (_aplExcOverride != null) return _aplExcOverride!;
+    final tipoLow = (_tipoInstrumento ?? '').toLowerCase();
+    if (tipoLow.contains('tanque') || tipoLow.contains('silo') ||
+        tipoLow.contains('colgante') || tipoLow.contains('grúa') ||
+        tipoLow.contains('grua') || tipoLow.contains('gancho')) {
       return false;
+    }
+    if (tipoLow.contains('plataforma') || tipoLow.contains('camion') ||
+        tipoLow.contains('puente') || tipoLow.contains('ferro') ||
+        tipoLow.contains('piso')) {
+      return true;
     }
     final raw = _os['aplica_excentricidad'];
     if (raw != null) {
@@ -426,7 +441,6 @@ class _CapturaScreenState extends State<CapturaScreen>
         return s == '1' || s == 'true' || s == 'si' || s == 'sí';
       }
     }
-    if (_aplExcOverride != null) return _aplExcOverride!;
     // Inferir por tipo de instrumento
     if (_tipoInstrumento != null) {
       return _kExcInstrumentos.contains(_tipoInstrumento);
@@ -536,9 +550,9 @@ class _CapturaScreenState extends State<CapturaScreen>
           if (draft['factor_sustitucion'] != null && draft['factor_sustitucion'].toString().isNotEmpty) {
             _factorSustCtrl.text = draft['factor_sustitucion'].toString();
           }
-          if (draft['tipo_instrumento'] != null && draft['tipo_instrumento'].toString().isNotEmpty) {
-            _tipoInstrumento = draft['tipo_instrumento'].toString();
-            _os['tipo_instrumento'] = _tipoInstrumento;
+          if (draft['tipo_instrumento'] != null && draft['tipo_instrumento'].toString().trim().isNotEmpty) {
+            _tipoInstrumento = _normalizarNombreTipoInstrumento(draft['tipo_instrumento'].toString());
+            _os['tipo_instrumento'] = _tipoInstrumento ?? '';
           }
           if (draft['funcionamiento'] != null && draft['funcionamiento'].toString().isNotEmpty) {
             _funcionamiento = draft['funcionamiento'].toString();
@@ -552,7 +566,14 @@ class _CapturaScreenState extends State<CapturaScreen>
           if (draft['jia_i'] != null) _iChecked = draft['jia_i'] == true;
           if (draft['jia_a'] != null) _aChecked = draft['jia_a'] == true;
           if (draft['aplica_excentricidad'] != null) {
-            _aplExcOverride = draft['aplica_excentricidad'] == true;
+            final tLowDraft = (_tipoInstrumento ?? '').toLowerCase();
+            if (tLowDraft.contains('plataforma') || tLowDraft.contains('camion') ||
+                tLowDraft.contains('puente') || tLowDraft.contains('ferro')) {
+              _aplExcOverride = true;
+              _os['aplica_excentricidad'] = true;
+            } else {
+              _aplExcOverride = draft['aplica_excentricidad'] == true;
+            }
           }
           if (draft['usa_sustitucion'] != null) {
             _usaSustitucion = draft['usa_sustitucion'] == true;
@@ -610,9 +631,17 @@ class _CapturaScreenState extends State<CapturaScreen>
               ? await LocalDbService.instance.getOsByFolio(folio)
               : null);
       if (saved != null && mounted) {
+        const instrumentKeys = {
+          'marca', 'modelo', 'ns', 'serie', 'id_equipo', 'ubicacion',
+          'tipo_instrumento', 'alcance_max', 'div_minima',
+          'instrumento_capacidad', 'instrumento_division',
+          'aplica_excentricidad', 'usa_sustitucion', 'datos_tecnicos_json',
+        };
         setState(() {
           for (final k in saved.keys) {
-            if (saved[k] != null && saved[k] != '') _os[k] = saved[k];
+            if (instrumentKeys.contains(k) || (saved[k] != null && saved[k] != '')) {
+              _os[k] = saved[k];
+            }
           }
           if (saved['unidad_medida'] != null && saved['unidad_medida'].toString().isNotEmpty) {
             _unidadMedida = saved['unidad_medida'].toString();
@@ -627,8 +656,8 @@ class _CapturaScreenState extends State<CapturaScreen>
             if (saved['exac_json'] != null && saved['exac_json'] != '')
               _exacRows = (_jsonSafe(saved['exac_json']) as List).cast<Map<String, dynamic>>();
           } catch (_) {}
+          _precargaCampos();
         });
-        _precargaCampos();
       }
     }
 
@@ -946,31 +975,48 @@ class _CapturaScreenState extends State<CapturaScreen>
               .toList(),
           onChanged: (v) => setState(() {
             _tipoInstrumento = v;
-            final wasTanque = (_os['motivo_no_aplica']?.toString().toLowerCase().contains('tanque') ?? false) ||
-                _asBool(_os['es_enlace_sustitucion']);
             _os['tipo_instrumento'] = v;
-            final isTanque = (v ?? '').toLowerCase().contains('tanque');
+            final vLow = (v ?? '').toLowerCase();
+            final isTanque = vLow.contains('tanque') || vLow.contains('silo');
+            final isColgante = vLow.contains('colgante') || vLow.contains('grúa') || vLow.contains('grua') || vLow.contains('gancho');
+
             if (isTanque) {
               _usaSustitucion = true;
               _aplExcOverride = false;
               _os['aplica_excentricidad'] = false;
               _os['motivo_no_aplica'] = 'Tanque';
+              _os['tipo_no_aplica_exc'] = 'tanque';
               _os['usa_sustitucion'] = true;
               _os['es_sustitucion'] = true;
               _os['es_enlace_sustitucion'] = true;
-            } else if (wasTanque) {
-              // Salió de Tanque: limpiar banderas heredadas para que el PDF
-              // dibuje el formato estándar de plataforma.
+            } else if (isColgante) {
               _usaSustitucion = false;
-              _aplExcOverride = null;
-              _os.remove('aplica_excentricidad');
+              _aplExcOverride = false;
+              _os['aplica_excentricidad'] = false;
+              _os['motivo_no_aplica'] = 'Colgante';
+              _os['tipo_no_aplica_exc'] = 'gancho';
+              _os['usa_sustitucion'] = false;
+              _os['aplica_sustitucion'] = false;
+              _os['es_sustitucion'] = false;
+              _os['es_enlace_sustitucion'] = false;
+            } else {
+              // Cualquier instrumento que NO sea Tanque ni Colgante (ej. Báscula de plataforma, Báscula camionera):
+              // Activar automáticamente aplicaExcentricidad = true y limpiar bloqueos heredados.
+              _usaSustitucion = false;
+              _aplExcOverride = true;
+              _os['aplica_excentricidad'] = true;
               _os['motivo_no_aplica'] = '';
+              _os['tipo_no_aplica_exc'] = null;
               _os['usa_sustitucion'] = false;
               _os['aplica_sustitucion'] = false;
               _os['es_sustitucion'] = false;
               _os['es_enlace_sustitucion'] = false;
             }
-            _puntosApoyo = getPuntosApoyoPorDefecto(v, fallback: _puntosApoyo);
+
+            _puntosApoyo = getPuntosApoyoPorDefecto(v, fallback: (_puntosApoyo > 1 ? _puntosApoyo : 5));
+            if (_aplExc && _puntosApoyo < 4) {
+              _puntosApoyo = (vLow.contains('camion') || vLow.contains('ferro') || vLow.contains('puente')) ? 4 : 5;
+            }
             _os['puntos_apoyo'] = _puntosApoyo;
             _geometriaExcentricidad = getGeometriaPorDefecto(v);
             _os['geometria_excentricidad'] = _geometriaExcentricidad;
@@ -980,9 +1026,22 @@ class _CapturaScreenState extends State<CapturaScreen>
             }
             _os['num_secciones']       = _numSeccionesExc;
             _os['secciones_camionera'] = _numSeccionesExc;
+
+            if (_aplExc) {
+              final numPos = _geometriaExcentricidad == 'Camionera' ? _numSeccionesExc.clamp(2, 50) : 5;
+              if (_excRows.isEmpty) {
+                _excRows = List.generate(numPos, (i) => {
+                  'posicion_id': i + 1,
+                  'carga': _cargaExcAutoCalculada,
+                  'lectura_inicial': null,
+                  'lectura_final': null,
+                  'error': null,
+                  'valido_d': true,
+                });
+              }
+              _actualizarCargasSugeridas(force: false);
+            }
             _dataVersion++;
-            // Recalcular excentricidad si no hay override manual
-            if (_aplExcOverride == null) setState(() {});
           }),
         ),
         const SizedBox(height: 16),
@@ -1037,15 +1096,17 @@ class _CapturaScreenState extends State<CapturaScreen>
         ]),
         const SizedBox(height: 12),
 
-        // ¿Aplica Excentricidad? — Solo lectura preestablecido desde Logística
+        // ¿Aplica Excentricidad? — SIEMPRE editable por el técnico en campo
         Card(
           margin: EdgeInsets.zero,
           elevation: 0,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
-              side: BorderSide(color: Colors.grey.shade200)),
+              side: BorderSide(color: _aplExc
+                  ? _kRed.withValues(alpha: 0.35)
+                  : Colors.grey.shade200)),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
                 Icon(
@@ -1064,30 +1125,57 @@ class _CapturaScreenState extends State<CapturaScreen>
                       const SizedBox(height: 2),
                       Text(
                         _aplExc
-                            ? 'Sí — Configurado por Logística'
-                            : 'No — Configurado por Logística',
+                            ? 'Sí — Prueba de excentricidad habilitada en pestaña Excentricidad'
+                            : 'No — Prueba de excentricidad omitida (puedes activarla si aplica)',
                         style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                       ),
                     ],
                   ),
                 ),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: _aplExc ? const Color(0xFFFEE2E2) : Colors.grey.shade200,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(
-                      color: _aplExc ? _kRed.withValues(alpha: 0.3) : Colors.grey.shade300,
-                    ),
-                  ),
-                  child: Text(
-                    _aplExc ? 'SÍ APLICA' : 'NO APLICA',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: _aplExc ? _kRed : Colors.grey.shade700,
-                    ),
-                  ),
+                SegmentedButton<bool>(
+                  key: const Key('captura_excentricidad_selector'),
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: false, label: Text('No')),
+                    ButtonSegment(value: true,  label: Text('Sí')),
+                  ],
+                  selected: {_aplExc},
+                  onSelectionChanged: (s) => setState(() {
+                    final nuevoVal = s.first;
+                    _aplExcOverride = nuevoVal;
+                    _os['aplica_excentricidad'] = nuevoVal;
+                    if (nuevoVal) {
+                      _os['motivo_no_aplica'] = '';
+                      _os['tipo_no_aplica_exc'] = null;
+                      if (_puntosApoyo < 4) {
+                        _puntosApoyo = getPuntosApoyoPorDefecto(_tipoInstrumento, fallback: 5);
+                        if (_puntosApoyo < 4) _puntosApoyo = 5;
+                        _os['puntos_apoyo'] = _puntosApoyo;
+                      }
+                      _geometriaExcentricidad = getGeometriaPorDefecto(_tipoInstrumento);
+                      _os['geometria_excentricidad'] = _geometriaExcentricidad;
+                      _os['geometria_plataforma']    = _geometriaExcentricidad;
+                      if (_geometriaExcentricidad == 'Camionera' && _numSeccionesExc < 2) {
+                        _numSeccionesExc = 4;
+                      }
+                      _os['num_secciones']       = _numSeccionesExc;
+                      _os['secciones_camionera'] = _numSeccionesExc;
+                      final numPos = _geometriaExcentricidad == 'Camionera' ? _numSeccionesExc.clamp(2, 50) : 5;
+                      if (_excRows.isEmpty) {
+                        _excRows = List.generate(numPos, (i) => {
+                          'posicion_id': i + 1,
+                          'carga': _cargaExcAutoCalculada,
+                          'lectura_inicial': null,
+                          'lectura_final': null,
+                          'error': null,
+                          'valido_d': true,
+                        });
+                      }
+                      _actualizarCargasSugeridas(force: false);
+                    }
+                    _dataVersion++;
+                  }),
+                  style: const ButtonStyle(visualDensity: VisualDensity.compact),
                 ),
               ],
             ),
@@ -1341,15 +1429,53 @@ class _CapturaScreenState extends State<CapturaScreen>
               const SizedBox(width: 8),
               Expanded(child: Text(
                 _aplExc
-                    ? 'Excentricidad asignada por Logística — captura los valores de cada posición.'
-                    : 'Excentricidad omitida por Logística. Marcada como No Aplica.',
+                    ? 'Prueba de Excentricidad activa — captura los valores de cada posición.'
+                    : 'Excentricidad marcada como No Aplica.',
                 style: TextStyle(fontSize: 12,
                     color: _aplExc ? Colors.green.shade800 : Colors.orange.shade800),
               )),
+              if (!_aplExc)
+                TextButton.icon(
+                  onPressed: () => setState(() {
+                    _aplExcOverride = true;
+                    _os['aplica_excentricidad'] = true;
+                    _os['motivo_no_aplica'] = '';
+                    _os['tipo_no_aplica_exc'] = null;
+                    if (_puntosApoyo < 4) {
+                      _puntosApoyo = getPuntosApoyoPorDefecto(_tipoInstrumento, fallback: 5);
+                      if (_puntosApoyo < 4) _puntosApoyo = 5;
+                      _os['puntos_apoyo'] = _puntosApoyo;
+                    }
+                    _geometriaExcentricidad = getGeometriaPorDefecto(_tipoInstrumento);
+                    _os['geometria_excentricidad'] = _geometriaExcentricidad;
+                    _os['geometria_plataforma']    = _geometriaExcentricidad;
+                    if (_geometriaExcentricidad == 'Camionera' && _numSeccionesExc < 2) {
+                      _numSeccionesExc = 4;
+                    }
+                    _os['num_secciones']       = _numSeccionesExc;
+                    _os['secciones_camionera'] = _numSeccionesExc;
+                    final numPos = _geometriaExcentricidad == 'Camionera' ? _numSeccionesExc.clamp(2, 50) : 5;
+                    if (_excRows.isEmpty) {
+                      _excRows = List.generate(numPos, (i) => {
+                        'posicion_id': i + 1,
+                        'carga': _cargaExcAutoCalculada,
+                        'lectura_inicial': null,
+                        'lectura_final': null,
+                        'error': null,
+                        'valido_d': true,
+                      });
+                    }
+                    _actualizarCargasSugeridas(force: false);
+                    _dataVersion++;
+                  }),
+                  icon: const Icon(Icons.lock_open, size: 15, color: _kRed),
+                  label: const Text('Habilitar Excentricidad',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _kRed)),
+                ),
             ]),
           ),
           ExcentricidadTable(
-            key: ValueKey('exc_${_dataVersion}_${_tipoInstrumento}_${_geometriaExcentricidad}_$_dValue'),
+            key: ValueKey('exc_${_dataVersion}_${_aplExc}_${_tipoInstrumento}_${_geometriaExcentricidad}_$_dValue'),
             numCeldas: nCeldas,
             numSecciones: _numSeccionesExc,
             rows: _excRows,
@@ -1362,6 +1488,13 @@ class _CapturaScreenState extends State<CapturaScreen>
                 _geometriaExcentricidad = geo;
                 _os['geometria_excentricidad'] = geo;
                 _os['geometria_plataforma']    = geo;
+                final gLow = geo.toLowerCase();
+                if (gLow.contains('plataforma') || gLow.contains('camion')) {
+                  _aplExcOverride = true;
+                  _os['aplica_excentricidad'] = true;
+                  _os['motivo_no_aplica'] = '';
+                  _os['tipo_no_aplica_exc'] = null;
+                }
               });
             },
             onNumSeccionesChanged: (sec) {

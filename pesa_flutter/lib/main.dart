@@ -24,6 +24,7 @@ import 'screens/mi_firma_screen.dart';
 import 'screens/pdf_viewer_screen.dart';
 import 'screens/remision_captura_screen.dart';
 import 'screens/revision_bascula_screen.dart';
+import 'screens/observaciones_bascula_screen.dart';
 import 'screens/levantamiento_proyecto_screen.dart';
 import 'screens/levantamiento_metrologico_screen.dart';
 import 'widgets/captura_firma_tecnico_dialog.dart';
@@ -129,6 +130,8 @@ final _router = GoRouter(
 
         if (tipo.contains('RMA') || tipo.contains('REMISI')) {
           return RemisionCapturaScreen(orden: extra);
+        } else if (tipoDoc == 'OSOB' || folio.startsWith('OSOB-') || tipo.contains('OSOB') || tipoSrv.contains('OBSERVACIONES')) {
+          return ObservacionesBasculaScreen(orden: extra);
         } else if (tipo.contains('REVISI') || tipoDoc == 'RE' || folio.startsWith('RE-')) {
           return RevisionBasculaScreen(orden: extra);
         } else if (tipo.contains('PROYECTO') || tipoDoc == 'LP' || folio.startsWith('LP-')) {

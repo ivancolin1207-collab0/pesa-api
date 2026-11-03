@@ -133,7 +133,7 @@ class SidebarNavButton(QPushButton):
     Estados: inactivo / hover / activo (#FCE8E9 + #B81D24) / colapsado (riel 54px)
     """
     def __init__(self, icon: str, label: str, tooltip: str, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._icon    = icon
         self._label   = label
         self._active  = False
@@ -240,7 +240,7 @@ class UserChip(QFrame):
     }
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setObjectName("user_chip")
         self.setFixedHeight(56)
 
@@ -328,7 +328,7 @@ class UserChip(QFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 class ConnectionIndicator(QWidget):
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 4, 14, 4)
         lay.setSpacing(6)

@@ -1642,6 +1642,44 @@ class SyncService extends ChangeNotifier {
           folio,
         ]);
 
+        // Si la orden viene en ASIGNADA / En Proceso (no cerrada) y el servidor trae datos de instrumento vacíos,
+        // sobrescribir las columnas locales incluso si vienen vacías ('') o null y limpiar borrador viejo.
+        if (hasPdfVal == 0) {
+          final String srvMarca = (remota['marca'] ?? '').toString().trim();
+          final String srvModelo = (remota['modelo'] ?? '').toString().trim();
+          final String srvNs = (remota['ns'] ?? remota['serie'] ?? '').toString().trim();
+          final String srvIdEq = (remota['id_equipo'] ?? '').toString().trim();
+          final String srvUbic = (remota['ubicacion'] ?? '').toString().trim();
+          final String srvTipoInst = (remota['tipo_instrumento'] ?? '').toString().trim();
+          final bool srvLimpio = (dtVal != null && dtVal.contains('instrumento_limpio_manual')) ||
+              (srvMarca.isEmpty && srvModelo.isEmpty && srvTipoInst.isEmpty);
+          if (srvLimpio) {
+            try {
+              await sqldb.rawUpdate('''
+                UPDATE ordenes_servicio
+                SET marca = ?,
+                    modelo = ?,
+                    ns = ?,
+                    id_equipo = ?,
+                    ubicacion = ?,
+                    tipo_instrumento = ?,
+                    alcance_max = NULL,
+                    div_minima = NULL,
+                    instrumento_capacidad = '',
+                    instrumento_division = '',
+                    aplica_excentricidad = 1,
+                    usa_sustitucion = 0
+                WHERE (folio_os = ? OR folio = ?)
+                  AND UPPER(COALESCE(estado, '')) NOT IN ('CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA')
+                  AND COALESCE(pdf_path_local, '') = ''
+              ''', [srvMarca, srvModelo, srvNs, srvIdEq, srvUbic, srvTipoInst, folio, folio]);
+              await sqldb.delete('borradores_captura', where: 'folio_os = ?', whereArgs: [folio]);
+            } catch (e) {
+              debugPrint('[Sync PULL] Limpieza de instrumento vacío ($folio): $e');
+            }
+          }
+        }
+
         if (updatedCount == 0) {
           await sqldb.insert('ordenes_servicio', {
             'folio_os': folio,

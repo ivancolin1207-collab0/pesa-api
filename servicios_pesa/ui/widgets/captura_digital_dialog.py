@@ -83,11 +83,18 @@ class CapturaDigitalDialog(QDialog):
 
     captura_guardada = pyqtSignal()
 
-    def __init__(self, os_id: int, folio: str = "", orden_data: dict = None, parent=None) -> None:
-        super().__init__(parent)
+    def __init__(self, os_id: int = 0, folio: str = "", orden_data: dict = None, parent=None) -> None:
+        if isinstance(os_id, dict) and orden_data is None:
+            orden_data = os_id
+            os_id = int(orden_data.get("id") or orden_data.get("os_id") or 0)
+            folio = folio or str(orden_data.get("folio_os") or orden_data.get("folio") or "")
+        if isinstance(parent, dict) and orden_data is None:
+            orden_data = parent
+            parent = None
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._os_id  = os_id
         self._folio  = folio
-        self._os_data: dict = orden_data or {}
+        self._os_data: dict = orden_data if isinstance(orden_data, dict) else {}
         self._datos_json_previos: dict = {}
         self._motivo_no_aplica: str = ""   # subtipo elegido cuando aplica_excentricidad=False
         self._pruebas_widget = None
@@ -167,7 +174,7 @@ class CapturaDigitalDialog(QDialog):
         self._tabs.addTab(self._w_inst, "1. INSTRUMENTO")
 
         # PESTAÑAS 2, 3, 4
-        self._pruebas_widget = _PruebasMetrologicasWidget(self._os_data)
+        self._pruebas_widget = _PruebasMetrologicasWidget(parent=self, orden_data=self._os_data)
         
         self._w_rep = QWidget()
         self._w_rep_lay = QVBoxLayout(self._w_rep)
@@ -242,8 +249,8 @@ class CapturaDigitalDialog(QDialog):
         self._lbl_tecnico  = self._ro_field(self._os_data.get('tecnico', ''))
         self._lbl_tipo_srv = self._ro_field(self._os_data.get('tipo_servicio', ''))
         
-        tipo_equipo_str = f"{self._os_data.get('tipo_instrumento', 'Báscula')} - {self._os_data.get('marca', '')} {self._os_data.get('modelo', '')}".strip(" -")
-        self._lbl_tipo_ins = self._ro_field(tipo_equipo_str if tipo_equipo_str else "Báscula de plataforma")
+        tipo_equipo_str = f"{self._os_data.get('tipo_instrumento', '')} - {self._os_data.get('marca', '')} {self._os_data.get('modelo', '')}".strip(" -")
+        self._lbl_tipo_ins = self._ro_field(tipo_equipo_str if tipo_equipo_str else "Captura manual en campo")
         
         for label, widget in [
             ("Folio OS:", self._lbl_folio),
@@ -277,6 +284,7 @@ class CapturaDigitalDialog(QDialog):
         
         self._cmb_tipo_inst = QComboBox()
         self._cmb_tipo_inst.addItems([
+            "",
             "Báscula camionera",
             "Báscula de plataforma",
             "Báscula de tolva / tanque",
@@ -293,6 +301,8 @@ class CapturaDigitalDialog(QDialog):
                 self._cmb_tipo_inst.setCurrentIndex(index)
             else:
                 self._cmb_tipo_inst.setCurrentText(tipo_inst)
+        else:
+            self._cmb_tipo_inst.setCurrentIndex(0)
                 
         self._le_marca = QLineEdit()
         self._le_modelo = QLineEdit()
@@ -423,8 +433,26 @@ class CapturaDigitalDialog(QDialog):
         self._le_div_min.textChanged.connect(self._on_div_min_changed)
         
         self._cmb_excentricidad.currentTextChanged.connect(self._on_excentricidad_changed)
+        self._cmb_tipo_inst.currentTextChanged.connect(self._on_tipo_inst_changed)
 
         return grp
+
+    def _on_tipo_inst_changed(self, text: str) -> None:
+        """Actualiza automáticamente excentricidad y receptor al cambiar Tipo de Instrumento."""
+        t = (text or "").lower()
+        self._cmb_excentricidad.setEnabled(True)
+        if any(k in t for k in ("colgante", "grúa", "grua", "tolva", "tanque", "silo")):
+            self._cmb_excentricidad.setCurrentText("No")
+            if "tolva" in t or "tanque" in t or "silo" in t:
+                self._cmb_receptor.setCurrentText("Tolva")
+            else:
+                self._cmb_receptor.setCurrentText("Otro")
+        elif t:
+            self._cmb_excentricidad.setCurrentText("Sí")
+            if "camionera" in t or "ferrocarril" in t:
+                self._cmb_receptor.setCurrentText("Camionera")
+            else:
+                self._cmb_receptor.setCurrentText("Plataforma")
 
     def _on_div_min_changed(self, text: str) -> None:
         """Propaga d a las tablas de pruebas metrológicas al cambiar División Mín."""
@@ -444,9 +472,12 @@ class CapturaDigitalDialog(QDialog):
         definido por Logística — SIN interrumpir al técnico con modales."""
         aplica = (text == "Sí")
         # Habilitar/deshabilitar la pestaña de excentricidad en pruebas
+        if hasattr(self, '_tabs') and self._tabs.count() > 2:
+            self._tabs.setTabEnabled(2, aplica)
         if hasattr(self, '_pruebas_widget') and self._pruebas_widget:
             try:
-                self._pruebas_widget._tabs.setTabEnabled(1, aplica)
+                if hasattr(self._pruebas_widget, '_tabs') and self._pruebas_widget._tabs.count() > 1:
+                    self._pruebas_widget._tabs.setTabEnabled(1, aplica)
             except Exception:
                 pass
 
@@ -781,6 +812,21 @@ class CapturaDigitalDialog(QDialog):
                 _dve_v = f"DVE.{_anio}."
             self._le_dve.setText(_dve_v)
 
+            # ── Auto-configurar tipo_instrumento y tipo_receptor desde la BD / borrador ──
+            _tipo_ins_nombre = (self._os_data.get("tipo_instrumento") or djp.get("tipo_instrumento") or "").strip()
+            self._cmb_tipo_inst.blockSignals(True)
+            try:
+                if _tipo_ins_nombre:
+                    idx_ti = self._cmb_tipo_inst.findText(_tipo_ins_nombre, Qt.MatchFlag.MatchFixedString)
+                    if idx_ti >= 0:
+                        self._cmb_tipo_inst.setCurrentIndex(idx_ti)
+                    else:
+                        self._cmb_tipo_inst.setCurrentText(_tipo_ins_nombre)
+                else:
+                    self._cmb_tipo_inst.setCurrentIndex(0)
+            finally:
+                self._cmb_tipo_inst.blockSignals(False)
+
             # Combos guardados en borrador
             if djp.get("funcionamiento"):
                 self._cmb_funcionamiento.setCurrentText(djp["funcionamiento"])
@@ -806,9 +852,6 @@ class CapturaDigitalDialog(QDialog):
                 else:
                     self._spn_puntos_apoyo.setValue(5)
 
-            # ── Auto-configurar tipo_receptor desde tipo_instrumento de la BD ──
-            # Si Logística ya definió el tipo, propagarlo al combo receptor
-            _tipo_ins_nombre = self._os_data.get("tipo_instrumento", "") or ""
             _TIPO_MAP = [
                 (["Camionera", "Ferrocarril", "FFCC", "Puente"],   "Camionera"),
                 (["Tolva", "Silo", "Silo"],                        "Tolva"),
@@ -834,6 +877,8 @@ class CapturaDigitalDialog(QDialog):
                 if aplica_exc:
                     self._cmb_excentricidad.setCurrentText("Sí")
                     self._motivo_no_aplica = ""
+                    if hasattr(self, '_tabs') and self._tabs.count() > 2:
+                        self._tabs.setTabEnabled(2, True)
                 else:
                     self._cmb_excentricidad.setCurrentText("No")
                     # Restaurar motivo guardado en borrador (sin popup)
@@ -844,9 +889,12 @@ class CapturaDigitalDialog(QDialog):
                         "Tolva / Tanque / Silo"
                     )
                     # Deshabilitar pestaña de excentricidad
+                    if hasattr(self, '_tabs') and self._tabs.count() > 2:
+                        self._tabs.setTabEnabled(2, False)
                     if hasattr(self, '_pruebas_widget') and self._pruebas_widget:
                         try:
-                            self._pruebas_widget._tabs.setTabEnabled(1, False)
+                            if hasattr(self._pruebas_widget, '_tabs') and self._pruebas_widget._tabs.count() > 1:
+                                self._pruebas_widget._tabs.setTabEnabled(1, False)
                         except Exception:
                             pass
             finally:

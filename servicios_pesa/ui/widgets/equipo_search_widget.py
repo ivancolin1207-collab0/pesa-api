@@ -65,7 +65,7 @@ class EquipoSearchWidget(QWidget):
     equipo_cleared = pyqtSignal()
 
     def __init__(self, label: str = "ID del Equipo:", parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._label_text = label
         self._last_found: Optional[dict] = None
         self._debounce = QTimer(self)

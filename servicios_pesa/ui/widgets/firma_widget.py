@@ -22,7 +22,7 @@ class DrawingCanvas(QWidget):
     signature_changed = pyqtSignal()
 
     def __init__(self, placeholder: str = "Firme aquí", parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._placeholder = placeholder
         self._strokes: list[list[QPointF]] = []
         self._current_stroke: list[QPointF] = []
@@ -137,7 +137,7 @@ class FirmaWidget(QWidget):
     """
     
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._setup_ui()
         
     def _setup_ui(self):

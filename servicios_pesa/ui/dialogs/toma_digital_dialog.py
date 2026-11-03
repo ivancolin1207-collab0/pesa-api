@@ -154,7 +154,7 @@ class NumericKeypad(QDialog):
     value_confirmed = pyqtSignal(str)  # Emite el valor final al confirmar
 
     def __init__(self, current_value: str = "", parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setWindowTitle("Ingresar Valor")
         self.setModal(True)
         self.setMinimumWidth(380)
@@ -286,7 +286,7 @@ class TouchTableWidget(QFrame):
         has_nominal: bool = False,
         parent=None,
     ):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._title      = title
         self._headers    = headers
         self._rows       = rows
@@ -503,7 +503,7 @@ class DrawingCanvas(QWidget):
     signature_changed = pyqtSignal()
 
     def __init__(self, placeholder: str = "Firme aquí", parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._placeholder = placeholder
         self._strokes: list[list[QPointF]] = []
         self._current_stroke: list[QPointF] = []
@@ -647,7 +647,7 @@ class EnlacesSustitucionWidget(QFrame):
     """
 
     def __init__(self, n_enlaces: int = 4, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._n_enlaces  = max(2, int(n_enlaces))
         self._rows_wgt: list[dict] = []  # dicts con los widgets de cada fila
         self._build()
@@ -901,14 +901,14 @@ class TomDigitalDialog(QDialog):
 
     def __init__(
         self,
-        folio_os:  str,
+        folio_os:  str = "",
         os_data:   Optional[dict] = None,
         os_id:     int = 0,
         parent=None,
     ):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._folio_os = folio_os
-        self._os_data  = os_data or {}
+        self._os_data  = os_data if isinstance(os_data, dict) else {}
         self._os_id    = os_id
 
         self.setWindowTitle(f"📱  Formulario Táctil — {folio_os}")

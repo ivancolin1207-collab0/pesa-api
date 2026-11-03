@@ -575,6 +575,12 @@ async def upload_pdf_tablet_os(
                 p.get("nombre_ing") or p.get("firma_cliente_nombre"), p.get("puesto_ing"),
                 p.get("unidad_medida"), actual_id,
             )
+            if p.get("datos_tecnicos_json"):
+                try:
+                    dt_str = json.dumps(p["datos_tecnicos_json"], ensure_ascii=False) if isinstance(p["datos_tecnicos_json"], dict) else str(p["datos_tecnicos_json"])
+                    await db.execute("UPDATE ordenes_servicio SET datos_tecnicos_json = $1 WHERE id = $2", dt_str, actual_id)
+                except Exception as e_dt:
+                    logger.warning("[UPLOAD-PDF OS] No se pudo guardar datos_tecnicos_json: %s", e_dt)
             fecha_raw = str(p.get("fecha") or p.get("fecha_servicio") or "").strip()
             if fecha_raw:
                 fecha_iso = fecha_raw[:10]
@@ -721,6 +727,13 @@ async def sync_data_os(
         payload.get("unidad_medida"),
         actual_id,
     )
+
+    if payload.get("datos_tecnicos_json"):
+        try:
+            dt_str = json.dumps(payload["datos_tecnicos_json"], ensure_ascii=False) if isinstance(payload["datos_tecnicos_json"], dict) else str(payload["datos_tecnicos_json"])
+            await db.execute("UPDATE ordenes_servicio SET datos_tecnicos_json = $1 WHERE id = $2", dt_str, actual_id)
+        except Exception as e_dt_sd:
+            logger.warning("[SYNC DATA] No se pudo guardar datos_tecnicos_json: %s", e_dt_sd)
 
     fecha_raw_sd = str(payload.get("fecha") or payload.get("fecha_servicio") or "").strip()
     if fecha_raw_sd:

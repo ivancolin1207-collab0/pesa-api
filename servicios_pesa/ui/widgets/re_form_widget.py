@@ -123,7 +123,7 @@ class CumpleRow(QWidget):
     """Fila de inspección: descripción | [CUMPLE] | [NO CUMPLE] | obs."""
 
     def __init__(self, num: int, desc: str, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._state: Optional[bool] = None
 
         layout = QHBoxLayout(self)
@@ -190,7 +190,7 @@ class PeriferalRow(QWidget):
     """Fila de periférico: nombre | CUMPLE | NO CUMPLE | obs."""
 
     def __init__(self, desc: str, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._state: Optional[bool] = None
         layout = QHBoxLayout(self)
         layout.setContentsMargins(4, 2, 4, 2)
@@ -247,7 +247,7 @@ class REFormWidget(QWidget):
     re_saved = pyqtSignal(str)
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._clientes:   list[dict] = []
         self._tecnicos:   list[dict] = []
         self._sucursales: list[dict] = []   # sucursales del cliente activo

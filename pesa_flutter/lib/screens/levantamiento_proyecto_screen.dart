@@ -135,9 +135,33 @@ class _LevantamientoProyectoScreenState extends State<LevantamientoProyectoScree
               pw.Text('Alimentación Eléctrica: ${_alimentacionCtrl.text} | Distancia a Caseta: ${_distanciaCasetaCtrl.text}', style: const pw.TextStyle(fontSize: 9)),
               pw.SizedBox(height: 10),
               pw.Text('REQUERIMIENTOS Y OBSERVACIONES:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.Text(_requerimientosCtrl.text, style: const pw.TextStyle(fontSize: 9)),
-              pw.SizedBox(height: 6),
-              pw.Text(_observacionesCtrl.text, style: const pw.TextStyle(fontSize: 9)),
+              if (_requerimientosCtrl.text.trim().isNotEmpty) ...[
+                pw.Text(_requerimientosCtrl.text.trim(), style: const pw.TextStyle(fontSize: 9), softWrap: true),
+                pw.SizedBox(height: 6),
+              ],
+              () {
+                final String obsTexto = _observacionesCtrl.text.trim();
+                final double obsFontSize = obsTexto.length > 350
+                    ? 6.8
+                    : (obsTexto.length > 200 ? 7.5 : 8.5);
+                return pw.Container(
+                  width: double.infinity,
+                  constraints: const pw.BoxConstraints(minHeight: 38),
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+                  ),
+                  child: pw.Text(
+                    obsTexto.isEmpty ? 'Sin observaciones adicionales.' : obsTexto,
+                    style: pw.TextStyle(
+                      fontSize: obsFontSize,
+                      lineSpacing: 1.5,
+                    ),
+                    softWrap: true,
+                    textAlign: pw.TextAlign.left,
+                  ),
+                );
+              }(),
               pw.Spacer(),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceAround,

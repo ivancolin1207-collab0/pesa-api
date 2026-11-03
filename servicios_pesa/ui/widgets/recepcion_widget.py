@@ -157,7 +157,7 @@ class LoteEditDialog(QDialog):
     saved = pyqtSignal(dict)  # Emite el dict guardado
 
     def __init__(self, lote: Optional[dict] = None, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._lote = lote or {}
         self._is_edit = bool(lote)
         self.setWindowTitle("Editar Lote de Recepción" if self._is_edit else "Nuevo Lote de Recepción")
@@ -439,7 +439,7 @@ class BloqueFecha(QFrame):
     accion_alta_equipo = pyqtSignal(int, dict)   # id_lote, lote_data
 
     def __init__(self, fecha: str, lotes: list[dict], parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._fecha  = fecha
         self._lotes  = lotes
         self._expanded = True
@@ -776,7 +776,7 @@ class BloqueFecha(QFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 class ResumenKPIBar(QFrame):
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setObjectName("kpi_bar")
         self.setFixedHeight(80)
         self.setStyleSheet("""
@@ -868,7 +868,7 @@ class RecepcionWidget(QWidget):
     """
 
     def __init__(self, parent=None):
-        super().__init__(parent)
+        super().__init__(parent if isinstance(parent, QWidget) else None)
         self._bloques: dict[str, BloqueFecha] = {}
         self._is_admin_or_logistica = self._check_role()
         self._build_ui()

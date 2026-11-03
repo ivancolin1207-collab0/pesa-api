@@ -140,8 +140,46 @@ class RmaPdfGenerator:
         y = self._draw_header(c, y, rma_data)
         y = self._draw_info_bar(c, y, rma_data)
         y = self._draw_tabla_materiales(c, y, rma_data)
+        y = self._draw_observaciones(c, y, rma_data)
         y = self._draw_firmas(c, y, rma_data)
         self._draw_footer_bar(c)
+
+    def _draw_observaciones(self, c, y: float, rma_data: dict) -> float:
+        from reportlab.lib.utils import simpleSplit
+
+        obs_raw = str(rma_data.get("observaciones") or rma_data.get("observaciones_tecnico") or "").strip()
+        if not obs_raw:
+            return y
+
+        font_name = "Helvetica"
+        font_size = 7.0 if len(obs_raw) > 300 else (7.8 if len(obs_raw) > 160 else 8.5)
+        line_height = font_size + 2.0
+        ancho_util = self.CW - 12
+
+        lineas_totales = []
+        for parrafo in obs_raw.splitlines():
+            if parrafo.strip():
+                lineas_totales.extend(simpleSplit(parrafo.strip(), font_name, font_size, ancho_util))
+            else:
+                lineas_totales.append("")
+
+        y_limite_firmas = self.MB + 22 + 15 + 55
+        if y - 18 < y_limite_firmas:
+            return y
+
+        c.setFillColor(_RED)
+        c.setFont("Helvetica-Bold", 7.5)
+        c.drawString(self.ML, y - 4, "OBSERVACIONES:")
+        y_inicio_obs = y - 14
+        c.setFillColor(_BLACK)
+        c.setFont(font_name, font_size)
+        y_cursor = y_inicio_obs
+        for linea in lineas_totales:
+            if y_cursor < y_limite_firmas:
+                break
+            c.drawString(self.ML + 6, y_cursor, linea)
+            y_cursor -= line_height
+        return y_cursor - 4
 
     def _draw_header(self, c, y: float, rma_data: dict) -> float:
         """
@@ -290,7 +328,7 @@ class RmaPdfGenerator:
 
         def _p(text, style):
             safe = (str(text) if text is not None else "")
-            safe = safe.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            safe = safe.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br/>")
             return Paragraph(safe, style)
 
         # ── Cabecera ──────────────────────────────────────────────────────

@@ -193,7 +193,7 @@ def extraer_id_equipo_de_pdf_bytes(pdf_bytes: Optional[bytes]) -> str:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         if len(doc) > 0:
             txt = doc[0].get_text() or ""
-            m = re.search(r"ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)", txt, re.IGNORECASE)
+            m = re.search(r"ID\s*(?:INTERNO\s*/\s*TAG|INDICADOR|EQUIPO)?\s*(?:/\s*(?:EQUIPO|TAG))?:\s*([^\n\r\t|]+)", txt, re.IGNORECASE)
             if m:
                 val = m.group(1).split()[0].strip()
                 if val.upper() not in ["TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "N/A", "NONE", "NULL", "--"]:
@@ -208,7 +208,7 @@ def extraer_id_equipo_de_pdf_bytes(pdf_bytes: Optional[bytes]) -> str:
         reader = PdfReader(io.BytesIO(pdf_bytes))
         if reader.pages:
             txt = reader.pages[0].extract_text() or ""
-            m = re.search(r"ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)", txt, re.IGNORECASE)
+            m = re.search(r"ID\s*(?:INTERNO\s*/\s*TAG|INDICADOR|EQUIPO)?\s*(?:/\s*(?:EQUIPO|TAG))?:\s*([^\n\r\t|]+)", txt, re.IGNORECASE)
             if m:
                 val = m.group(1).split()[0].strip()
                 if val.upper() not in ["TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "N/A", "NONE", "NULL", "--"]:
@@ -242,6 +242,11 @@ def construir_nombre_pdf(folio: str, cliente: str = "", id_equipo: str = "", ser
 
 def _enviar_smtp_sync(destinatario: str, cc: str, asunto: str, cuerpo_html: str, cuerpo_texto: str, adjuntos: List[tuple[str, bytes]]) -> bool:
     """Envío síncrono por SMTP TLS con autenticación Gmail."""
+    cc_parts = [c.strip() for c in (cc or "").split(",") if c.strip()]
+    if "recepcion@basculaspesa.com.mx" not in [c.lower() for c in cc_parts]:
+        cc_parts.append("recepcion@basculaspesa.com.mx")
+    cc = ", ".join(cc_parts)
+
     msg = MIMEMultipart("mixed")
     msg["From"] = f"Básculas PESA <{settings.EMAIL_USER}>"
     msg["To"] = destinatario
@@ -715,7 +720,9 @@ recepcion@basculaspesa.com.mx
 
         id_equipo_real = str(id_desde_pdf or id_eq or "S-ID").strip()
         empresa = sanear_nombre_cliente(row["cliente"] or "Cliente")
-        servicio_real = str(row["srv_nombre"] or row["tipo_servicio"] or "Calibración").strip()
+        es_osob = str(folio or "").strip().upper().startswith("OSOB-")
+        servicio_default = "Inspección y Revisión de Básculas" if es_osob else "Calibración"
+        servicio_real = str(row["srv_nombre"] or row["tipo_servicio"] or servicio_default).strip()
 
         nombre_adj = construir_nombre_pdf(
             folio=folio,
@@ -724,12 +731,17 @@ recepcion@basculaspesa.com.mx
             servicio=servicio_real,
         )
 
-        id_txt = f" ({id_equipo_real})" if id_equipo_real and id_equipo_real != "S-ID" else ""
-        asunto = f"Orden de Servicio {folio}{id_txt} - {empresa} | Básculas PESA"
+        id_txt = f" ({id_equipo_real})" if id_equipo_real and id_equipo_real != "S-ID" else (" (S/ID)" if es_osob else "")
+        if es_osob:
+            asunto = f"Formato de Inspección y Revisión {folio}{id_txt} - {empresa} | Básculas PESA"
+            doc_titulo_correo = f"Formato de Inspección y Revisión {folio}"
+        else:
+            asunto = f"Orden de Servicio {folio}{id_txt} - {empresa} | Básculas PESA"
+            doc_titulo_correo = f"Orden de Servicio {folio}"
         cuerpo_texto = f"""Estimado cliente ({empresa}):
 
-Adjuntamos el reporte oficial correspondiente a la Orden de Servicio {folio}.
-Servicio: {row['srv_nombre'] or row['tipo_servicio'] or 'Calibración'}
+Adjuntamos el reporte oficial correspondiente a {doc_titulo_correo}.
+Servicio: {servicio_real}
 
 El documento cuenta con validez y firmas digitales.
 
@@ -745,7 +757,7 @@ recepcion@basculaspesa.com.mx
             </div>
             <div style="padding: 24px; border: 1px solid #E5E5EA; border-top: none; border-radius: 0 0 8px 8px; background-color: #FFFFFF;">
                 <p>Estimado cliente <strong>{empresa}</strong>,</p>
-                <p>Hacemos entrega del documento digital oficial correspondiente a la <strong>Orden de Servicio {folio}</strong>:</p>
+                <p>Hacemos entrega del documento digital oficial correspondiente a <strong>{doc_titulo_correo}</strong>:</p>
                 <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px;">
                     <tr style="border-bottom: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0; color: #64748B; width: 140px;">Folio:</td>
@@ -753,7 +765,7 @@ recepcion@basculaspesa.com.mx
                     </tr>
                     <tr style="border-bottom: 1px solid #E2E8F0;">
                         <td style="padding: 8px 0; color: #64748B;">Tipo de Servicio:</td>
-                        <td style="padding: 8px 0; font-weight: 600;">{row['srv_nombre'] or row['tipo_servicio'] or 'Calibración'}</td>
+                        <td style="padding: 8px 0; font-weight: 600;">{servicio_real}</td>
                     </tr>
                 </table>
                 <p>Adjunto a este correo encontrará el reporte completo en formato PDF con firmas electrónicas.</p>
