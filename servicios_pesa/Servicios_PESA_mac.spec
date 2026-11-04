@@ -29,6 +29,7 @@ all_hidden = sorted(list(set(
         'ui.widgets.rma_form_widget',
         'ui.dialogs',
         'ui.dialogs.digital_service_dialog',
+        'ui.dialogs.osob_digital_dialog',
         'ui.dialogs.login_dialog',
         'ui.dialogs.modo_formato_dialog',
         'ui.dialogs.toma_digital_dialog',

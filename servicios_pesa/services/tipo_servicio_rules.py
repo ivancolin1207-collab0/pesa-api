@@ -264,9 +264,11 @@ _ID_A_NOMBRE_BD = {
 
 def _clasificar(nombre: Optional[str], id_tipo: Optional[int] = None,
                 folio: Optional[str] = None) -> tuple[str, bool, bool, bool]:
-    """Retorna (formato, cca, dve, ajuste). formato: 'os' | 'rma' | 're' | 'sin'."""
+    """Retorna (formato, cca, dve, ajuste). formato: 'os' | 'osob' | 'rma' | 're' | 'sin'."""
     import re
     f = (folio or "").strip().upper()
+    if f.startswith("OSOB-"):
+        return "osob", False, False, False
     if f.startswith("RMA-"):
         return "rma", False, False, False
     if f.startswith("RE-"):
@@ -279,6 +281,8 @@ def _clasificar(nombre: Optional[str], id_tipo: Optional[int] = None,
             n = ""
     if not n:
         return "sin", False, False, False
+    if "osob" in n or "observacion" in n or ("inspeccion" in n and "revisi" in n and "bascula" in n):
+        return "osob", False, False, False
     if "refacci" in n or "remisi" in n:
         return "rma", False, False, False
     if "revisi" in n or "celda" in n:
@@ -292,8 +296,10 @@ def _clasificar(nombre: Optional[str], id_tipo: Optional[int] = None,
 def etiqueta_corta(nombre: Optional[str], id_tipo: Optional[int] = None,
                    folio: Optional[str] = None) -> str:
     """Calibración + Ajuste + Inspección · Ajuste + Inspección · Calibración + Ajuste · Ajuste
-    (CCA = Calibración, DVE = Inspección). También Remisión · Revisión · Sin tipo."""
+    (CCA = Calibración, DVE = Inspección). También Observaciones · Remisión · Revisión · Sin tipo."""
     fmt, cca, dve, aju = _clasificar(nombre, id_tipo, folio)
+    if fmt == "osob":
+        return "Inspección y Revisión de Básculas (OSOB)"
     if fmt == "rma":
         return "Remisión"
     if fmt == "re":
@@ -314,6 +320,8 @@ def etiqueta_larga(nombre: Optional[str], id_tipo: Optional[int] = None,
                    folio: Optional[str] = None) -> str:
     """Descripción para tooltips / banners (misma redacción que la tablet)."""
     fmt, cca, dve, aju = _clasificar(nombre, id_tipo, folio)
+    if fmt == "osob":
+        return "Formato de Inspección y Revisión de Básculas (OSOB)"
     if fmt == "rma":
         return "Remisión — sin CCA ni DVE"
     if fmt == "re":

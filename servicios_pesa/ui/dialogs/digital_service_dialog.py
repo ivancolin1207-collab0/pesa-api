@@ -1922,22 +1922,20 @@ def open_digital_form(
 ) -> bool:
     """
     Abre el formulario digital de forma conveniente desde cualquier módulo.
-
-    Uso:
-        from ui.dialogs.digital_service_dialog import open_digital_form
-        completado = open_digital_form("OS-26-042", os_data, os_id=42,
-                                       id_cliente=5, parent=self)
-        if completado:
-            self.refresh()
-
-    Args:
-        id_cliente: ID del cliente en cat_clientes.
-                    Se usa para filtrar el historial de equipos (cat_equipos)
-                    y ofrecer autocompletado por ID de equipo.
-
-    Returns:
-        True si el usuario guardó el formulario, False si canceló.
     """
+    folio_upper = str(folio_os or (os_data or {}).get("folio_os") or (os_data or {}).get("folio") or "").strip().upper()
+    tipo_doc_upper = str((os_data or {}).get("tipo_documento") or "").strip().upper()
+    tipo_srv_upper = str((os_data or {}).get("tipo_servicio") or "").strip().upper().replace("Á", "A").replace("Ó", "O")
+    if folio_upper.startswith("OSOB-") or tipo_doc_upper == "OSOB" or "OSOB" in tipo_srv_upper or "OBSERVACION" in tipo_srv_upper or ("INSPECCION" in tipo_srv_upper and "BASCULA" in tipo_srv_upper):
+        from ui.dialogs.osob_digital_dialog import OsobDigitalDialog
+        dlg_osob = OsobDigitalDialog(
+            os_id      = os_id,
+            folio      = folio_os,
+            orden_data = os_data or {},
+            parent     = parent,
+        )
+        return dlg_osob.exec() == QDialog.DialogCode.Accepted
+
     dlg = DigitalServiceDialog(
         folio_os   = folio_os,
         os_data    = os_data or {},

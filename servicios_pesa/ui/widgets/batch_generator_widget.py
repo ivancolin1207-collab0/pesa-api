@@ -274,15 +274,12 @@ class EquipoCard(QFrame):
         self._inp_ubicacion = self._make_input("Ubicación (ej: Planta Norte)",     row2, "Ubicación")
         fields_lay.addLayout(row2)
 
-        # ── Fila Extra OSOB: Indicador (Marca / Modelo) y Orden de Servicio vinculada ──
+        # ── Fila Extra OSOB: Orden de Servicio vinculada ──
         self._wgt_osob_extra = QWidget()
         self._wgt_osob_extra.setStyleSheet("background: transparent;")
         _osob_lay = QHBoxLayout(self._wgt_osob_extra)
         _osob_lay.setContentsMargins(0, 0, 0, 0)
         _osob_lay.setSpacing(12)
-        self._inp_indicador_mm = self._make_input(
-            "Indicador (Marca / Modelo, ej: Rice Lake 480)", _osob_lay, "Indicador (Marca / Modelo)"
-        )
         self._inp_os_vinculada = self._make_input(
             "Orden de Servicio vinculada (ej: OS-26-700, opcional)", _osob_lay, "Orden de Servicio"
         )
@@ -966,8 +963,6 @@ class EquipoCard(QFrame):
             "dve":                 _v("_inp_dve"),
             "ubicacion":           _v("_inp_ubicacion"),
             "planta":              _v("_inp_ubicacion"),
-            "indicador_marca_modelo": _v("_inp_indicador_mm"),
-            "indicador":           _v("_inp_indicador_mm"),
             "orden_servicio_vinculada": _v("_inp_os_vinculada"),
             "os_vinculada":        _v("_inp_os_vinculada"),
             "orden_servicio":      _v("_inp_os_vinculada"),

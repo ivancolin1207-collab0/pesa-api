@@ -2984,6 +2984,7 @@ class OsobPdfGenerator:
             mod = str(os_data.get("modalidad") or "").strip().upper().replace("Í", "I")
             has_cap = bool(
                 os_data.get("checklist")
+                or os_data.get("checklist_inspeccion")
                 or os_data.get("pruebas_rapidas")
                 or os_data.get("dictamen")
                 or os_data.get("firma_cliente")
@@ -3236,7 +3237,6 @@ class OsobPdfGenerator:
         if div_str and unidad.lower() not in div_str.lower():
             div_str = f"{div_str} {unidad}"
 
-        indicador = str(d.get("indicador_marca_modelo") or d.get("indicador") or "").strip()
         tipo_inst = str(d.get("tipo_instrumento") or "").strip()
         tipo_otro = str(d.get("tipo_instrumento_otro") or "").strip()
 
@@ -3270,13 +3270,10 @@ class OsobPdfGenerator:
         draw_cell(self.ML + w_f2 * 3, y, w_f2, row_h, "Número de Serie:", serie)
         y -= row_h
 
-        # Fila 3: Capacidad Máx. (Max) | División Mínima (d / e) | Indicador (Marca / Modelo)
-        w_f3_a = cw * 0.30
-        w_f3_b = cw * 0.30
-        w_f3_c = cw - w_f3_a - w_f3_b
-        draw_cell(self.ML, y, w_f3_a, row_h, "Capacidad Máx. (Max):", cap_str)
-        draw_cell(self.ML + w_f3_a, y, w_f3_b, row_h, "División Mínima (d / e):", div_str)
-        draw_cell(self.ML + w_f3_a + w_f3_b, y, w_f3_c, row_h, "Indicador (Marca / Modelo):", indicador)
+        # Fila 3: Capacidad Máx. (Max) (50%) | División Mínima (d / e) (50%)
+        w_f3 = cw / 2.0
+        draw_cell(self.ML, y, w_f3, row_h, "Capacidad Máx. (Max):", cap_str)
+        draw_cell(self.ML + w_f3, y, cw - w_f3, row_h, "División Mínima (d / e):", div_str)
         y -= row_h
 
         # Fila 4: Tipo de Instrumento: [ ] Mesa  [ ] Camionera  [ ] Colgante  [ ] Tolva  [ ] Tanque  [ ] Otro (especifique): ___
@@ -3339,7 +3336,7 @@ class OsobPdfGenerator:
         )
         y -= inst_h
 
-        checklist_data = d.get("checklist") or {}
+        checklist_data = d.get("checklist") or d.get("checklist_inspeccion") or {}
         if isinstance(checklist_data, list):
             # Convertir lista a dict por índice 1..14
             tmp_chk = {}
@@ -3436,7 +3433,8 @@ class OsobPdfGenerator:
         col_cumple_w = 135.0
 
         for idx, (key, title_lbl, sec_lbl) in enumerate(self.PRUEBAS_RAPIDAS):
-            p_info = pruebas.get(key) or {}
+            alt_key = "excentricidad" if key == "excentricidad_esquinas" else ("repetibilidad" if key == "repetibilidad_lectura" else key)
+            p_info = pruebas.get(key) or pruebas.get(alt_key) or {}
             if not isinstance(p_info, dict):
                 p_info = {}
             res_val = str(p_info.get("resultado") or "").strip().upper() if digital else ""

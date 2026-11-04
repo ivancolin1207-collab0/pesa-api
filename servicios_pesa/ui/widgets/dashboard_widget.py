@@ -3008,6 +3008,9 @@ class DashboardWidget(QWidget):
         elif folio_text.startswith("LV-"):
             servicio = "Levantamiento Metrológico"
             item.setText(self._COL_SERVICIO, servicio)
+        elif folio_text.startswith("OSOB-"):
+            servicio = "Inspección y Revisión de Básculas (OSOB)"
+            item.setText(self._COL_SERVICIO, servicio)
         elif folio_text.startswith("RMA-"):
             servicio = "Remisión de Material"
             item.setText(self._COL_SERVICIO, servicio)
@@ -5099,6 +5102,23 @@ recepcion@basculaspesa.com.mx
                 orden_dict['tipo_instrumento'] = row_data[13]
                 orden_dict['marca'] = row_data[14]
                 orden_dict['modelo'] = row_data[15]
+
+        folio_upper = str(folio or "").strip().upper()
+        tipo_srv_upper = str(orden_dict.get('tipo_servicio') or "").strip().upper()
+        if folio_upper.startswith("OSOB-") or "OSOB" in tipo_srv_upper or "OBSERVACION" in tipo_srv_upper or ("INSPECCION" in tipo_srv_upper and "BASCULA" in tipo_srv_upper.replace("Á", "A")):
+            try:
+                from ui.dialogs.osob_digital_dialog import OsobDigitalDialog
+                dlg_osob = OsobDigitalDialog(os_id=os_id, folio=folio, orden_data=orden_dict, parent=self)
+                dlg_osob.captura_guardada.connect(self.refresh)
+                dlg_osob.exec()
+                return
+            except Exception as exc_osob:
+                logger.error("Error abriendo OsobDigitalDialog: %s", exc_osob)
+                QMessageBox.critical(
+                    self, "Error",
+                    f"No se pudo abrir el Formato de Inspección y Revisión de Básculas:\n{exc_osob}"
+                )
+                return
 
         dlg = CapturaDigitalDialog(os_id=os_id, folio=folio, orden_data=orden_dict, parent=self)
         dlg.captura_guardada.connect(self.refresh)
