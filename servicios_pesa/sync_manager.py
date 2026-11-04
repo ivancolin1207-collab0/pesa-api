@@ -286,9 +286,12 @@ class SyncManager:
                         SELECT
                             os.id, os.folio_os, os.fecha::text,
                             os.id_tipo_servicio,
-                            COALESCE(ts.nombre, os.tipo_servicio) AS tipo_servicio_nombre,
+                            CASE
+                                WHEN os.folio_os ILIKE 'OSOB-%%' THEN 'Observaciones'
+                                ELSE COALESCE(ts.nombre, os.tipo_servicio)
+                            END AS tipo_servicio_nombre,
                             os.id_cliente, cl.razon_social,
-                            os.id_sucursal,
+                            os.sucursal_id,
                             COALESCE(suc.nombre_sucursal, os.ubicacion, '') AS sucursal_nombre,
                             os.id_tecnico, tc.nombre_completo,
                             os.marca, os.modelo, os.ns, os.ubicacion,
@@ -303,7 +306,7 @@ class SyncManager:
                         LEFT JOIN cat_clientes      cl  ON os.id_cliente       = cl.id
                         LEFT JOIN cat_tecnicos      tc  ON os.id_tecnico       = tc.id
                         LEFT JOIN cat_tipo_servicio ts  ON os.id_tipo_servicio = ts.id
-                        LEFT JOIN cliente_sucursales suc ON os.id_sucursal     = suc.id
+                        LEFT JOIN cliente_sucursales suc ON os.sucursal_id     = suc.id
                         WHERE os.estado NOT IN ('CANCELADA')
                         {where}
                         ORDER BY os.fecha DESC, os.created_at DESC
@@ -328,6 +331,7 @@ class SyncManager:
                             ON CONFLICT(folio_os) DO UPDATE SET
                                 fecha                = excluded.fecha,
                                 estado               = excluded.estado,
+                                tipo_servicio_nombre = excluded.tipo_servicio_nombre,
                                 tecnico_nombre       = excluded.tecnico_nombre,
                                 cliente_nombre       = excluded.cliente_nombre,
                                 sucursal_nombre      = excluded.sucursal_nombre,

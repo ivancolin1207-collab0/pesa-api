@@ -3763,7 +3763,7 @@ class BatchGeneratorWidget(QWidget):
         elif self._tipo_doc == "RMA":
             tipo_servicio_mapped = "Entrega Refacciones"
         elif self._tipo_doc == "OSOB":
-            tipo_servicio_mapped = "Formato de Inspección y Revisión de Básculas"
+            tipo_servicio_mapped = "Observaciones"
         
         puntos_exactitud = int(self.cmb_puntos_exactitud.currentText()) if hasattr(self, "cmb_puntos_exactitud") else 5
 

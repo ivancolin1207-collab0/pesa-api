@@ -21,7 +21,7 @@ _V_OS_QUERY = """
         cl.direccion AS direccion_cliente,
         su.nombre_sucursal AS sucursal_nombre,
         su.direccion AS sucursal_direccion,
-        ts.nombre AS tipo_servicio,
+        COALESCE(ts.nombre, os.tipo_servicio) AS tipo_servicio,
         tc.nombre_completo AS tecnico,
         tc.nombre_completo AS tecnico_nombre,
         ti.nombre AS tipo_instrumento,
@@ -376,6 +376,8 @@ class OrdenServicioRepository(BaseRepository):
                         tipo_doc_data = "RMA"
                     elif folio_actual.startswith("RE-"):
                         tipo_doc_data = "RE"
+                    elif folio_actual.startswith("OSOB-"):
+                        tipo_doc_data = "OSOB"
                     else:
                         tipo_doc_data = "OS"
 

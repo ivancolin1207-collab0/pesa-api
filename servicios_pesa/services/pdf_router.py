@@ -85,7 +85,10 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
 
     id_limpio = limpiar(id_equipo)
     s_limpio = limpiar(servicio)
-    if not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null']:
+    if f_limpio.upper().startswith("OSOB-"):
+        if not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null', 'formato de inspección y revisión de básculas', 'inspección y revisión de básculas (osob)']:
+            s_limpio = "Observaciones"
+    elif not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null']:
         s_limpio = "Ajuste" if "ajuste" in str(servicio).lower() else "Calibracion"
 
     partes = [f_limpio, c_limpio]
@@ -313,7 +316,10 @@ def regenerar_pdf(os_id: int, folio: str, force: bool = True) -> Optional[str]:
             try:
                 from services.os_pdf_generator import osob_pdf_generator
                 output_path = _get_output_path(folio, "PDF_OS")
-                return osob_pdf_generator.generate(os_data=os_data, output_path=output_path, force=force)
+                res_pdf = osob_pdf_generator.generate(os_data=os_data, output_path=output_path, force=force)
+                if res_pdf and Path(res_pdf).exists():
+                    _actualizar_bd_pdf(os_id, res_pdf)
+                return res_pdf
             except (ImportError, AttributeError) as exc:
                 logger.warning("osob_pdf_generator no disponible: %s", exc)
                 return None

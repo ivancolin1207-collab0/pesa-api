@@ -4660,7 +4660,7 @@ class TipoServicioBadge extends StatelessWidget {
     final label = rules.etiquetaCorta;
     final (Color fg, Color bg) = switch (rules) {
       _ when rules.sinTipo              => (const Color(0xFFB45309), const Color(0xFFFFFBEB)), // ámbar
-      _ when rules.esObservaciones      => (const Color(0xFF991B1B), const Color(0xFFFEF2F2)), // rojo PESA OSOB
+      _ when rules.esObservaciones      => (const Color(0xFF7C3AED), const Color(0xFFF3E8FF)), // violeta OSOB
       _ when rules.esRemision || rules.esRevisionCeldas
                                         => (const Color(0xFF6B7280), const Color(0xFFF9FAFB)),
       _ when rules.pideCca && rules.pideDve

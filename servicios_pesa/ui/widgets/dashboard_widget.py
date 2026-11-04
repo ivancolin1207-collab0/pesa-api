@@ -124,7 +124,10 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
 
     id_limpio = limpiar(id_equipo)
     s_limpio = limpiar(servicio)
-    if not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null']:
+    if f_limpio.upper().startswith("OSOB-"):
+        if not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null', 'formato de inspección y revisión de básculas', 'inspección y revisión de básculas (osob)']:
+            s_limpio = "Observaciones"
+    elif not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null']:
         s_limpio = "Ajuste" if "ajuste" in str(servicio).lower() else "Calibracion"
 
     partes = [f_limpio, c_limpio]
@@ -147,6 +150,16 @@ _BORDER   = "#E5E5EA"   # Borde por defecto
 _SEP      = "#F2F2F7"   # Separador ultra fino
 _SEG_BG   = "#EBEBED"   # Fondo segmented control
 
+# Diccionario de colores de tipos de servicio con fallback defensivo .get()
+COLOR_TIPO_SERVICIO = {
+    'Observaciones': '#7C3AED',  # Violeta / Púrpura distintivo
+    'Inspección': '#7C3AED',
+    'OSOB': '#7C3AED',
+    'Observaciones (OSOB)': '#7C3AED',
+    'Inspección y Revisión de Básculas (OSOB)': '#7C3AED',
+    'Formato de Inspección y Revisión de Básculas': '#7C3AED',
+}
+
 
 # =============================================================================
 # Delegate para badges de estado (pintado directo con QPainter)
@@ -163,6 +176,7 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         "proceso":   ("#FFF3E0", "#E65100", "#FFE0B2"),
         "cerrado":   ("#E8F5E9", "#1B5E20", "#C8E6C9"),
         "cerrada":   ("#E8F5E9", "#1B5E20", "#C8E6C9"),
+        "firmada":   ("#E8F5E9", "#1B5E20", "#C8E6C9"),
         "escaneada": ("#E8F5E9", "#1B5E20", "#C8E6C9"),
         "completada":("#E8F5E9", "#1B5E20", "#C8E6C9"),
         "completada_digital": ("#E8F5E9", "#1B5E20", "#C8E6C9"),
@@ -180,29 +194,36 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         "calibración + ajuste":              ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
         "calibración":                       ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
         "ajuste + inspección":               ("#F0FDFA", "#0F766E", "#99F6E4"),
-        "inspección":                        ("#F0FDFA", "#0F766E", "#99F6E4"),
+        "inspección":                        ("#F3E8FF", "#7C3AED", "#DDD6FE"),
         "sin tipo":     ("#FFFBEB", "#B45309", "#FDE68A"),
         "remisión":     ("#F5F5F7", "#48484A", "#E5E5EA"),
         "revisión":     ("#F5F5F7", "#48484A", "#E5E5EA"),
         # Tipos de servicio (texto libre heredado)
         "calibracion":  ("#E8F5E9", "#1B5E20", "#C8E6C9"),
         "ajuste":       ("#F3F4F6", "#4B5563", "#E5E7EB"),
-        "inspeccion":   ("#E3F2FD", "#0D47A1", "#BBDEFB"),
+        "inspeccion":   ("#F3E8FF", "#7C3AED", "#DDD6FE"),
         "revision":     ("#F5F5F7", "#48484A", "#E5E5EA"),
         "refacciones":  ("#F5F5F7", "#48484A", "#E5E5EA"),
         "levantamiento":("#EDE7F6", "#4A148C", "#D1C4E9"),
-        "observaciones":("#FFF7ED", "#C2410C", "#FED7AA"),
-        "formato de inspección": ("#FFF7ED", "#C2410C", "#FED7AA"),
+        "observaciones":("#F3E8FF", "#7C3AED", "#DDD6FE"),
+        "observaciones (osob)": ("#F3E8FF", "#7C3AED", "#DDD6FE"),
+        "osob":         ("#F3E8FF", "#7C3AED", "#DDD6FE"),
+        "formato de inspección": ("#F3E8FF", "#7C3AED", "#DDD6FE"),
     }
 
     def _resolve_colors(self, text: str):
-        lower = text.lower().strip()
+        clean_txt = str(text or "").strip()
+        lower = clean_txt.lower()
         if lower in self._BADGE_MAP:
-            return self._BADGE_MAP[lower]
+            return self._BADGE_MAP.get(lower, ("#F3F4F6", "#4B5563", "#E5E7EB"))
+        if clean_txt in COLOR_TIPO_SERVICIO:
+            fg = COLOR_TIPO_SERVICIO.get(clean_txt, "#4B5563")
+            return ("#F3F4F6", fg, "#DDD6FE")
         for key, colors in self._BADGE_MAP.items():
             if key in lower:
                 return colors
-        return ("#F5F5F5", "#616161", "#E0E0E0")
+        fg_fallback = COLOR_TIPO_SERVICIO.get(clean_txt, "#4B5563")
+        return ("#F3F4F6", fg_fallback, "#E5E7EB")
 
     def _abbreviate(self, text: str) -> str:
         """Mantiene textos legibles y sin truncamiento feo."""
@@ -210,8 +231,11 @@ class StatusBadgeDelegate(QStyledItemDelegate):
             "Entrega Refacciones": "Refacciones",
             "Calibracion + Ajuste": "Calibración + Ajuste",
             "Inspeccion Visual":   "Inspección",
-            "Formato de Inspección y Revisión de Básculas (Observaciones)": "Observaciones (OSOB)",
-            "Formato de Inspección y Revisión de Básculas": "Observaciones (OSOB)",
+            "Formato de Inspección y Revisión de Básculas (Observaciones)": "Observaciones",
+            "Formato de Inspección y Revisión de Básculas": "Observaciones",
+            "Inspección y Revisión de Básculas (OSOB)": "Observaciones",
+            "Observaciones (OSOB)": "Observaciones",
+            "OSOB": "Observaciones",
         }
         for long, short in abbr.items():
             if long.lower() in text.lower():
@@ -795,11 +819,14 @@ class _DashboardLoader(QThread):
                         WHERE os.estado ILIKE '%%proceso%%'
                            OR os.estado ILIKE 'abiert%%'
                            OR os.estado ILIKE 'pendiente%%'
+                           OR os.estado ILIKE 'asignad%%'
                            OR COALESCE(NULLIF(TRIM(os.estado), ''), '') = ''
                     )                                                                   AS en_proceso,
                     COUNT(*) FILTER (
                         WHERE os.estado ILIKE '%%cerrad%%' OR os.estado ILIKE '%%finaliz%%'
                            OR os.estado ILIKE '%%complet%%' OR os.estado ILIKE 'escaneada'
+                           OR os.estado ILIKE '%%firmad%%' OR os.estatus ILIKE '%%cerrad%%'
+                           OR os.estado ILIKE '%%terminad%%'
                     )                                                                   AS cerrados,
                     COUNT(*) FILTER (WHERE os.modalidad ILIKE '%%fisic%%')               AS formatos_fisicos
                 FROM ordenes_servicio os
@@ -901,7 +928,10 @@ class _DashboardLoader(QThread):
                         cl.razon_social
                     ) AS ubicacion_final,
                     tc.nombre_completo,
-                    COALESCE(ts.nombre, os.tipo_servicio) AS tipo_servicio_final,
+                    CASE
+                        WHEN os.folio_os ILIKE 'OSOB-%%' THEN 'Observaciones'
+                        ELSE COALESCE(ts.nombre, os.tipo_servicio)
+                    END AS tipo_servicio_final,
                     os.modalidad,
                     COALESCE(NULLIF(os.estado, ''), 'Proceso') AS estado_final,
                     os.id,
@@ -934,15 +964,14 @@ class _DashboardLoader(QThread):
                 WHERE 1=1 {where_clause}
             ) sub
             ORDER BY
-                -- Orden descendente seguro: extrae el último número del folio
-                -- (funciona con OS-26-645, RMA-26-630, RE-26-605, LV-26-1, etc.)
+                sub.fecha DESC,
+                sub.id DESC,
                 CASE WHEN sub.folio_os ~ '-[0-9]+$'
                      THEN CAST(REGEXP_REPLACE(sub.folio_os, '^.*-([0-9]+)$', '\\1') AS INTEGER)
                      ELSE 0
-                END DESC,
-                sub.fecha DESC
+                END DESC
             LIMIT 500
-        """.format(where_clause=where_clause)
+        """
         try:
             with conn.cursor() as cur:
                 cur.execute(sql, params or None)
@@ -1760,7 +1789,7 @@ class DashboardWidget(QWidget):
         if _is_field_tech:
             self._combo_tec_bar.setVisible(False)
 
-        # â”€â”€ Filtro de Estado â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Filtro de Estado ──────────────────────────────────────────────────
         self._combo_estado_global = QComboBox()
         self._combo_estado_global.setFixedHeight(36)
         self._combo_estado_global.setMinimumWidth(150)
@@ -1776,6 +1805,24 @@ class DashboardWidget(QWidget):
             self._combo_estado_global.addItem(texto, valor)
         self._combo_estado_global.currentIndexChanged.connect(self._on_filter_changed)
         lay.addWidget(self._combo_estado_global)
+
+        # ── Filtro de Tipo de Servicio / Formato ──────────────────────────────
+        self._combo_tipo_servicio_bar = QComboBox()
+        self._combo_tipo_servicio_bar.setFixedHeight(36)
+        self._combo_tipo_servicio_bar.setMinimumWidth(175)
+        self._combo_tipo_servicio_bar.setToolTip("Filtrar por Tipo de Servicio / Formato")
+        self._combo_tipo_servicio_bar.setStyleSheet(_combo_style)
+        for texto, valor in [
+            ("Todos los Servicios", ""),
+            ("Orden de Servicio (OS)", "OS"),
+            ("Observaciones (OSOB)", "OSOB"),
+            ("Remisión de Material (RMA)", "RMA"),
+            ("Revisión de Báscula (RE)", "RE"),
+            ("Levantamiento (LV / LP)", "LV"),
+        ]:
+            self._combo_tipo_servicio_bar.addItem(texto, valor)
+        self._combo_tipo_servicio_bar.currentIndexChanged.connect(self._on_filter_changed)
+        lay.addWidget(self._combo_tipo_servicio_bar)
 
         # -- Buscador rapido --------------------------------------------------
         self._search_global = QLineEdit()
@@ -2546,6 +2593,33 @@ class DashboardWidget(QWidget):
                 rows = filtered_rows
         # -----------------------------------
 
+        # --- APLICAR FILTRO DE TIPO DE SERVICIO / FORMATO ---
+        if hasattr(self, "_combo_tipo_servicio_bar"):
+            filtro_ts = str(self._combo_tipo_servicio_bar.currentData() or "").strip().upper()
+            if filtro_ts:
+                filtered_ts = []
+                for row in rows:
+                    f_str = str(row[0] or "").strip().upper()
+                    s_str = str(row[5] or "").strip().upper() if len(row) > 5 else ""
+                    if filtro_ts == "OSOB":
+                        if not (f_str.startswith("OSOB-") or "OSOB" in s_str or "OBSERVACION" in s_str):
+                            continue
+                    elif filtro_ts == "RMA":
+                        if not (f_str.startswith("RMA-") or "REFACCION" in s_str or "REMISI" in s_str):
+                            continue
+                    elif filtro_ts == "RE":
+                        if not (f_str.startswith("RE-") or "REVISI" in s_str):
+                            continue
+                    elif filtro_ts == "LV":
+                        if not (f_str.startswith("LV-") or f_str.startswith("LP-") or "LEVANTAMIENTO" in s_str):
+                            continue
+                    elif filtro_ts == "OS":
+                        if not f_str.startswith("OS-"):
+                            continue
+                    filtered_ts.append(row)
+                rows = filtered_ts
+        # ----------------------------------------------------
+
         # Guardar en caché para restauración instantánea
         self._data_cache['rows'] = rows
         self._cache_valid = True
@@ -2836,7 +2910,7 @@ class DashboardWidget(QWidget):
             return "Pendiente de Formato"
         if 'proc' in e:
             return "En Proceso"
-        if 'cerrad' in e or 'complet' in e:
+        if 'cerrad' in e or 'complet' in e or 'firmad' in e or 'finaliz' in e or 'terminad' in e:
             return "Cerrado"
         if 'asig' in e:
             return "Asignada"
@@ -2852,7 +2926,7 @@ class DashboardWidget(QWidget):
 
     @staticmethod
     def _check_has_mediciones(datos_val) -> bool:
-        """Verifica si la orden tiene mediciones metrológicas capturadas."""
+        """Verifica si la orden tiene mediciones metrológicas o checklist capturado."""
         if not datos_val:
             return False
         if isinstance(datos_val, str):
@@ -2872,7 +2946,8 @@ class DashboardWidget(QWidget):
         rep = datos.get('repetibilidad') or []
         exc = datos.get('excentricidad') or []
         exac = datos.get('exactitud') or []
-        return bool(rep or exc or exac)
+        chk = datos.get('checklist_inspeccion') or datos.get('pruebas_metrologicas') or []
+        return bool(rep or exc or exac or chk)
 
     @classmethod
     def _check_real_has_pdf(cls, folio: str, row_or_dict) -> bool:
@@ -3002,19 +3077,35 @@ class DashboardWidget(QWidget):
 
         # Col 6-9: badges (texto para el delegate)
         # Col 6: TIPO SERVICIO homologado (CCA + DVE / DVE + Ajuste / CCA + Ajuste / Ajuste)
-        if folio_text.startswith("LP-"):
+        folio_clean = folio_text.replace("▸ LOTE ", "").strip()
+        srv_clean = str(servicio or "").strip()
+        if folio_clean.startswith("LP-") or "LP-" in folio_text:
             servicio = "Levantamiento de Proyecto"
             item.setText(self._COL_SERVICIO, servicio)
-        elif folio_text.startswith("LV-"):
+        elif folio_clean.startswith("LV-") or "LV-" in folio_text:
             servicio = "Levantamiento Metrológico"
             item.setText(self._COL_SERVICIO, servicio)
-        elif folio_text.startswith("OSOB-"):
-            servicio = "Inspección y Revisión de Básculas (OSOB)"
+        elif (
+            folio_clean.startswith("OSOB-")
+            or "OSOB-" in folio_text
+            or srv_clean in (
+                "Observaciones",
+                "OSOB",
+                "Observaciones (OSOB)",
+                "Formato de Inspección y Revisión de Básculas",
+                "Inspección y Revisión de Básculas (OSOB)",
+            )
+        ):
+            servicio = "Observaciones"
             item.setText(self._COL_SERVICIO, servicio)
-        elif folio_text.startswith("RMA-"):
+            item.setToolTip(
+                self._COL_SERVICIO,
+                "Formato de Inspección y Revisión de Básculas (OSOB)\nAsignado: Observaciones",
+            )
+        elif folio_clean.startswith("RMA-") or "RMA-" in folio_text:
             servicio = "Remisión de Material"
             item.setText(self._COL_SERVICIO, servicio)
-        elif folio_text.startswith("RE-"):
+        elif folio_clean.startswith("RE-") or "RE-" in folio_text:
             servicio = "Revisión de Báscula"
             item.setText(self._COL_SERVICIO, servicio)
         else:
@@ -3044,8 +3135,17 @@ class DashboardWidget(QWidget):
             for col in range(self._table.columnCount()):
                 item.setBackground(col, bg)
 
+    @staticmethod
+    def _extraer_consecutivo(folio: str) -> int | None:
+        m = re.search(r'-(\d+)$', str(folio or '').strip())
+        return int(m.group(1)) if m else None
+
     def _fill_table_rows(self, rows: list) -> None:
         """Inserta items en el QTreeWidget agrupando por id_lote."""
+        def _extraer_consecutivo(folio: str) -> int | None:
+            m = re.search(r'-(\d+)$', str(folio or '').strip())
+            return int(m.group(1)) if m else None
+
         if not isinstance(rows, list):
             print(f"ADVERTENCIA: rows no es una lista, es {type(rows)}. Intentando extraer datos...")
             if isinstance(rows, dict):
@@ -3308,6 +3408,40 @@ class DashboardWidget(QWidget):
         """
         fi = folio_inicio.strip()
         ff = folio_fin.strip()
+
+        # 0. Compilar dinámicamente todos los PDFs individuales del lote si están disponibles en BD / disco
+        try:
+            import io
+            import tempfile
+            import pathlib
+            import subprocess
+            import sys
+            from pypdf import PdfReader, PdfWriter
+            writer = PdfWriter()
+            added_any = False
+            for fol in all_folios:
+                fol_clean = str(fol).strip()
+                raw_bytes = self._fetch_pdf_bytes_for_os(None, fol_clean)
+                if raw_bytes and len(raw_bytes) > 500:
+                    reader = PdfReader(io.BytesIO(raw_bytes))
+                    for pg in reader.pages:
+                        writer.add_page(pg)
+                    added_any = True
+            if added_any:
+                temp_dir = pathlib.Path(tempfile.gettempdir()) / "Pesa_PDFs"
+                temp_dir.mkdir(parents=True, exist_ok=True)
+                lote_pdf_path = temp_dir / f"{fi}_al_{ff}.pdf"
+                with open(lote_pdf_path, "wb") as fh:
+                    writer.write(fh)
+                if sys.platform == "win32":
+                    os.startfile(str(lote_pdf_path))
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", str(lote_pdf_path)], check=False)
+                else:
+                    subprocess.run(["xdg-open", str(lote_pdf_path)], check=False)
+                return
+        except Exception as exc_merge:
+            logger.debug("No se pudo compilar PDF combinado del lote %s..%s: %s", fi, ff, exc_merge)
 
         # 1. Intentar descargar/abrir archivo combinado de lote
         lote_cand = f"{fi}_al_{ff}"
@@ -3884,40 +4018,81 @@ class DashboardWidget(QWidget):
         else:
             # Si has_pdf es False:
             # Los botones [ ðŸ‘ PDF ] y [ ðŸ“¥ Descargar ] NO deben mostrarse habilitados como si ya existieran.
+            is_osob_folio = str(folio or "").strip().upper().startswith("OSOB-")
             btn_pdf = QPushButton("PDF")
-            btn_pdf.setObjectName("btn_action_pdf_disabled")
             btn_pdf.setFixedSize(54, 28)
-            btn_pdf.setEnabled(False)
-            btn_pdf.setStyleSheet("""
-                QPushButton {
-                    background-color: #F5F5F7;
-                    color: #8E8E93;
-                    border: 1px solid #E5E5EA;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 500;
-                    padding: 2px 3px;
-                }
-            """)
-            btn_pdf.setToolTip(f"PDF no disponible para {folio}")
+            if is_osob_folio:
+                btn_pdf.setObjectName("btn_action_pdf")
+                btn_pdf.setEnabled(True)
+                btn_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_pdf.setStyleSheet("""
+                    QPushButton {
+                        background-color: #E3F2FD;
+                        color: #1976D2;
+                        border: 1px solid #BBDEFB;
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: 600;
+                        padding: 2px 3px;
+                    }
+                    QPushButton:hover { background-color: #BBDEFB; }
+                """)
+                btn_pdf.setToolTip(f"Visualizar Formato de Inspección y Revisión de Básculas ({folio})")
+                btn_pdf.clicked.connect(lambda _, fl=str(folio): self._open_pdf(fl))
+            else:
+                btn_pdf.setObjectName("btn_action_pdf_disabled")
+                btn_pdf.setEnabled(False)
+                btn_pdf.setStyleSheet("""
+                    QPushButton {
+                        background-color: #F5F5F7;
+                        color: #8E8E93;
+                        border: 1px solid #E5E5EA;
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: 500;
+                        padding: 2px 3px;
+                    }
+                """)
+                btn_pdf.setToolTip(f"PDF no disponible para {folio}")
             lay.addWidget(btn_pdf)
 
             btn_dl = QPushButton("Descargar")
-            btn_dl.setObjectName("btn_action_download_disabled")
             btn_dl.setFixedSize(80, 28)
-            btn_dl.setEnabled(False)
-            btn_dl.setStyleSheet("""
-                QPushButton {
-                    background-color: #F5F5F7;
-                    color: #8E8E93;
-                    border: 1px solid #E5E5EA;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 500;
-                    padding: 2px 3px;
-                }
-            """)
-            btn_dl.setToolTip(f"PDF no disponible para {folio}")
+            if is_osob_folio:
+                btn_dl.setObjectName("btn_action_download")
+                btn_dl.setEnabled(True)
+                btn_dl.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_dl.setStyleSheet("""
+                    QPushButton {
+                        background-color: #E8F5E9;
+                        color: #2E7D32;
+                        border: 1px solid #C8E6C9;
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: 600;
+                        padding: 2px 3px;
+                    }
+                    QPushButton:hover { background-color: #C8E6C9; }
+                """)
+                btn_dl.setToolTip(f"Descargar PDF de {folio} al disco")
+                btn_dl.clicked.connect(
+                    lambda _, fid=os_id, fl=folio, rd=row_data: self._descargar_pdf_os(fid, fl, row_data=rd)
+                )
+            else:
+                btn_dl.setObjectName("btn_action_download_disabled")
+                btn_dl.setEnabled(False)
+                btn_dl.setStyleSheet("""
+                    QPushButton {
+                        background-color: #F5F5F7;
+                        color: #8E8E93;
+                        border: 1px solid #E5E5EA;
+                        border-radius: 6px;
+                        font-size: 11px;
+                        font-weight: 500;
+                        padding: 2px 3px;
+                    }
+                """)
+                btn_dl.setToolTip(f"PDF no disponible para {folio}")
             lay.addWidget(btn_dl)
 
             # Botón Capturar para permitir captura metrológica
@@ -4858,6 +5033,15 @@ recepcion@basculaspesa.com.mx
                 except Exception as exc_render:
                     logger.debug("No se pudo descargar PDF desde Render (%s) en _descargar_pdf_os para %s: %s", render_url, clean_folio, exc_render)
 
+        if (not pdf_src or not _os.path.exists(pdf_src)) and clean_folio.upper().startswith("OSOB-"):
+            try:
+                from services.pdf_router import regenerar_pdf_orden
+                gen_path = regenerar_pdf_orden(clean_folio, force=False)
+                if gen_path and _os.path.exists(gen_path):
+                    pdf_src = gen_path
+            except Exception as exc_gen:
+                logger.warning("No se pudo generar PDF OSOB para %s: %s", clean_folio, exc_gen)
+
         if not pdf_src or not _os.path.exists(pdf_src):
             QMessageBox.warning(
                 self, "PDF no encontrado",
@@ -5465,6 +5649,17 @@ recepcion@basculaspesa.com.mx
                         return raw
         except Exception as exc_render:
             logger.debug("No se pudo descargar PDF desde Render para %s: %s", clean_folio, exc_render)
+
+        # 4. Si es OSOB, generar vista previa con osob_pdf_generator si aún no existe en disco
+        if clean_folio.upper().startswith("OSOB-"):
+            try:
+                from services.pdf_router import regenerar_pdf_orden
+                gen_path = regenerar_pdf_orden(clean_folio, force=False)
+                if gen_path and _os.path.exists(gen_path) and _os.path.getsize(gen_path) > 100:
+                    with open(gen_path, "rb") as f:
+                        return f.read()
+            except Exception as exc_gen:
+                logger.debug("No se pudo generar PDF OSOB en _fetch_pdf_bytes_for_os para %s: %s", clean_folio, exc_gen)
 
         return None
 
@@ -6157,6 +6352,18 @@ recepcion@basculaspesa.com.mx
             _open_file(str(target_path))
             return True
 
+        # 6. Si es un folio OSOB-, generar vista previa oficial con osob_pdf_generator
+        if clean_folio.upper().startswith("OSOB-"):
+            try:
+                from services.pdf_router import regenerar_pdf_orden
+                gen_path = regenerar_pdf_orden(clean_folio, force=False)
+                if gen_path and pathlib.Path(gen_path).exists() and pathlib.Path(gen_path).stat().st_size > 500:
+                    logger.info("PDF OSOB generado en vista previa: %s", gen_path)
+                    _open_file(str(gen_path))
+                    return True
+            except Exception as exc_osob_gen:
+                logger.warning("Error generando vista previa PDF OSOB para %s: %s", clean_folio, exc_osob_gen)
+
         return False
 
     def _open_pdf(self, os_id_or_folio) -> None:
@@ -6280,6 +6487,9 @@ recepcion@basculaspesa.com.mx
 
     def _on_tree_item_double_click_full(self, item: QTreeWidgetItem, col: int) -> None:
         """Doble-clic en item del arbol: abre PDF (fisico) o formulario (digital)."""
+        if item.childCount() > 0:
+            item.setExpanded(not item.isExpanded())
+            return
         os_id = item.data(self._COL_FOLIO, Qt.ItemDataRole.UserRole)
         if not os_id:
             return
@@ -6289,6 +6499,10 @@ recepcion@basculaspesa.com.mx
 
         if folio.startswith("LP-"):
             self.lp_selected.emit(int(os_id))
+            return
+
+        if folio.upper().startswith("OSOB-"):
+            self._abrir_captura_digital(os_id, folio)
             return
 
         if modalidad.upper() == "DIGITAL":

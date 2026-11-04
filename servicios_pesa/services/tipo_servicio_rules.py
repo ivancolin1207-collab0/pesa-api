@@ -299,7 +299,7 @@ def etiqueta_corta(nombre: Optional[str], id_tipo: Optional[int] = None,
     (CCA = Calibración, DVE = Inspección). También Observaciones · Remisión · Revisión · Sin tipo."""
     fmt, cca, dve, aju = _clasificar(nombre, id_tipo, folio)
     if fmt == "osob":
-        return "Inspección y Revisión de Básculas (OSOB)"
+        return "Observaciones"
     if fmt == "rma":
         return "Remisión"
     if fmt == "re":
