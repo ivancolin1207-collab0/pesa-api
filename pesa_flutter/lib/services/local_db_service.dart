@@ -139,9 +139,34 @@ class LocalDbService {
     try {
       await db.execute(_createTableBorradoresSql);
       await _limpiarLoteInstrumentosClonados(db);
+      await _limpiarBorradoresOsobCorruptos(db);
       _borradoresVerificada = true;
     } catch (e) {
       debugPrint('[LocalDB] Error creando borradores_captura: $e');
+    }
+  }
+
+  /// Limpia borradores corruptos de RMA guardados por error en folios OSOB-%
+  /// y corrige tipo_documento = 'OSOB' en ordenes_servicio.
+  Future<void> _limpiarBorradoresOsobCorruptos(Database db) async {
+    try {
+      await db.rawDelete('''
+        DELETE FROM borradores_captura
+        WHERE UPPER(folio_os) LIKE 'OSOB-%'
+          AND (
+            draft_json LIKE '%"partidas"%'
+            OR draft_json LIKE '%"items"%'
+            OR draft_json NOT LIKE '%"checklist_inspeccion"%'
+          )
+      ''');
+      await db.rawUpdate('''
+        UPDATE ordenes_servicio
+        SET tipo_documento = 'OSOB',
+            partidas = NULL
+        WHERE UPPER(folio_os) LIKE 'OSOB-%'
+      ''');
+    } catch (e) {
+      debugPrint('[LocalDB] Aviso en _limpiarBorradoresOsobCorruptos: $e');
     }
   }
 
@@ -730,7 +755,7 @@ class LocalDbService {
           'firma_cliente':     (raw['firma_cliente'] ?? raw['firma_cliente_b64'])?.toString(),
           'pdf_path_local':    raw['pdf_path_local']?.toString(),
           'pdf_b64_local':     (raw['pdf_b64_local'] ?? raw['pdf_b64'])?.toString(),
-          'tipo_documento':    (raw['tipo_documento'] ?? (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS')))))?.toString(),
+          'tipo_documento':    (raw['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS'))))))?.toString(),
           'datos_tecnicos_json': raw['datos_tecnicos_json']?.toString(),
           'partidas':          raw['partidas'] is String
               ? raw['partidas']
@@ -1111,6 +1136,11 @@ class LocalDbService {
       'unidad_medida':     data['unidad_medida']?.toString() ?? 'kg',
       'id_lote':           (data['id_lote'] ?? data['lote'])?.toString() ?? '',
       'rango_lote':        data['rango_lote']?.toString() ?? '',
+      'tipo_documento':    (data['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.toUpperCase().startsWith('RMA') ? 'RMA' : (folio.toUpperCase().startsWith('RE') ? 'RE' : (folio.toUpperCase().startsWith('LP') ? 'LP' : (folio.toUpperCase().startsWith('LV') ? 'LV' : 'OS'))))))?.toString(),
+      if (data['datos_tecnicos_json'] != null)
+        'datos_tecnicos_json': data['datos_tecnicos_json'] is String
+            ? data['datos_tecnicos_json']
+            : jsonEncode(data['datos_tecnicos_json']),
       if (data['firma_tecnico_descargada'] != null)
         'firma_tecnico_descargada': data['firma_tecnico_descargada']?.toString(),
       if (data['firma_tecnico'] != null && data['firma_tecnico'].toString().isNotEmpty)
@@ -1688,7 +1718,19 @@ class LocalDbService {
       if (rows.isEmpty) return null;
       final raw = rows.first['draft_json'] as String?;
       if (raw == null || raw.isEmpty) return null;
-      return jsonDecode(raw) as Map<String, dynamic>;
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      if (folioKey.toUpperCase().startsWith('OSOB-') &&
+          (decoded.containsKey('partidas') ||
+              decoded.containsKey('items') ||
+              !decoded.containsKey('checklist_inspeccion'))) {
+        await db.delete(
+          'borradores_captura',
+          where: 'folio_os = ?',
+          whereArgs: [folioKey],
+        );
+        return null;
+      }
+      return decoded;
     } catch (e) {
       debugPrint('[LocalDB] Error recuperando borrador para $folioKey: $e');
       return null;

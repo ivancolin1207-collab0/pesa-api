@@ -562,8 +562,10 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         planta: dirPlanta,
         nombreContacto: nombreReceptor,
       );
-      final loteKey = _pickFromMap(_datosCombinados, ['lote_id', 'id_lote', 'sucursal_id', 'cliente'], cliente);
-      LoteSession.registrarResponsable(loteKey, nombreReceptor);
+      final loteKey = _pickFromMap(_datosCombinados, ['lote_id', 'id_lote']);
+      if (loteKey.isNotEmpty && loteKey.toLowerCase() != 'null' && loteKey.toLowerCase() != 'none') {
+        LoteSession.registrarResponsable(loteKey, nombreReceptor);
+      }
 
       await LocalDbService.instance.saveFirmas(
         localId: localId,
@@ -1607,8 +1609,10 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   // TARJETA SECCIÓN 5: OBSERVACIONES Y FIRMAS
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildSeccion5ObservacionesFirmasCard(String cliente) {
-    final loteKey = _pickFromMap(_datosCombinados, ['lote_id', 'id_lote', 'sucursal_id', 'cliente'], cliente);
-    final sugerenciaLote = LoteSession.getUltimoResponsable(loteKey);
+    final loteKey = _pickFromMap(_datosCombinados, ['lote_id', 'id_lote']);
+    final sugerenciaLote = (loteKey.isNotEmpty && loteKey.toLowerCase() != 'null' && loteKey.toLowerCase() != 'none')
+        ? LoteSession.getUltimoResponsable(loteKey)
+        : null;
     final mostrarChipLote = sugerenciaLote != null &&
         sugerenciaLote.isNotEmpty &&
         !esRazonSocialEmpresa(sugerenciaLote, cliente) &&

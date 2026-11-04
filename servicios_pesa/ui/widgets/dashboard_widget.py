@@ -3075,87 +3075,28 @@ class DashboardWidget(QWidget):
                     _seen_folios[_folio_key] = _r
             rows = list(_seen_folios.values()) if _seen_folios else rows
 
-            # â”€â”€ Agrupar filas: primero por id_lote (BD), luego retroactivo en Python â”€
-            # Para registros históricos sin id_lote, detectar folios consecutivos que
-            # comparten (fecha, cliente, tecnico, servicio) â†’ tratarlos como lote virtual.
+            # ── Agrupar filas estrictamente por id_lote explícito (BD) ──
+            # Los formatos individuales (id_lote nulo/vacío) NUNCA se agrupan en lotes.
             from collections import OrderedDict
 
             lote_groups: OrderedDict[str, list] = OrderedDict()
-            rows_sin_lote: list = []
-
+            singles: list = []
 
             for row in rows:
                 id_lote = row[9] if len(row) > 9 else None
-                if id_lote:
-                    key = str(id_lote)
-                    lote_groups.setdefault(key, []).append(row)
+                id_lote_str = str(id_lote).strip() if id_lote is not None else ""
+                if id_lote_str and id_lote_str.lower() not in ("none", "null", ""):
+                    lote_groups.setdefault(id_lote_str, []).append(row)
                 else:
-                    rows_sin_lote.append(row)
+                    singles.append(row)
 
-            # â”€â”€ Agrupación retroactiva: folios consecutivos mismo cliente/fecha/tec/srv â”€â”€
-            def _extraer_consecutivo(folio: str) -> int | None:
-                """Extrae el último número de un folio tipo OS-26-570 â†’ 570."""
-                try:
-                    return int(str(folio).split("-")[-1])
-                except (ValueError, IndexError):
-                    return None
-
-            def _clave_grupo(row) -> tuple:
-                """Clave de agrupación: fecha + cliente + técnico + tipo_servicio."""
-                return (
-                    str(row[1] or ""),   # fecha
-                    str(row[2] or ""),   # cliente
-                    str(row[4] or ""),   # tecnico
-                    str(row[5] or ""),   # tipo_servicio
-                    str(row[6] or ""),   # modalidad
-                )
-
-            # Ordenar los singles por clave de grupo y consecutivo para detectar secuencias
-            rows_sin_lote_sorted = sorted(
-                rows_sin_lote,
-                key=lambda r: (_clave_grupo(r), _extraer_consecutivo(str(r[0] or "")) or 0)
-            )
-
-            singles: list = []   # filas finalmente sin grupo (lote size = 1)
-            retro_groups: OrderedDict[str, list] = OrderedDict()
-
-            if rows_sin_lote_sorted:
-                current_group: list = [rows_sin_lote_sorted[0]]
-                retro_key_counter = 0
-
-                for row in rows_sin_lote_sorted[1:]:
-                    prev = current_group[-1]
-                    prev_consec = _extraer_consecutivo(str(prev[0] or ""))
-                    curr_consec = _extraer_consecutivo(str(row[0] or ""))
-                    same_group = (
-                        _clave_grupo(row) == _clave_grupo(prev)
-                        and prev_consec is not None
-                        and curr_consec is not None
-                        and curr_consec == prev_consec + 1
-                    )
-                    if same_group:
-                        current_group.append(row)
-                    else:
-                        # Cerrar grupo anterior
-                        if len(current_group) >= 2:
-                            retro_key = f"RETRO-{retro_key_counter}"
-                            retro_key_counter += 1
-                            retro_groups[retro_key] = current_group
-                        else:
-                            singles.extend(current_group)
-                        current_group = [row]
-
-                # Cerrar último grupo
-                if len(current_group) >= 2:
-                    retro_key = f"RETRO-{retro_key_counter}"
-                    retro_groups[retro_key] = current_group
-                else:
-                    singles.extend(current_group)
-
-            # Unir grupos de BD + grupos retroactivos
+            # Solo conservar como lote aquellos grupos con más de 1 orden; si solo hay 1, pasar a singles
             all_groups: OrderedDict[str, list] = OrderedDict()
-            all_groups.update(lote_groups)
-            all_groups.update(retro_groups)
+            for _lkey, _lrows in lote_groups.items():
+                if len(_lrows) > 1:
+                    all_groups[_lkey] = _lrows
+                else:
+                    singles.extend(_lrows)
 
             _CHK_STYLE = """
                 QCheckBox::indicator { width: 16px; height: 16px; border-radius: 4px; }

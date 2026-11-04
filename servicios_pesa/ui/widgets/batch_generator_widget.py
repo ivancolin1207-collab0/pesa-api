@@ -1351,7 +1351,8 @@ class BatchGeneratorWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
         self._modalidad:  str = ""   # "DIGITAL" | "FISICO" | "HIBRIDO"
-        self._tipo_doc:   str = ""   # "OS" | "RMA" | "RE"
+        self._tipo_doc:   str = ""   # "OS" | "RMA" | "RE" | "LP" | "LV" | "OSOB"
+        self.id_lote_actual: Optional[str] = None
         self._clientes:   list[str] = []
         self._clientes_ids: list[int] = []
         self._tecnicos:   list[tuple[int, str]] = []
@@ -1587,8 +1588,10 @@ class BatchGeneratorWidget(QWidget):
         self.cmb_cliente.setView(QListView())
         self.cmb_cliente.setMinimumWidth(240)
         self.cmb_cliente.setEditable(True)
+        self.cmb_cliente.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         self.cmb_cliente.setPlaceholderText("— Selecciona un cliente —")
         self.cmb_cliente.currentIndexChanged.connect(self._on_cliente_changed)
+        self.cmb_cliente.editTextChanged.connect(self._on_cliente_text_edited)
         col_cliente.addWidget(self.cmb_cliente)
         row1.addLayout(col_cliente, stretch=2)
 
@@ -1885,6 +1888,7 @@ class BatchGeneratorWidget(QWidget):
         col_cant.setSpacing(6)
         col_cant.addWidget(_field_label("Cantidad de Formatos", required=True))
         self.spn_cantidad = QSpinBox()
+        self.spin_cantidad = self.spn_cantidad
         self.spn_cantidad.setRange(1, 50)
         self.spn_cantidad.setValue(1)
         self.spn_cantidad.setSuffix("  formato(s)")
@@ -2111,9 +2115,10 @@ class BatchGeneratorWidget(QWidget):
         grid.addWidget(self._frame_rma_items)
         self._frame_rma_items.setVisible(False)
 
-        # Agregar 3 filas iniciales RMA (visibles solo cuando RMA esté activo)
-        for _ in range(3):
-            self._rma_add_item_row()
+        # Agregar 1 fila inicial limpia RMA (visible cuando RMA esté activo)
+        self._rma_add_item_row()
+        if self._rma_item_rows:
+            self._rma_item_rows[0]["cantidad"].setText("1")
 
         # ── Bloque exclusivo LV: N Básculas + Logística de Pesas Patrón ─────────────
         self._frame_lv_basculas = QFrame()
@@ -2342,7 +2347,7 @@ class BatchGeneratorWidget(QWidget):
             }
             QPushButton:hover { background: rgba(0,0,0,0.04); color: #1D1D1F; }
         """)
-        self.btn_reiniciar.clicked.connect(self._reset)
+        self.btn_reiniciar.clicked.connect(self.reiniciar_formulario)
         lay.addWidget(self.btn_reiniciar)
 
         lay.addStretch()
@@ -2598,6 +2603,20 @@ class BatchGeneratorWidget(QWidget):
 
         self.cmb_sucursal.setEnabled(True)
         self.cmb_sucursal.blockSignals(False)
+
+    def _on_cliente_text_edited(self, text: str) -> None:
+        """Si el usuario borra manualmente el texto del cliente, limpiar la sucursal inmediatamente."""
+        cleaned = (text or "").strip()
+        if not cleaned or "Selecciona" in cleaned or cleaned.startswith("—"):
+            if hasattr(self, "cmb_sucursal"):
+                self.cmb_sucursal.blockSignals(True)
+                self.cmb_sucursal.clear()
+                self.cmb_sucursal.addItem("— Selecciona sucursal —", None)
+                self.cmb_sucursal.setCurrentIndex(0)
+                self.cmb_sucursal.setEnabled(False)
+                self.cmb_sucursal.blockSignals(False)
+            self._current_catalog = []
+        self._on_params_changed()
 
     def _on_sucursal_changed(self, index=0):
         """Carga el catálogo de equipos de la sucursal seleccionada para el autocompletado."""
@@ -3339,6 +3358,7 @@ class BatchGeneratorWidget(QWidget):
                         f"(Original + Copia Calca por folio)\n\nAbriendo vista previa…"
                     )
                     self._abrir_pdf_preview(pdf_path)
+                    self.reiniciar_formulario()
                 except Exception as exc:
                     logger.exception("Error generando PDF lote: %s", exc)
                     QMessageBox.critical(
@@ -3419,6 +3439,7 @@ class BatchGeneratorWidget(QWidget):
                         AppSession.dashboard_refresh()
                 except Exception:
                     pass
+                self.reiniciar_formulario()
         except Exception as exc:
             self._set_loading(False)
             logger.exception("Error al asignar a tablet: %s", exc)
@@ -3450,6 +3471,8 @@ class BatchGeneratorWidget(QWidget):
                 logger.info("Formulario digital completado para folio: %s", folio)
                 self.btn_llenar_digital.setVisible(False)
                 self._ultimo_folio_digital = ""
+                self._ultimo_os_data_digital = {}
+                self.reiniciar_formulario()
         except Exception as exc:
             logger.exception("Error abriendo formulario digital: %s", exc)
             QMessageBox.critical(self, "Error", f"No se pudo abrir el formulario digital:\n\n{exc}")
@@ -3800,16 +3823,25 @@ class BatchGeneratorWidget(QWidget):
             id_tipo_inst_1 = equipos[0].get("id_tipo_instrumento")
             tipo_inst_nom_1 = equipos[0].get("tipo_instrumento") or ""
 
+        cantidad = self.spn_cantidad.value()
+        if cantidad > 1:
+            import uuid
+            id_lote_nuevo = f"LOTE-{uuid.uuid4().hex[:8].upper()}"
+        else:
+            id_lote_nuevo = None  # FORMATOS INDIVIDUALES NUNCA LLEVAN ID DE LOTE
+        self.id_lote_actual = id_lote_nuevo
+
         datos_formato = {
             "modalidad":             self._modalidad,
             "tipo_doc":              self._tipo_doc or "OS",
+            "id_lote":               id_lote_nuevo,
             "cliente":               cliente_nom,
             "id_cliente":            id_cliente,
             "id_tecnico":            tecnico_id,
             "tecnico_nombre":        tecnico_nom,
             "id_tipo_instrumento":   int(id_tipo_inst_1) if id_tipo_inst_1 is not None else None,
             "tipo_instrumento":      tipo_inst_nom_1,
-            "cantidad":              self.spn_cantidad.value(),
+            "cantidad":              cantidad,
             "fecha":                 self.dte_fecha.date().toPyDate(),
             "observaciones_tecnico": obs,
             "equipos":               equipos,
@@ -3904,7 +3936,11 @@ class BatchGeneratorWidget(QWidget):
             estado = "ASIGNADA"
 
         import uuid
-        id_lote = str(uuid.uuid4()) if cant > 1 else None
+        if cant > 1:
+            id_lote = datos.get("id_lote") or f"LOTE-{uuid.uuid4().hex[:8].upper()}"
+        else:
+            id_lote = None  # FORMATOS INDIVIDUALES NUNCA LLEVAN ID DE LOTE
+        self.id_lote_actual = id_lote
         # rango_lote: se calcula después de conocer folio_base (ver más abajo)
         _rango_lote: str | None = None
 
@@ -3912,6 +3948,23 @@ class BatchGeneratorWidget(QWidget):
             conn = _db_pool.get_connection()
             try:
                 with conn.cursor() as cur:
+                    # Verificar tipo de columna id_lote en ordenes_servicio (VARCHAR vs UUID)
+                    _id_lote_db = id_lote
+                    if id_lote is not None:
+                        try:
+                            cur.execute(
+                                "SELECT data_type FROM information_schema.columns WHERE table_name = 'ordenes_servicio' AND column_name = 'id_lote'"
+                            )
+                            _col_row = cur.fetchone()
+                            if _col_row and str(_col_row[0]).lower() == "uuid":
+                                try:
+                                    uuid.UUID(str(id_lote))
+                                except ValueError:
+                                    _id_lote_db = str(uuid.uuid4())
+                        except Exception:
+                            pass
+                    else:
+                        _id_lote_db = None
                     # Determinar prefijo y base a partir del folio manual proveído por el usuario.
                     # El campo input_folio_inicial siempre tiene prioridad sobre cualquier valor
                     # calculado automáticamente. Si folio_base está vacío (caso defensivo),
@@ -4076,6 +4129,8 @@ class BatchGeneratorWidget(QWidget):
                         # Sobrescribir con los campos exclusivos del instrumento idx (datos_eq)
                         for _k, _v in datos_eq.items():
                             _dt_dict[_k] = copy.deepcopy(_v)
+                        _dt_dict["id_lote"] = id_lote
+                        _dt_dict["rango_lote"] = _rango_lote
                         _dt_dict["equipos"] = [copy.deepcopy(datos_eq)]
                         _dt_json_str = json.dumps(_dt_dict, ensure_ascii=False, default=str)
 
@@ -4092,11 +4147,16 @@ class BatchGeneratorWidget(QWidget):
                                 SET datos_tecnicos_json   = %s,
                                     tipo_documento        = %s,
                                     modalidad             = %s,
-                                    id_cliente            = COALESCE(%s, id_cliente),
-                                    id_tecnico            = COALESCE(%s, id_tecnico),
-                                    sucursal_id           = COALESCE(%s, sucursal_id),
-                                    observaciones         = COALESCE(%s, observaciones),
+                                    fecha                 = %s,
+                                    id_tipo_servicio      = %s,
+                                    tipo_servicio         = %s,
+                                    id_cliente            = %s,
+                                    id_tecnico            = %s,
+                                    sucursal_id           = %s,
+                                    observaciones         = %s,
                                     estado                = %s,
+                                    id_lote               = %s,
+                                    rango_lote            = %s,
                                     id_tipo_instrumento   = %s,
                                     aplica_excentricidad  = %s,
                                     filas_excentricidad   = %s,
@@ -4119,11 +4179,16 @@ class BatchGeneratorWidget(QWidget):
                                     _dt_json_str,
                                     tipo,
                                     datos.get("modalidad", "FISICO"),
+                                    datos["fecha"],
+                                    datos.get("id_tipo_servicio"),
+                                    datos.get("tipo_servicio_mapped"),
                                     datos.get("id_cliente"),
                                     datos.get("id_tecnico"),
                                     datos.get("sucursal_id"),
                                     datos.get("observaciones_tecnico"),
                                     estado,
+                                    _id_lote_db,
+                                    _rango_lote,
                                     _id_tipo_inst,
                                     _aplica_exc,
                                     _filas_exc,
@@ -4170,7 +4235,7 @@ class BatchGeneratorWidget(QWidget):
                                     datos.get("id_cliente"),
                                     datos.get("id_tecnico"),
                                     datos.get("observaciones_tecnico"),
-                                    estado, id_lote, _rango_lote,
+                                    estado, _id_lote_db, _rango_lote,
                                     _id_tipo_inst,
                                     _aplica_exc,
                                     _filas_exc,
@@ -4882,39 +4947,117 @@ class BatchGeneratorWidget(QWidget):
         self._progress.setVisible(loading)
         self.btn_ejecutar.setEnabled(not loading)
 
-    def _reset(self) -> None:
-        """Reinicia el asistente a su estado inicial."""
-        self._modalidad = ""
-        self._tipo_doc  = ""
+    def actualizar_consecutivo(self) -> str:
+        """Recalcula y actualiza en pantalla el Folio Inicial (Consecutivo) consultando el siguiente disponible en BD."""
+        tipo_doc = getattr(self, "_tipo_doc", "") or "OS"
+        nuevo_folio = self._obtener_siguiente_folio(tipo_doc)
+        if hasattr(self, "input_folio_inicial"):
+            self.input_folio_inicial.blockSignals(True)
+            self.input_folio_inicial.clear()
+            self.input_folio_inicial.setText(str(nuevo_folio))
+            self.input_folio_inicial.setEnabled(True)
+            self.input_folio_inicial.setReadOnly(False)
+            self.input_folio_inicial.blockSignals(False)
+        self._actualizar_resumen()
+        return nuevo_folio
 
-        # Desmarcar tarjetas de modalidad
-        self._card_digital.setChecked(False)
-        self._card_fisico.setChecked(False)
+    def reiniciar_formulario(self) -> None:
+        """
+        Ejecuta una limpieza profunda de todos los controles del formulario
+        tras asignar/imprimir o al presionar '↺ Reiniciar':
+          1. self.id_lote_actual = None
+          2. Limpiar Cliente / Razón Social
+          3. Limpiar Sucursal / Planta
+          4. Limpiar Técnico Asignado
+          5. Regresar Cantidad de Formatos a 1
+          6. Limpiar Observaciones del Servicio
+          7. Vaciar Partidas / Refacciones a Entregar y dejar 1 fila en blanco
+          8. Resetear Instrumentos / Básculas dejando solo Instrumento 1 limpio
+          9. Recalcular y actualizar en pantalla el Folio Inicial (Consecutivo)
+        """
+        # 1. Destruir cualquier referencia al lote anterior
+        self.id_lote_actual = None
 
-        # Desmarcar tarjetas de documento
-        for _btn in [self._card_os, self._card_rma, self._card_re, self._card_lp]:
-            _btn.setChecked(False)
-        if hasattr(self, "_card_lv"):
-            self._card_lv.setChecked(False)
-        if hasattr(self, "_card_osob"):
-            self._card_osob.setChecked(False)
+        # 2. Limpiar Cliente / Razón Social (índice 0 y texto vacío)
+        if hasattr(self, "cmb_cliente"):
+            self.cmb_cliente.blockSignals(True)
+            if self.cmb_cliente.count() > 0:
+                self.cmb_cliente.setItemText(0, "— Selecciona un cliente —")
+                self.cmb_cliente.setCurrentIndex(0)
+            if self.cmb_cliente.isEditable() and self.cmb_cliente.lineEdit() is not None:
+                self.cmb_cliente.lineEdit().clear()
+                self.cmb_cliente.lineEdit().setPlaceholderText("— Selecciona un cliente —")
+            self.cmb_cliente.blockSignals(False)
 
-        # Resetear parámetros
-        self.cmb_cliente.setCurrentIndex(0)
-        self.cmb_tecnico.setCurrentIndex(0)
-        self.spn_cantidad.setValue(1)
-        self.dte_fecha.setDate(QDate.currentDate())
-        self.txt_observaciones.clear()
-        # Resetear campos de estructura RE
-        if hasattr(self, "_frame_re_estructura"):
-            self._frame_re_estructura.setVisible(False)
+        # 3. Limpiar Sucursal / Planta (vaciar ComboBox y dejarlo en blanco)
+        if hasattr(self, "cmb_sucursal"):
+            self.cmb_sucursal.blockSignals(True)
+            self.cmb_sucursal.clear()
+            self.cmb_sucursal.addItem("— Selecciona sucursal —", None)
+            self.cmb_sucursal.setCurrentIndex(0)
+            self.cmb_sucursal.setEnabled(False)
+            self.cmb_sucursal.blockSignals(False)
+        self._current_catalog = []
+
+        # 4. Limpiar Técnico Asignado (índice 0 / sin selección)
+        if hasattr(self, "cmb_tecnico"):
+            self.cmb_tecnico.blockSignals(True)
+            if self.cmb_tecnico.count() > 0:
+                self.cmb_tecnico.setCurrentIndex(0)
+            if self.cmb_tecnico.isEditable() and self.cmb_tecnico.lineEdit() is not None:
+                self.cmb_tecnico.lineEdit().clear()
+            self.cmb_tecnico.blockSignals(False)
+
+        # 5. Regresar Cantidad de Formatos a 1 y Fecha a hoy
+        if hasattr(self, "spn_cantidad"):
+            self.spn_cantidad.blockSignals(True)
+            self.spn_cantidad.setValue(1)
+            self.spn_cantidad.blockSignals(False)
+        if hasattr(self, "dte_fecha"):
+            self.dte_fecha.blockSignals(True)
+            self.dte_fecha.setDate(QDate.currentDate())
+            self.dte_fecha.blockSignals(False)
+        if hasattr(self, "cmb_tipo_servicio") and self.cmb_tipo_servicio.count() > 0:
+            self.cmb_tipo_servicio.blockSignals(True)
+            self.cmb_tipo_servicio.setCurrentIndex(0)
+            self.cmb_tipo_servicio.blockSignals(False)
+
+        # 6. Limpiar Observaciones del Servicio
+        if hasattr(self, "txt_observaciones"):
+            self.txt_observaciones.clear()
+
+        # 7. Vaciar Partidas / Refacciones a Entregar y dejar únicamente 1 fila en blanco
+        if hasattr(self, "_rma_item_rows") and hasattr(self, "_rma_items_container"):
+            while self._rma_item_rows:
+                row_info = self._rma_item_rows.pop()
+                w_row = row_info.get("widget")
+                if w_row is not None:
+                    self._rma_items_container.removeWidget(w_row)
+                    w_row.setParent(None)
+                    w_row.deleteLater()
+            self._rma_add_item_row()
+            if self._rma_item_rows:
+                self._rma_item_rows[0]["cantidad"].setText("1")
+                self._rma_item_rows[0]["parte"].clear()
+                self._rma_item_rows[0]["desc"].clear()
+                self._rma_item_rows[0]["serie"].clear()
+
+        # 8. Resetear Instrumentos / Básculas: destruir todas las tarjetas y crear solo Instrumento 1 vacío
+        if hasattr(self, "_equipo_cards") and hasattr(self, "_equipos_container"):
+            while self._equipo_cards:
+                card = self._equipo_cards.pop()
+                self._equipos_container.removeWidget(card)
+                card.setParent(None)
+                card.deleteLater()
+            self._update_equipos_section(1)
+
+        # Resetear campos de estructura e indicador RE
         if hasattr(self, "cmb_tipo_estructura"):
             self.cmb_tipo_estructura.setCurrentIndex(0)
         if hasattr(self, "cmb_instalacion_camionera"):
             self.cmb_instalacion_camionera.setCurrentIndex(0)
         if hasattr(self, "spn_secciones_camionera"):
             self.spn_secciones_camionera.setValue(2)
-        # Resetear campos de indicador y celdas RE
         for _attr in [
             "le_ind_marca", "le_ind_modelo", "le_ind_serie", "le_ind_id",
             "le_cap_maxima", "le_div_minima",
@@ -4931,32 +5074,30 @@ class BatchGeneratorWidget(QWidget):
             self.cmb_celdas_homogeneas.setCurrentIndex(0)
         if hasattr(self, "_widget_grupo_b"):
             self._widget_grupo_b.setVisible(False)
-        # Resetear controles de calibración
-        if hasattr(self, "_frame_calibracion"):
-            self._frame_calibracion.setVisible(False)
 
-        # Resetear tarjetas de equipo a 1
-        self._update_equipos_section(1)
+        # Resetear filas de básculas LV
+        if hasattr(self, "_lv_bascula_rows") and hasattr(self, "_lv_basculas_container"):
+            while self._lv_bascula_rows:
+                row_lv = self._lv_bascula_rows.pop()
+                w_lv = row_lv.get("widget")
+                if w_lv is not None:
+                    self._lv_basculas_container.removeWidget(w_lv)
+                    w_lv.setParent(None)
+                    w_lv.deleteLater()
+            if hasattr(self, "spn_lv_basculas"):
+                self.spn_lv_basculas.blockSignals(True)
+                self.spn_lv_basculas.setValue(1)
+                self.spn_lv_basculas.blockSignals(False)
+            self._lv_add_bascula_row()
+        if hasattr(self, "txt_lv_pesas"):
+            self.txt_lv_pesas.clear()
+        if hasattr(self, "txt_lv_maniobra"):
+            self.txt_lv_maniobra.clear()
 
-        # Deshabilitar pasos 2-4
-        for card in [self._card_step2, self._card_step3, self._card_step4]:
-            card.setEnabled(False)
-            card.setStyleSheet("""
-                QFrame { background: #FAFAFA; border: 1px solid rgba(0,0,0,0.05);
-                         border-radius: 14px; }
-            """)
+        # 9. Recalcular y actualizar en pantalla el Folio Inicial (Consecutivo)
+        self.actualizar_consecutivo()
+        self.btn_ejecutar.setEnabled(True)
 
-        self.btn_ejecutar.setEnabled(False)
-        self.btn_ejecutar.setText("🖨️  Generar e Imprimir PDF")
-        self._lbl_title.setText("🖨️  Asistente de Generación de Formatos")
-        if hasattr(self, '_lbl_resumen'):
-            self._lbl_resumen.setText("")
-        # Limpiar folio para que se auto-pueble con el consecutivo real en el próximo ciclo
-        if hasattr(self, 'input_folio_inicial'):
-            self.input_folio_inicial.blockSignals(True)
-            self.input_folio_inicial.clear()
-            self.input_folio_inicial.blockSignals(False)
-        if hasattr(self, 'lbl_folio_preview'):
-            self.lbl_folio_preview.setText("")
-        if hasattr(self, '_lbl_modo_badge'):
-            self._lbl_modo_badge.setText("")
+    def _reset(self) -> None:
+        """Alias hacia reiniciar_formulario() para compatibilidad."""
+        self.reiniciar_formulario()

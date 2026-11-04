@@ -1132,15 +1132,12 @@ class SyncService extends ChangeNotifier {
     return lista.first;
   }
 
-  /// Clave de lote igual a la del tablero (_groupByLote): id_lote o cliente+sucursal+fecha.
+  /// Clave de lote igual a la del tablero (_groupByLote): únicamente id_lote explícito.
   static String _claveLote(Map<String, dynamic> os) {
     final lote = (os['id_lote'] ?? os['lote'])?.toString().trim() ?? '';
-    if (lote.isNotEmpty) return lote;
-    final cliente  = (os['cliente'] ?? '').toString().trim();
-    final sucursal = (os['sucursal'] ?? '').toString().trim();
-    final fecha = (os['fecha_servicio'] ?? os['fecha_os'] ?? os['fecha'] ?? '')
-        .toString().split('T').first.trim();
-    if (cliente.isNotEmpty && fecha.isNotEmpty) return 'grp_${cliente}_${sucursal}_$fecha';
+    if (lote.isNotEmpty && lote.toLowerCase() != 'null' && lote.toLowerCase() != 'none') {
+      return lote;
+    }
     return 'solo_${os['folio_os'] ?? os['folio'] ?? os['local_id']}';
   }
 
@@ -1580,7 +1577,7 @@ class SyncService extends ChangeNotifier {
             }
           } catch (_) {}
         }
-        final String? tipoDocVal = (remota['tipo_documento'] ?? (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS')))))?.toString();
+        final String? tipoDocVal = (remota['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS'))))))?.toString();
         final String? dtVal = remota['datos_tecnicos_json']?.toString();
 
         // 1. UPDATE directo en 'ordenes' (mediante trigger INSTEAD OF UPDATE) exactamente como pide el spec

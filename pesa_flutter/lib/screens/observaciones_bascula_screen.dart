@@ -9,6 +9,7 @@
 //   SECCIÓN 4. Diagnóstico General, Observaciones y Refacciones
 //   SECCIÓN 5. Firmas de Conformidad
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -70,7 +71,6 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
   final _serieCtrl = TextEditingController();
   final _capMaxCtrl = TextEditingController();
   final _divMinCtrl = TextEditingController();
-  final _indicadorCtrl = TextEditingController();
   final _tipoInstOtroCtrl = TextEditingController();
   String _tipoInstrumento = 'Mesa'; // 'Mesa' | 'Camionera' | 'Colgante' | 'Tolva' | 'Tanque' | 'Otro'
 
@@ -125,6 +125,9 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
   Uint8List? _firmaTecPre;
   bool _usarFirmaPre = false;
   bool _guardando = false;
+  bool _cargandoInicial = true;
+  bool _finalizadaExitosamente = false;
+  Timer? _autoSaveDebounce;
 
   Map<String, dynamic> _datosCombinados = {};
 
@@ -134,7 +137,45 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     _chkObsCtrls = {
       for (int i = 1; i <= 14; i++) i: TextEditingController(),
     };
+    _registrarListenersAutoGuardado();
     _cargarDatos();
+  }
+
+  void _registrarListenersAutoGuardado() {
+    final ctrls = <TextEditingController>[
+      _ordenServicioRefCtrl,
+      _clienteCtrl,
+      _plantaCtrl,
+      _idTagCtrl,
+      _marcaCtrl,
+      _modeloCtrl,
+      _serieCtrl,
+      _capMaxCtrl,
+      _divMinCtrl,
+      _tipoInstOtroCtrl,
+      ..._chkObsCtrls.values,
+      _estabCeroComCtrl,
+      _retornoCeroComCtrl,
+      _excentricidadDifCtrl,
+      _repetibilidadCargaCtrl,
+      _obsTecnicasCtrl,
+      _refaccionesCtrl,
+      _tecNombreCtrl,
+      _tecPuestoCtrl,
+      _cliNombreCtrl,
+      _cliPuestoCtrl,
+    ];
+    for (final c in ctrls) {
+      c.addListener(_programarAutoGuardado);
+    }
+  }
+
+  void _programarAutoGuardado() {
+    if (_cargandoInicial || _finalizadaExitosamente) return;
+    _autoSaveDebounce?.cancel();
+    _autoSaveDebounce = Timer(const Duration(milliseconds: 350), () {
+      _guardarBorradorLocal();
+    });
   }
 
   String _pickFromMap(Map<String, dynamic> m, List<String> keys, [String def = '']) {
@@ -204,13 +245,39 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     unpackJsonField(widget.orden['datos_tecnicos_json']);
     unpackJsonField(merged['datos_tecnicos_json']);
 
+    Map<String, dynamic>? loadedDraft;
     if (folio.isNotEmpty) {
       try {
-        final draft = await LocalDbService.instance.getDraft(folio);
-        if (draft != null) {
-          for (final e in draft.entries) {
-            if (e.value != null && e.value.toString().trim().isNotEmpty) {
-              merged[e.key] = e.value;
+        final db = await LocalDbService.instance.database;
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS borradores_captura (
+            folio_os TEXT PRIMARY KEY,
+            draft_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        ''');
+        final rows = await db.query(
+          'borradores_captura',
+          where: 'folio_os = ?',
+          whereArgs: [folio],
+          limit: 1,
+        );
+        if (rows.isNotEmpty) {
+          final rawDraftStr = (rows.first['draft_json'] ?? '').toString();
+          if (rawDraftStr.isNotEmpty) {
+            final draft = Map<String, dynamic>.from(jsonDecode(rawDraftStr) as Map);
+            final bool esBorradorRmaCorrupto =
+                (draft.containsKey('partidas') || draft.containsKey('items')) &&
+                !draft.containsKey('checklist_inspeccion');
+            if (esBorradorRmaCorrupto) {
+              await LocalDbService.instance.deleteDraft(folio);
+            } else {
+              loadedDraft = draft;
+              for (final e in draft.entries) {
+                if (e.value != null) {
+                  merged[e.key] = e.value;
+                }
+              }
             }
           }
         }
@@ -219,28 +286,34 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
     _datosCombinados = merged;
 
+    String pickField(List<String> keys, [String def = '']) {
+      if (loadedDraft != null) {
+        for (final k in keys) {
+          if (loadedDraft.containsKey(k) && loadedDraft[k] != null) {
+            final s = loadedDraft[k].toString().trim();
+            if (s.toLowerCase() != 'null' && s.toLowerCase() != 'none') {
+              return s;
+            }
+          }
+        }
+      }
+      return _pickFromMap(merged, keys, def);
+    }
+
     // Cabecera
-    _ordenServicioRefCtrl.text = _pickFromMap(merged, ['orden_servicio_ref', 'orden_servicio']);
+    _ordenServicioRefCtrl.text = pickField(['orden_servicio_ref', 'orden_servicio']);
 
     // Sección 1
-    _clienteCtrl.text = _pickFromMap(merged, ['cliente', 'razon_social', 'cliente_nombre']);
-    _plantaCtrl.text = _pickFromMap(merged, ['ubicacion', 'sucursal', 'direccion', 'planta']);
-    _idTagCtrl.text = _pickFromMap(merged, ['id_equipo', 'id_indicador', 'indicador_id', 'equipo_id']);
-    _marcaCtrl.text = _pickFromMap(merged, ['marca', 'equipo_marca', 'instrumento_marca']);
-    _modeloCtrl.text = _pickFromMap(merged, ['modelo', 'equipo_modelo', 'instrumento_modelo']);
-    _serieCtrl.text = _pickFromMap(merged, ['serie', 'ns', 'numero_serie', 'equipo_ns']);
-    _capMaxCtrl.text = _pickFromMap(merged, ['capacidad_maxima', 'alcance_max', 'cap_maxima', 'instrumento_capacidad']);
-    _divMinCtrl.text = _pickFromMap(merged, ['division_minima', 'div_minima', 'instrumento_division']);
+    _clienteCtrl.text = pickField(['cliente', 'razon_social', 'cliente_nombre']);
+    _plantaCtrl.text = pickField(['ubicacion', 'sucursal', 'direccion', 'planta']);
+    _idTagCtrl.text = pickField(['id_equipo', 'id_indicador', 'indicador_id', 'equipo_id']);
+    _marcaCtrl.text = pickField(['marca', 'equipo_marca', 'instrumento_marca']);
+    _modeloCtrl.text = pickField(['modelo', 'equipo_modelo', 'instrumento_modelo']);
+    _serieCtrl.text = pickField(['serie', 'ns', 'numero_serie', 'equipo_ns']);
+    _capMaxCtrl.text = pickField(['capacidad_maxima', 'alcance_max', 'cap_maxima', 'instrumento_capacidad']);
+    _divMinCtrl.text = pickField(['division_minima', 'div_minima', 'instrumento_division']);
 
-    String indMM = _pickFromMap(merged, ['indicador_marca_modelo']);
-    if (indMM.isEmpty) {
-      final im = _pickFromMap(merged, ['indicador_marca']);
-      final imod = _pickFromMap(merged, ['indicador_modelo']);
-      indMM = '$im $imod'.trim();
-    }
-    _indicadorCtrl.text = indMM;
-
-    final rawTipoInst = _pickFromMap(merged, ['tipo_instrumento'], 'Mesa');
+    final rawTipoInst = pickField(['tipo_instrumento'], 'Mesa');
     final tl = rawTipoInst.toLowerCase();
     if (tl.contains('mesa') || tl.contains('mostrador') || tl.contains('banco')) {
       _tipoInstrumento = 'Mesa';
@@ -389,6 +462,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
       } catch (_) {}
     }
 
+    _cargandoInicial = false;
     if (mounted) setState(() {});
   }
 
@@ -461,7 +535,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     payload['division_minima'] = _divMinCtrl.text.trim();
     payload['div_minima'] = _divMinCtrl.text.trim();
     payload['instrumento_division'] = _divMinCtrl.text.trim();
-    payload['indicador_marca_modelo'] = _indicadorCtrl.text.trim();
+    payload.remove('indicador_marca_modelo');
     payload['tipo_instrumento'] = _tipoInstrumento;
     payload['tipo_instrumento_otro'] = _tipoInstOtroCtrl.text.trim();
 
@@ -507,14 +581,62 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     return payload;
   }
 
-  Future<void> _guardarBorradorSilencioso() async {
+  Future<void> _guardarBorradorLocal() async {
+    if (_cargandoInicial || _finalizadaExitosamente) return;
     final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? '').toString().trim();
     if (folio.isEmpty) return;
     try {
       final payload = _construirPayload();
-      await LocalDbService.instance.saveDraft(folio, payload);
+      final jsonStr = jsonEncode(payload);
+      final nowIso = DateTime.now().toUtc().toIso8601String();
+      final db = await LocalDbService.instance.database;
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS borradores_captura (
+          folio_os TEXT PRIMARY KEY,
+          draft_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      ''');
+      await db.rawInsert(
+        'INSERT OR REPLACE INTO borradores_captura (folio_os, draft_json, updated_at) VALUES (?, ?, ?)',
+        [folio, jsonStr, nowIso],
+      );
+      await db.rawUpdate(
+        '''UPDATE ordenes_servicio
+           SET marca = ?,
+               modelo = ?,
+               ns = ?,
+               id_equipo = ?,
+               alcance_max = ?,
+               div_minima = ?,
+               ubicacion = ?,
+               observaciones = ?,
+               dictamen = ?,
+               datos_tecnicos_json = ?
+           WHERE folio_os = ? OR folio = ?''',
+        [
+          _marcaCtrl.text.trim(),
+          _modeloCtrl.text.trim(),
+          _serieCtrl.text.trim(),
+          _idTagCtrl.text.trim(),
+          _capMaxCtrl.text.trim(),
+          _divMinCtrl.text.trim(),
+          _plantaCtrl.text.trim(),
+          _obsTecnicasCtrl.text.trim(),
+          _dictamenEstado,
+          jsonStr,
+          folio,
+          folio,
+        ],
+      );
+      try {
+        widget.orden.addAll(payload);
+        widget.orden['datos_tecnicos_json'] = jsonStr;
+      } catch (_) {}
     } catch (_) {}
   }
+
+  Future<void> _guardarBorradorSilencioso() => _guardarBorradorLocal();
 
   Future<void> _finalizar() async {
     final cliente = _clienteCtrl.text.trim();
@@ -715,6 +837,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
         'pdf_path': pdfPath,
         'estado': 'FINALIZADA',
       });
+      _finalizadaExitosamente = true;
 
       await LocalDbService.instance.saveContactoPlanta(
         cliente: cliente,
@@ -929,6 +1052,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   @override
   void dispose() {
+    _autoSaveDebounce?.cancel();
     _ordenServicioRefCtrl.dispose();
     _clienteCtrl.dispose();
     _plantaCtrl.dispose();
@@ -938,7 +1062,6 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     _serieCtrl.dispose();
     _capMaxCtrl.dispose();
     _divMinCtrl.dispose();
-    _indicadorCtrl.dispose();
     _tipoInstOtroCtrl.dispose();
     for (final ctrl in _chkObsCtrls.values) {
       ctrl.dispose();
@@ -964,43 +1087,83 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   @override
   Widget build(BuildContext context) {
-    final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'OSOB-26-001').toString();
+    final folio = (widget.orden['folio'] ?? widget.orden['folio_os'] ?? 'OSOB-26-001').toString().trim();
     final now = DateTime.now();
     final fechaHoyFmt = '${now.day.toString().padLeft(2, '0')} / ${now.month.toString().padLeft(2, '0')} / ${now.year}';
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF3F4F6),
-      appBar: AppBar(
-        backgroundColor: _pesaRed,
-        foregroundColor: Colors.white,
-        elevation: 2,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return PopScope(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) async {
+        await _guardarBorradorLocal();
+      },
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF3F4F6),
+        appBar: AppBar(
+          backgroundColor: _pesaDark,
+          foregroundColor: Colors.white,
+          elevation: 2,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () async {
+              await _guardarBorradorLocal();
+              if (context.mounted) {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+          title: Row(
           children: [
-            const Text(
-              'FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS',
-              style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Inspección y Revisión ($folio)',
+                    style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    'FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS · $fechaHoyFmt',
+                    style: const TextStyle(fontSize: 10.5, color: Colors.white70),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
-            Text(
-              'Folio: $folio  |  Fecha: $fechaHoyFmt',
-              style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: _pesaRed,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.white38, width: 0.8),
+              ),
+              child: const Text(
+                'OSOB DIGITAL',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 0.4,
+                ),
+              ),
             ),
           ],
         ),
         actions: [
-          IconButton(
-            tooltip: 'Guardar borrador local',
-            icon: const Icon(Icons.save_outlined),
+          TextButton.icon(
             onPressed: () async {
               await _guardarBorradorSilencioso();
               if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Avance guardado localmente'),
+                  content: Text('Borrador OSOB guardado localmente'),
                   duration: Duration(seconds: 2),
                 ),
               );
             },
+            icon: const Icon(Icons.save_outlined, color: Colors.white, size: 18),
+            label: const Text('Borrador', style: TextStyle(color: Colors.white, fontSize: 12)),
           ),
         ],
       ),
@@ -1049,6 +1212,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
           ],
         ),
       ),
+      ),
     );
   }
 
@@ -1084,48 +1248,67 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
       margin: EdgeInsets.zero,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Wrap(
-          spacing: 18,
-          runSpacing: 10,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Folio: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                Flexible(
+                  child: Text(
+                    'FOLIO: $folio',
+                    style: const TextStyle(
+                      color: _pesaRed,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFCE8E9),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: _pesaRed),
+                    border: Border.all(color: _pesaRed, width: 0.8),
                   ),
-                  child: Text(
-                    folio,
-                    style: const TextStyle(color: _pesaRed, fontWeight: FontWeight.bold, fontSize: 13),
+                  child: const Text(
+                    'OSOB DIGITAL',
+                    style: TextStyle(
+                      color: _pesaRed,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11.5,
+                    ),
                   ),
                 ),
               ],
             ),
-            Row(
-              mainAxisSize: MainAxisSize.min,
+            const Divider(height: 16),
+            Wrap(
+              spacing: 18,
+              runSpacing: 10,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                const Text('Fecha: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                Text(fechaHoyFmt, style: const TextStyle(fontSize: 13)),
-              ],
-            ),
-            SizedBox(
-              width: 240,
-              child: TextField(
-                controller: _ordenServicioRefCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Orden de Servicio (opcional)',
-                  hintText: 'Ej. OS-26-700',
-                  isDense: true,
-                  border: OutlineInputBorder(),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Fecha: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text(fechaHoyFmt, style: const TextStyle(fontSize: 13)),
+                  ],
                 ),
-              ),
+                SizedBox(
+                  width: 240,
+                  child: TextField(
+                    controller: _ordenServicioRefCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Orden de Servicio',
+                      hintText: 'Ej. OS-26-700',
+                      isDense: true,
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -1146,66 +1329,102 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
           _buildSectionTitleBanner('SECCIÓN 1. Datos del Cliente y del Equipo'),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final bool isWide = constraints.maxWidth >= 560;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: _textInput('Cliente / Empresa', _clienteCtrl)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _textInput('Planta / Ubicación', _plantaCtrl)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(child: _textInput('ID Interno / Tag', _idTagCtrl)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _textInput('Marca', _marcaCtrl)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _textInput('Modelo', _modeloCtrl)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _textInput('Número de Serie', _serieCtrl)),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(child: _textInput('Capacidad Máx. (Max)', _capMaxCtrl)),
-                    const SizedBox(width: 10),
-                    Expanded(child: _textInput('División Mínima (d / e)', _divMinCtrl)),
-                    const SizedBox(width: 10),
-                    Expanded(flex: 2, child: _textInput('Indicador (Marca / Modelo)', _indicadorCtrl)),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Tipo de Instrumento:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                ),
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  children: tipos.map((t) {
-                    final sel = _tipoInstrumento == t;
-                    return ChoiceChip(
-                      label: Text(t == 'Otro' ? 'Otro (especifique)' : t),
-                      selected: sel,
-                      selectedColor: const Color(0xFFFCE8E9),
-                      labelStyle: TextStyle(
-                        color: sel ? _pesaRed : Colors.black87,
-                        fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                    if (isWide) ...[
+                      Row(
+                        children: [
+                          Expanded(child: _textInput('Cliente / Empresa', _clienteCtrl)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _textInput('Planta / Ubicación', _plantaCtrl)),
+                        ],
                       ),
-                      onSelected: (_) => setState(() => _tipoInstrumento = t),
-                    );
-                  }).toList(),
-                ),
-                if (_tipoInstrumento == 'Otro') ...[
-                  const SizedBox(height: 8),
-                  _textInput('Otro (especifique)', _tipoInstOtroCtrl),
-                ],
-              ],
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(child: _textInput('ID Interno / Tag', _idTagCtrl)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _textInput('Marca', _marcaCtrl)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _textInput('Modelo', _modeloCtrl)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _textInput('Número de Serie', _serieCtrl)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(child: _textInput('Capacidad Máx. (Max)', _capMaxCtrl)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _textInput('División Mínima (d / e)', _divMinCtrl)),
+                        ],
+                      ),
+                    ] else ...[
+                      _textInput('Cliente / Empresa', _clienteCtrl),
+                      const SizedBox(height: 10),
+                      _textInput('Planta / Ubicación', _plantaCtrl),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(child: _textInput('ID Interno / Tag', _idTagCtrl)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _textInput('Marca', _marcaCtrl)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(child: _textInput('Modelo', _modeloCtrl)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _textInput('Número de Serie', _serieCtrl)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(child: _textInput('Capacidad Máx. (Max)', _capMaxCtrl)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _textInput('División Mínima (d / e)', _divMinCtrl)),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Tipo de Instrumento:',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: tipos.map((t) {
+                        final sel = _tipoInstrumento == t;
+                        return ChoiceChip(
+                          label: Text(t == 'Otro' ? 'Otro (especifique)' : t),
+                          selected: sel,
+                          selectedColor: const Color(0xFFFCE8E9),
+                          labelStyle: TextStyle(
+                            color: sel ? _pesaRed : Colors.black87,
+                            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                          ),
+                          onSelected: (_) {
+                            setState(() => _tipoInstrumento = t);
+                            _programarAutoGuardado();
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    if (_tipoInstrumento == 'Otro') ...[
+                      const SizedBox(height: 8),
+                      _textInput('Especifique', _tipoInstOtroCtrl),
+                    ],
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -1235,6 +1454,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                     _chkEstado[i] = 'B';
                   }
                 });
+                _programarAutoGuardado();
               },
               icon: const Icon(Icons.done_all, size: 16, color: Colors.greenAccent),
               label: const Text('Marcar todos B', style: TextStyle(fontSize: 11.5)),
@@ -1296,7 +1516,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                 children: opts.map((op) {
                   final active = cur == op;
                   return InkWell(
-                    onTap: () => setState(() => _chkEstado[num] = op),
+                    onTap: () {
+                      setState(() => _chkEstado[num] = op);
+                      _programarAutoGuardado();
+                    },
                     borderRadius: BorderRadius.circular(6),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1354,35 +1577,50 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                 _buildPruebaRapidaItem(
                   label: 'Estabilidad de Cero al encendido',
                   estado: _estabCeroEstado,
-                  onChangedEstado: (v) => setState(() => _estabCeroEstado = v),
+                  onChangedEstado: (v) {
+                    setState(() => _estabCeroEstado = v);
+                    _programarAutoGuardado();
+                  },
                   extraField: _textInput('Comentarios', _estabCeroComCtrl),
                 ),
                 const Divider(height: 16),
                 _buildPruebaRapidaItem(
                   label: 'Retorno a Cero tras descarga',
                   estado: _retornoCeroEstado,
-                  onChangedEstado: (v) => setState(() => _retornoCeroEstado = v),
+                  onChangedEstado: (v) {
+                    setState(() => _retornoCeroEstado = v);
+                    _programarAutoGuardado();
+                  },
                   extraField: _textInput('Comentarios', _retornoCeroComCtrl),
                 ),
                 const Divider(height: 16),
                 _buildPruebaRapidaItem(
                   label: 'Prueba de Excentricidad (Esquinas)',
                   estado: _excentricidadEstado,
-                  onChangedEstado: (v) => setState(() => _excentricidadEstado = v),
+                  onChangedEstado: (v) {
+                    setState(() => _excentricidadEstado = v);
+                    _programarAutoGuardado();
+                  },
                   extraField: _textInput('Dif. máx. detectada', _excentricidadDifCtrl),
                 ),
                 const Divider(height: 16),
                 _buildPruebaRapidaItem(
                   label: 'Repetibilidad de lectura',
                   estado: _repetibilidadEstado,
-                  onChangedEstado: (v) => setState(() => _repetibilidadEstado = v),
+                  onChangedEstado: (v) {
+                    setState(() => _repetibilidadEstado = v);
+                    _programarAutoGuardado();
+                  },
                   extraField: _textInput('Carga de prueba', _repetibilidadCargaCtrl),
                 ),
                 const Divider(height: 16),
                 _buildPruebaRapidaItem(
                   label: 'Exactitud preliminar de pesaje',
                   estado: _exactitudEstado,
-                  onChangedEstado: (v) => setState(() => _exactitudEstado = v),
+                  onChangedEstado: (v) {
+                    setState(() => _exactitudEstado = v);
+                    _programarAutoGuardado();
+                  },
                   extraField: Row(
                     children: [
                       const Text('Requiere ajuste: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
@@ -1391,14 +1629,20 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                         label: const Text('Sí'),
                         selected: _exactitudReqAjuste == 'Sí',
                         selectedColor: const Color(0xFFFCE8E9),
-                        onSelected: (_) => setState(() => _exactitudReqAjuste = 'Sí'),
+                        onSelected: (_) {
+                          setState(() => _exactitudReqAjuste = 'Sí');
+                          _programarAutoGuardado();
+                        },
                       ),
                       const SizedBox(width: 6),
                       ChoiceChip(
                         label: const Text('No'),
                         selected: _exactitudReqAjuste == 'No',
                         selectedColor: const Color(0xFFFCE8E9),
-                        onSelected: (_) => setState(() => _exactitudReqAjuste = 'No'),
+                        onSelected: (_) {
+                          setState(() => _exactitudReqAjuste = 'No');
+                          _programarAutoGuardado();
+                        },
                       ),
                     ],
                   ),
@@ -1501,7 +1745,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   activeColor: _pesaRed,
                   title: const Text('Limpieza superficial e interna'),
                   value: _accLimpieza,
-                  onChanged: (v) => setState(() => _accLimpieza = v ?? false),
+                  onChanged: (v) {
+                    setState(() => _accLimpieza = v ?? false);
+                    _programarAutoGuardado();
+                  },
                 ),
                 CheckboxListTile(
                   dense: true,
@@ -1510,7 +1757,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   activeColor: _pesaRed,
                   title: const Text('Nivelación de patas y ajuste de topes'),
                   value: _accNivelacion,
-                  onChanged: (v) => setState(() => _accNivelacion = v ?? false),
+                  onChanged: (v) {
+                    setState(() => _accNivelacion = v ?? false);
+                    _programarAutoGuardado();
+                  },
                 ),
                 CheckboxListTile(
                   dense: true,
@@ -1519,7 +1769,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   activeColor: _pesaRed,
                   title: const Text('Ajuste de peso (calibración interna / ajuste con masa patrón)'),
                   value: _accAjustePeso,
-                  onChanged: (v) => setState(() => _accAjustePeso = v ?? false),
+                  onChanged: (v) {
+                    setState(() => _accAjustePeso = v ?? false);
+                    _programarAutoGuardado();
+                  },
                 ),
                 CheckboxListTile(
                   dense: true,
@@ -1528,7 +1781,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   activeColor: _pesaRed,
                   title: const Text('Revisión eléctrica y reapriete de conexiones'),
                   value: _accRevElectrica,
-                  onChanged: (v) => setState(() => _accRevElectrica = v ?? false),
+                  onChanged: (v) {
+                    setState(() => _accRevElectrica = v ?? false);
+                    _programarAutoGuardado();
+                  },
                 ),
                 const SizedBox(height: 10),
                 const Text(
@@ -1567,7 +1823,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                       ),
                     ),
                     onChanged: (v) {
-                      if (v != null) setState(() => _dictamenEstado = v);
+                      if (v != null) {
+                        setState(() => _dictamenEstado = v);
+                        _programarAutoGuardado();
+                      }
                     },
                   ),
               ],
@@ -1580,6 +1839,150 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   // ── SECCIÓN 5: Firmas de Conformidad ──────────────────────────────────────
   Widget _buildSeccion5Card() {
+    Widget buildTecBox() {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Realizó Revisión (Técnico)',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaRed),
+            ),
+            const SizedBox(height: 8),
+            _textInput('Nombre', _tecNombreCtrl),
+            const SizedBox(height: 8),
+            _textInput('Puesto', _tecPuestoCtrl),
+            const SizedBox(height: 8),
+            if (_usarFirmaPre && _firmaTecPre != null)
+              Container(
+                height: 110,
+                width: double.infinity,
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.green.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.shade300),
+                ),
+                child: Column(
+                  children: [
+                    Expanded(child: Image.memory(_firmaTecPre!, fit: BoxFit.contain)),
+                    TextButton.icon(
+                      onPressed: () => setState(() => _usarFirmaPre = false),
+                      icon: const Icon(Icons.edit, size: 14),
+                      label: const Text('Firmar manualmente', style: TextStyle(fontSize: 11)),
+                    ),
+                  ],
+                ),
+              )
+            else
+              Column(
+                children: [
+                  Container(
+                    height: 110,
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.grey.shade400),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SignatureGestureShield(
+                        child: Signature(
+                          controller: _sigTecnicoCtrl,
+                          height: 110,
+                          backgroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      onPressed: () => _sigTecnicoCtrl.clear(),
+                      icon: const Icon(Icons.refresh, size: 15),
+                      label: const Text('Limpiar firma técnico', style: TextStyle(fontSize: 11)),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      );
+    }
+
+    Widget buildCliBox() {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Recibió de Conformidad (Cliente / Usuario)',
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaRed),
+            ),
+            const SizedBox(height: 8),
+            _textInput('Nombre * (Obligatorio)', _cliNombreCtrl),
+            if (_contactosSugeridos.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: _contactosSugeridos.map((c) {
+                    return Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: ActionChip(
+                        visualDensity: VisualDensity.compact,
+                        label: Text(c, style: const TextStyle(fontSize: 11)),
+                        onPressed: () => setState(() => _cliNombreCtrl.text = c),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+            const SizedBox(height: 8),
+            _textInput('Área / Puesto', _cliPuestoCtrl),
+            const SizedBox(height: 8),
+            Container(
+              height: 110,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey.shade400),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SignatureGestureShield(
+                  child: Signature(
+                    controller: _sigClienteCtrl,
+                    height: 110,
+                    backgroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                onPressed: () => _sigClienteCtrl.clear(),
+                icon: const Icon(Icons.refresh, size: 15),
+                label: const Text('Limpiar firma cliente', style: TextStyle(fontSize: 11)),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Card(
       elevation: 1,
       margin: EdgeInsets.zero,
@@ -1590,155 +1993,27 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
           _buildSectionTitleBanner('SECCIÓN 5. Firmas de Conformidad'),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Columna Técnico
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Realizó Revisión (Técnico)',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaRed),
-                        ),
-                        const SizedBox(height: 8),
-                        _textInput('Nombre', _tecNombreCtrl),
-                        const SizedBox(height: 8),
-                        _textInput('Puesto', _tecPuestoCtrl),
-                        const SizedBox(height: 8),
-                        if (_usarFirmaPre && _firmaTecPre != null)
-                          Container(
-                            height: 110,
-                            width: double.infinity,
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: Colors.green.shade50,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.green.shade300),
-                            ),
-                            child: Column(
-                              children: [
-                                Expanded(child: Image.memory(_firmaTecPre!, fit: BoxFit.contain)),
-                                TextButton.icon(
-                                  onPressed: () => setState(() => _usarFirmaPre = false),
-                                  icon: const Icon(Icons.edit, size: 14),
-                                  label: const Text('Firmar manualmente', style: TextStyle(fontSize: 11)),
-                                ),
-                              ],
-                            ),
-                          )
-                        else
-                          Column(
-                            children: [
-                              Container(
-                                height: 110,
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.grey.shade400),
-                                ),
-                                child: ClipRRect(
-                                  borderRadius: BorderRadius.circular(8),
-                                  child: SignatureGestureShield(
-                                    child: Signature(
-                                      controller: _sigTecnicoCtrl,
-                                      height: 110,
-                                      backgroundColor: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton.icon(
-                                  onPressed: () => _sigTecnicoCtrl.clear(),
-                                  icon: const Icon(Icons.refresh, size: 15),
-                                  label: const Text('Limpiar firma técnico', style: TextStyle(fontSize: 11)),
-                                ),
-                              ),
-                            ],
-                          ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                // Columna Cliente / Usuario
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Recibió de Conformidad (Cliente / Usuario)',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaRed),
-                        ),
-                        const SizedBox(height: 8),
-                        _textInput('Nombre * (Obligatorio)', _cliNombreCtrl),
-                        if (_contactosSugeridos.isNotEmpty) ...[
-                          const SizedBox(height: 4),
-                          SingleChildScrollView(
-                            scrollDirection: Axis.horizontal,
-                            child: Row(
-                              children: _contactosSugeridos.map((c) {
-                                return Padding(
-                                  padding: const EdgeInsets.only(right: 4),
-                                  child: ActionChip(
-                                    visualDensity: VisualDensity.compact,
-                                    label: Text(c, style: const TextStyle(fontSize: 11)),
-                                    onPressed: () => setState(() => _cliNombreCtrl.text = c),
-                                  ),
-                                );
-                              }).toList(),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(height: 8),
-                        _textInput('Área / Puesto', _cliPuestoCtrl),
-                        const SizedBox(height: 8),
-                        Container(
-                          height: 110,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.grey.shade400),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: SignatureGestureShield(
-                              child: Signature(
-                                controller: _sigClienteCtrl,
-                                height: 110,
-                                backgroundColor: Colors.white,
-                              ),
-                            ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton.icon(
-                            onPressed: () => _sigClienteCtrl.clear(),
-                            icon: const Icon(Icons.refresh, size: 15),
-                            label: const Text('Limpiar firma cliente', style: TextStyle(fontSize: 11)),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 560) {
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: buildTecBox()),
+                      const SizedBox(width: 12),
+                      Expanded(child: buildCliBox()),
+                    ],
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    buildTecBox(),
+                    const SizedBox(height: 12),
+                    buildCliBox(),
+                  ],
+                );
+              },
             ),
           ),
         ],

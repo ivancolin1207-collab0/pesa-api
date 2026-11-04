@@ -81,6 +81,16 @@ class PdfService {
     String? firmaTecBase64,
     String? firmaCliBase64,
   }) async {
+    final String folioCheck = (osData['folio_os'] ?? osData['folio'] ?? '').toString().trim().toUpperCase();
+    final String tipoDocCheck = (osData['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
+      return generarPdfObservacionesBascula(
+        osData: osData,
+        firmaTecBase64: firmaTecBase64,
+        firmaCliBase64: firmaCliBase64,
+      );
+    }
+
     final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
     osData['fecha_creacion_logistica'] ??= osData['fecha'];
     osData['fecha'] = fechaEjecucionHoy;
@@ -103,6 +113,16 @@ class PdfService {
     String? firmaTecBase64,
     String? firmaCliBase64,
   }) async {
+    final String folioCheck = (osData['folio_os'] ?? osData['folio'] ?? '').toString().trim().toUpperCase();
+    final String tipoDocCheck = (osData['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
+      return buildPdfObservacionesBasculaBytes(
+        osData: osData,
+        firmaTecBase64: firmaTecBase64,
+        firmaCliBase64: firmaCliBase64,
+      );
+    }
+
     final doc = pw.Document(
       title:   'Toma de Datos - ${osData['folio_os'] ?? ''}',
       author:  'Servicios PESA',
@@ -2778,12 +2798,6 @@ class PdfService {
     final serie = _s(osData, 'serie', _s(osData, 'ns', _s(osData, 'numero_serie', '')));
     final capMax = formatoMilesEspacio(_s(osData, 'capacidad_maxima', _s(osData, 'alcance_max', _s(osData, 'cap_maxima', ''))));
     final divMin = formatoMilesEspacio(_s(osData, 'division_minima', _s(osData, 'div_minima', '')));
-    String indMarcaModelo = _s(osData, 'indicador_marca_modelo', '');
-    if (indMarcaModelo.isEmpty) {
-      final im = _s(osData, 'indicador_marca', '');
-      final imod = _s(osData, 'indicador_modelo', '');
-      indMarcaModelo = '$im $imod'.trim();
-    }
     final tipoInst = _s(osData, 'tipo_instrumento', '').toLowerCase();
     final tipoInstOtro = _s(osData, 'tipo_instrumento_otro', '');
 
@@ -3081,7 +3095,6 @@ class PdfService {
                 pw.Row(children: [
                   pw.Expanded(child: pw.Text('Capacidad Máx. (Max): $capMax', style: const pw.TextStyle(fontSize: 6.3))),
                   pw.Expanded(child: pw.Text('División Mínima (d / e): $divMin', style: const pw.TextStyle(fontSize: 6.3))),
-                  pw.Expanded(flex: 2, child: pw.Text('Indicador (Marca / Modelo): $indMarcaModelo', style: const pw.TextStyle(fontSize: 6.3))),
                 ]),
                 pw.SizedBox(height: 2),
                 pw.Text(

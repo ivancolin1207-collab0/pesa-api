@@ -123,20 +123,43 @@ final _router = GoRouter(
       builder: (ctx, state) {
         final osId = int.tryParse(state.pathParameters['osId'] ?? '') ?? 0;
         final extra = state.extra as Map<String, dynamic>? ?? {'local_id': osId};
-        final tipoDoc = (extra['tipo_documento'] ?? '').toString().toUpperCase();
-        final tipoSrv = (extra['tipo_servicio'] ?? '').toString().toUpperCase();
-        final folio = (extra['folio_os'] ?? extra['folio_rma'] ?? '').toString().toUpperCase();
-        final tipo = '$tipoDoc $tipoSrv $folio';
+        final String folioUpper = (extra['folio'] ?? extra['folio_os'] ?? extra['folio_rma'] ?? '').toString().trim().toUpperCase();
+        final String tipoDocUpper = (extra['tipo_documento'] ?? '').toString().trim().toUpperCase();
+        final String tipoUpper = (extra['tipo_servicio'] ?? '').toString().trim().toUpperCase();
 
-        if (tipo.contains('RMA') || tipo.contains('REMISI')) {
-          return RemisionCapturaScreen(orden: extra);
-        } else if (tipoDoc == 'OSOB' || folio.startsWith('OSOB-') || tipo.contains('OSOB') || tipoSrv.contains('OBSERVACIONES')) {
+        if ((extra['folio'] == null || extra['folio'].toString().trim().isEmpty) && extra['folio_os'] != null) {
+          extra['folio'] = extra['folio_os'];
+        }
+        if ((extra['folio_os'] == null || extra['folio_os'].toString().trim().isEmpty) && extra['folio'] != null) {
+          extra['folio_os'] = extra['folio'];
+        }
+
+        // 1. PRIMERA CONDICIÓN EXPLÍCITA: OSOB (Formato de Inspección y Revisión de Básculas)
+        if (folioUpper.startsWith('OSOB-') ||
+            tipoDocUpper == 'OSOB' ||
+            tipoUpper.contains('OSOB') ||
+            tipoUpper.contains('OBSERVACION') ||
+            (!folioUpper.startsWith('OS-') &&
+                !folioUpper.startsWith('RMA-') &&
+                !folioUpper.startsWith('RE-') &&
+                (tipoUpper.contains('INSPECCION') || tipoUpper.contains('INSPECCIÓN')))) {
           return ObservacionesBasculaScreen(orden: extra);
-        } else if (tipo.contains('REVISI') || tipoDoc == 'RE' || folio.startsWith('RE-')) {
+        } else if (folioUpper.startsWith('RMA-') ||
+            tipoDocUpper == 'RMA' ||
+            tipoUpper.contains('REMISI') ||
+            tipoUpper.contains('REFACCI')) {
+          return RemisionCapturaScreen(orden: extra);
+        } else if (folioUpper.startsWith('RE-') ||
+            tipoDocUpper == 'RE' ||
+            (!folioUpper.startsWith('OS-') && tipoUpper.contains('REVISI'))) {
           return RevisionBasculaScreen(orden: extra);
-        } else if (tipo.contains('PROYECTO') || tipoDoc == 'LP' || folio.startsWith('LP-')) {
+        } else if (folioUpper.startsWith('LP-') ||
+            tipoDocUpper == 'LP' ||
+            tipoUpper.contains('PROYECTO')) {
           return LevantamientoProyectoScreen(orden: extra);
-        } else if (tipo.contains('METROL') || tipoDoc == 'LV' || folio.startsWith('LV-')) {
+        } else if (folioUpper.startsWith('LV-') ||
+            tipoDocUpper == 'LV' ||
+            tipoUpper.contains('METROL')) {
           return LevantamientoMetrologicoScreen(orden: extra);
         } else {
           return CapturaScreen(osId: osId, osData: extra);

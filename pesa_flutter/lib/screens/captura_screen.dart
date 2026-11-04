@@ -18,6 +18,7 @@ import 'remision_captura_screen.dart';
 import 'revision_bascula_screen.dart';
 import 'levantamiento_proyecto_screen.dart';
 import 'levantamiento_metrologico_screen.dart';
+import 'observaciones_bascula_screen.dart';
 
 class CalibracionAjusteScreen extends StatelessWidget {
   final Map<String, dynamic> orden;
@@ -25,6 +26,20 @@ class CalibracionAjusteScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final String folioUpper = (orden['folio'] ?? orden['folio_os'] ?? orden['folio_rma'] ?? '').toString().trim().toUpperCase();
+    final String tipoDocUpper = (orden['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    final String tipoUpper = (orden['tipo_servicio'] ?? '').toString().trim().toUpperCase();
+
+    if (folioUpper.startsWith('OSOB-') ||
+        tipoDocUpper == 'OSOB' ||
+        tipoUpper.contains('OSOB') ||
+        tipoUpper.contains('OBSERVACION') ||
+        (!folioUpper.startsWith('OS-') &&
+            !folioUpper.startsWith('RMA-') &&
+            !folioUpper.startsWith('RE-') &&
+            (tipoUpper.contains('INSPECCION') || tipoUpper.contains('INSPECCIÓN')))) {
+      return ObservacionesBasculaScreen(orden: orden);
+    }
     final osId = orden['local_id'] as int? ?? 0;
     return CapturaScreen(osId: osId, osData: orden);
   }
@@ -796,18 +811,36 @@ class _CapturaScreenState extends State<CapturaScreen>
     }
 
     final docData = _os.isNotEmpty ? _os : widget.osData;
-    final tipoDoc = (docData['tipo_documento'] ?? '').toString().toUpperCase();
-    final tipoSrv = (docData['tipo_servicio'] ?? '').toString().toUpperCase();
-    final folioStr = (docData['folio_os'] ?? docData['folio_rma'] ?? '').toString().toUpperCase();
-    final tipoComp = '$tipoDoc $tipoSrv $folioStr';
+    final String folioUpper = (docData['folio'] ?? docData['folio_os'] ?? docData['folio_rma'] ?? '').toString().trim().toUpperCase();
+    final String tipoDocUpper = (docData['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    final String tipoUpper = (docData['tipo_servicio'] ?? '').toString().trim().toUpperCase();
 
-    if (tipoComp.contains('RMA') || tipoComp.contains('REMISI')) {
+    // 1. PRIMERA CONDICIÓN EXPLÍCITA: OSOB (Formato de Inspección y Revisión de Básculas)
+    if (folioUpper.startsWith('OSOB-') ||
+        tipoDocUpper == 'OSOB' ||
+        tipoUpper.contains('OSOB') ||
+        tipoUpper.contains('OBSERVACION') ||
+        (!folioUpper.startsWith('OS-') &&
+            !folioUpper.startsWith('RMA-') &&
+            !folioUpper.startsWith('RE-') &&
+            (tipoUpper.contains('INSPECCION') || tipoUpper.contains('INSPECCIÓN')))) {
+      return ObservacionesBasculaScreen(orden: docData);
+    } else if (folioUpper.startsWith('RMA-') ||
+        tipoDocUpper == 'RMA' ||
+        tipoUpper.contains('REMISI') ||
+        tipoUpper.contains('REFACCI')) {
       return RemisionCapturaScreen(orden: docData);
-    } else if (tipoComp.contains('REVISI') || tipoDoc == 'RE' || folioStr.startsWith('RE-')) {
+    } else if (folioUpper.startsWith('RE-') ||
+        tipoDocUpper == 'RE' ||
+        (!folioUpper.startsWith('OS-') && tipoUpper.contains('REVISI'))) {
       return RevisionBasculaScreen(orden: docData);
-    } else if (tipoComp.contains('PROYECTO') || tipoDoc == 'LP' || folioStr.startsWith('LP-')) {
+    } else if (folioUpper.startsWith('LP-') ||
+        tipoDocUpper == 'LP' ||
+        tipoUpper.contains('PROYECTO')) {
       return LevantamientoProyectoScreen(orden: docData);
-    } else if (tipoComp.contains('METROL') || tipoDoc == 'LV' || folioStr.startsWith('LV-')) {
+    } else if (folioUpper.startsWith('LV-') ||
+        tipoDocUpper == 'LV' ||
+        tipoUpper.contains('METROL')) {
       return LevantamientoMetrologicoScreen(orden: docData);
     }
 

@@ -65,30 +65,102 @@ const _kTextSec    = Color(0xFF86868B);
 const _kTableHead  = Color(0xFFF3F4F6);
 
 /// Enrutador dinámico por tipo de documento:
-/// RMA -> RemisionCapturaScreen
-/// RE -> RevisionBasculaScreen
-/// LP -> LevantamientoProyectoScreen
-/// LV -> LevantamientoMetrologicoScreen
-/// Resto -> CalibracionAjusteScreen (CapturaScreen)
+/// OSOB -> ObservacionesBasculaScreen (PRIMERA condición prioritaria)
+/// RMA  -> RemisionCapturaScreen
+/// RE   -> RevisionBasculaScreen
+/// LP   -> LevantamientoProyectoScreen
+/// LV   -> LevantamientoMetrologicoScreen
+/// Resto (OS-) -> CalibracionAjusteScreen (CapturaScreen)
 void navegarCapturaSegunTipo(BuildContext context, Map<String, dynamic> orden) {
-  final tipoDoc = (orden['tipo_documento'] ?? '').toString().toUpperCase();
-  final tipoSrv = (orden['tipo_servicio'] ?? '').toString().toUpperCase();
-  final folio = (orden['folio_os'] ?? orden['folio_rma'] ?? '').toString().toUpperCase();
-  final tipo = '$tipoDoc $tipoSrv $folio';
+  final String folioUpper = (orden['folio'] ?? orden['folio_os'] ?? orden['folio_rma'] ?? '').toString().trim().toUpperCase();
+  final String tipoDocUpper = (orden['tipo_documento'] ?? '').toString().trim().toUpperCase();
+  final String tipoUpper = (orden['tipo_servicio'] ?? '').toString().trim().toUpperCase();
 
-  if (tipo.contains('RMA') || tipo.contains('REMISI')) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => RemisionCapturaScreen(orden: orden)));
-  } else if (tipoDoc == 'OSOB' || folio.startsWith('OSOB-') || tipo.contains('OSOB') || tipoSrv.contains('OBSERVACIONES')) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => ObservacionesBasculaScreen(orden: orden)));
-  } else if (tipo.contains('REVISI') || tipoDoc == 'RE' || folio.startsWith('RE-')) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => RevisionBasculaScreen(orden: orden)));
-  } else if (tipo.contains('PROYECTO') || tipoDoc == 'LP' || folio.startsWith('LP-')) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => LevantamientoProyectoScreen(orden: orden)));
-  } else if (tipo.contains('METROL') || tipoDoc == 'LV' || folio.startsWith('LV-')) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => LevantamientoMetrologicoScreen(orden: orden)));
-  } else {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => CalibracionAjusteScreen(orden: orden)));
+  if ((orden['folio'] == null || orden['folio'].toString().trim().isEmpty) && orden['folio_os'] != null) {
+    orden['folio'] = orden['folio_os'];
   }
+  if ((orden['folio_os'] == null || orden['folio_os'].toString().trim().isEmpty) && orden['folio'] != null) {
+    orden['folio_os'] = orden['folio'];
+  }
+
+  // 1. PRIMERA CONDICIÓN EXPLÍCITA: OSOB (Formato de Inspección y Revisión de Básculas)
+  if (folioUpper.startsWith('OSOB-') ||
+      tipoDocUpper == 'OSOB' ||
+      tipoUpper.contains('OSOB') ||
+      tipoUpper.contains('OBSERVACION') ||
+      (!folioUpper.startsWith('OS-') &&
+          !folioUpper.startsWith('RMA-') &&
+          !folioUpper.startsWith('RE-') &&
+          (tipoUpper.contains('INSPECCION') || tipoUpper.contains('INSPECCIÓN')))) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ObservacionesBasculaScreen(orden: orden),
+      ),
+    );
+    return;
+  }
+
+  // 2. RMA (Remisión de Material) — prefijo explícito RMA- (sin coincidir 'RMA' dentro de 'FORMATO')
+  if (folioUpper.startsWith('RMA-') ||
+      tipoDocUpper == 'RMA' ||
+      tipoUpper.contains('REMISI') ||
+      tipoUpper.contains('REFACCI')) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RemisionCapturaScreen(orden: orden),
+      ),
+    );
+    return;
+  }
+
+  // 3. RE (Revisión de Celdas / Báscula)
+  if (folioUpper.startsWith('RE-') ||
+      tipoDocUpper == 'RE' ||
+      (!folioUpper.startsWith('OS-') && tipoUpper.contains('REVISI'))) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => RevisionBasculaScreen(orden: orden),
+      ),
+    );
+    return;
+  }
+
+  // 4. LP (Levantamiento de Proyecto)
+  if (folioUpper.startsWith('LP-') ||
+      tipoDocUpper == 'LP' ||
+      tipoUpper.contains('PROYECTO')) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LevantamientoProyectoScreen(orden: orden),
+      ),
+    );
+    return;
+  }
+
+  // 5. LV (Levantamiento Metrológico)
+  if (folioUpper.startsWith('LV-') ||
+      tipoDocUpper == 'LV' ||
+      tipoUpper.contains('METROL')) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => LevantamientoMetrologicoScreen(orden: orden),
+      ),
+    );
+    return;
+  }
+
+  // 6. OS estándar (Calibración / Ajuste / Inspección)
+  Navigator.push(
+    context,
+    MaterialPageRoute(
+      builder: (_) => CalibracionAjusteScreen(orden: orden),
+    ),
+  );
 }
 
 /// Retorna true si la modalidad del documento es explícitamente física.
@@ -688,26 +760,14 @@ class _OsListScreenState extends State<OsListScreen> {
   List<_OsGroup> _groupByLote(List<Map<String, dynamic>> list) {
     final Map<String, List<Map<String, dynamic>>> buckets = {};
     for (final os in list) {
-      // Criterio primario: id_lote explícito del servidor
-      final lote = (os['id_lote'] as String?) ?? (os['lote'] as String?) ?? '';
+      // Criterio estricto: únicamente agrupar cuando existe un id_lote explícito del servidor.
+      // Las órdenes individuales (id_lote nulo o vacío) NUNCA se agrupan en lotes.
+      final lote = ((os['id_lote'] as String?) ?? (os['lote'] as String?) ?? '').trim();
       String key;
-      if (lote.isNotEmpty) {
+      if (lote.isNotEmpty && lote.toLowerCase() != 'null' && lote.toLowerCase() != 'none') {
         key = lote;
       } else {
-        // Criterio secundario: agrupar por cliente + fecha de servicio
-        // cuando no hay lote asignado en el servidor (ej. Mar Bran multi-báscula)
-        final cliente   = (os['cliente'] as String? ?? '').trim();
-        final sucursal  = (os['sucursal'] as String? ?? '').trim();
-        final fecha     = (os['fecha_servicio'] as String?
-            ?? os['fecha_os'] as String?
-            ?? os['fecha'] as String?
-            ?? '').split('T').first.trim(); // solo la fecha, sin hora
-        // Solo agrupamos si hay cliente + fecha válidos (evitar agrupaciones falsas)
-        if (cliente.isNotEmpty && fecha.isNotEmpty) {
-          key = 'grp_${cliente}_${sucursal}_$fecha';
-        } else {
-          key = 'solo_${os['folio_os'] ?? os['local_id']}';
-        }
+        key = 'solo_${os['folio_os'] ?? os['folio'] ?? os['local_id']}';
       }
       buckets.putIfAbsent(key, () => []).add(os);
     }
@@ -4600,6 +4660,7 @@ class TipoServicioBadge extends StatelessWidget {
     final label = rules.etiquetaCorta;
     final (Color fg, Color bg) = switch (rules) {
       _ when rules.sinTipo              => (const Color(0xFFB45309), const Color(0xFFFFFBEB)), // ámbar
+      _ when rules.esObservaciones      => (const Color(0xFF991B1B), const Color(0xFFFEF2F2)), // rojo PESA OSOB
       _ when rules.esRemision || rules.esRevisionCeldas
                                         => (const Color(0xFF6B7280), const Color(0xFFF9FAFB)),
       _ when rules.pideCca && rules.pideDve

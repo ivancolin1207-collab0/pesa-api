@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'pdf_service.dart';
 
 class RmaPdfService {
   static const PdfColor _red = PdfColor.fromInt(0xFFCC1F1F);
@@ -21,6 +22,16 @@ class RmaPdfService {
     String? firmaCliBase64,
     String? observaciones,
   }) async {
+    final String folioCheck = (rmaData['folio_os'] ?? rmaData['folio_rma'] ?? rmaData['folio'] ?? '').toString().trim().toUpperCase();
+    final String tipoDocCheck = (rmaData['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
+      return PdfService.instance.buildPdfObservacionesBasculaBytes(
+        osData: rmaData,
+        firmaTecBase64: firmaTecBase64,
+        firmaCliBase64: firmaCliBase64,
+      );
+    }
+
     final doc = pw.Document(
       title: 'Remision de Material - ${rmaData['folio_os'] ?? rmaData['folio_rma'] ?? 'RMA'}',
       author: 'Servicios PESA',
