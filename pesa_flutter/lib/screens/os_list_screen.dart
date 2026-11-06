@@ -26,6 +26,7 @@ import 'captura_screen.dart';
 import 'remision_captura_screen.dart';
 import 'revision_bascula_screen.dart';
 import 'observaciones_bascula_screen.dart';
+import 'observaciones_celda_screen.dart';
 import 'levantamiento_proyecto_screen.dart';
 import 'levantamiento_metrologico_screen.dart';
 
@@ -83,7 +84,23 @@ void navegarCapturaSegunTipo(BuildContext context, Map<String, dynamic> orden) {
     orden['folio_os'] = orden['folio'];
   }
 
-  // 1. PRIMERA CONDICIÓN EXPLÍCITA: OSOB (Formato de Inspección y Revisión de Básculas)
+  // 0. PRIMERA CONDICIÓN EXPLÍCITA: OSOCC (Formato de Diagnóstico y Revisión de Celda de Carga)
+  if (folioUpper.startsWith('OSOCC-') ||
+      tipoDocUpper == 'OSOCC' ||
+      tipoUpper.contains('OSOCC') ||
+      tipoUpper.contains('OBSERVACIONES CELDA') ||
+      (tipoUpper.contains('DIAGNOSTICO') && tipoUpper.contains('CELDA')) ||
+      (tipoUpper.contains('DIAGNÓSTICO') && tipoUpper.contains('CELDA'))) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ObservacionesCeldaScreen(orden: orden),
+      ),
+    );
+    return;
+  }
+
+  // 1. SEGUNDA CONDICIÓN EXPLÍCITA: OSOB (Formato de Inspección y Revisión de Básculas)
   if (folioUpper.startsWith('OSOB-') ||
       tipoDocUpper == 'OSOB' ||
       tipoUpper.contains('OSOB') ||
@@ -214,6 +231,7 @@ class _OsListScreenState extends State<OsListScreen> {
       'Calibración',
       'Mantenimiento',
       'Observaciones',
+      'Observaciones Celda',
     };
 
     for (final o in _all) {
@@ -4660,6 +4678,7 @@ class TipoServicioBadge extends StatelessWidget {
     final label = rules.etiquetaCorta;
     final (Color fg, Color bg) = switch (rules) {
       _ when rules.sinTipo              => (const Color(0xFFB45309), const Color(0xFFFFFBEB)), // ámbar
+      _ when rules.esObservacionesCelda => (const Color(0xFF0284C7), const Color(0xFFE0F2FE)), // azul cielo OSOCC
       _ when rules.esObservaciones      => (const Color(0xFF7C3AED), const Color(0xFFF3E8FF)), // violeta OSOB
       _ when rules.esRemision || rules.esRevisionCeldas
                                         => (const Color(0xFF6B7280), const Color(0xFFF9FAFB)),

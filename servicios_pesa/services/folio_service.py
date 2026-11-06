@@ -33,6 +33,11 @@ class FolioService:
         """Genera el siguiente folio de Formato de Inspección y Revisión de Básculas (OSOB)."""
         return FolioManager.get_next_folio("OSOB", anio)
 
+    @staticmethod
+    def nuevo_folio_osocc(anio: int | None = None) -> str:
+        """Genera el siguiente folio de Formato de Diagnóstico y Revisión de Celda de Carga (OSOCC)."""
+        return FolioManager.get_next_folio("OSOCC", anio)
+
 
     @staticmethod
     def get_resumen() -> list[dict]:

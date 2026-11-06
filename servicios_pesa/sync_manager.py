@@ -287,10 +287,12 @@ class SyncManager:
                             os.id, os.folio_os, os.fecha::text,
                             os.id_tipo_servicio,
                             CASE
+                                WHEN os.folio_os ILIKE 'OSOCC-%%' THEN 'Observaciones Celda'
                                 WHEN os.folio_os ILIKE 'OSOB-%%' THEN 'Observaciones'
                                 ELSE COALESCE(ts.nombre, os.tipo_servicio)
                             END AS tipo_servicio_nombre,
-                            os.id_cliente, cl.razon_social,
+                            os.id_cliente,
+                            COALESCE(cl.razon_social, CASE WHEN os.folio_os ILIKE 'OSOCC-%%' THEN COALESCE(os.ubicacion, 'Stock / Taller Básculas PESA') ELSE NULL END) AS razon_social,
                             os.sucursal_id,
                             COALESCE(suc.nombre_sucursal, os.ubicacion, '') AS sucursal_nombre,
                             os.id_tecnico, tc.nombre_completo,

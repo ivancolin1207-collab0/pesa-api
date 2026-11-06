@@ -755,7 +755,7 @@ class LocalDbService {
           'firma_cliente':     (raw['firma_cliente'] ?? raw['firma_cliente_b64'])?.toString(),
           'pdf_path_local':    raw['pdf_path_local']?.toString(),
           'pdf_b64_local':     (raw['pdf_b64_local'] ?? raw['pdf_b64'])?.toString(),
-          'tipo_documento':    (raw['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS'))))))?.toString(),
+          'tipo_documento':    (raw['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOCC') ? 'OSOCC' : (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS')))))))?.toString(),
           'datos_tecnicos_json': raw['datos_tecnicos_json']?.toString(),
           'partidas':          raw['partidas'] is String
               ? raw['partidas']
@@ -1136,7 +1136,7 @@ class LocalDbService {
       'unidad_medida':     data['unidad_medida']?.toString() ?? 'kg',
       'id_lote':           (data['id_lote'] ?? data['lote'])?.toString() ?? '',
       'rango_lote':        data['rango_lote']?.toString() ?? '',
-      'tipo_documento':    (data['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.toUpperCase().startsWith('RMA') ? 'RMA' : (folio.toUpperCase().startsWith('RE') ? 'RE' : (folio.toUpperCase().startsWith('LP') ? 'LP' : (folio.toUpperCase().startsWith('LV') ? 'LV' : 'OS'))))))?.toString(),
+      'tipo_documento':    (data['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOCC') ? 'OSOCC' : (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.toUpperCase().startsWith('RMA') ? 'RMA' : (folio.toUpperCase().startsWith('RE') ? 'RE' : (folio.toUpperCase().startsWith('LP') ? 'LP' : (folio.toUpperCase().startsWith('LV') ? 'LV' : 'OS')))))))?.toString(),
       if (data['datos_tecnicos_json'] != null)
         'datos_tecnicos_json': data['datos_tecnicos_json'] is String
             ? data['datos_tecnicos_json']

@@ -85,7 +85,12 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
 
     id_limpio = limpiar(id_equipo)
     s_limpio = limpiar(servicio)
-    if f_limpio.upper().startswith("OSOB-"):
+    if f_limpio.upper().startswith("OSOCC-"):
+        if not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null', 'formato de diagnóstico y revisión de celda de carga', 'diagnóstico y revisión de celda de carga (osocc)']:
+            s_limpio = "Observaciones Celda"
+        if not c_limpio or c_limpio.lower() in ['empresa', 'cliente', 'none', 'null']:
+            c_limpio = "Basculas PESA"
+    elif f_limpio.upper().startswith("OSOB-"):
         if not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null', 'formato de inspección y revisión de básculas', 'inspección y revisión de básculas (osob)']:
             s_limpio = "Observaciones"
     elif not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null']:
@@ -309,6 +314,19 @@ def regenerar_pdf(os_id: int, folio: str, force: bool = True) -> Optional[str]:
                 return gen.generate(os_data=os_data, output_path=output_path, force=force)
             except (ImportError, AttributeError) as exc:
                 logger.warning("LvPdfGenerator no disponible: %s", exc)
+                return None
+
+        # OSOCC -- Formato de Diagnóstico y Revisión de Celda de Carga (Observaciones Celda)
+        elif folio_upper.startswith("OSOCC-") or str(os_data.get("tipo_documento") or "").strip().upper() == "OSOCC":
+            try:
+                from services.os_pdf_generator import osocc_pdf_generator
+                output_path = _get_output_path(folio, "PDF_OS")
+                res_pdf = osocc_pdf_generator.generate(os_data=os_data, output_path=output_path, force=force)
+                if res_pdf and Path(res_pdf).exists():
+                    _actualizar_bd_pdf(os_id, res_pdf)
+                return res_pdf
+            except (ImportError, AttributeError) as exc:
+                logger.warning("osocc_pdf_generator no disponible: %s", exc)
                 return None
 
         # OSOB -- Formato de Inspección y Revisión de Básculas (Observaciones)

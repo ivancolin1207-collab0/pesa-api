@@ -286,6 +286,46 @@ class EquipoCard(QFrame):
         self._wgt_osob_extra.setVisible(False)
         fields_lay.addWidget(self._wgt_osob_extra)
 
+        # ── Fila Extra OSOCC: Sensibilidad, Resistencia Nominal, Ref./Orden y Cables ──
+        self._wgt_osocc_extra = QWidget()
+        self._wgt_osocc_extra.setStyleSheet("background: transparent;")
+        _osocc_vlay = QVBoxLayout(self._wgt_osocc_extra)
+        _osocc_vlay.setContentsMargins(0, 0, 0, 0)
+        _osocc_vlay.setSpacing(8)
+        _osocc_row1 = QHBoxLayout()
+        _osocc_row1.setContentsMargins(0, 0, 0, 0)
+        _osocc_row1.setSpacing(12)
+        self._inp_sensibilidad = self._make_input(
+            "Sensibilidad (ej: 2.0 mV/V, 3.0 mV/V)", _osocc_row1, "Sensibilidad Nominal (mV/V)"
+        )
+        self._inp_res_nominal = self._make_input(
+            "Resistencia Entrada / Salida (ej: 350 Ω / 700 Ω / 1000 Ω)", _osocc_row1, "Resistencia Nominal (Ohms)"
+        )
+        self._inp_ref_orden = self._make_input(
+            "Ref. / Orden (opcional)", _osocc_row1, "Ref. / Orden"
+        )
+        _osocc_vlay.addLayout(_osocc_row1)
+
+        _osocc_row2 = QHBoxLayout()
+        _osocc_row2.setContentsMargins(0, 0, 0, 0)
+        _osocc_row2.setSpacing(8)
+        self._inp_cable_exc_pos = self._make_input("Rojo", _osocc_row2, "Cable Exc+")
+        self._inp_cable_exc_pos.setText("Rojo")
+        self._inp_cable_exc_neg = self._make_input("Negro", _osocc_row2, "Cable Exc-")
+        self._inp_cable_exc_neg.setText("Negro")
+        self._inp_cable_sig_pos = self._make_input("Verde", _osocc_row2, "Cable Sig+")
+        self._inp_cable_sig_pos.setText("Verde")
+        self._inp_cable_sig_neg = self._make_input("Blanco", _osocc_row2, "Cable Sig-")
+        self._inp_cable_sig_neg.setText("Blanco")
+        self._inp_cable_blindaje = self._make_input("Malla", _osocc_row2, "Blindaje")
+        self._inp_cable_blindaje.setText("Malla")
+        self._inp_cable_sense = self._make_input("Si/No", _osocc_row2, "Sense")
+        self._inp_cable_sense.setText("Si/No")
+        _osocc_vlay.addLayout(_osocc_row2)
+
+        self._wgt_osocc_extra.setVisible(False)
+        fields_lay.addWidget(self._wgt_osocc_extra)
+
         # ── Fila 3: Capacidad / División / DVE / Puntos de Apoyo ──────────────
         self._wgt_hologramas = QWidget()
         self._wgt_hologramas.setStyleSheet("background: transparent;")
@@ -833,9 +873,32 @@ class EquipoCard(QFrame):
         try:
             if hasattr(self, '_wgt_osob_extra'):
                 self._wgt_osob_extra.setVisible(is_osob)
+            if is_osob and hasattr(self, '_wgt_osocc_extra'):
+                self._wgt_osocc_extra.setVisible(False)
+            if hasattr(self, '_fields_row2'):
+                self._fields_row2.setVisible(True)
             if hasattr(self, '_fields_row3'):
                 self._fields_row3.setVisible(not is_osob)
             if is_osob:
+                self.set_calibracion_visible(False)
+                self.set_inspeccion_visible(False)
+                if hasattr(self, '_wgt_enlaces'):
+                    self._wgt_enlaces.setVisible(False)
+        except Exception:
+            pass
+
+    def set_osocc_mode(self, is_osocc: bool) -> None:
+        """Adapta la tarjeta de instrumento para el formato OSOCC (Sección 1 de Celda de Carga)."""
+        try:
+            if hasattr(self, '_wgt_osocc_extra'):
+                self._wgt_osocc_extra.setVisible(is_osocc)
+            if is_osocc and hasattr(self, '_wgt_osob_extra'):
+                self._wgt_osob_extra.setVisible(False)
+            if hasattr(self, '_fields_row2'):
+                self._fields_row2.setVisible(not is_osocc)
+            if hasattr(self, '_fields_row3'):
+                self._fields_row3.setVisible(not is_osocc)
+            if is_osocc:
                 self.set_calibracion_visible(False)
                 self.set_inspeccion_visible(False)
                 if hasattr(self, '_wgt_enlaces'):
@@ -966,6 +1029,17 @@ class EquipoCard(QFrame):
             "orden_servicio_vinculada": _v("_inp_os_vinculada"),
             "os_vinculada":        _v("_inp_os_vinculada"),
             "orden_servicio":      _v("_inp_os_vinculada"),
+            "sensibilidad_nominal": _v("_inp_sensibilidad"),
+            "resistencia_nominal":  _v("_inp_res_nominal"),
+            "orden_referencia":     _v("_inp_ref_orden"),
+            "configuracion_cables": {
+                "exc_pos":  _v("_inp_cable_exc_pos", "Rojo") or "Rojo",
+                "exc_neg":  _v("_inp_cable_exc_neg", "Negro") or "Negro",
+                "sig_pos":  _v("_inp_cable_sig_pos", "Verde") or "Verde",
+                "sig_neg":  _v("_inp_cable_sig_neg", "Blanco") or "Blanco",
+                "blindaje": _v("_inp_cable_blindaje", "Malla") or "Malla",
+                "sense":    _v("_inp_cable_sense", "Si/No") or "Si/No",
+            },
             # ── Calibración ────────────────────────────────────────────────────
             "id_tipo_instrumento":     int(self._cmb_tipo_inst.currentData()) if (hasattr(self, '_cmb_tipo_inst') and self._cmb_tipo_inst.currentData() is not None) else None,
             "tipo_instrumento":        _cmb("_cmb_tipo_inst", "Báscula de plataforma"),
@@ -1542,15 +1616,21 @@ class BatchGeneratorWidget(QWidget):
             "Formato de Inspección y Revisión de Básculas.",
             accent="#0D9488",
         )
+        self._card_osocc = SelectCard(
+            "🔌", "Observaciones Celda (OSOCC)",
+            "Diagnóstico unitario de celdas de carga (Stock o Cliente).",
+            accent="#0284C7",
+        )
 
         self._doc_group = QButtonGroup(self)
         self._doc_group.setExclusive(True)
-        self._doc_group.addButton(self._card_os,   1)
-        self._doc_group.addButton(self._card_rma,  2)
-        self._doc_group.addButton(self._card_re,   3)
-        self._doc_group.addButton(self._card_lp,   4)
-        self._doc_group.addButton(self._card_lv,   5)
-        self._doc_group.addButton(self._card_osob, 6)
+        self._doc_group.addButton(self._card_os,    1)
+        self._doc_group.addButton(self._card_rma,   2)
+        self._doc_group.addButton(self._card_re,    3)
+        self._doc_group.addButton(self._card_lp,    4)
+        self._doc_group.addButton(self._card_lv,    5)
+        self._doc_group.addButton(self._card_osob,  6)
+        self._doc_group.addButton(self._card_osocc, 7)
 
         self._card_os.toggled.connect(lambda chk: chk and self._on_tipo_doc("OS"))
         self._card_rma.toggled.connect(lambda chk: chk and self._on_tipo_doc("RMA"))
@@ -1558,6 +1638,7 @@ class BatchGeneratorWidget(QWidget):
         self._card_lp.toggled.connect(lambda chk: chk and self._on_tipo_doc("LP"))
         self._card_lv.toggled.connect(lambda chk: chk and self._on_tipo_doc("LV"))
         self._card_osob.toggled.connect(lambda chk: chk and self._on_tipo_doc("OSOB"))
+        self._card_osocc.toggled.connect(lambda chk: chk and self._on_tipo_doc("OSOCC"))
 
         row.addWidget(self._card_os)
         row.addWidget(self._card_rma)
@@ -1565,6 +1646,7 @@ class BatchGeneratorWidget(QWidget):
         row.addWidget(self._card_lp)
         row.addWidget(self._card_lv)
         row.addWidget(self._card_osob)
+        row.addWidget(self._card_osocc)
         return w
 
     # ── PASO 3 ────────────────────────────────────────────────────────────────
@@ -1618,6 +1700,42 @@ class BatchGeneratorWidget(QWidget):
         col_tec.addWidget(self.cmb_tecnico)
         row1.addLayout(col_tec, stretch=2)
         grid.addLayout(row1)
+
+        # ── Bloque condicional OSOCC: Destino de la Celda (Cliente o Stock / Taller Interno) ──
+        self._frame_osocc_destino = QFrame()
+        self._frame_osocc_destino.setObjectName("frame_osocc_destino")
+        self._frame_osocc_destino.setStyleSheet("""
+            QFrame#frame_osocc_destino {
+                background: rgba(2,132,199,0.06);
+                border: 1.5px solid rgba(2,132,199,0.30);
+                border-radius: 10px;
+            }
+        """)
+        _osocc_dest_lay = QHBoxLayout(self._frame_osocc_destino)
+        _osocc_dest_lay.setContentsMargins(14, 10, 14, 10)
+        _osocc_dest_lay.setSpacing(16)
+
+        _col_dest_sel = QVBoxLayout()
+        _col_dest_sel.setSpacing(4)
+        _col_dest_sel.addWidget(_field_label("Destino de la Celda (OSOCC)", required=True))
+        self.cmb_osocc_destino = QComboBox()
+        self.cmb_osocc_destino.addItems(["Stock / Taller Interno", "Cliente"])
+        self.cmb_osocc_destino.setFixedWidth(230)
+        self.cmb_osocc_destino.currentIndexChanged.connect(self._on_osocc_destino_changed)
+        _col_dest_sel.addWidget(self.cmb_osocc_destino)
+        _osocc_dest_lay.addLayout(_col_dest_sel)
+
+        _col_dest_nom = QVBoxLayout()
+        _col_dest_nom.setSpacing(4)
+        _col_dest_nom.addWidget(_field_label("Cliente / Destino en PDF (Editable)"))
+        self.le_osocc_cliente_destino = QLineEdit("Básculas PESA - Laboratorio de Celdas")
+        self.le_osocc_cliente_destino.setPlaceholderText("Básculas PESA - Laboratorio de Celdas / Stock / Taller Básculas PESA")
+        self.le_osocc_cliente_destino.textChanged.connect(self._on_params_changed)
+        _col_dest_nom.addWidget(self.le_osocc_cliente_destino)
+        _osocc_dest_lay.addLayout(_col_dest_nom, stretch=1)
+
+        self._frame_osocc_destino.setVisible(False)
+        grid.addWidget(self._frame_osocc_destino)
 
         # Fila 1b: Tipo de Servicio y Tipo de Instrumento
         # Se oculta para documentos RE (no aplica)
@@ -2543,6 +2661,28 @@ class BatchGeneratorWidget(QWidget):
         """Compatibilidad: redirige a la carga asíncrona."""
         self._launch_catalog_loader()
 
+    def _es_osocc_stock(self) -> bool:
+        """Retorna True si el documento es OSOCC y el destino es Stock / Taller Interno (o no se eligió cliente)."""
+        if getattr(self, "_tipo_doc", "") != "OSOCC":
+            return False
+        if hasattr(self, "cmb_osocc_destino"):
+            return "Stock" in self.cmb_osocc_destino.currentText()
+        return True
+
+    def _on_osocc_destino_changed(self, index: int = 0) -> None:
+        """Sincroniza el campo editable Cliente / Destino cuando cambia el combo Destino de OSOCC."""
+        if not hasattr(self, "cmb_osocc_destino") or not hasattr(self, "le_osocc_cliente_destino"):
+            return
+        es_stock = "Stock" in self.cmb_osocc_destino.currentText()
+        if es_stock:
+            if not self.le_osocc_cliente_destino.text().strip() or self.cmb_cliente.currentData() is None:
+                self.le_osocc_cliente_destino.setText("Básculas PESA - Laboratorio de Celdas")
+        else:
+            cli_txt = self.cmb_cliente.currentText().strip() if hasattr(self, "cmb_cliente") else ""
+            if cli_txt and "Selecciona" not in cli_txt and not cli_txt.startswith("—"):
+                self.le_osocc_cliente_destino.setText(cli_txt)
+        self._on_params_changed()
+
     def _on_params_changed(self, *args, **kwargs) -> None:
         """Maneja las actualizaciones visuales y cálculos cuando cambian los parámetros del formato."""
         try:
@@ -2553,9 +2693,21 @@ class BatchGeneratorWidget(QWidget):
         except Exception:
             pass
 
+        if getattr(self, "_tipo_doc", "") == "OSOCC" and hasattr(self, "le_osocc_cliente_destino"):
+            cli_sel = self.cmb_cliente.currentText().strip() if hasattr(self, "cmb_cliente") else ""
+            if cli_sel and "Selecciona" not in cli_sel and not cli_sel.startswith("—"):
+                if hasattr(self, "cmb_osocc_destino") and self.cmb_osocc_destino.currentText() != "Cliente":
+                    self.cmb_osocc_destino.blockSignals(True)
+                    self.cmb_osocc_destino.setCurrentText("Cliente")
+                    self.cmb_osocc_destino.blockSignals(False)
+                self.le_osocc_cliente_destino.blockSignals(True)
+                self.le_osocc_cliente_destino.setText(cli_sel)
+                self.le_osocc_cliente_destino.blockSignals(False)
+
         valido = True
-        if hasattr(self, 'cmb_cliente') and (self.cmb_cliente.currentText().strip() == "" or "Selecciona" in self.cmb_cliente.currentText()):
-            valido = False
+        if not self._es_osocc_stock():
+            if hasattr(self, 'cmb_cliente') and (self.cmb_cliente.currentText().strip() == "" or "Selecciona" in self.cmb_cliente.currentText()):
+                valido = False
         if hasattr(self, 'cmb_tecnico') and (self.cmb_tecnico.currentText().strip() == "" or "Selecciona" in self.cmb_tecnico.currentText()):
             valido = False
         if hasattr(self, '_tipo_doc') and self._tipo_doc == "OS" and hasattr(self, 'cmb_tipo_servicio') and (self.cmb_tipo_servicio.currentText().strip() == "" or "Selecciona" in self.cmb_tipo_servicio.currentText()):
@@ -2715,8 +2867,8 @@ class BatchGeneratorWidget(QWidget):
                 # 3. Usar el mayor de las dos fuentes
                 ultimo = max(max_control, max_os)
                 siguiente = ultimo + 1
-                if str(tipo_doc).upper() == "OSOB":
-                    folio_preview = f"OSOB-{anio2}-{siguiente:03d}"
+                if str(tipo_doc).upper() in ("OSOB", "OSOCC"):
+                    folio_preview = f"{str(tipo_doc).upper()}-{anio2}-{siguiente:03d}"
                 else:
                     folio_preview = f"{tipo_doc}-{anio2}-{siguiente}"
                 logger.debug(
@@ -2728,8 +2880,8 @@ class BatchGeneratorWidget(QWidget):
             pass
         # Fallback genérico si no hay BD
         anio2 = str(QDate.currentDate().year())[2:]
-        if str(tipo_doc).upper() == "OSOB":
-            return f"OSOB-{anio2}-001"
+        if str(tipo_doc).upper() in ("OSOB", "OSOCC"):
+            return f"{str(tipo_doc).upper()}-{anio2}-001"
         return f"{tipo_doc}-{anio2}-1"
 
     def _actualizar_resumen(self):
@@ -2775,7 +2927,7 @@ class BatchGeneratorWidget(QWidget):
                         )
                     else:
                         num_fin    = num_inicio + cant - 1
-                        folio_fin  = f"{prefix}-{num_fin:03d}" if prefix.upper().startswith("OSOB") else f"{prefix}-{num_fin}"
+                        folio_fin  = f"{prefix}-{num_fin:03d}" if prefix.upper().startswith(("OSOB", "OSOCC")) else f"{prefix}-{num_fin}"
                         self.lbl_folio_rango.setText(
                             f"▶  Se generará el lote de <b>{cant} folios</b>: "
                             f"<b>{folio_base}</b> al <b>{folio_fin}</b>"
@@ -2831,7 +2983,7 @@ class BatchGeneratorWidget(QWidget):
             card.blockSignals(False)
 
         # Restablecer selección de documento
-        for btn in [self._card_os, self._card_rma, self._card_re, self._card_lp, self._card_lv, self._card_osob]:
+        for btn in [self._card_os, self._card_rma, self._card_re, self._card_lp, self._card_lv, self._card_osob, self._card_osocc]:
             btn.blockSignals(True)
             btn.setChecked(False)
             if hasattr(btn, '_apply_style'): btn._apply_style(False)
@@ -3071,20 +3223,26 @@ class BatchGeneratorWidget(QWidget):
         # Forzar visualmente el estado de selección de la tarjeta de documento
         for c, t in [(self._card_os, "OS"), (self._card_rma, "RMA"), 
                      (self._card_re, "RE"), (self._card_lp, "LP"),
-                     (self._card_lv, "LV"), (self._card_osob, "OSOB")]:
+                     (self._card_lv, "LV"), (self._card_osob, "OSOB"),
+                     (self._card_osocc, "OSOCC")]:
             c.blockSignals(True)
             c.setChecked(tipo == t)
             if hasattr(c, '_apply_style'): c._apply_style(tipo == t)
             c.blockSignals(False)
 
-        es_re   = (tipo == "RE")
-        es_rma  = (tipo == "RMA")
-        es_os   = (tipo == "OS")
-        es_lv   = (tipo == "LV")
-        es_osob = (tipo == "OSOB")
+        es_re    = (tipo == "RE")
+        es_rma   = (tipo == "RMA")
+        es_os    = (tipo == "OS")
+        es_lv    = (tipo == "LV")
+        es_osob  = (tipo == "OSOB")
+        es_osocc = (tipo == "OSOCC")
         # LV redirige al formulario dedicado al ejecutar — no necesita campos extra en paso 3
         # Los campos de OS / RE / RMA se ocultan para LP y LV
         es_os_fields = es_os  # solo OS muestra tipo servicio, excentricidad
+
+        # Bloque Destino OSOCC (Stock / Cliente)
+        if hasattr(self, "_frame_osocc_destino"):
+            self._frame_osocc_destino.setVisible(es_osocc)
 
         # Bloque estructura RE
         if hasattr(self, "_frame_re_estructura"):
@@ -3106,15 +3264,17 @@ class BatchGeneratorWidget(QWidget):
         if hasattr(self, "_widget_row_exc"):
             self._widget_row_exc.setVisible(es_os_fields)
 
-        # Datos del Instrumento por Equipo → visible para OS y OSOB (Sección 1)
+        # Datos del Instrumento por Equipo → visible para OS, OSOB y OSOCC (Sección 1)
         if hasattr(self, "_widget_equipos_section"):
-            self._widget_equipos_section.setVisible(es_os or es_osob)
+            self._widget_equipos_section.setVisible(es_os or es_osob or es_osocc)
 
-        # Adaptar tarjetas de instrumento según sea OS u OSOB
+        # Adaptar tarjetas de instrumento según sea OS, OSOB u OSOCC
         if hasattr(self, "_equipo_cards"):
             for card in self._equipo_cards:
                 if hasattr(card, "set_osob_mode"):
                     card.set_osob_mode(es_osob)
+                if hasattr(card, "set_osocc_mode"):
+                    card.set_osocc_mode(es_osocc)
                 if es_os:
                     card.set_calibracion_visible(self._servicio_requiere_calibracion())
                     card.set_inspeccion_visible(self._servicio_requiere_inspeccion())
@@ -3213,7 +3373,7 @@ class BatchGeneratorWidget(QWidget):
                     conn.commit()
                 finally:
                     _db_pool.release_connection(conn)
-                fmt_num = f"{nuevo_consecutivo:03d}" if str(tipo).upper() == "OSOB" else f"{nuevo_consecutivo}"
+                fmt_num = f"{nuevo_consecutivo:03d}" if str(tipo).upper() in ("OSOB", "OSOCC") else f"{nuevo_consecutivo}"
                 QMessageBox.information(self, "Éxito", f"El próximo folio será {tipo}-{str(anio)[2:]}-{fmt_num}")
             except Exception as e:
                 QMessageBox.critical(self, "Error", f"Error al actualizar consecutivo: {e}")
@@ -3232,11 +3392,14 @@ class BatchGeneratorWidget(QWidget):
         sin_clientes = self.cmb_cliente.count() <= 1   # solo el placeholder
         sin_tecnicos = self.cmb_tecnico.count() <= 1   # solo el placeholder
 
-        # Validar cliente seleccionado
+        # Validar cliente seleccionado (opcional en OSOCC Stock / Taller Interno)
         cliente_data = self.cmb_cliente.currentData()
-        sin_seleccion_cliente = (cliente_data is None)
+        es_osocc_sin_cli = (getattr(self, "_tipo_doc", "") == "OSOCC") and (
+            self._es_osocc_stock() or cliente_data is None
+        )
+        sin_seleccion_cliente = (cliente_data is None) and not es_osocc_sin_cli
 
-        if sin_clientes:
+        if sin_clientes and not es_osocc_sin_cli:
             QMessageBox.information(
                 self,
                 "⚠️  Sin clientes registrados",
@@ -3274,10 +3437,14 @@ class BatchGeneratorWidget(QWidget):
         tecnico = self.cmb_tecnico.currentText().strip() if hasattr(self, 'cmb_tecnico') else ""
         servicio = self.cmb_tipo_servicio.currentText().strip() if hasattr(self, 'cmb_tipo_servicio') else ""
         tipo_doc = getattr(self, '_tipo_doc', 'OS') or 'OS'
+        es_osocc_libre = (tipo_doc == "OSOCC") and (
+            self._es_osocc_stock() or not cliente or "Selecciona" in cliente or "—" in cliente
+        )
 
         faltan = []
-        if not cliente or "Selecciona" in cliente or "—" in cliente: faltan.append("Cliente / Razón Social")
-        if not sucursal or "Selecciona" in sucursal or "—" in sucursal: faltan.append("Sucursal / Planta")
+        if not es_osocc_libre:
+            if not cliente or "Selecciona" in cliente or "—" in cliente: faltan.append("Cliente / Razón Social")
+            if not sucursal or "Selecciona" in sucursal or "—" in sucursal: faltan.append("Sucursal / Planta")
         if not tecnico or "Selecciona" in tecnico or "—" in tecnico or not self.cmb_tecnico.currentData(): faltan.append("Técnico Asignado")
         if tipo_doc == "OS" and (not servicio or "Selecciona" in servicio or "—" in servicio): faltan.append("Tipo de Servicio")
         
@@ -3512,6 +3679,8 @@ class BatchGeneratorWidget(QWidget):
             card.set_puntos_exactitud(_n_pts_global) # sembrar con valor global
             if hasattr(card, "set_osob_mode"):
                 card.set_osob_mode(getattr(self, "_tipo_doc", "") == "OSOB")
+            if hasattr(card, "set_osocc_mode"):
+                card.set_osocc_mode(getattr(self, "_tipo_doc", "") == "OSOCC")
             self._equipo_cards.append(card)
             self._equipos_container.addWidget(card)
 
@@ -3764,6 +3933,18 @@ class BatchGeneratorWidget(QWidget):
             tipo_servicio_mapped = "Entrega Refacciones"
         elif self._tipo_doc == "OSOB":
             tipo_servicio_mapped = "Observaciones"
+        elif self._tipo_doc == "OSOCC":
+            tipo_servicio_mapped = "Observaciones Celda"
+            if not id_cliente or self._es_osocc_stock():
+                cliente_nom = (
+                    self.le_osocc_cliente_destino.text().strip()
+                    if hasattr(self, "le_osocc_cliente_destino")
+                    else ""
+                ) or "Básculas PESA - Laboratorio de Celdas"
+                if self._es_osocc_stock():
+                    id_cliente = None
+                    sucursal_id_sel = None
+                    sucursal_nom_sel = "Stock / Taller Básculas PESA"
         
         puntos_exactitud = int(self.cmb_puntos_exactitud.currentText()) if hasattr(self, "cmb_puntos_exactitud") else 5
 
@@ -3888,6 +4069,11 @@ class BatchGeneratorWidget(QWidget):
                 self.txt_lv_maniobra.toPlainText().strip()
                 if hasattr(self, "txt_lv_maniobra") and self._tipo_doc == "LV" else ""
             ),
+            # ── Datos específicos OSOCC ────────────────────────────────────────
+            "destino_celda": (
+                ("STOCK" if self._es_osocc_stock() else "CLIENTE")
+                if self._tipo_doc == "OSOCC" else None
+            ),
         }
 
         # Extraer y asignar el folio exacto escrito por el usuario
@@ -3990,7 +4176,7 @@ class BatchGeneratorWidget(QWidget):
                                        folio_base, prefix, consec_base)
 
                     # Calcular rango_lote una sola vez (antes del loop)
-                    _is_osob_fmt = (str(tipo).upper() == "OSOB") or prefix.upper().startswith("OSOB")
+                    _is_osob_fmt = (str(tipo).upper() in ("OSOB", "OSOCC")) or prefix.upper().startswith(("OSOB", "OSOCC"))
                     if cant > 1:
                         folio_ini = f"{prefix}-{consec_base:03d}" if _is_osob_fmt else f"{prefix}-{consec_base}"
                         folio_fin = f"{prefix}-{consec_base + cant - 1:03d}" if _is_osob_fmt else f"{prefix}-{consec_base + cant - 1}"
@@ -4039,7 +4225,10 @@ class BatchGeneratorWidget(QWidget):
                         _modelo          = str(modelo).strip() or None
                         _ns              = str(serie).strip() or None
                         _id_eq           = str(id_indicador).strip() or None
-                        _ubicacion       = str(ubicacion).strip() or None
+                        _ubicacion       = str(ubicacion).strip() or (
+                            (datos.get("cliente") or "Básculas PESA - Laboratorio de Celdas")
+                            if str(tipo).upper() == "OSOCC" else None
+                        )
                         _tipo_ins_nombre = str(tipo_instrumento).strip() or None
                         _id_tipo_inst    = datos_eq.get("id_tipo_instrumento")
                         if _id_tipo_inst is None and idx == 0:
@@ -4348,6 +4537,54 @@ class BatchGeneratorWidget(QWidget):
         direccion_cliente = self._get_direccion_cliente(datos.get("id_cliente"))
 
         tipo_doc = datos.get("tipo_doc", "OS")
+
+        # ── OSOCC: Formato de Diagnóstico y Revisión de Celda de Carga ────────
+        if tipo_doc == "OSOCC":
+            from services.os_pdf_generator import osocc_pdf_generator as _osocc_gen
+            import shutil as _shutil_osocc
+            sucursal_dir_osocc = self._get_direccion_sucursal(datos.get("sucursal_id")) or direccion_cliente
+            tmp_paths_osocc = []
+            is_calca_osocc = (self._modalidad == "FISICO")
+            for i, folio in enumerate(folios):
+                equipo_data = copy.deepcopy(equipos[i]) if (equipos and i < len(equipos)) else (copy.deepcopy(equipos[0]) if equipos else {})
+                osocc_data = {
+                    **datos,
+                    "folio_os":           folio,
+                    "folio":              folio,
+                    "cliente":            datos.get("cliente") or "Stock / Taller Básculas PESA",
+                    "planta":             equipo_data.get("ubicacion") or datos.get("sucursal_nombre") or sucursal_dir_osocc or "Stock / Taller Básculas PESA",
+                    "ubicacion":          equipo_data.get("ubicacion") or datos.get("cliente") or "Stock / Taller Básculas PESA",
+                    "direccion":          sucursal_dir_osocc,
+                    "sucursal_direccion": sucursal_dir_osocc,
+                    "tecnico_nombre":     datos.get("tecnico_nombre", ""),
+                    "fecha":              datos.get("fecha"),
+                    "observaciones":      datos.get("observaciones_tecnico", ""),
+                    "destino_celda":      datos.get("destino_celda") or ("STOCK" if self._es_osocc_stock() else "CLIENTE"),
+                    **equipo_data,
+                }
+                tmp = str(output_dir / f"{folio}_tmp.pdf")
+                _osocc_gen.generate(osocc_data, output_path=tmp, calca=is_calca_osocc, force=True)
+                tmp_paths_osocc.append(tmp)
+            if len(tmp_paths_osocc) == 1:
+                _shutil_osocc.move(tmp_paths_osocc[0], pdf_path)
+            else:
+                try:
+                    from pypdf import PdfWriter, PdfReader
+                    writer = PdfWriter()
+                    for tmp in tmp_paths_osocc:
+                        for page in PdfReader(tmp).pages:
+                            writer.add_page(page)
+                    with open(pdf_path, "wb") as fh:
+                        writer.write(fh)
+                except ImportError:
+                    _shutil_osocc.copy(tmp_paths_osocc[0], pdf_path)
+                finally:
+                    import os as _os
+                    for tmp in tmp_paths_osocc:
+                        try: _os.remove(tmp)
+                        except: pass
+            logger.info("PDF OSOCC lote generado: %s (%d folios)", pdf_path, len(folios))
+            return pdf_path
 
         # ── OSOB: Formato de Inspección y Revisión de Básculas ────────────────
         if tipo_doc == "OSOB":
@@ -4795,6 +5032,16 @@ class BatchGeneratorWidget(QWidget):
             os_data['aplica_excentricidad']    = False
             os_data['tipo_no_aplica_exc']      = os_data.get('tipo_no_aplica_exc') or 'tanque'
 
+        # ── OSOCC: Formato de Diagnóstico y Revisión de Celda de Carga (individual) ──
+        if datos.get("tipo_doc") == "OSOCC":
+            from services.os_pdf_generator import osocc_pdf_generator as _osocc_gen
+            is_calca = (self._modalidad == "FISICO")
+            os_data["cliente"] = datos.get("cliente") or "Stock / Taller Básculas PESA"
+            os_data["destino_celda"] = datos.get("destino_celda") or ("STOCK" if self._es_osocc_stock() else "CLIENTE")
+            _osocc_gen.generate(os_data, output_path=pdf_path, calca=is_calca, force=True)
+            logger.info("PDF OSOCC individual generado: %s", pdf_path)
+            return pdf_path
+
         # ── OSOB: Formato de Inspección y Revisión de Básculas (individual) ───────
         if datos.get("tipo_doc") == "OSOB":
             from services.os_pdf_generator import osob_pdf_generator as _osob_gen
@@ -4899,6 +5146,9 @@ class BatchGeneratorWidget(QWidget):
         elif tipo == "OSOB":
             if hasattr(self, "_card_osob"):
                 self._card_osob.setChecked(True)
+        elif tipo == "OSOCC":
+            if hasattr(self, "_card_osocc"):
+                self._card_osocc.setChecked(True)
 
     def _abrir_pdf_preview(self, pdf_path: str) -> None:
         """
@@ -5093,6 +5343,15 @@ class BatchGeneratorWidget(QWidget):
             self.txt_lv_pesas.clear()
         if hasattr(self, "txt_lv_maniobra"):
             self.txt_lv_maniobra.clear()
+
+        if hasattr(self, "cmb_osocc_destino"):
+            self.cmb_osocc_destino.blockSignals(True)
+            self.cmb_osocc_destino.setCurrentIndex(0)
+            self.cmb_osocc_destino.blockSignals(False)
+        if hasattr(self, "le_osocc_cliente_destino"):
+            self.le_osocc_cliente_destino.blockSignals(True)
+            self.le_osocc_cliente_destino.setText("Básculas PESA - Laboratorio de Celdas")
+            self.le_osocc_cliente_destino.blockSignals(False)
 
         # 9. Recalcular y actualizar en pantalla el Folio Inicial (Consecutivo)
         self.actualizar_consecutivo()

@@ -124,7 +124,10 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
 
     id_limpio = limpiar(id_equipo)
     s_limpio = limpiar(servicio)
-    if f_limpio.upper().startswith("OSOB-"):
+    if f_limpio.upper().startswith("OSOCC-"):
+        if not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null', 'formato de diagnóstico y revisión de celda de carga', 'observaciones celda (osocc)']:
+            s_limpio = "Observaciones Celda"
+    elif f_limpio.upper().startswith("OSOB-"):
         if not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null', 'formato de inspección y revisión de básculas', 'inspección y revisión de básculas (osob)']:
             s_limpio = "Observaciones"
     elif not s_limpio or s_limpio.lower() in ['servicio', 'none', 'null']:
@@ -152,6 +155,10 @@ _SEG_BG   = "#EBEBED"   # Fondo segmented control
 
 # Diccionario de colores de tipos de servicio con fallback defensivo .get()
 COLOR_TIPO_SERVICIO = {
+    'Observaciones Celda': '#0284C7',  # Azul Cobalto Técnico (OSOCC)
+    'OSOCC': '#0284C7',
+    'Observaciones Celda (OSOCC)': '#0284C7',
+    'Formato de Diagnóstico y Revisión de Celda de Carga': '#0284C7',
     'Observaciones': '#7C3AED',  # Violeta / Púrpura distintivo
     'Inspección': '#7C3AED',
     'OSOB': '#7C3AED',
@@ -205,6 +212,10 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         "revision":     ("#F5F5F7", "#48484A", "#E5E5EA"),
         "refacciones":  ("#F5F5F7", "#48484A", "#E5E5EA"),
         "levantamiento":("#EDE7F6", "#4A148C", "#D1C4E9"),
+        "observaciones celda": ("#E0F2FE", "#0284C7", "#BAE6FD"),
+        "observaciones celda (osocc)": ("#E0F2FE", "#0284C7", "#BAE6FD"),
+        "osocc":        ("#E0F2FE", "#0284C7", "#BAE6FD"),
+        "formato de diagnóstico": ("#E0F2FE", "#0284C7", "#BAE6FD"),
         "observaciones":("#F3E8FF", "#7C3AED", "#DDD6FE"),
         "observaciones (osob)": ("#F3E8FF", "#7C3AED", "#DDD6FE"),
         "osob":         ("#F3E8FF", "#7C3AED", "#DDD6FE"),
@@ -231,6 +242,10 @@ class StatusBadgeDelegate(QStyledItemDelegate):
             "Entrega Refacciones": "Refacciones",
             "Calibracion + Ajuste": "Calibración + Ajuste",
             "Inspeccion Visual":   "Inspección",
+            "Formato de Diagnóstico y Revisión de Celda de Carga (Observaciones Celda)": "Observaciones Celda",
+            "Formato de Diagnóstico y Revisión de Celda de Carga": "Observaciones Celda",
+            "Observaciones Celda (OSOCC)": "Observaciones Celda",
+            "OSOCC": "Observaciones Celda",
             "Formato de Inspección y Revisión de Básculas (Observaciones)": "Observaciones",
             "Formato de Inspección y Revisión de Básculas": "Observaciones",
             "Inspección y Revisión de Básculas (OSOB)": "Observaciones",
@@ -917,7 +932,13 @@ class _DashboardLoader(QThread):
                 SELECT DISTINCT ON (COALESCE(os.id::text, 'F:' || os.folio_os))
                     os.folio_os,
                     os.fecha::text AS fecha_str,
-                    cl.razon_social,
+                    COALESCE(
+                        cl.razon_social,
+                        CASE
+                            WHEN os.folio_os ILIKE 'OSOCC-%%' THEN COALESCE(NULLIF(TRIM(os.ubicacion), ''), 'Stock / Taller Básculas PESA')
+                            ELSE NULL
+                        END
+                    ) AS razon_social,
                     COALESCE(
                         NULLIF(TRIM(suc.nombre_sucursal || ' — ' || suc.direccion), ' — '),
                         NULLIF(TRIM(suc.nombre_sucursal), ''),
@@ -929,6 +950,7 @@ class _DashboardLoader(QThread):
                     ) AS ubicacion_final,
                     tc.nombre_completo,
                     CASE
+                        WHEN os.folio_os ILIKE 'OSOCC-%%' THEN 'Observaciones Celda'
                         WHEN os.folio_os ILIKE 'OSOB-%%' THEN 'Observaciones'
                         ELSE COALESCE(ts.nombre, os.tipo_servicio)
                     END AS tipo_servicio_final,
@@ -1617,16 +1639,18 @@ class DashboardWidget(QWidget):
                 QMenu::item:selected { background: #F5F5F7; }
                 QMenu::separator { height: 1px; background: #E5E5EA; margin: 3px 8px; }
             """)
-            act_os   = menu.addAction("Orden de Servicio (OS)")
-            act_rma  = menu.addAction("Remisión (RMA)")
-            act_re   = menu.addAction("Revisión (RE)")
-            act_osob = menu.addAction("Observaciones (OSOB)")
+            act_os    = menu.addAction("Orden de Servicio (OS)")
+            act_rma   = menu.addAction("Remisión (RMA)")
+            act_re    = menu.addAction("Revisión (RE)")
+            act_osob  = menu.addAction("Observaciones (OSOB)")
+            act_osocc = menu.addAction("Observaciones Celda (OSOCC)")
             menu.addSeparator()
-            act_lp   = menu.addAction("Levantamiento de Planta (LP)")
+            act_lp    = menu.addAction("Levantamiento de Planta (LP)")
             act_os.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("OS"))
             act_rma.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("RMA"))
             act_re.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("RE"))
             act_osob.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("OSOB"))
+            act_osocc.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("OSOCC"))
             act_lp.triggered.connect(lambda: self.solicitar_nuevo_formato.emit("LP"))
             self.btn_nueva_os.setMenu(menu)
             lay.addWidget(self.btn_nueva_os)
@@ -1816,6 +1840,7 @@ class DashboardWidget(QWidget):
             ("Todos los Servicios", ""),
             ("Orden de Servicio (OS)", "OS"),
             ("Observaciones (OSOB)", "OSOB"),
+            ("Observaciones Celda (OSOCC)", "OSOCC"),
             ("Remisión de Material (RMA)", "RMA"),
             ("Revisión de Báscula (RE)", "RE"),
             ("Levantamiento (LV / LP)", "LV"),
@@ -2601,7 +2626,12 @@ class DashboardWidget(QWidget):
                 for row in rows:
                     f_str = str(row[0] or "").strip().upper()
                     s_str = str(row[5] or "").strip().upper() if len(row) > 5 else ""
-                    if filtro_ts == "OSOB":
+                    if filtro_ts == "OSOCC":
+                        if not (f_str.startswith("OSOCC-") or "OSOCC" in s_str or "OBSERVACIONES CELDA" in s_str):
+                            continue
+                    elif filtro_ts == "OSOB":
+                        if f_str.startswith("OSOCC-"):
+                            continue
                         if not (f_str.startswith("OSOB-") or "OSOB" in s_str or "OBSERVACION" in s_str):
                             continue
                     elif filtro_ts == "RMA":
@@ -2767,7 +2797,13 @@ class DashboardWidget(QWidget):
                         f"""
                         SELECT
                             os.folio_os, os.fecha::text,
-                            cl.razon_social,
+                            COALESCE(
+                                cl.razon_social,
+                                CASE
+                                    WHEN os.folio_os ILIKE 'OSOCC-%%' THEN COALESCE(NULLIF(TRIM(os.ubicacion), ''), 'Stock / Taller Básculas PESA')
+                                    ELSE NULL
+                                END
+                            ),
                             COALESCE(
                                 NULLIF(suc.nombre_sucursal, ''),
                                 NULLIF(suc.direccion, ''),
@@ -2781,7 +2817,11 @@ class DashboardWidget(QWidget):
                                 ''
                             ),
                             tc.nombre_completo,
-                            COALESCE(ts.nombre, os.tipo_servicio),
+                            CASE
+                                WHEN os.folio_os ILIKE 'OSOCC-%%' THEN 'Observaciones Celda'
+                                WHEN os.folio_os ILIKE 'OSOB-%%' THEN 'Observaciones'
+                                ELSE COALESCE(ts.nombre, os.tipo_servicio)
+                            END,
                             os.modalidad,
                             os.estado,
                             os.id,
@@ -3085,6 +3125,23 @@ class DashboardWidget(QWidget):
         elif folio_clean.startswith("LV-") or "LV-" in folio_text:
             servicio = "Levantamiento Metrológico"
             item.setText(self._COL_SERVICIO, servicio)
+        elif (
+            folio_clean.startswith("OSOCC-")
+            or "OSOCC-" in folio_text
+            or srv_clean in (
+                "Observaciones Celda",
+                "OSOCC",
+                "Observaciones Celda (OSOCC)",
+                "Formato de Diagnóstico y Revisión de Celda de Carga",
+                "Formato de Diagnóstico y Revisión de Celda de Carga (OSOCC)",
+            )
+        ):
+            servicio = "Observaciones Celda"
+            item.setText(self._COL_SERVICIO, servicio)
+            item.setToolTip(
+                self._COL_SERVICIO,
+                "Formato de Diagnóstico y Revisión de Celda de Carga (OSOCC)\nAsignado: Observaciones Celda",
+            )
         elif (
             folio_clean.startswith("OSOB-")
             or "OSOB-" in folio_text
@@ -4018,7 +4075,7 @@ class DashboardWidget(QWidget):
         else:
             # Si has_pdf es False:
             # Los botones [ ðŸ‘ PDF ] y [ ðŸ“¥ Descargar ] NO deben mostrarse habilitados como si ya existieran.
-            is_osob_folio = str(folio or "").strip().upper().startswith("OSOB-")
+            is_osob_folio = str(folio or "").strip().upper().startswith(("OSOB-", "OSOCC-"))
             btn_pdf = QPushButton("PDF")
             btn_pdf.setFixedSize(54, 28)
             if is_osob_folio:
@@ -4037,7 +4094,7 @@ class DashboardWidget(QWidget):
                     }
                     QPushButton:hover { background-color: #BBDEFB; }
                 """)
-                btn_pdf.setToolTip(f"Visualizar Formato de Inspección y Revisión de Básculas ({folio})")
+                btn_pdf.setToolTip(f"Visualizar Formato PDF ({folio})")
                 btn_pdf.clicked.connect(lambda _, fl=str(folio): self._open_pdf(fl))
             else:
                 btn_pdf.setObjectName("btn_action_pdf_disabled")
@@ -4864,7 +4921,11 @@ recepcion@basculaspesa.com.mx
         msg["From"] = f"Básculas PESA <{smtp_user}>"
         msg["To"] = destinatario_to
         msg["Cc"] = smtp_cc
-        if clean_folio.upper().startswith("OSOB-"):
+        if clean_folio.upper().startswith("OSOCC-"):
+            id_lbl = f" ({id_eq})" if id_eq else ""
+            msg["Subject"] = f"Diagnóstico y Revisión de Celda {clean_folio}{id_lbl} - {empresa} | Básculas PESA"
+            doc_desc = f"el Formato de Diagnóstico y Revisión de Celda de Carga {clean_folio}"
+        elif clean_folio.upper().startswith("OSOB-"):
             id_lbl = f" ({id_eq})" if id_eq else ""
             msg["Subject"] = f"Formato de Inspección y Revisión {clean_folio}{id_lbl} - {empresa} | Básculas PESA"
             doc_desc = f"el Formato de Inspección y Revisión de Básculas {clean_folio}"
@@ -5033,14 +5094,14 @@ recepcion@basculaspesa.com.mx
                 except Exception as exc_render:
                     logger.debug("No se pudo descargar PDF desde Render (%s) en _descargar_pdf_os para %s: %s", render_url, clean_folio, exc_render)
 
-        if (not pdf_src or not _os.path.exists(pdf_src)) and clean_folio.upper().startswith("OSOB-"):
+        if (not pdf_src or not _os.path.exists(pdf_src)) and clean_folio.upper().startswith(("OSOB-", "OSOCC-")):
             try:
                 from services.pdf_router import regenerar_pdf_orden
                 gen_path = regenerar_pdf_orden(clean_folio, force=False)
                 if gen_path and _os.path.exists(gen_path):
                     pdf_src = gen_path
             except Exception as exc_gen:
-                logger.warning("No se pudo generar PDF OSOB para %s: %s", clean_folio, exc_gen)
+                logger.warning("No se pudo generar PDF OSOB/OSOCC para %s: %s", clean_folio, exc_gen)
 
         if not pdf_src or not _os.path.exists(pdf_src):
             QMessageBox.warning(
@@ -5230,6 +5291,21 @@ recepcion@basculaspesa.com.mx
 
         folio_upper = str(folio or "").strip().upper()
         tipo_srv_upper = str(orden_dict.get('tipo_servicio') or "").strip().upper()
+        if folio_upper.startswith("OSOCC-") or "OSOCC" in tipo_srv_upper or "OBSERVACIONES CELDA" in tipo_srv_upper or ("DIAGNOSTICO" in tipo_srv_upper.replace("Ó", "O") and "CELDA" in tipo_srv_upper):
+            try:
+                from ui.dialogs.osocc_digital_dialog import OsoccDigitalDialog
+                dlg_osocc = OsoccDigitalDialog(os_id=os_id, folio=folio, orden_data=orden_dict, parent=self)
+                dlg_osocc.captura_guardada.connect(self.refresh)
+                dlg_osocc.exec()
+                return
+            except Exception as exc_osocc:
+                logger.error("Error abriendo OsoccDigitalDialog: %s", exc_osocc)
+                QMessageBox.critical(
+                    self, "Error",
+                    f"No se pudo abrir el Formato de Diagnóstico y Revisión de Celda de Carga:\n{exc_osocc}"
+                )
+                return
+
         if folio_upper.startswith("OSOB-") or "OSOB" in tipo_srv_upper or "OBSERVACION" in tipo_srv_upper or ("INSPECCION" in tipo_srv_upper and "BASCULA" in tipo_srv_upper.replace("Á", "A")):
             try:
                 from ui.dialogs.osob_digital_dialog import OsobDigitalDialog
@@ -5326,8 +5402,8 @@ recepcion@basculaspesa.com.mx
         # hagan falso-positivo.
         _is_numeric_search = search_term.isdigit()
 
-        # Prefijo de folio (ej. "OS-26", "RMA-26") â†’ solo folio.
-        _FOLIO_PREFIXES = ("os-", "rma-", "re-", "lp-", "lv-", "osob-")
+        # Prefijo de folio (ej. "OS-26", "RMA-26") → solo folio.
+        _FOLIO_PREFIXES = ("os-", "rma-", "re-", "lp-", "lv-", "osob-", "osocc-")
         _is_folio_prefix = any(search_term.startswith(p) for p in _FOLIO_PREFIXES)
 
         _folio_only = _is_numeric_search or _is_folio_prefix
@@ -6352,17 +6428,17 @@ recepcion@basculaspesa.com.mx
             _open_file(str(target_path))
             return True
 
-        # 6. Si es un folio OSOB-, generar vista previa oficial con osob_pdf_generator
-        if clean_folio.upper().startswith("OSOB-"):
+        # 6. Si es un folio OSOB- u OSOCC-, generar vista previa oficial
+        if clean_folio.upper().startswith(("OSOB-", "OSOCC-")):
             try:
                 from services.pdf_router import regenerar_pdf_orden
                 gen_path = regenerar_pdf_orden(clean_folio, force=False)
                 if gen_path and pathlib.Path(gen_path).exists() and pathlib.Path(gen_path).stat().st_size > 500:
-                    logger.info("PDF OSOB generado en vista previa: %s", gen_path)
+                    logger.info("PDF OSOB/OSOCC generado en vista previa: %s", gen_path)
                     _open_file(str(gen_path))
                     return True
             except Exception as exc_osob_gen:
-                logger.warning("Error generando vista previa PDF OSOB para %s: %s", clean_folio, exc_osob_gen)
+                logger.warning("Error generando vista previa PDF OSOB/OSOCC para %s: %s", clean_folio, exc_osob_gen)
 
         return False
 
@@ -6501,7 +6577,7 @@ recepcion@basculaspesa.com.mx
             self.lp_selected.emit(int(os_id))
             return
 
-        if folio.upper().startswith("OSOB-"):
+        if folio.upper().startswith(("OSOB-", "OSOCC-")):
             self._abrir_captura_digital(os_id, folio)
             return
 

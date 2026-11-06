@@ -24,6 +24,13 @@ class RmaPdfService {
   }) async {
     final String folioCheck = (rmaData['folio_os'] ?? rmaData['folio_rma'] ?? rmaData['folio'] ?? '').toString().trim().toUpperCase();
     final String tipoDocCheck = (rmaData['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    if (folioCheck.startsWith('OSOCC-') || tipoDocCheck == 'OSOCC') {
+      return PdfService.instance.buildPdfObservacionesCeldaBytes(
+        osData: rmaData,
+        firmaTecBase64: firmaTecBase64,
+        firmaCliBase64: firmaCliBase64,
+      );
+    }
     if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
       return PdfService.instance.buildPdfObservacionesBasculaBytes(
         osData: rmaData,

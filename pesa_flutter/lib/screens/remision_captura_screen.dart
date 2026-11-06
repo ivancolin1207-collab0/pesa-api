@@ -18,6 +18,7 @@ import '../services/rma_pdf_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/signature_shield.dart';
 import 'observaciones_bascula_screen.dart';
+import 'observaciones_celda_screen.dart';
 
 class RemisionCapturaScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
@@ -85,25 +86,37 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
   bool _saving = false;
   Uint8List? _firmaTecnicoExistente;
 
+  bool get _esOsocc {
+    final String folioUpper = (widget.orden['folio'] ?? widget.orden['folio_os'] ?? widget.orden['folio_rma'] ?? '').toString().trim().toUpperCase();
+    final String tipoDocUpper = (widget.orden['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    final String tipoUpper = (widget.orden['tipo_servicio'] ?? '').toString().trim().toUpperCase();
+    return folioUpper.startsWith('OSOCC-') ||
+        tipoDocUpper == 'OSOCC' ||
+        tipoUpper.contains('OSOCC') ||
+        tipoUpper.contains('OBSERVACIONES CELDA') ||
+        (tipoUpper.contains('DIAGNOSTICO') && tipoUpper.contains('CELDA')) ||
+        (tipoUpper.contains('DIAGNÓSTICO') && tipoUpper.contains('CELDA'));
+  }
+
   bool get _esOsob {
     final String folioUpper = (widget.orden['folio'] ?? widget.orden['folio_os'] ?? widget.orden['folio_rma'] ?? '').toString().trim().toUpperCase();
     final String tipoDocUpper = (widget.orden['tipo_documento'] ?? '').toString().trim().toUpperCase();
     final String tipoUpper = (widget.orden['tipo_servicio'] ?? '').toString().trim().toUpperCase();
-    return folioUpper.startsWith('OSOB-') ||
+    return !_esOsocc && (folioUpper.startsWith('OSOB-') ||
         tipoDocUpper == 'OSOB' ||
         tipoUpper.contains('OSOB') ||
         tipoUpper.contains('OBSERVACION') ||
         (!folioUpper.startsWith('OS-') &&
             !folioUpper.startsWith('RMA-') &&
             !folioUpper.startsWith('RE-') &&
-            (tipoUpper.contains('INSPECCION') || tipoUpper.contains('INSPECCIÓN')));
+            (tipoUpper.contains('INSPECCION') || tipoUpper.contains('INSPECCIÓN'))));
   }
 
   @override
   void initState() {
     super.initState();
     _tabFirmasCtrl = TabController(length: 2, vsync: this);
-    if (!_esOsob) {
+    if (!_esOsocc && !_esOsob) {
       _cargarDatosIniciales();
     }
   }
@@ -533,6 +546,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
 
   @override
   Widget build(BuildContext context) {
+    if (_esOsocc) {
+      return ObservacionesCeldaScreen(orden: widget.orden);
+    }
     if (_esOsob) {
       return ObservacionesBasculaScreen(orden: widget.orden);
     }

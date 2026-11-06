@@ -226,12 +226,13 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
   Widget _buildForm() {
     final docs = [
-      {'key': 'OS',   'label': 'Orden de Servicio (OS)'},
-      {'key': 'RMA',  'label': 'Remisión Material (RMA)'},
-      {'key': 'RE',   'label': 'Revisión Báscula (RE)'},
-      {'key': 'OSOB', 'label': 'Observaciones (OSOB)'},
-      {'key': 'LP',   'label': 'Levantamiento Proy. (LP)'},
-      {'key': 'LV',   'label': 'Levantamiento Met. (LV)'},
+      {'key': 'OS',    'label': 'Orden de Servicio (OS)'},
+      {'key': 'RMA',   'label': 'Remisión Material (RMA)'},
+      {'key': 'RE',    'label': 'Revisión Báscula (RE)'},
+      {'key': 'OSOB',  'label': 'Observaciones (OSOB)'},
+      {'key': 'OSOCC', 'label': 'Observaciones Celda (OSOCC)'},
+      {'key': 'LP',    'label': 'Levantamiento Proy. (LP)'},
+      {'key': 'LV',    'label': 'Levantamiento Met. (LV)'},
     ];
 
     return SingleChildScrollView(

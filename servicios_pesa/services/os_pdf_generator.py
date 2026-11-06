@@ -3767,8 +3767,720 @@ class OsobPdfGenerator:
             logger.debug("No se pudo incrustar firma en OSOB PDF: %s", exc)
 
 
+class OsoccPdfGenerator(OsobPdfGenerator):
+    """
+    Generador de PDF para el formato OSOCC (OSOCC-26-XXX):
+    FORMATO DE DIAGNÓSTICO Y REVISIÓN DE CELDA DE CARGA
+    Diagnóstico unitario de 1 celda de carga (Cliente o Stock / Laboratorio Interno).
+    Soporta tanto modalidad Física (líneas limpias / calca) como Digital.
+    """
+
+    SECCION_2_ITEMS = [
+        ("cuerpo_metalico", "1. Cuerpo metálico / Deformación"),
+        ("roscas_barrenos", "2. Roscas, barrenos y apoyos mecánicos"),
+        ("sellos_galgas", "3. Sellos herméticos y encapsulado de galgas"),
+        ("integridad_cable", "4. Integridad del cable (sin cortes, aplastamientos ni empalmes)"),
+        ("prensaestopas", "5. Prensaestopas / Salida de cable"),
+        ("corrosion_humedad", "6. Evidencia de corrosión, humedad o sobrecarga térmica"),
+    ]
+
+    SECCION_3_PARAMS = [
+        ("exc_pos_exc_neg", "1. Excitación Exc+ / Exc-", "Ohms", "OK", "Falla"),
+        ("sig_pos_sig_neg", "2. Resistencia Sig+ / Sig-", "Ohms", "OK", "Falla"),
+        ("exc_pos_sig_pos", "3. Resistencia Exc+ / Sig+", "Ohms", "OK", "Falla"),
+        ("exc_pos_sig_neg", "4. Resistencia Exc+ / Sig-", "Ohms", "OK", "Falla"),
+        ("exc_neg_sig_pos", "5. Resistencia Exc- / Sig+", "Ohms", "OK", "Falla"),
+        ("exc_neg_sig_neg", "6. Resistencia Exc- / Sig-", "Ohms", "OK", "Falla"),
+        ("sig_neg_exc_pos", "7. Resistencia Sig- + Exc+", "Ohms", "OK", "Falla"),
+        ("sig_neg_exc_neg", "8. Resistencia Sig- + Exc-", "Ohms", "OK", "Falla"),
+        ("exc_ambos_sig_pos", "9. Resistencia Exc-+ / Sig+", "Ohms", "OK", "Falla"),
+        ("exc_ambos_sig_neg", "10. Resistencia Exc-+ / Sig-", "Ohms", "OK", "Falla"),
+        ("senal_salida_mv", "11. Señal de Salida (Milivoltaje)", "mV", "OK", "Falla"),
+        ("aislamiento_mohm", "12. Resistencia de Aislamiento", "MΩ", "> 5000 MΩ (OK)", "Fuga"),
+    ]
+
+    DICTAMENES = [
+        ("OPERATIVA", "OPERATIVA / EN TOLERANCIA (Apta para instalación o calibración)"),
+        ("REPARABLE", "REPARABLE (Requiere reemplazo de cable, conector o reapriete)"),
+        ("DANADA", "DAÑADA / DESCALIBRADA (Sobrecarga, galgas abiertas o fuga - FUERA DE SERVICIO)"),
+    ]
+
+    def generate(
+        self,
+        os_data: dict,
+        output_path: Optional[str] = None,
+        force: bool = True,
+        calca: bool = False,
+    ) -> str:
+        if not _REPORTLAB_AVAILABLE:
+            raise RuntimeError("ReportLab no está instalado.")
+
+        d = self._normalize_data(os_data)
+        folio = d.get("folio_os") or "OSOCC-26-001"
+
+        if output_path is None:
+            output_dir = Path(PDFS_DIR)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = str(output_dir / f"{folio}.pdf")
+        else:
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        if not force and Path(output_path).exists():
+            return output_path
+
+        c = rl_canvas.Canvas(output_path, pagesize=letter)
+        c.setTitle(f"Diagnóstico y Revisión de Celda de Carga — {folio}")
+        c.setAuthor("Servicios PESA — Básculas PESA")
+        c.setSubject("FORMATO DE DIAGNÓSTICO Y REVISIÓN DE CELDA DE CARGA")
+
+        is_digital = self._is_digital_filled(d) and not calca
+        num_copies = 2 if calca else 1
+        for _ in range(num_copies):
+            self.draw_on_canvas(c, d, digital=is_digital)
+            c.showPage()
+
+        c.save()
+        logger.info("PDF OSOCC generado exitosamente: %s", output_path)
+        return output_path
+
+    def generate_lote(
+        self,
+        folios: list[str],
+        base_data: dict,
+        output_path: Optional[str] = None,
+        calca: bool = True,
+        equipos_por_folio: Optional[dict[str, dict]] = None,
+    ) -> str:
+        if not _REPORTLAB_AVAILABLE:
+            raise RuntimeError("ReportLab no está instalado.")
+
+        if not folios:
+            raise ValueError("Lista de folios vacía para lote OSOCC.")
+
+        if output_path is None:
+            import tempfile
+            fn = f"LOTE_OSOCC_{folios[0]}_al_{folios[-1]}.pdf" if len(folios) > 1 else f"{folios[0]}.pdf"
+            output_path = str(Path(tempfile.gettempdir()) / fn)
+        else:
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+        c = rl_canvas.Canvas(output_path, pagesize=letter)
+        c.setTitle(f"Lote OSOCC — {folios[0]} al {folios[-1]}")
+        c.setAuthor("Servicios PESA — Básculas PESA")
+
+        total = len(folios)
+        copies = 2 if calca else 1
+        for idx, folio in enumerate(folios, start=1):
+            row_data = dict(base_data or {})
+            row_data["folio_os"] = folio
+            if equipos_por_folio and folio in equipos_por_folio:
+                row_data.update(equipos_por_folio[folio])
+            d = self._normalize_data(row_data)
+            for _ in range(copies):
+                self.draw_on_canvas(c, d, digital=False)
+                if total > 1:
+                    c.setFillColor(_GRAY_DARK)
+                    c.setFont("Helvetica", 6.5)
+                    c.drawRightString(self.ML + self.CW, 23, f"Formato {idx} de {total}")
+                c.showPage()
+
+        c.save()
+        logger.info("PDF lote OSOCC generado (%d folios): %s", total, output_path)
+        return output_path
+
+    def _is_digital_filled(self, d: dict) -> bool:
+        mod = str(d.get("modalidad") or "").strip().upper()
+        est = str(d.get("estado") or "").strip().upper()
+        if d.get("osocc_digital") or d.get("inspeccion_fisica_celda") or d.get("mediciones_electricas_celda") or d.get("dictamen_celda"):
+            return True
+        if est in ("CERRADA", "CERRADO", "COMPLETADA", "COMPLETADA_DIGITAL", "FINALIZADA") and mod != "FISICO":
+            return True
+        return False
+
+    def draw_on_canvas(self, c, data: dict, digital: bool = False) -> None:
+        d = self._normalize_data(data)
+        y = self.H - self.MT
+
+        # ── CABECERA INSTITUCIONAL Y DE CONTROL ───────────────────────────────
+        y = self._draw_header_osocc(c, y, d, digital=digital)
+        y -= 4
+
+        # ── SECCIÓN 1: DATOS DE IDENTIFICACIÓN DE LA CELDA ────────────────────
+        y = self._draw_sec_hdr(c, y, "SECCIÓN 1. DATOS DE IDENTIFICACIÓN DE LA CELDA")
+        y = self._draw_seccion_1_osocc(c, y, d, digital=digital)
+        y -= 4
+
+        # ── SECCIÓN 2: INSPECCIÓN FÍSICA Y MECÁNICA DE LA CELDA ───────────────
+        y = self._draw_sec_hdr(
+            c,
+            y,
+            "SECCIÓN 2. INSPECCIÓN FÍSICA Y MECÁNICA DE LA CELDA",
+            right_label="Criterio:  [ B ] Bueno    [ R ] Regular    [ M ] Malo    [ N/A ]",
+        )
+        y = self._draw_seccion_2_osocc(c, y, d, digital=digital)
+        y -= 4
+
+        # ── SECCIÓN 3: PRUEBAS Y MEDICIONES ELÉCTRICAS UNITARIAS (SIN CARGA) ──
+        y = self._draw_sec_hdr(
+            c,
+            y,
+            "SECCIÓN 3. PRUEBAS Y MEDICIONES ELÉCTRICAS UNITARIAS (SIN CARGA)",
+            right_label="Diagnóstico unitario de 1 celda de carga",
+        )
+        y = self._draw_seccion_3_osocc(c, y, d, digital=digital)
+        y -= 4
+
+        # ── SECCIÓN 4: DICTAMEN TÉCNICO Y OBSERVACIONES ───────────────────────
+        y = self._draw_sec_hdr(c, y, "SECCIÓN 4. DICTAMEN TÉCNICO Y OBSERVACIONES")
+        y = self._draw_seccion_4_osocc(c, y, d, digital=digital)
+        y -= 4
+
+        # ── SECCIÓN 5: FIRMAS DE RESPONSABILIDAD ──────────────────────────────
+        y = self._draw_sec_hdr(c, y, "SECCIÓN 5. FIRMAS DE RESPONSABILIDAD")
+        self._draw_seccion_5_osocc(c, y, d, digital=digital)
+
+        # ── PIE DE PÁGINA ─────────────────────────────────────────────────────
+        self._draw_footer(c)
+
+    def _draw_header_osocc(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        hdr_h = 52.0
+
+        # Fondo y borde superior
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.6)
+        c.rect(self.ML, y - hdr_h, cw, hdr_h, fill=1, stroke=1)
+
+        # Barra superior azul celeste / rojo corporativo
+        c.setFillColor(_RED)
+        c.rect(self.ML, y - 3, cw, 3, fill=1, stroke=0)
+
+        # Logo BP a la izquierda
+        logo_path = _find_asset(
+            "logo_bp.png", "bp_logo.png", "logo_pesa.png",
+            "basculas_pesa.png", "logo.png"
+        )
+        if logo_path:
+            try:
+                c.drawImage(
+                    logo_path,
+                    self.ML + 6, y - 33,
+                    width=105, height=26,
+                    preserveAspectRatio=True, mask="auto",
+                )
+            except Exception:
+                self._draw_bp_fallback(c, self.ML + 6, y - 33)
+        else:
+            self._draw_bp_fallback(c, self.ML + 6, y - 33)
+
+        # Logo Rice Lake a la derecha
+        rl_path = _find_asset("logo_ricelake.png", "ricelake_logo.png", "rice_lake.png", "ricelake.png")
+        if rl_path:
+            try:
+                c.drawImage(
+                    rl_path,
+                    self.ML + cw - 110, y - 33,
+                    width=104, height=26,
+                    preserveAspectRatio=True, mask="auto",
+                )
+            except Exception:
+                self._draw_rl_fallback(c, self.ML + cw - 110, y - 33)
+        else:
+            self._draw_rl_fallback(c, self.ML + cw - 110, y - 33)
+
+        # Título Oficial centrado
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 9.6)
+        c.drawCentredString(self.ML + cw / 2, y - 16, "FORMATO DE DIAGNÓSTICO Y REVISIÓN DE CELDA DE CARGA")
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica", 6.2)
+        c.drawCentredString(self.ML + cw / 2, y - 25, "DIAGNÓSTICO UNITARIO DE RESISTENCIA, MILIVOLTAJE, AISLAMIENTO E INTEGRIDAD MECÁNICA")
+
+        # Subtítulo / Cabecera de control:
+        # Folio: OSOCC-26-XXX | Fecha: DD / MM / 2026 | Ref. / Orden: _______________ | Destino: [ ] Cliente   [ ] Stock / Laboratorio Interno
+        ctrl_y = y - hdr_h
+        ctrl_h = 16.5
+        c.setFillColor(_CREAM_BG)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.5)
+        c.rect(self.ML, ctrl_y, cw, ctrl_h, fill=1, stroke=1)
+
+        folio = str(d.get("folio_os") or "OSOCC-26-001").strip()
+        fecha_str = self._fmt_fecha(d.get("fecha"))
+        ref_orden = str(d.get("orden_referencia") or d.get("ref_orden") or "").strip()
+
+        destino_raw = str(d.get("destino_celda") or d.get("destino") or "").strip().upper()
+        cli_val = str(d.get("cliente") or d.get("razon_social") or "").strip()
+        if not destino_raw:
+            if not cli_val or "stock" in cli_val.lower() or "taller" in cli_val.lower() or "laboratorio" in cli_val.lower() or "basculas pesa" in cli_val.lower() or "básculas pesa" in cli_val.lower():
+                destino_raw = "STOCK"
+            else:
+                destino_raw = "CLIENTE"
+        is_cliente = "CLI" in destino_raw
+        is_stock = ("STOCK" in destino_raw) or ("LAB" in destino_raw) or ("TALLER" in destino_raw) or ("INTERN" in destino_raw)
+
+        # Col 1: Folio
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.8)
+        c.drawString(self.ML + 5, ctrl_y + 4.8, "Folio:")
+        c.setFillColor(_RED)
+        c.setFont("Helvetica-Bold", 8.2)
+        c.drawString(self.ML + 27, ctrl_y + 4.5, folio)
+
+        # Separador 1
+        sep1 = self.ML + 112
+        c.setStrokeColor(_GRAY_MED)
+        c.line(sep1, ctrl_y, sep1, ctrl_y + ctrl_h)
+
+        # Col 2: Fecha
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.8)
+        c.drawString(sep1 + 5, ctrl_y + 4.8, "Fecha:")
+        c.setFillColor(_BLACK)
+        c.setFont("Helvetica-Bold", 7.2)
+        c.drawString(sep1 + 31, ctrl_y + 4.8, fecha_str)
+
+        # Separador 2
+        sep2 = self.ML + 220
+        c.line(sep2, ctrl_y, sep2, ctrl_y + ctrl_h)
+
+        # Col 3: Ref. / Orden
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.8)
+        c.drawString(sep2 + 5, ctrl_y + 4.8, "Ref. / Orden:")
+        line_x1 = sep2 + 52
+        line_x2 = self.ML + 340
+        c.setStrokeColor(_GRAY_DARK)
+        c.setLineWidth(0.4)
+        c.line(line_x1, ctrl_y + 3.5, line_x2, ctrl_y + 3.5)
+        if ref_orden:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 7.0)
+            c.drawString(line_x1 + 2, ctrl_y + 4.8, ref_orden[:22])
+
+        # Separador 3
+        sep3 = self.ML + 345
+        c.setStrokeColor(_GRAY_MED)
+        c.line(sep3, ctrl_y, sep3, ctrl_y + ctrl_h)
+
+        # Col 4: Destino: [ ] Cliente   [ ] Stock / Laboratorio Interno
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.6)
+        c.drawString(sep3 + 5, ctrl_y + 4.8, "Destino:")
+
+        cx_cli = sep3 + 36
+        self._draw_checkbox(c, cx_cli, ctrl_y + 4.2, size=6.5, checked=is_cliente)
+        c.setFillColor(_RED if is_cliente else _BLACK)
+        c.setFont("Helvetica-Bold" if is_cliente else "Helvetica", 6.3)
+        c.drawString(cx_cli + 8.5, ctrl_y + 4.8, "Cliente")
+
+        cx_stk = cx_cli + 38
+        self._draw_checkbox(c, cx_stk, ctrl_y + 4.2, size=6.5, checked=is_stock)
+        c.setFillColor(_RED if is_stock else _BLACK)
+        c.setFont("Helvetica-Bold" if is_stock else "Helvetica", 6.3)
+        c.drawString(cx_stk + 8.5, ctrl_y + 4.8, "Stock / Laboratorio Interno")
+
+        return y - hdr_h
+
+    def _draw_seccion_1_osocc(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        row_h = 15.5
+        total_h = row_h * 4
+
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(self.ML, y - total_h, cw, total_h, fill=1, stroke=1)
+
+        cliente_val = str(
+            d.get("cliente")
+            or d.get("razon_social")
+            or d.get("ubicacion")
+            or "Stock / Taller Básculas PESA"
+        ).strip()
+        if not cliente_val or cliente_val.lower() in ("none", "null", "--"):
+            cliente_val = "Stock / Taller Básculas PESA"
+
+        marca = str(d.get("marca") or "").strip()
+        modelo = str(d.get("modelo") or "").strip()
+        ns = str(d.get("ns") or d.get("numero_serie") or "").strip()
+        cap_max = str(d.get("alcance_max") or d.get("capacidad_max") or "").strip()
+        if cap_max.endswith(".0"):
+            cap_max = cap_max[:-2]
+        unidad_cap = str(d.get("unidad_capacidad") or d.get("unidad") or "").strip()
+        if cap_max and unidad_cap and unidad_cap.lower() not in cap_max.lower():
+            cap_max = f"{cap_max} {unidad_cap}"
+
+        sensibilidad = str(d.get("sensibilidad_nominal") or d.get("sensibilidad") or "").strip()
+        res_nominal = str(d.get("resistencia_nominal") or d.get("resistencia_entrada_salida") or "").strip()
+
+        cables_cfg = d.get("configuracion_cables")
+        if not isinstance(cables_cfg, dict):
+            cables_cfg = {}
+        exc_pos_col = str(cables_cfg.get("exc_pos") or d.get("cable_exc_pos") or "Rojo").strip()
+        exc_neg_col = str(cables_cfg.get("exc_neg") or d.get("cable_exc_neg") or "Negro").strip()
+        sig_pos_col = str(cables_cfg.get("sig_pos") or d.get("cable_sig_pos") or "Verde").strip()
+        sig_neg_col = str(cables_cfg.get("sig_neg") or d.get("cable_sig_neg") or "Blanco").strip()
+        blindaje_col = str(cables_cfg.get("blindaje") or d.get("cable_blindaje") or "Malla").strip()
+        sense_col = str(cables_cfg.get("sense") or d.get("cable_sense") or ("Si/No" if not digital else "No")).strip()
+
+        # Fila 1: Cliente / Destino (56%) | Marca (22%) | Modelo (22%)
+        r1_y = y
+        w_cli = cw * 0.52
+        w_mar = cw * 0.24
+        w_mod = cw - w_cli - w_mar
+        self._draw_labeled_cell(c, self.ML, r1_y, w_cli, row_h, "Cliente / Destino:", cliente_val)
+        self._draw_labeled_cell(c, self.ML + w_cli, r1_y, w_mar, row_h, "Marca:", marca)
+        self._draw_labeled_cell(c, self.ML + w_cli + w_mar, r1_y, w_mod, row_h, "Modelo:", modelo)
+
+        # Fila 2: Número de Serie (38%) | Capacidad Nominal (Max) (kg / lb / t) (34%) | Sensibilidad Nominal (mV/V) (28%)
+        r2_y = y - row_h
+        w_ns = cw * 0.36
+        w_cap = cw * 0.34
+        w_sen = cw - w_ns - w_cap
+        self._draw_labeled_cell(c, self.ML, r2_y, w_ns, row_h, "Número de Serie:", ns)
+        self._draw_labeled_cell(c, self.ML + w_ns, r2_y, w_cap, row_h, "Capacidad Nominal (Max) (kg/lb/t):", cap_max)
+        self._draw_labeled_cell(
+            c, self.ML + w_ns + w_cap, r2_y, w_sen, row_h,
+            "Sensibilidad Nominal (mV/V):",
+            f"{sensibilidad} mV/V" if sensibilidad and "mv" not in sensibilidad.lower() else sensibilidad,
+        )
+
+        # Fila 3: Resistencia Nominal Entrada / Salida: ___________ Ohms (ej. 350 Ω / 700 Ω / 1000 Ω)
+        r3_y = y - row_h * 2
+        res_display = f"{res_nominal} Ohms" if res_nominal and "ohm" not in res_nominal.lower() and "Ω" not in res_nominal else res_nominal
+        self._draw_labeled_cell(
+            c, self.ML, r3_y, cw, row_h,
+            "Resistencia Nominal Entrada / Salida (Ohms — ej. 350 Ω / 700 Ω / 1000 Ω):",
+            res_display,
+        )
+
+        # Fila 4: Configuración de Cables / Colores: [ Exc+: Rojo | Exc-: Negro | Sig+: Verde | Sig-: Blanco | Blindaje: Malla | Sense: Si/No ]
+        r4_y = y - row_h * 3
+        c.setStrokeColor(_GRAY_LIGHT)
+        c.setLineWidth(0.35)
+        c.rect(self.ML, r4_y - row_h, cw, row_h, fill=0, stroke=1)
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 6.0)
+        c.drawString(self.ML + 4, r4_y - 10.2, "Configuración de Cables / Colores:")
+
+        cables_str = (
+            f"[ Exc+: {exc_pos_col}  |  Exc-: {exc_neg_col}  |  "
+            f"Sig+: {sig_pos_col}  |  Sig-: {sig_neg_col}  |  "
+            f"Blindaje: {blindaje_col}  |  Sense: {sense_col} ]"
+        )
+        c.setFillColor(_BLACK)
+        c.setFont("Helvetica-Bold", 6.5)
+        c.drawString(self.ML + 116, r4_y - 10.2, cables_str)
+
+        return y - total_h
+
+    def _draw_seccion_2_osocc(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        insp = d.get("inspeccion_fisica_celda")
+        if not isinstance(insp, dict):
+            insp = {}
+
+        row_h = 13.0
+        for idx, (key, label) in enumerate(self.SECCION_2_ITEMS):
+            bg = _GRAY_ROW if idx % 2 == 0 else _WHITE
+            c.setFillColor(bg)
+            c.setStrokeColor(_GRAY_MED)
+            c.setLineWidth(0.3)
+            c.rect(self.ML, y - row_h, cw, row_h, fill=1, stroke=1)
+
+            item_val = insp.get(key)
+            estado_sel = ""
+            obs_txt = ""
+            if isinstance(item_val, dict):
+                estado_sel = str(item_val.get("estado") or item_val.get("criterio") or "").strip().upper()
+                obs_txt = str(item_val.get("obs") or item_val.get("observacion") or "").strip()
+            elif isinstance(item_val, str):
+                estado_sel = item_val.strip().upper()
+
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 6.2)
+            c.drawString(self.ML + 5, y - 9.0, label)
+
+            # Checkboxes [ B ] [ R ] [ M ] [ N/A ]
+            crit_x = self.ML + 225
+            for opt in ("B", "R", "M", "N/A"):
+                checked = (estado_sel == opt)
+                self._draw_checkbox(c, crit_x, y - 9.6, size=6.0, checked=checked)
+                c.setFillColor(_RED if checked else _DARK_HDR)
+                c.setFont("Helvetica-Bold" if checked else "Helvetica", 5.8)
+                c.drawString(crit_x + 7.5, y - 8.8, opt)
+                crit_x += 23 if opt != "N/A" else 28
+
+            # | Obs: _________________
+            obs_lbl_x = self.ML + 324
+            c.setFillColor(_GRAY_DARK)
+            c.setFont("Helvetica-Bold", 5.8)
+            c.drawString(obs_lbl_x, y - 8.8, "| Obs:")
+            line_start = obs_lbl_x + 21
+            line_end = self.ML + cw - 5
+            c.setStrokeColor(_GRAY_DARK)
+            c.setLineWidth(0.3)
+            c.line(line_start, y - 10.2, line_end, y - 10.2)
+            if obs_txt:
+                c.setFillColor(_BLACK)
+                c.setFont("Helvetica", 6.0)
+                c.drawString(line_start + 2, y - 8.8, obs_txt[:62])
+
+            y -= row_h
+
+        return y
+
+    def _draw_seccion_3_osocc(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        meds = d.get("mediciones_electricas_celda")
+        if not isinstance(meds, dict):
+            meds = {}
+
+        hdr_h = 13.0
+        row_h = 12.8
+
+        # Columnas: [ PARÁMETRO ELÉCTRICO | UND | VALOR MEDIDO | ESTADO (OK / FALLA) ]
+        w_param = cw * 0.44
+        w_und = cw * 0.10
+        w_val = cw * 0.22
+        w_est = cw - w_param - w_und - w_val
+
+        # Encabezado de tabla
+        c.setFillColor(colors.HexColor("#2B3548"))
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.4)
+        c.rect(self.ML, y - hdr_h, cw, hdr_h, fill=1, stroke=1)
+
+        c.setFillColor(_WHITE)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(self.ML + 6, y - 9.0, "PARÁMETRO ELÉCTRICO")
+        c.drawCentredString(self.ML + w_param + w_und / 2, y - 9.0, "UND")
+        c.drawCentredString(self.ML + w_param + w_und + w_val / 2, y - 9.0, "VALOR MEDIDO")
+        c.drawCentredString(self.ML + w_param + w_und + w_val + w_est / 2, y - 9.0, "ESTADO (OK / FALLA)")
+        y -= hdr_h
+
+        for idx, (key, label, und, ok_lbl, fail_lbl) in enumerate(self.SECCION_3_PARAMS):
+            bg = _GRAY_ROW if idx % 2 == 0 else _WHITE
+            c.setFillColor(bg)
+            c.setStrokeColor(_GRAY_MED)
+            c.setLineWidth(0.3)
+            c.rect(self.ML, y - row_h, cw, row_h, fill=1, stroke=1)
+
+            # Líneas divisorias de columnas
+            c.line(self.ML + w_param, y - row_h, self.ML + w_param, y)
+            c.line(self.ML + w_param + w_und, y - row_h, self.ML + w_param + w_und, y)
+            c.line(self.ML + w_param + w_und + w_val, y - row_h, self.ML + w_param + w_und + w_val, y)
+
+            row_data = meds.get(key)
+            val_str = ""
+            est_str = ""
+            if isinstance(row_data, dict):
+                val_str = str(row_data.get("valor") or row_data.get("medido") or "").strip()
+                est_str = str(row_data.get("estado") or "").strip().upper()
+            elif row_data is not None:
+                val_str = str(row_data).strip()
+
+            # Col 1: Parámetro
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 6.2)
+            c.drawString(self.ML + 6, y - 8.8, label)
+
+            # Col 2: Unidad
+            c.setFillColor(_GRAY_DARK)
+            c.setFont("Helvetica-Bold", 6.2)
+            c.drawCentredString(self.ML + w_param + w_und / 2, y - 8.8, und)
+
+            # Col 3: Valor Medido
+            val_x1 = self.ML + w_param + w_und + 8
+            val_x2 = self.ML + w_param + w_und + w_val - 8
+            c.setStrokeColor(_GRAY_DARK)
+            c.setLineWidth(0.35)
+            c.line(val_x1, y - 10.2, val_x2, y - 10.2)
+            if val_str:
+                c.setFillColor(_BLACK)
+                c.setFont("Helvetica-Bold", 6.8)
+                c.drawCentredString(self.ML + w_param + w_und + w_val / 2, y - 8.6, val_str[:22])
+
+            # Col 4: Estado [ ] OK   [ ] Falla  (o [ ] > 5000 MΩ (OK)  [ ] Fuga)
+            est_x0 = self.ML + w_param + w_und + w_val + 8
+            is_ok = est_str in ("OK", "> 5000 MΩ (OK)", ">5000", "BUENO", "CUMPLE")
+            is_fail = est_str in ("FALLA", "FUGA", "MALO", "NO CUMPLE")
+
+            self._draw_checkbox(c, est_x0, y - 9.4, size=6.0, checked=is_ok)
+            c.setFillColor(_GREEN_OK if is_ok else _DARK_HDR)
+            c.setFont("Helvetica-Bold" if is_ok else "Helvetica", 5.8)
+            c.drawString(est_x0 + 8, y - 8.8, ok_lbl)
+
+            fail_x = est_x0 + (78 if len(ok_lbl) > 4 else 48)
+            self._draw_checkbox(c, fail_x, y - 9.4, size=6.0, checked=is_fail)
+            c.setFillColor(_RED if is_fail else _DARK_HDR)
+            c.setFont("Helvetica-Bold" if is_fail else "Helvetica", 5.8)
+            c.drawString(fail_x + 8, y - 8.8, fail_lbl)
+
+            y -= row_h
+
+        return y
+
+    def _draw_seccion_4_osocc(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        obs_text = str(d.get("observaciones_diagnostico") or d.get("observaciones") or "").strip()
+        dictamen_sel = str(d.get("dictamen_celda") or d.get("dictamen") or "").strip().upper()
+
+        wrapped_lines: list[str] = []
+        if obs_text:
+            for paragraph in obs_text.splitlines():
+                paragraph = paragraph.strip()
+                if not paragraph:
+                    wrapped_lines.append("")
+                    continue
+                wrapped_lines.extend(simpleSplit(paragraph, "Helvetica", 6.6, cw - 14))
+
+        num_obs_rows = max(4, len(wrapped_lines))
+        line_step = 10.5
+        obs_box_h = 13.0 + num_obs_rows * line_step + 4.0
+
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(self.ML, y - obs_box_h, cw, obs_box_h, fill=1, stroke=1)
+
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.2)
+        c.drawString(self.ML + 5, y - 9.0, "Observaciones Técnicas y Diagnóstico:")
+
+        for i in range(num_obs_rows):
+            ly = y - 19.5 - i * line_step
+            c.setStrokeColor(_GRAY_LIGHT)
+            c.setLineWidth(0.35)
+            c.line(self.ML + 6, ly - 1.5, self.ML + cw - 6, ly - 1.5)
+            if i < len(wrapped_lines) and wrapped_lines[i]:
+                c.setFillColor(_BLACK)
+                c.setFont("Helvetica", 6.6)
+                c.drawString(self.ML + 7, ly, wrapped_lines[i])
+
+        y -= obs_box_h + 2.5
+
+        # Dictamen Final de la Celda
+        dict_h = 41.0
+        c.setFillColor(_CREAM_BG)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(self.ML, y - dict_h, cw, dict_h, fill=1, stroke=1)
+
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(self.ML + 5, y - 8.5, "Dictamen Final de la Celda:")
+
+        for idx, (d_code, d_text) in enumerate(self.DICTAMENES):
+            dy = y - 17.5 - idx * 9.8
+            is_d = (
+                dictamen_sel == d_code
+                or (d_code == "OPERATIVA" and "OPERATIVA" in dictamen_sel)
+                or (d_code == "REPARABLE" and "REPARABLE" in dictamen_sel)
+                or (d_code == "DANADA" and ("DAÑADA" in dictamen_sel or "DANADA" in dictamen_sel or "DESCALIBRADA" in dictamen_sel))
+            )
+            self._draw_checkbox(c, self.ML + 8, dy - 1.2, size=6.5, checked=is_d)
+            c.setFillColor(_RED if is_d else _BLACK)
+            c.setFont("Helvetica-Bold" if is_d else "Helvetica", 6.1)
+            c.drawString(self.ML + 17.5, dy, d_text)
+
+        return y - dict_h
+
+    def _draw_seccion_5_osocc(self, c, y: float, d: dict, digital: bool = False) -> float:
+        cw = self.CW
+        box_h = 62.0
+        half_w = (cw - 8.0) / 2.0
+
+        tec_nombre = str(d.get("tecnico_nombre") or d.get("tecnico") or "").strip()
+        tec_puesto = str(d.get("puesto_tecnico") or "Técnico de Servicio / Laboratorio").strip() if (digital or d.get("puesto_tecnico")) else ""
+        cli_nombre = str(d.get("nombre_ing") or d.get("firma_cliente_nombre") or "").strip() if digital else ""
+        cli_puesto = str(d.get("puesto_ing") or d.get("area_cliente") or "").strip() if digital else ""
+
+        firma_tec_b64 = d.get("firma_tecnico") or d.get("firma_tecnico_b64") or _firma_perfil_tecnico(d)
+        firma_cli_b64 = d.get("firma_cliente") or d.get("firma_cliente_b64")
+
+        # Columna Izquierda: Evaluó / Técnico Responsable
+        lx = self.ML
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(lx, y - box_h, half_w, box_h, fill=1, stroke=1)
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(lx + 6, y - 9.0, "Evaluó / Técnico Responsable:")
+
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(lx + 6, y - 20.0, "Nombre:")
+        c.setStrokeColor(_GRAY_DARK)
+        c.setLineWidth(0.35)
+        c.line(lx + 36, y - 21.0, lx + half_w - 6, y - 21.0)
+        if tec_nombre:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 6.3)
+            c.drawString(lx + 38, y - 19.8, tec_nombre[:40])
+
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(lx + 6, y - 31.0, "Puesto:")
+        c.line(lx + 36, y - 32.0, lx + half_w - 6, y - 32.0)
+        if tec_puesto:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica", 6.2)
+            c.drawString(lx + 38, y - 30.8, tec_puesto[:40])
+
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(lx + 6, y - 54.0, "Firma:")
+        c.line(lx + 36, y - 55.0, lx + half_w - 6, y - 55.0)
+        if digital and firma_tec_b64:
+            self._draw_sig_b64(c, firma_tec_b64, lx + 45, y - 54.0, width=110, height=21)
+
+        # Columna Derecha: Recibió / Almacén o Cliente
+        rx = self.ML + half_w + 8.0
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.45)
+        c.rect(rx, y - box_h, half_w, box_h, fill=1, stroke=1)
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 6.3)
+        c.drawString(rx + 6, y - 9.0, "Recibió / Almacén o Cliente:")
+
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(rx + 6, y - 20.0, "Nombre:")
+        c.setStrokeColor(_GRAY_DARK)
+        c.setLineWidth(0.35)
+        c.line(rx + 36, y - 21.0, rx + half_w - 6, y - 21.0)
+        if cli_nombre:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 6.3)
+            c.drawString(rx + 38, y - 19.8, cli_nombre[:40])
+
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(rx + 6, y - 31.0, "Puesto:")
+        c.line(rx + 36, y - 32.0, rx + half_w - 6, y - 32.0)
+        if cli_puesto:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica", 6.2)
+            c.drawString(rx + 38, y - 30.8, cli_puesto[:40])
+
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.8)
+        c.drawString(rx + 6, y - 54.0, "Firma:")
+        c.line(rx + 36, y - 55.0, rx + half_w - 6, y - 55.0)
+        if digital and firma_cli_b64:
+            self._draw_sig_b64(c, firma_cli_b64, rx + 45, y - 54.0, width=110, height=21)
+
+        return y - box_h
+
+
 # ---------------------------------------------------------------------------
 # Instancias singleton
 # ---------------------------------------------------------------------------
 osob_pdf_generator = OsobPdfGenerator()
+osocc_pdf_generator = OsoccPdfGenerator()
 os_pdf_generator = OsPdfGenerator()

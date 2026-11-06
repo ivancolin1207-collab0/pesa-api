@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 _V_OS_QUERY = """
     SELECT 
         os.*,
-        cl.razon_social AS cliente,
+        COALESCE(cl.razon_social, CASE WHEN os.folio_os ILIKE 'OSOCC-%%' THEN COALESCE(os.ubicacion, 'Stock / Taller Básculas PESA') ELSE NULL END) AS cliente,
         cl.direccion AS direccion_cliente,
         su.nombre_sucursal AS sucursal_nombre,
         su.direccion AS sucursal_direccion,
@@ -376,6 +376,8 @@ class OrdenServicioRepository(BaseRepository):
                         tipo_doc_data = "RMA"
                     elif folio_actual.startswith("RE-"):
                         tipo_doc_data = "RE"
+                    elif folio_actual.startswith("OSOCC-"):
+                        tipo_doc_data = "OSOCC"
                     elif folio_actual.startswith("OSOB-"):
                         tipo_doc_data = "OSOB"
                     else:

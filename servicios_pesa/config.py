@@ -239,12 +239,13 @@ LOG_LEVEL = os.getenv("PESA_LOG_LEVEL", "INFO")
 # FOLIOS
 # ══════════════════════════════════════════════════════════════════════════════
 FOLIO_TIPOS: dict[str, str] = {
-    "OS":   "Orden de Servicio",
-    "RMA":  "Remisión",
-    "RE":   "Revisión / Revisión Externa",
-    "OSOB": "Formato de Inspección y Revisión de Básculas (Observaciones)",
-    "LP":   "Levantamiento de Proyecto",
-    "LV":   "Levantamiento Metrológico y Logística de Pesas",
+    "OS":    "Orden de Servicio",
+    "RMA":   "Remisión",
+    "RE":    "Revisión / Revisión Externa",
+    "OSOB":  "Formato de Inspección y Revisión de Básculas (Observaciones)",
+    "OSOCC": "Formato de Diagnóstico y Revisión de Celda de Carga (Observaciones Celda)",
+    "LP":    "Levantamiento de Proyecto",
+    "LV":    "Levantamiento Metrológico y Logística de Pesas",
 }
 
 

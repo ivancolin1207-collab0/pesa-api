@@ -19,6 +19,7 @@ import 'revision_bascula_screen.dart';
 import 'levantamiento_proyecto_screen.dart';
 import 'levantamiento_metrologico_screen.dart';
 import 'observaciones_bascula_screen.dart';
+import 'observaciones_celda_screen.dart';
 
 class CalibracionAjusteScreen extends StatelessWidget {
   final Map<String, dynamic> orden;
@@ -30,6 +31,14 @@ class CalibracionAjusteScreen extends StatelessWidget {
     final String tipoDocUpper = (orden['tipo_documento'] ?? '').toString().trim().toUpperCase();
     final String tipoUpper = (orden['tipo_servicio'] ?? '').toString().trim().toUpperCase();
 
+    if (folioUpper.startsWith('OSOCC-') ||
+        tipoDocUpper == 'OSOCC' ||
+        tipoUpper.contains('OSOCC') ||
+        tipoUpper.contains('OBSERVACIONES CELDA') ||
+        (tipoUpper.contains('DIAGNOSTICO') && tipoUpper.contains('CELDA')) ||
+        (tipoUpper.contains('DIAGNÓSTICO') && tipoUpper.contains('CELDA'))) {
+      return ObservacionesCeldaScreen(orden: orden);
+    }
     if (folioUpper.startsWith('OSOB-') ||
         tipoDocUpper == 'OSOB' ||
         tipoUpper.contains('OSOB') ||
@@ -815,8 +824,15 @@ class _CapturaScreenState extends State<CapturaScreen>
     final String tipoDocUpper = (docData['tipo_documento'] ?? '').toString().trim().toUpperCase();
     final String tipoUpper = (docData['tipo_servicio'] ?? '').toString().trim().toUpperCase();
 
-    // 1. PRIMERA CONDICIÓN EXPLÍCITA: OSOB (Formato de Inspección y Revisión de Básculas)
-    if (folioUpper.startsWith('OSOB-') ||
+    // 0. PRIMERA CONDICIÓN EXPLÍCITA: OSOCC (Formato de Diagnóstico y Revisión de Celda de Carga)
+    if (folioUpper.startsWith('OSOCC-') ||
+        tipoDocUpper == 'OSOCC' ||
+        tipoUpper.contains('OSOCC') ||
+        tipoUpper.contains('OBSERVACIONES CELDA') ||
+        (tipoUpper.contains('DIAGNOSTICO') && tipoUpper.contains('CELDA')) ||
+        (tipoUpper.contains('DIAGNÓSTICO') && tipoUpper.contains('CELDA'))) {
+      return ObservacionesCeldaScreen(orden: docData);
+    } else if (folioUpper.startsWith('OSOB-') ||
         tipoDocUpper == 'OSOB' ||
         tipoUpper.contains('OSOB') ||
         tipoUpper.contains('OBSERVACION') ||

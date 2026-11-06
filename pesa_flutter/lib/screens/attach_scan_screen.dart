@@ -131,6 +131,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
         FormatoDocumento.remision             => 'Remisión de Servicio',
         FormatoDocumento.revisionCeldas       => 'Revisión de Celdas de Carga',
         FormatoDocumento.observacionesBascula => 'Formato de Inspección y Revisión de Básculas (OSOB)',
+        FormatoDocumento.observacionesCelda   => 'Formato de Diagnóstico y Revisión de Celda de Carga (OSOCC)',
         FormatoDocumento.ordenServicio        => 'Orden de Servicio',
       };
 
@@ -151,6 +152,13 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
           'Pruebas Rápidas de Funcionamiento',
           'Diagnóstico General, Observaciones y Refacciones',
           'Firmas de Conformidad',
+        ],
+        FormatoDocumento.observacionesCelda => const [
+          'Datos de Identificación de la Celda (Cliente o Stock)',
+          'Inspección Física y Mecánica de la Celda (6 puntos)',
+          'Pruebas y Mediciones Eléctricas Unitarias (12 parámetros)',
+          'Dictamen Técnico y Observaciones',
+          'Firmas de Responsabilidad',
         ],
         FormatoDocumento.ordenServicio => const [
           'Datos del instrumento', 'Lecturas de prueba', 'Dictamen', 'Firmas',

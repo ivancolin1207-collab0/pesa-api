@@ -97,10 +97,11 @@ class BatchPdfGenerator:
         c.setAuthor("Servicios PESA")
 
         draw_fn = {
-            "OS":   self._draw_os_page,
-            "RE":   self._draw_re_page,
-            "RMA":  self._draw_rma_page,
-            "OSOB": self._draw_osob_page,
+            "OS":    self._draw_os_page,
+            "RE":    self._draw_re_page,
+            "RMA":   self._draw_rma_page,
+            "OSOB":  self._draw_osob_page,
+            "OSOCC": self._draw_osocc_page,
         }.get(tipo.upper(), self._draw_os_page)
 
         total = len(folios)
@@ -150,6 +151,24 @@ class BatchPdfGenerator:
     ) -> None:
         from services.os_pdf_generator import osob_pdf_generator
         osob_pdf_generator.draw_on_canvas(
+            c,
+            {
+                "folio_os": folio,
+                "cliente": cliente,
+                "planta": direccion,
+                "tecnico_nombre": tecnico,
+                "fecha": fecha,
+                "modalidad": "FISICO",
+            },
+            digital=False,
+        )
+
+    def _draw_osocc_page(
+        self, c, folio: str, cliente: str, direccion: str,
+        tecnico: str, fecha: date
+    ) -> None:
+        from services.os_pdf_generator import osocc_pdf_generator
+        osocc_pdf_generator.draw_on_canvas(
             c,
             {
                 "folio_os": folio,

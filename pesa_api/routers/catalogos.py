@@ -268,12 +268,23 @@ async def get_ordenes(
             COALESCE(os.id_equipo::text, '') AS id_equipo,
             COALESCE(os.sync_version, 1) AS sync_version,
             COALESCE(os.updated_at, NOW()) AS updated_at,
-            COALESCE(cl.razon_social, os.cliente, '') AS cliente,
-            COALESCE(cl.razon_social, os.cliente, '') AS cliente_nombre,
+            COALESCE(
+                cl.razon_social,
+                NULLIF(TRIM(os.cliente), ''),
+                CASE WHEN os.folio_os ~* '^OSOCC-' THEN COALESCE(NULLIF(TRIM(os.ubicacion), ''), 'Stock / Taller Básculas PESA') ELSE '' END
+            ) AS cliente,
+            COALESCE(
+                cl.razon_social,
+                NULLIF(TRIM(os.cliente), ''),
+                CASE WHEN os.folio_os ~* '^OSOCC-' THEN COALESCE(NULLIF(TRIM(os.ubicacion), ''), 'Stock / Taller Básculas PESA') ELSE '' END
+            ) AS cliente_nombre,
             COALESCE(tc.nombre_completo, '') AS tecnico,
             COALESCE(tc.nombre_completo, '') AS tecnico_nombre,
             os.id_tipo_servicio,
-            COALESCE(ts.nombre, '') AS tipo_servicio,
+            CASE
+                WHEN os.folio_os ~* '^OSOCC-' THEN COALESCE(NULLIF(TRIM(os.tipo_servicio), ''), 'Observaciones Celda')
+                ELSE COALESCE(ts.nombre, os.tipo_servicio, '')
+            END AS tipo_servicio,
             os.id_tipo_instrumento,
             COALESCE(ti.nombre, '') AS tipo_instrumento,
             COALESCE(os.aplica_excentricidad, true) AS aplica_excentricidad,
@@ -412,7 +423,7 @@ async def crear_orden(
 
     # Obtener el siguiente número de secuencia
     pref = (body.tipo_documento or "OS").strip().upper()
-    if pref not in ("OS", "RMA", "RE", "OSOB", "LV", "LP"):
+    if pref not in ("OS", "RMA", "RE", "OSOB", "OSOCC", "LV", "LP"):
         pref = "OS"
 
     seq_row = await db.fetchrow(
@@ -435,7 +446,12 @@ async def crear_orden(
 
     for i in range(cantidad):
         folio = f"{pref}-{year_short}-{siguiente + i:03d}"
-        tipo_srv_txt = "Formato de Inspección y Revisión de Básculas" if pref == "OSOB" else None
+        if pref == "OSOB":
+            tipo_srv_txt = "Formato de Inspección y Revisión de Básculas"
+        elif pref == "OSOCC":
+            tipo_srv_txt = "Formato de Diagnóstico y Revisión de Celda de Carga"
+        else:
+            tipo_srv_txt = None
         await db.execute(
             """
             INSERT INTO ordenes_servicio (

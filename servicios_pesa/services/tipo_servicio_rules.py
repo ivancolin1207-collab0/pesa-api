@@ -264,9 +264,11 @@ _ID_A_NOMBRE_BD = {
 
 def _clasificar(nombre: Optional[str], id_tipo: Optional[int] = None,
                 folio: Optional[str] = None) -> tuple[str, bool, bool, bool]:
-    """Retorna (formato, cca, dve, ajuste). formato: 'os' | 'osob' | 'rma' | 're' | 'sin'."""
+    """Retorna (formato, cca, dve, ajuste). formato: 'os' | 'osob' | 'osocc' | 'rma' | 're' | 'sin'."""
     import re
     f = (folio or "").strip().upper()
+    if f.startswith("OSOCC-"):
+        return "osocc", False, False, False
     if f.startswith("OSOB-"):
         return "osob", False, False, False
     if f.startswith("RMA-"):
@@ -281,6 +283,8 @@ def _clasificar(nombre: Optional[str], id_tipo: Optional[int] = None,
             n = ""
     if not n:
         return "sin", False, False, False
+    if "osocc" in n or ("observacion" in n and "celda" in n) or ("diagnostico" in n and "celda" in n):
+        return "osocc", False, False, False
     if "osob" in n or "observacion" in n or ("inspeccion" in n and "revisi" in n and "bascula" in n):
         return "osob", False, False, False
     if "refacci" in n or "remisi" in n:
@@ -296,8 +300,10 @@ def _clasificar(nombre: Optional[str], id_tipo: Optional[int] = None,
 def etiqueta_corta(nombre: Optional[str], id_tipo: Optional[int] = None,
                    folio: Optional[str] = None) -> str:
     """Calibración + Ajuste + Inspección · Ajuste + Inspección · Calibración + Ajuste · Ajuste
-    (CCA = Calibración, DVE = Inspección). También Observaciones · Remisión · Revisión · Sin tipo."""
+    (CCA = Calibración, DVE = Inspección). También Observaciones · Observaciones Celda · Remisión · Revisión · Sin tipo."""
     fmt, cca, dve, aju = _clasificar(nombre, id_tipo, folio)
+    if fmt == "osocc":
+        return "Observaciones Celda"
     if fmt == "osob":
         return "Observaciones"
     if fmt == "rma":
@@ -320,6 +326,8 @@ def etiqueta_larga(nombre: Optional[str], id_tipo: Optional[int] = None,
                    folio: Optional[str] = None) -> str:
     """Descripción para tooltips / banners (misma redacción que la tablet)."""
     fmt, cca, dve, aju = _clasificar(nombre, id_tipo, folio)
+    if fmt == "osocc":
+        return "Formato de Diagnóstico y Revisión de Celda de Carga (OSOCC)"
     if fmt == "osob":
         return "Formato de Inspección y Revisión de Básculas (OSOB)"
     if fmt == "rma":

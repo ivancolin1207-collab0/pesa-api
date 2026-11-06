@@ -1926,6 +1926,22 @@ def open_digital_form(
     folio_upper = str(folio_os or (os_data or {}).get("folio_os") or (os_data or {}).get("folio") or "").strip().upper()
     tipo_doc_upper = str((os_data or {}).get("tipo_documento") or "").strip().upper()
     tipo_srv_upper = str((os_data or {}).get("tipo_servicio") or "").strip().upper().replace("Á", "A").replace("Ó", "O")
+    if (
+        folio_upper.startswith("OSOCC-")
+        or tipo_doc_upper == "OSOCC"
+        or "OSOCC" in tipo_srv_upper
+        or ("OBSERVACION" in tipo_srv_upper and "CELDA" in tipo_srv_upper)
+        or ("DIAGNOSTICO" in tipo_srv_upper and "CELDA" in tipo_srv_upper)
+    ):
+        from ui.dialogs.osocc_digital_dialog import OsoccDigitalDialog
+        dlg_osocc = OsoccDigitalDialog(
+            os_id      = os_id,
+            folio      = folio_os,
+            orden_data = os_data or {},
+            parent     = parent,
+        )
+        return dlg_osocc.exec() == QDialog.DialogCode.Accepted
+
     if folio_upper.startswith("OSOB-") or tipo_doc_upper == "OSOB" or "OSOB" in tipo_srv_upper or "OBSERVACION" in tipo_srv_upper or ("INSPECCION" in tipo_srv_upper and "BASCULA" in tipo_srv_upper):
         from ui.dialogs.osob_digital_dialog import OsobDigitalDialog
         dlg_osob = OsobDigitalDialog(

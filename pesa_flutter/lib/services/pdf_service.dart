@@ -83,6 +83,13 @@ class PdfService {
   }) async {
     final String folioCheck = (osData['folio_os'] ?? osData['folio'] ?? '').toString().trim().toUpperCase();
     final String tipoDocCheck = (osData['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    if (folioCheck.startsWith('OSOCC-') || tipoDocCheck == 'OSOCC') {
+      return generarPdfObservacionesCelda(
+        osData: osData,
+        firmaTecBase64: firmaTecBase64,
+        firmaCliBase64: firmaCliBase64,
+      );
+    }
     if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
       return generarPdfObservacionesBascula(
         osData: osData,
@@ -115,6 +122,13 @@ class PdfService {
   }) async {
     final String folioCheck = (osData['folio_os'] ?? osData['folio'] ?? '').toString().trim().toUpperCase();
     final String tipoDocCheck = (osData['tipo_documento'] ?? '').toString().trim().toUpperCase();
+    if (folioCheck.startsWith('OSOCC-') || tipoDocCheck == 'OSOCC') {
+      return buildPdfObservacionesCeldaBytes(
+        osData: osData,
+        firmaTecBase64: firmaTecBase64,
+        firmaCliBase64: firmaCliBase64,
+      );
+    }
     if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
       return buildPdfObservacionesBasculaBytes(
         osData: osData,
@@ -3252,6 +3266,486 @@ class PdfService {
     if (tipoInst.contains('otro') || tipoInstOtro.isNotEmpty) return true;
     if (tipoInst.isNotEmpty && !isMesa && !isCam && !isColg && !isTolva && !isTanque) return true;
     return false;
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // FORMATO DE DIAGNÓSTICO Y REVISIÓN DE CELDA DE CARGA (OSOCC-26-001)
+  // ══════════════════════════════════════════════════════════════════════════
+  Future<String> generarPdfObservacionesCelda({
+    required Map<String, dynamic> osData,
+    String? firmaTecBase64,
+    String? firmaCliBase64,
+  }) async {
+    final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
+    osData['fecha_creacion_logistica'] ??= osData['fecha'];
+    osData['fecha'] = fechaEjecucionHoy;
+    osData['fecha_servicio'] = fechaEjecucionHoy;
+    osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+
+    final bytes = await buildPdfObservacionesCeldaBytes(
+      osData: osData,
+      firmaTecBase64: firmaTecBase64,
+      firmaCliBase64: firmaCliBase64,
+    );
+
+    final dir = await getApplicationDocumentsDirectory();
+    final pdfDir = Directory('${dir.path}/pdfs');
+    if (!await pdfDir.exists()) {
+      await pdfDir.create(recursive: true);
+    }
+    final folio = _s(osData, 'folio_os', _s(osData, 'folio', 'OSOCC-26-001')).trim();
+    final safeFolio = folio.replaceAll(RegExp(r'[\\/:*?"<>|]'), '_');
+    final fileName = '$safeFolio.pdf';
+    final filePath = '${pdfDir.path}/$fileName';
+    await _writeAtomic(File(filePath), bytes);
+
+    try {
+      final legacyDir = Directory('${dir.path}/Pesa_PDFs');
+      if (!await legacyDir.exists()) await legacyDir.create(recursive: true);
+      await _writeAtomic(File('${legacyDir.path}/$fileName'), bytes);
+    } catch (_) {}
+
+    return filePath;
+  }
+
+  Future<Uint8List> buildPdfObservacionesCeldaBytes({
+    required Map<String, dynamic> osData,
+    String? firmaTecBase64,
+    String? firmaCliBase64,
+  }) async {
+    final folio = _s(osData, 'folio_os', _s(osData, 'folio', 'OSOCC-26-001'));
+    final doc = pw.Document(
+      title: 'FORMATO DE DIAGNÓSTICO Y REVISIÓN DE CELDA DE CARGA - $folio',
+      author: 'Servicios PESA',
+      subject: 'Formato de Diagnóstico y Revisión de Celda de Carga (OSOCC)',
+      creator: 'PESA Tablet App v3',
+    );
+
+    pw.ImageProvider? logoPesa;
+    pw.ImageProvider? logoRl;
+    for (final p in ['Img/logo_pesa.png', 'assets/logo_pesa.png']) {
+      try {
+        final b = await rootBundle.load(p);
+        logoPesa = pw.MemoryImage(b.buffer.asUint8List());
+        break;
+      } catch (_) {}
+    }
+    for (final p in ['Img/RiceLake.png', 'assets/RiceLake.png']) {
+      try {
+        final b = await rootBundle.load(p);
+        logoRl = pw.MemoryImage(b.buffer.asUint8List());
+        break;
+      } catch (_) {}
+    }
+
+    pw.ImageProvider? firmaTecImg;
+    pw.ImageProvider? firmaCliImg;
+    final rawTec = firmaTecBase64 ?? _s(osData, 'firma_tecnico', _s(osData, 'firma_tecnico_b64', ''));
+    final rawCli = firmaCliBase64 ?? _s(osData, 'firma_cliente', _s(osData, 'firma_receptor_b64', ''));
+    if (rawTec.isNotEmpty) {
+      try {
+        final clean = rawTec.contains(',') ? rawTec.split(',').last : rawTec;
+        firmaTecImg = pw.MemoryImage(base64Decode(clean));
+      } catch (_) {}
+    }
+    if (rawCli.isNotEmpty) {
+      try {
+        final clean = rawCli.contains(',') ? rawCli.split(',').last : rawCli;
+        firmaCliImg = pw.MemoryImage(base64Decode(clean));
+      } catch (_) {}
+    }
+
+    String fechaRaw = _s(osData, 'fecha', _s(osData, 'fecha_servicio', ''));
+    String fechaFmt = '';
+    if (fechaRaw.length >= 10 && fechaRaw.contains('-')) {
+      final parts = fechaRaw.substring(0, 10).split('-');
+      if (parts.length == 3) {
+        fechaFmt = '${parts[2]} / ${parts[1]} / ${parts[0]}';
+      }
+    }
+    if (fechaFmt.isEmpty) {
+      final now = DateTime.now();
+      fechaFmt = '${now.day.toString().padLeft(2, '0')} / ${now.month.toString().padLeft(2, '0')} / ${now.year}';
+    }
+
+    final refOrden = _s(osData, 'orden_servicio_ref', _s(osData, 'ref_orden', _s(osData, 'orden_servicio', '_______________')));
+    final destinoRaw = _s(osData, 'destino_celda', _s(osData, 'destino_tipo', '')).toLowerCase();
+    final clienteDest = _s(osData, 'cliente_destino', _s(osData, 'cliente', _s(osData, 'razon_social', 'Stock / Taller Básculas PESA')));
+
+    final bool isStock = destinoRaw.contains('stock') ||
+        destinoRaw.contains('laboratorio') ||
+        destinoRaw.contains('interno') ||
+        clienteDest.toLowerCase().contains('stock / taller') ||
+        clienteDest.toLowerCase().contains('laboratorio de celdas');
+    final bool isCliente = !isStock;
+
+    final marca = _s(osData, 'marca', _s(osData, 'equipo_marca', ''));
+    final modelo = _s(osData, 'modelo', _s(osData, 'equipo_modelo', ''));
+    final serie = _s(osData, 'serie', _s(osData, 'ns', _s(osData, 'numero_serie', '')));
+    final capNom = _s(osData, 'capacidad_nominal', _s(osData, 'instrumento_capacidad', _s(osData, 'capacidad_maxima', _s(osData, 'alcance_max', ''))));
+    final sensNom = _s(osData, 'sensibilidad_nominal', _s(osData, 'sensibilidad_mv_v', ''));
+    final resNom = _s(osData, 'resistencia_nominal', _s(osData, 'resistencia_entrada_salida', ''));
+
+    final Map<String, dynamic> cablesRaw = (osData['configuracion_cables'] is Map)
+        ? Map<String, dynamic>.from(osData['configuracion_cables'] as Map)
+        : {};
+    final cExcP = (cablesRaw['exc_pos'] ?? 'Rojo').toString().trim();
+    final cExcN = (cablesRaw['exc_neg'] ?? 'Negro').toString().trim();
+    final cSigP = (cablesRaw['sig_pos'] ?? 'Verde').toString().trim();
+    final cSigN = (cablesRaw['sig_neg'] ?? 'Blanco').toString().trim();
+    final cBlind = (cablesRaw['blindaje'] ?? 'Malla').toString().trim();
+    final cSense = (cablesRaw['sense'] ?? 'No').toString().trim();
+
+    final Map<String, dynamic> chkRaw = (osData['checklist_celda'] is Map)
+        ? Map<String, dynamic>.from(osData['checklist_celda'] as Map)
+        : {};
+    String chkEst(int idx) {
+      final it = chkRaw['$idx'] ?? chkRaw[idx];
+      if (it is Map) return (it['estado'] ?? '').toString().trim().toUpperCase();
+      return '';
+    }
+    String chkObs(int idx) {
+      final it = chkRaw['$idx'] ?? chkRaw[idx];
+      if (it is Map) return (it['observaciones'] ?? '').toString().trim();
+      return '';
+    }
+
+    final Map<String, dynamic> prRaw = (osData['pruebas_electricas_celda'] is Map)
+        ? Map<String, dynamic>.from(osData['pruebas_electricas_celda'] as Map)
+        : {};
+
+    final String obsTecnicas = _s(osData, 'observaciones', _s(osData, 'observaciones_tecnicas', ''));
+    final String dictamenUp = _s(osData, 'dictamen_celda', _s(osData, 'dictamen_estado', _s(osData, 'dictamen', 'OPERATIVA'))).toUpperCase();
+    final bool isRep = dictamenUp.contains('REPARABLE');
+    final bool isDan = dictamenUp.contains('DAÑAD') || dictamenUp.contains('DANAD') || dictamenUp.contains('DESCALIBRADA') || dictamenUp.contains('FUERA');
+    final bool isOp = !isRep && !isDan;
+
+    final tecNombre = _s(osData, 'tecnico', _s(osData, 'tecnico_nombre', ''));
+    final tecPuesto = _s(osData, 'puesto_tecnico', 'Técnico Especialista');
+    final cliNombre = _s(osData, 'nombre_receptor', _s(osData, 'firma_cliente_nombre', _s(osData, 'nombre_ing', '')));
+    final cliPuesto = _s(osData, 'puesto_receptor', _s(osData, 'area_puesto_cliente', _s(osData, 'puesto_ing', '')));
+
+    String markBox(bool active, [String inner = 'X']) {
+      if (inner == 'X') return active ? '[ X ]' : '[   ]';
+      return active ? '[X $inner]' : '[ $inner ]';
+    }
+
+    pw.Widget secHeader(String title) => pw.Container(
+          width: double.infinity,
+          color: _dark,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+          child: pw.Text(
+            title,
+            style: pw.TextStyle(color: _white, fontSize: 7.4, fontWeight: pw.FontWeight.bold),
+          ),
+        );
+
+    pw.Widget buildChecklistCeldaRow(int num, String label) {
+      final est = chkEst(num);
+      final obs = chkObs(num);
+      return pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: pw.BoxDecoration(
+          color: num.isEven ? const PdfColor.fromInt(0xFFF9FAFB) : _white,
+          border: const pw.Border(
+            bottom: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+            left: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+            right: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+          ),
+        ),
+        child: pw.Row(
+          children: [
+            pw.Expanded(
+              flex: 48,
+              child: pw.Text('$num. $label', style: const pw.TextStyle(fontSize: 6.2, color: _black)),
+            ),
+            pw.SizedBox(
+              width: 118,
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(markBox(est == 'B', 'B'), style: pw.TextStyle(fontSize: 6.0, fontWeight: est == 'B' ? pw.FontWeight.bold : pw.FontWeight.normal, color: est == 'B' ? _redBright : _black)),
+                  pw.Text(markBox(est == 'R', 'R'), style: pw.TextStyle(fontSize: 6.0, fontWeight: est == 'R' ? pw.FontWeight.bold : pw.FontWeight.normal, color: est == 'R' ? _redBright : _black)),
+                  pw.Text(markBox(est == 'M', 'M'), style: pw.TextStyle(fontSize: 6.0, fontWeight: est == 'M' ? pw.FontWeight.bold : pw.FontWeight.normal, color: est == 'M' ? _redBright : _black)),
+                  pw.Text(markBox(est == 'N/A' || est == 'NA', 'N/A'), style: pw.TextStyle(fontSize: 6.0, fontWeight: (est == 'N/A' || est == 'NA') ? pw.FontWeight.bold : pw.FontWeight.normal, color: (est == 'N/A' || est == 'NA') ? _redBright : _black)),
+                ],
+              ),
+            ),
+            pw.SizedBox(width: 6),
+            pw.Expanded(
+              flex: 30,
+              child: pw.Text('| Obs: ${obs.isNotEmpty ? obs : "_________________"}', style: const pw.TextStyle(fontSize: 6.0, color: _grayD)),
+            ),
+          ],
+        ),
+      );
+    }
+
+    const List<Map<String, String>> prSpec = [
+      {'idx': '1', 'key': 'exc_pos_exc_neg', 'label': 'Excitación Exc+ / Exc-', 'und': 'Ohms'},
+      {'idx': '2', 'key': 'sig_pos_sig_neg', 'label': 'Resistencia Sig+ / Sig-', 'und': 'Ohms'},
+      {'idx': '3', 'key': 'exc_pos_sig_pos', 'label': 'Resistencia Exc+ / Sig+', 'und': 'Ohms'},
+      {'idx': '4', 'key': 'exc_pos_sig_neg', 'label': 'Resistencia Exc+ / Sig-', 'und': 'Ohms'},
+      {'idx': '5', 'key': 'exc_neg_sig_pos', 'label': 'Resistencia Exc- / Sig+', 'und': 'Ohms'},
+      {'idx': '6', 'key': 'exc_neg_sig_neg', 'label': 'Resistencia Exc- / Sig-', 'und': 'Ohms'},
+      {'idx': '7', 'key': 'sig_neg_mas_exc_pos', 'label': 'Resistencia Sig- + Exc+', 'und': 'Ohms'},
+      {'idx': '8', 'key': 'sig_neg_mas_exc_neg', 'label': 'Resistencia Sig- + Exc-', 'und': 'Ohms'},
+      {'idx': '9', 'key': 'exc_neg_pos_sig_pos', 'label': 'Resistencia Exc-+ / Sig+', 'und': 'Ohms'},
+      {'idx': '10', 'key': 'exc_neg_pos_sig_neg', 'label': 'Resistencia Exc-+ / Sig-', 'und': 'Ohms'},
+      {'idx': '11', 'key': 'senal_salida_mv', 'label': 'Señal de Salida (Milivoltaje)', 'und': 'mV'},
+      {'idx': '12', 'key': 'resistencia_aislamiento', 'label': 'Resistencia de Aislamiento', 'und': 'MΩ'},
+    ];
+
+    pw.Widget buildPruebaElecRow(Map<String, String> spec) {
+      final int idx = int.parse(spec['idx']!);
+      final String key = spec['key']!;
+      final dynamic it = prRaw['$idx'] ?? prRaw[idx] ?? prRaw[key];
+      String valMed = '';
+      String estStr = '';
+      if (it is Map) {
+        valMed = (it['valor'] ?? it['valor_medido'] ?? '').toString().trim();
+        estStr = (it['estado'] ?? '').toString().trim().toUpperCase();
+      }
+      final bool isFail = estStr.contains('FALLA') || estStr.contains('FUGA');
+      final bool isOk = !isFail && estStr.isNotEmpty;
+      final String estadoTxt = idx == 12
+          ? '${markBox(isOk)} > 5000 MΩ (OK)   ${markBox(isFail)} Fuga'
+          : '${markBox(isOk)} OK   ${markBox(isFail)} Falla';
+
+      return pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+        decoration: pw.BoxDecoration(
+          color: idx.isEven ? const PdfColor.fromInt(0xFFF9FAFB) : _white,
+          border: const pw.Border(
+            bottom: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+            left: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+            right: pw.BorderSide(color: PdfColor.fromInt(0xFFDCDCDC), width: 0.35),
+          ),
+        ),
+        child: pw.Row(
+          children: [
+            pw.Expanded(
+              flex: 42,
+              child: pw.Text('$idx. ${spec['label']}', style: const pw.TextStyle(fontSize: 6.2)),
+            ),
+            pw.SizedBox(
+              width: 42,
+              child: pw.Text(spec['und']!, textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 6.1, fontWeight: pw.FontWeight.bold)),
+            ),
+            pw.Expanded(
+              flex: 24,
+              child: pw.Text(
+                valMed.isNotEmpty ? valMed : '____________',
+                textAlign: pw.TextAlign.center,
+                style: pw.TextStyle(fontSize: 6.3, fontWeight: pw.FontWeight.bold),
+              ),
+            ),
+            pw.Expanded(
+              flex: 34,
+              child: pw.Text(
+                estadoTxt,
+                textAlign: pw.TextAlign.center,
+                style: const pw.TextStyle(fontSize: 6.0),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    final double obsFontSize = obsTecnicas.length > 350 ? 6.8 : (obsTecnicas.length > 200 ? 7.5 : 8.5);
+
+    doc.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.letter,
+        margin: const pw.EdgeInsets.fromLTRB(22, 14, 22, 14),
+        build: (ctx) => [
+          // Cabecera con logos y título oficial
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              _logoBox(logoPesa, 'BP BÁSCULAS PESA', 95, 28),
+              pw.Expanded(
+                child: pw.Column(
+                  children: [
+                    pw.Text(
+                      'FORMATO DE DIAGNÓSTICO Y REVISIÓN DE CELDA DE CARGA',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(fontSize: 10.2, fontWeight: pw.FontWeight.bold, color: _red),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.Text(
+                      'Folio: $folio | Fecha: $fechaFmt | Ref. / Orden: ${refOrden.isEmpty ? "_______________" : refOrden} | Destino: ${markBox(isCliente)} Cliente   ${markBox(isStock)} Stock / Laboratorio Interno',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(fontSize: 6.8, fontWeight: pw.FontWeight.bold, color: _dark),
+                    ),
+                  ],
+                ),
+              ),
+              _logoBox(logoRl, 'RICE LAKE', 85, 28),
+            ],
+          ),
+          pw.SizedBox(height: 5),
+
+          // ── 1. DATOS DE IDENTIFICACIÓN DE LA CELDA ────────────────────────
+          secHeader('1. DATOS DE IDENTIFICACIÓN DE LA CELDA'),
+          pw.Container(
+            padding: const pw.EdgeInsets.all(5),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('Cliente / Destino: $clienteDest', style: pw.TextStyle(fontSize: 6.8, fontWeight: pw.FontWeight.bold)),
+                pw.SizedBox(height: 2.5),
+                pw.Row(children: [
+                  pw.Expanded(child: pw.Text('Marca: $marca', style: const pw.TextStyle(fontSize: 6.5))),
+                  pw.Expanded(child: pw.Text('Modelo: $modelo', style: const pw.TextStyle(fontSize: 6.5))),
+                  pw.Expanded(child: pw.Text('Número de Serie: $serie', style: const pw.TextStyle(fontSize: 6.5))),
+                ]),
+                pw.SizedBox(height: 2.5),
+                pw.Row(children: [
+                  pw.Expanded(child: pw.Text('Capacidad Nominal (Max): $capNom', style: const pw.TextStyle(fontSize: 6.5))),
+                  pw.Expanded(child: pw.Text('Sensibilidad Nominal: ${sensNom.isNotEmpty ? "$sensNom mV/V" : ""}', style: const pw.TextStyle(fontSize: 6.5))),
+                  pw.Expanded(child: pw.Text('Resistencia Nominal Ent./Sal.: ${resNom.isNotEmpty ? "$resNom Ohms" : ""}', style: const pw.TextStyle(fontSize: 6.5))),
+                ]),
+                pw.SizedBox(height: 2.5),
+                pw.Text(
+                  'Configuración de Cables / Colores: [ Exc+: $cExcP | Exc-: $cExcN | Sig+: $cSigP | Sig-: $cSigN | Blindaje: $cBlind | Sense: $cSense ]',
+                  style: const pw.TextStyle(fontSize: 6.3),
+                ),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 4),
+
+          // ── 2. INSPECCIÓN FÍSICA Y MECÁNICA DE LA CELDA ───────────────────
+          secHeader('2. INSPECCIÓN FÍSICA Y MECÁNICA DE LA CELDA (Criterio: [ B ] Bueno   [ R ] Regular   [ M ] Malo   [ N/A ])'),
+          buildChecklistCeldaRow(1, 'Cuerpo metálico / Deformación'),
+          buildChecklistCeldaRow(2, 'Roscas, barrenos y apoyos mecánicos'),
+          buildChecklistCeldaRow(3, 'Sellos herméticos y encapsulado de galgas'),
+          buildChecklistCeldaRow(4, 'Integridad del cable (sin cortes, aplastamientos ni empalmes)'),
+          buildChecklistCeldaRow(5, 'Prensaestopas / Salida de cable'),
+          buildChecklistCeldaRow(6, 'Evidencia de corrosión, humedad o sobrecarga térmica'),
+          pw.SizedBox(height: 4),
+
+          // ── 3. PRUEBAS Y MEDICIONES ELÉCTRICAS UNITARIAS (SIN CARGA) ──────
+          secHeader('3. PRUEBAS Y MEDICIONES ELÉCTRICAS UNITARIAS (SIN CARGA)'),
+          pw.Container(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            color: const PdfColor.fromInt(0xFFEAEAEA),
+            child: pw.Row(
+              children: [
+                pw.Expanded(flex: 42, child: pw.Text('PARÁMETRO ELÉCTRICO', style: pw.TextStyle(fontSize: 6.2, fontWeight: pw.FontWeight.bold, color: _red))),
+                pw.SizedBox(width: 42, child: pw.Text('UND', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 6.2, fontWeight: pw.FontWeight.bold, color: _red))),
+                pw.Expanded(flex: 24, child: pw.Text('VALOR MEDIDO', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 6.2, fontWeight: pw.FontWeight.bold, color: _red))),
+                pw.Expanded(flex: 34, child: pw.Text('ESTADO (OK / FALLA)', textAlign: pw.TextAlign.center, style: pw.TextStyle(fontSize: 6.2, fontWeight: pw.FontWeight.bold, color: _red))),
+              ],
+            ),
+          ),
+          for (final spec in prSpec) buildPruebaElecRow(spec),
+          pw.SizedBox(height: 4),
+
+          // ── 4. DICTAMEN TÉCNICO Y OBSERVACIONES ───────────────────────────
+          secHeader('4. DICTAMEN TÉCNICO Y OBSERVACIONES'),
+          pw.SizedBox(height: 2),
+          pw.Text('Observaciones Técnicas y Diagnóstico:', style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 1.5),
+          pw.Container(
+            width: double.infinity,
+            constraints: const pw.BoxConstraints(minHeight: 38),
+            padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+            decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400, width: 0.6)),
+            child: pw.Text(
+              obsTecnicas.isEmpty ? 'Sin observaciones adicionales.' : obsTecnicas,
+              style: pw.TextStyle(fontSize: obsFontSize, lineSpacing: 1.5),
+              softWrap: true,
+              textAlign: pw.TextAlign.left,
+            ),
+          ),
+          pw.SizedBox(height: 3),
+          pw.Text('Dictamen Final de la Celda:', style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 1.5),
+          pw.Text(
+            '  ${markBox(isOp)} OPERATIVA / EN TOLERANCIA (Apta para instalación o calibración)',
+            style: pw.TextStyle(fontSize: 6.2, fontWeight: isOp ? pw.FontWeight.bold : pw.FontWeight.normal),
+          ),
+          pw.Text(
+            '  ${markBox(isRep)} REPARABLE (Requiere reemplazo de cable, conector o reapriete)',
+            style: pw.TextStyle(fontSize: 6.2, fontWeight: isRep ? pw.FontWeight.bold : pw.FontWeight.normal),
+          ),
+          pw.Text(
+            '  ${markBox(isDan)} DAÑADA / DESCALIBRADA (Sobrecarga, galgas abiertas o fuga - FUERA DE SERVICIO)',
+            style: pw.TextStyle(fontSize: 6.2, fontWeight: isDan ? pw.FontWeight.bold : pw.FontWeight.normal),
+          ),
+          pw.SizedBox(height: 4),
+
+          // ── 5. FIRMAS DE RESPONSABILIDAD ──────────────────────────────────
+          secHeader('5. FIRMAS DE RESPONSABILIDAD'),
+          pw.SizedBox(height: 3),
+          pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Expanded(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(5),
+                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400, width: 0.6)),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Evaluó / Técnico Responsable', style: pw.TextStyle(fontSize: 6.6, fontWeight: pw.FontWeight.bold, color: _red)),
+                      pw.SizedBox(height: 2),
+                      pw.Text('Nombre: $tecNombre', style: const pw.TextStyle(fontSize: 6.3)),
+                      pw.Text('Puesto: $tecPuesto', style: const pw.TextStyle(fontSize: 6.3)),
+                      pw.SizedBox(height: 2),
+                      pw.SizedBox(
+                        height: 34,
+                        width: double.infinity,
+                        child: firmaTecImg != null
+                            ? pw.Center(child: pw.Image(firmaTecImg, fit: pw.BoxFit.contain))
+                            : pw.SizedBox(),
+                      ),
+                      pw.Divider(height: 1, thickness: 0.5, color: PdfColors.grey600),
+                      pw.Center(child: pw.Text('Firma', style: const pw.TextStyle(fontSize: 5.8, color: _grayD))),
+                    ],
+                  ),
+                ),
+              ),
+              pw.SizedBox(width: 14),
+              pw.Expanded(
+                child: pw.Container(
+                  padding: const pw.EdgeInsets.all(5),
+                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey400, width: 0.6)),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text('Recibió / Almacén o Cliente', style: pw.TextStyle(fontSize: 6.6, fontWeight: pw.FontWeight.bold, color: _red)),
+                      pw.SizedBox(height: 2),
+                      pw.Text('Nombre: $cliNombre', style: const pw.TextStyle(fontSize: 6.3)),
+                      pw.Text('Puesto: $cliPuesto', style: const pw.TextStyle(fontSize: 6.3)),
+                      pw.SizedBox(height: 2),
+                      pw.SizedBox(
+                        height: 34,
+                        width: double.infinity,
+                        child: firmaCliImg != null
+                            ? pw.Center(child: pw.Image(firmaCliImg, fit: pw.BoxFit.contain))
+                            : pw.SizedBox(),
+                      ),
+                      pw.Divider(height: 1, thickness: 0.5, color: PdfColors.grey600),
+                      pw.Center(child: pw.Text('Firma', style: const pw.TextStyle(fontSize: 5.8, color: _grayD))),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    return doc.save();
   }
 }
 

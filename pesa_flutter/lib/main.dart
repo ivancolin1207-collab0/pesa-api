@@ -25,6 +25,7 @@ import 'screens/pdf_viewer_screen.dart';
 import 'screens/remision_captura_screen.dart';
 import 'screens/revision_bascula_screen.dart';
 import 'screens/observaciones_bascula_screen.dart';
+import 'screens/observaciones_celda_screen.dart';
 import 'screens/levantamiento_proyecto_screen.dart';
 import 'screens/levantamiento_metrologico_screen.dart';
 import 'widgets/captura_firma_tecnico_dialog.dart';
@@ -134,8 +135,15 @@ final _router = GoRouter(
           extra['folio_os'] = extra['folio'];
         }
 
-        // 1. PRIMERA CONDICIÓN EXPLÍCITA: OSOB (Formato de Inspección y Revisión de Básculas)
-        if (folioUpper.startsWith('OSOB-') ||
+        // 0. PRIMERA CONDICIÓN EXPLÍCITA: OSOCC (Formato de Diagnóstico y Revisión de Celda de Carga)
+        if (folioUpper.startsWith('OSOCC-') ||
+            tipoDocUpper == 'OSOCC' ||
+            tipoUpper.contains('OSOCC') ||
+            tipoUpper.contains('OBSERVACIONES CELDA') ||
+            (tipoUpper.contains('DIAGNOSTICO') && tipoUpper.contains('CELDA')) ||
+            (tipoUpper.contains('DIAGNÓSTICO') && tipoUpper.contains('CELDA'))) {
+          return ObservacionesCeldaScreen(orden: extra);
+        } else if (folioUpper.startsWith('OSOB-') ||
             tipoDocUpper == 'OSOB' ||
             tipoUpper.contains('OSOB') ||
             tipoUpper.contains('OBSERVACION') ||

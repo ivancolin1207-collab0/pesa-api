@@ -720,8 +720,15 @@ recepcion@basculaspesa.com.mx
 
         id_equipo_real = str(id_desde_pdf or id_eq or "S-ID").strip()
         empresa = sanear_nombre_cliente(row["cliente"] or "Cliente")
-        es_osob = str(folio or "").strip().upper().startswith("OSOB-")
-        servicio_default = "Inspección y Revisión de Básculas" if es_osob else "Calibración"
+        folio_up = str(folio or "").strip().upper()
+        es_osocc = folio_up.startswith("OSOCC-")
+        es_osob = folio_up.startswith("OSOB-")
+        if es_osocc:
+            servicio_default = "Diagnóstico y Revisión de Celda de Carga"
+        elif es_osob:
+            servicio_default = "Inspección y Revisión de Básculas"
+        else:
+            servicio_default = "Calibración"
         servicio_real = str(row["srv_nombre"] or row["tipo_servicio"] or servicio_default).strip()
 
         nombre_adj = construir_nombre_pdf(
@@ -731,8 +738,11 @@ recepcion@basculaspesa.com.mx
             servicio=servicio_real,
         )
 
-        id_txt = f" ({id_equipo_real})" if id_equipo_real and id_equipo_real != "S-ID" else (" (S/ID)" if es_osob else "")
-        if es_osob:
+        id_txt = f" ({id_equipo_real})" if id_equipo_real and id_equipo_real != "S-ID" else (" (S/ID)" if (es_osob or es_osocc) else "")
+        if es_osocc:
+            asunto = f"Diagnóstico y Revisión de Celda {folio}{id_txt} - {empresa} | Básculas PESA"
+            doc_titulo_correo = f"Formato de Diagnóstico y Revisión de Celda de Carga {folio}"
+        elif es_osob:
             asunto = f"Formato de Inspección y Revisión {folio}{id_txt} - {empresa} | Básculas PESA"
             doc_titulo_correo = f"Formato de Inspección y Revisión {folio}"
         else:

@@ -44,6 +44,9 @@ logger = logging.getLogger("pesa_api.sync")
 # "Calibración + Ajuste") que harían que la tablet exigiera CCA/DVE.
 _TIPO_SERVICIO_SQL = """
             CASE
+                WHEN UPPER(COALESCE(os.tipo_documento, '')) = 'OSOCC'
+                  OR os.folio_os ~* '^OSOCC-'
+                THEN COALESCE(NULLIF(TRIM(os.tipo_servicio), ''), 'Observaciones Celda')
                 WHEN UPPER(COALESCE(os.tipo_documento, '')) IN ('RE', 'RMA', 'LV', 'OSOB')
                   OR os.folio_os ~* '^(RE|RMA|LV|OSOB)-'
                 THEN COALESCE(NULLIF(TRIM(os.tipo_servicio), ''), ts.nombre, '')
@@ -467,8 +470,16 @@ async def sync_pull(
             COALESCE(os.updated_at, NOW())          AS updated_at,
             COALESCE(os.id_lote, '')                AS id_lote,
             COALESCE(os.rango_lote, '')             AS rango_lote,
-            COALESCE(cl.razon_social, os.cliente, '') AS cliente,
-            COALESCE(cl.razon_social, os.cliente, '') AS cliente_nombre,
+            COALESCE(
+                cl.razon_social,
+                NULLIF(TRIM(os.cliente), ''),
+                CASE WHEN os.folio_os ~* '^OSOCC-' THEN COALESCE(NULLIF(TRIM(os.ubicacion), ''), 'Stock / Taller Básculas PESA') ELSE '' END
+            ) AS cliente,
+            COALESCE(
+                cl.razon_social,
+                NULLIF(TRIM(os.cliente), ''),
+                CASE WHEN os.folio_os ~* '^OSOCC-' THEN COALESCE(NULLIF(TRIM(os.ubicacion), ''), 'Stock / Taller Básculas PESA') ELSE '' END
+            ) AS cliente_nombre,
             COALESCE(cl.direccion,       '') AS direccion_cliente,
             COALESCE(suc.nombre_sucursal, '') AS sucursal_nombre,
             """ + _TIPO_SERVICIO_SQL + """ AS tipo_servicio,
@@ -1389,7 +1400,7 @@ async def upload_firmas(
     summary        = "Reservar el siguiente folio para uso offline",
 )
 async def folio_lock(
-    tipo:         str         = Query(..., pattern="^(OS|RMA|RE|OSOB|LV|LP)$"),
+    tipo:         str         = Query(..., pattern="^(OS|RMA|RE|OSOB|OSOCC|LV|LP)$"),
     db            = Depends(get_db),
     current_user: dict = Depends(require_roles("servicio", "logistica", "admin")),
 ) -> FolioLockResponse:
@@ -1409,11 +1420,11 @@ async def folio_lock(
         "SELECT generate_folio($1::VARCHAR, $2::SMALLINT)",
         tipo, anio,
     )
-    if tipo.upper() == "OSOB" and folio:
+    if tipo.upper() in ("OSOB", "OSOCC") and folio:
         try:
             parts = str(folio).split("-")
             if len(parts) == 3:
-                folio = f"OSOB-{parts[1]}-{int(parts[2]):03d}"
+                folio = f"{tipo.upper()}-{parts[1]}-{int(parts[2]):03d}"
         except Exception:
             pass
     logger.info(

@@ -1577,7 +1577,7 @@ class SyncService extends ChangeNotifier {
             }
           } catch (_) {}
         }
-        final String? tipoDocVal = (remota['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS'))))))?.toString();
+        final String? tipoDocVal = (remota['tipo_documento'] ?? (folio.toUpperCase().startsWith('OSOCC') ? 'OSOCC' : (folio.toUpperCase().startsWith('OSOB') ? 'OSOB' : (folio.startsWith('RMA') ? 'RMA' : (folio.startsWith('RE') ? 'RE' : (folio.startsWith('LP') ? 'LP' : (folio.startsWith('LV') ? 'LV' : 'OS')))))))?.toString();
         final String? dtVal = remota['datos_tecnicos_json']?.toString();
 
         // 1. UPDATE directo en 'ordenes' (mediante trigger INSTEAD OF UPDATE) exactamente como pide el spec
