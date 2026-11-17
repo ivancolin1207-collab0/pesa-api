@@ -21,6 +21,7 @@ import 'package:signature/signature.dart';
 import '../services/api_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
+import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/nombre_recibe.dart';
@@ -244,12 +245,12 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
       'instrumento_capacidad',
       'capacidad',
     ]);
-    _divMinCtrl.text = _pickFromMap(merged, [
+    _divMinCtrl.text = formatearDivisionMinima(_pickFromMap(merged, [
       'div_minima',
       'division_minima',
       'instrumento_division',
       'division',
-    ]);
+    ]));
     _ubicacionCtrl.text = _pickFromMap(merged, [
       'ubicacion',
       'ubicacion_interna',

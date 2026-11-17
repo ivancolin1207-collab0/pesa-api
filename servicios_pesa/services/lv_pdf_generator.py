@@ -357,6 +357,7 @@ class LvPdfGenerator:
 
         tbl_data = [headers_basc]
 
+        from services.metrology import formatear_division_minima
         for b in basculas:
             tbl_data.append([
                 Paragraph(b.get("id_indicador")     or "", style_cell),
@@ -365,7 +366,7 @@ class LvPdfGenerator:
                 Paragraph(b.get("modelo")           or "", style_cell),
                 Paragraph(b.get("numero_serie")     or "", style_cell),
                 Paragraph(b.get("capacidad_max")    or "", style_cell),
-                Paragraph(b.get("division_min")     or "", style_cell),
+                Paragraph(formatear_division_minima(b.get("division_min") or ""), style_cell),
                 Paragraph(b.get("ubicacion_interna")or "", style_cell),
             ])
 

@@ -325,10 +325,11 @@ class RePdfGenerator:
             ("No. DE SERIE",      _pick("indicador_serie", "ns", "serie", "numero_serie", "instrumento_serie"),  cw * 0.22),
             ("ID INDICADOR",      _pick("indicador_id", "id_indicador", "id_equipo", "instrumento_id"),     cw * 0.22),
         ])
+        from services.metrology import formatear_division_minima
         ub_val = _pick("ubicacion", "ubicacion_interna", "planta")
         row2 = [
             ("CAPACIDAD MAX.",    _pick("cap_maxima", "capacidad_maxima", "alcance_max", "instrumento_capacidad"),  cw * 0.25),
-            ("DIVISION MIN. (d)", _pick("div_minima", "division_minima", "instrumento_division"),  cw * 0.25),
+            ("DIVISION MIN. (d)", formatear_division_minima(_pick("div_minima", "division_minima", "instrumento_division")),  cw * 0.25),
         ]
         if ub_val:
             row2.append(("UBICACION", ub_val, cw * 0.42))

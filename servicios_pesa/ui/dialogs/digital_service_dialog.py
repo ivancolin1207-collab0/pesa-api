@@ -1506,10 +1506,11 @@ class DigitalServiceDialog(QDialog):
                     return str(v)
             return ""
 
+        from services.metrology import formatear_division_minima
         self._inp_eq_marca.setText(_v(["marca"]))
         self._inp_eq_modelo.setText(_v(["modelo"]))
         self._inp_eq_alcance.setText(_v(["alcance_max", "alcance"]))
-        self._inp_eq_division.setText(_v(["div_minima", "division"]))
+        self._inp_eq_division.setText(formatear_division_minima(_v(["div_minima", "division"])))
         self._inp_eq_ns.setText(_v(["ns"]))
         self._inp_eq_ubicacion.setText(_v(["ubicacion"]))
 
@@ -1682,7 +1683,7 @@ class DigitalServiceDialog(QDialog):
             "equipo_marca":      self._inp_eq_marca.text().strip(),
             "equipo_modelo":     self._inp_eq_modelo.text().strip(),
             "equipo_alcance":    self._inp_eq_alcance.text().strip(),
-            "equipo_division":   self._inp_eq_division.text().strip(),
+            "equipo_division":   formatear_division_minima(self._inp_eq_division.text().strip()),
             "equipo_ns":         self._inp_eq_ns.text().strip(),
             "equipo_ubicacion":  self._inp_eq_ubicacion.text().strip(),
             # Pruebas metrológicas

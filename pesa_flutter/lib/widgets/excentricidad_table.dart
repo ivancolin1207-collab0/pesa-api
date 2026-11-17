@@ -19,6 +19,10 @@ class ExcentricidadTable extends StatefulWidget {
   final String? tipoInstrumento;
   /// Si Logística definió que aplica o no excentricidad
   final bool aplicaExcentricidad;
+  /// Tipo de instrumento no apto seleccionado ('Grúa', 'Patín', 'Tanque', 'Tolva', 'Silo')
+  final String? motivoNoExcentricidad;
+  /// Callback cuando el técnico selecciona el motivo/instrumento no apto
+  final ValueChanged<String>? onMotivoNoChanged;
   /// Callback cuando el técnico cambia la geometría
   final ValueChanged<String>? onGeometriaChanged;
   /// Callback cuando el técnico cambia el número de secciones (camionera)
@@ -34,6 +38,8 @@ class ExcentricidadTable extends StatefulWidget {
     this.geometria,
     this.tipoInstrumento,
     this.aplicaExcentricidad = true,
+    this.motivoNoExcentricidad,
+    this.onMotivoNoChanged,
     this.onGeometriaChanged,
     this.onNumSeccionesChanged,
   });
@@ -259,34 +265,104 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
   Widget build(BuildContext context) {
     super.build(context); // requerido por AutomaticKeepAliveClientMixin
     if (!widget.aplicaExcentricidad) {
-      return Center(
+      final selMotivo = inferirMotivoNoExcentricidad(
+        widget.motivoNoExcentricidad,
+        widget.tipoInstrumento,
+      );
+      const opciones = <Map<String, dynamic>>[
+        {'key': 'Grúa',   'sub': 'Báscula de grúa / colgante',     'icon': Icons.precision_manufacturing_outlined},
+        {'key': 'Patín',  'sub': 'Patín hidráulico / transpaleta', 'icon': Icons.rv_hookup_outlined},
+        {'key': 'Tanque', 'sub': 'Báscula tipo tanque',            'icon': Icons.propane_tank_outlined},
+        {'key': 'Tolva',  'sub': 'Báscula tipo tolva',             'icon': Icons.filter_alt_outlined},
+        {'key': 'Silo',   'sub': 'Báscula tipo silo',              'icon': Icons.factory_outlined},
+      ];
+      return Padding(
+        padding: const EdgeInsets.all(16),
         child: Card(
           elevation: 0,
-          color: Colors.orange.shade50,
+          color: const Color(0xFFFFF8F8),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: BorderSide(color: Colors.orange.shade200),
+            side: const BorderSide(color: Color(0xFFFFCCCC), width: 1.2),
           ),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Icon(Icons.block, size: 48, color: Colors.orange.shade700),
-                const SizedBox(height: 12),
-                const Text(
-                  'Prueba de Excentricidad No Aplica',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF1D1D1F),
-                  ),
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.block, size: 28, color: _kRed),
+                    SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        'NO APLICA PRUEBA DE EXCENTRICIDAD',
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: _kRed,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Logística o el tipo de instrumento definió que esta prueba no es requerida.',
+                  'Selecciona el tipo de instrumento por el cual no aplica la prueba:',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                   textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  alignment: WrapAlignment.center,
+                  children: opciones.map((opt) {
+                    final String k = opt['key'] as String;
+                    final String sub = opt['sub'] as String;
+                    final IconData ic = opt['icon'] as IconData;
+                    final bool active = selMotivo.toLowerCase() == k.toLowerCase();
+                    return InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => widget.onMotivoNoChanged?.call(k),
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 160),
+                        width: 150,
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: active ? _kRed.withValues(alpha: 0.10) : Colors.white,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: active ? _kRed : Colors.grey.shade300,
+                            width: active ? 1.8 : 1.0,
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(ic, size: 26, color: active ? _kRed : Colors.grey.shade700),
+                            const SizedBox(height: 4),
+                            Text(
+                              k,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: active ? _kRed : const Color(0xFF1D1D1F),
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              sub,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
                 ),
               ],
             ),

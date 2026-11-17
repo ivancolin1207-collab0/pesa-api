@@ -200,9 +200,15 @@ class PdfService {
     pw.ImageProvider? firmaCli,
   }) {
     final aplExc   = _parseBool(osData['aplica_excentricidad']);
-    final motivoNo = _s(osData, 'motivo_no_aplica', '');
+    final motivoNoRaw = _s(osData, 'motivo_no_excentricidad',
+        _s(osData, 'tipo_no_apto',
+            _s(osData, 'motivo_no_aplica',
+                _s(osData, 'tipo_no_aplica_exc', ''))));
+    final motivoNo = motivoNoRaw.isNotEmpty
+        ? motivoNoRaw
+        : _s(osData, 'tipo_instrumento', '');
     final leyenda  = _s(osData, 'leyenda_excentricidad',
-        'El tipo de instrumento no es apto para realizar prueba de excentricidad.');
+        'No aplica prueba de excentricidad.');
     final divMin   = _parseDivMin(osData);
     final rawGeo   = (_s(osData, 'geometria_excentricidad', '').isNotEmpty)
         ? _s(osData, 'geometria_excentricidad', '')
@@ -399,7 +405,8 @@ class PdfService {
     final func   = _s(os, 'funcionamiento', 'Electrónico');
     final ubic   = _s(os, 'ubicacion', _s(os, 'area', _s(os, 'ubicacion_equipo', '')));
     final cap    = _s(os, 'alcance_max', _s(os, 'capacidad_max', _s(os, 'cap_max', _s(os, 'capacidad_maxima', ''))));
-    final div    = _s(os, 'div_minima', _s(os, 'division_minima', _s(os, 'div_min', '')));
+    final divRaw = _s(os, 'div_minima', _s(os, 'division_minima', _s(os, 'div_min', '')));
+    final div    = formatearDivisionMinima(divRaw);
     final unidad = _s(os, 'unidad_medida', 'kg');
     final apoyo  = _s(os, 'puntos_apoyo', '4');
     final cca      = _s(os, 'numero_cca', _s(os, 'cca', _s(os, 'numeroCca', '')));
@@ -606,7 +613,7 @@ class PdfService {
               children: [
                 _buildRepetibilidadTable(repRows, osData, divMin),
                 pw.SizedBox(height: 5),
-                _buildNoAplicaTanqueBox(),
+                _buildNoAplicaBox(motivoNo.isNotEmpty ? motivoNo : 'Tanque', leyenda),
                 if (tieneSustitutos) ...[
                   pw.SizedBox(height: 5),
                   _buildSustitutoTable(validSustitutos, osData, divMin,
@@ -640,7 +647,7 @@ class PdfService {
             children: [
               _buildRepetibilidadTable(repRows, osData, divMin),
               pw.SizedBox(height: 5),
-              (aplExc || (!esTanque && motivoNo.toLowerCase().contains('tanque')))
+              aplExc
                   ? _buildExcentricidadTable(excRows, osData, divMin)
                   : _buildNoAplicaBox(motivoNo, leyenda),
             ],
@@ -654,7 +661,7 @@ class PdfService {
             children: [
               _buildExactitudTable(exacRows, osData, divMin),
               pw.SizedBox(height: 5),
-              _buildDiagrama3Paneles(osData, geo),
+              _buildDiagrama3Paneles(osData, geo, aplicaExcentricidad: aplExc),
             ],
           ),
         ),
@@ -900,10 +907,34 @@ class PdfService {
 
 
   // ══════════════════════════════════════════════════════════════════════════
-  // NO APLICA EXCENTRICIDAD
+  // NO APLICA EXCENTRICIDAD (CON ICONO VECTORIAL Y DESCRIPCIÓN)
   // ══════════════════════════════════════════════════════════════════════════
   pw.Widget _buildNoAplicaBox(String motivoNo, String leyenda) {
-    final tipo = motivoNo.isNotEmpty ? motivoNo : 'instrumento especial';
+    final t = motivoNo.trim().toLowerCase();
+    void Function(PdfGraphics, PdfPoint) painter;
+    String descTipo;
+
+    if (t.contains('grua') || t.contains('grúa') || t.contains('colgante') || t.contains('gancho')) {
+      painter = _dibujarGrua;
+      descTipo = 'Báscula tipo: Grúa — pesaje suspendido';
+    } else if (t.contains('patin') || t.contains('patín') || t.contains('transpaleta')) {
+      painter = _dibujarPatin;
+      descTipo = 'Báscula tipo: Patín hidráulico — equipo móvil';
+    } else if (t.contains('tanque')) {
+      painter = _dibujarTanque;
+      descTipo = 'Báscula tipo: Tanque — pesaje de carga estática';
+    } else if (t.contains('tolva')) {
+      painter = _dibujarTolva;
+      descTipo = 'Báscula tipo: Tolva — pesaje de proceso';
+    } else if (t.contains('silo')) {
+      painter = _dibujarSilo;
+      descTipo = 'Báscula tipo: Silo — almacenamiento a granel';
+    } else {
+      painter = _dibujarInstrumentoEspecial;
+      final limpio = motivoNo.trim().isNotEmpty ? motivoNo.trim() : 'Instrumento especial';
+      descTipo = 'Báscula tipo: $limpio';
+    }
+
     return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: [
       _tblHeader('EXCENTRICIDAD'),
       pw.Container(
@@ -912,91 +943,57 @@ class PdfService {
           border: pw.Border.all(color: _red, width: 0.7),
           color: _redBg,
         ),
-        child: pw.Center(child: pw.Column(
-          mainAxisAlignment: pw.MainAxisAlignment.center,
-          children: [
-            pw.Text('NO APLICA PRUEBA DE EXCENTRICIDAD',
-                textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold,
-                    color: _redBright)),
-            pw.SizedBox(height: 3),
-            pw.Text('Instrumento tipo: $tipo',
-                textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 6.5, color: _black)),
-            pw.SizedBox(height: 2),
-            pw.Padding(
-              padding: const pw.EdgeInsets.symmetric(horizontal: 6),
-              child: pw.Text(leyenda, textAlign: pw.TextAlign.center,
-                  style: pw.TextStyle(fontSize: 5.5, fontStyle: pw.FontStyle.italic,
-                      color: _gray)),
-            ),
-          ],
-        )),
-      ),
-    ]);
-  }
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // NO APTO TANQUE (EXCENTRICIDAD)
-  // ══════════════════════════════════════════════════════════════════════════
-  pw.Widget _buildNoAplicaTanqueBox() {
-    const borderColor = PdfColor.fromInt(0xFFFFCCCC);
-    const bgColor = PdfColor.fromInt(0xFFFFF8F8);
-    const iconColor = PdfColor.fromInt(0xFFC8102E);
-    const textColor = PdfColor.fromInt(0xFF7A0010);
-    const subColor = PdfColor.fromInt(0xFF555555);
-
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        pw.Container(
-          height: 14,
-          color: borderColor,
-          child: pw.Center(
-            child: pw.Text(
-              'EXCENTRICIDAD',
-              style: pw.TextStyle(fontSize: 7.0, fontWeight: pw.FontWeight.bold, color: textColor),
-            ),
-          ),
-        ),
-        pw.Container(
-          height: 61,
-          decoration: pw.BoxDecoration(
-            color: bgColor,
-            border: pw.Border.all(color: borderColor, width: 1.0),
-          ),
+        child: pw.Center(
           child: pw.Column(
             mainAxisAlignment: pw.MainAxisAlignment.center,
             children: [
               pw.SizedBox(
-                width: 32,
-                height: 25,
-                child: pw.CustomPaint(painter: _dibujarTanque),
+                width: 34,
+                height: 24,
+                child: pw.CustomPaint(painter: painter),
               ),
               pw.SizedBox(height: 2),
               pw.Text(
-                'INSTRUMENTO NO APTO PARA PRUEBA DE EXCENTRICIDAD',
+                'NO APLICA PRUEBA DE EXCENTRICIDAD',
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 6.5, fontWeight: pw.FontWeight.bold, color: iconColor),
+                style: pw.TextStyle(
+                  fontSize: 6.8,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _redBright,
+                ),
               ),
               pw.SizedBox(height: 1.5),
               pw.Text(
-                'Báscula tipo: Tanque — pesaje de carga estática',
+                descTipo,
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 5.5, fontStyle: pw.FontStyle.italic, color: subColor),
+                style: pw.TextStyle(
+                  fontSize: 6.0,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _black,
+                ),
               ),
               pw.SizedBox(height: 1),
               pw.Text(
                 'No aplica prueba de excentricidad.',
                 textAlign: pw.TextAlign.center,
-                style: pw.TextStyle(fontSize: 5.5, fontStyle: pw.FontStyle.italic, color: subColor),
+                style: pw.TextStyle(
+                  fontSize: 5.5,
+                  fontStyle: pw.FontStyle.italic,
+                  color: _gray,
+                ),
               ),
             ],
           ),
         ),
-      ],
-    );
+      ),
+    ]);
   }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // NO APTO TANQUE (EXCENTRICIDAD) — delega a _buildNoAplicaBox
+  // ══════════════════════════════════════════════════════════════════════════
+  pw.Widget _buildNoAplicaTanqueBox() =>
+      _buildNoAplicaBox('Tanque', 'No aplica prueba de excentricidad.');
 
   // ══════════════════════════════════════════════════════════════════════════
   // TABLA SUSTITUTO / PESO (Solo si peso > 0)
@@ -1351,7 +1348,8 @@ class PdfService {
     return fallbackLen > 0 ? fallbackLen : 6;
   }
 
-  pw.Widget _buildDiagrama3Paneles(Map<String, dynamic> os, String geo) {
+  pw.Widget _buildDiagrama3Paneles(Map<String, dynamic> os, String geo, {bool? aplicaExcentricidad}) {
+    final bool aplExc = aplicaExcentricidad ?? _parseBool(os['aplica_excentricidad']);
     final tipo = _s(os, 'tipo_instrumento', '').toLowerCase();
     final rawGeo = (_s(os, 'geometria_excentricidad', '').isNotEmpty)
         ? _s(os, 'geometria_excentricidad', '')
@@ -1360,14 +1358,14 @@ class PdfService {
             : geo);
     final g = rawGeo.toLowerCase().trim();
 
-    // Regla de detección estricta y mutuamente excluyente
-    final bool isCam = g.contains('camion') ||
+    // Regla estricta: si aplicaExcentricidad == false, NUNCA marcar con X ninguna casilla
+    final bool isCam = aplExc && (g.contains('camion') ||
         g.contains('ferro') ||
         tipo.contains('camion') ||
         tipo.contains('puente') ||
-        tipo.contains('ferro');
-    final bool isCirc = !isCam && (g.contains('circ') || tipo.contains('circ'));
-    final bool isPlat = !isCam && !isCirc;
+        tipo.contains('ferro'));
+    final bool isCirc = aplExc && !isCam && (g.contains('circ') || tipo.contains('circ'));
+    final bool isPlat = aplExc && !isCam && !isCirc && !g.contains('libre');
 
     int nSec = int.tryParse(os['num_secciones']?.toString() ?? '') ??
                int.tryParse(os['secciones_camionera']?.toString() ?? '') ??
@@ -2004,7 +2002,7 @@ class PdfService {
     final serieInd = pick(['indicador_serie', 'ns', 'serie', 'numero_serie', 'instrumento_serie']);
     final idInd = pick(['indicador_id', 'id_indicador', 'id_equipo', 'instrumento_id']);
     final capMax = pick(['cap_maxima', 'capacidad_maxima', 'alcance_max', 'instrumento_capacidad']);
-    final divMin = pick(['div_minima', 'division_minima', 'instrumento_division']);
+    final divMin = formatearDivisionMinima(pick(['div_minima', 'division_minima', 'instrumento_division']));
     final ubicacion = pick(['ubicacion', 'ubicacion_interna', 'planta']);
 
     final celdaAMarca = pick(['celda_a_marca', 'marca_celda'], marcaInd);
@@ -2811,7 +2809,7 @@ class PdfService {
     final modelo = _s(osData, 'modelo', _s(osData, 'equipo_modelo', ''));
     final serie = _s(osData, 'serie', _s(osData, 'ns', _s(osData, 'numero_serie', '')));
     final capMax = formatoMilesEspacio(_s(osData, 'capacidad_maxima', _s(osData, 'alcance_max', _s(osData, 'cap_maxima', ''))));
-    final divMin = formatoMilesEspacio(_s(osData, 'division_minima', _s(osData, 'div_minima', '')));
+    final divMin = formatoMilesEspacio(formatearDivisionMinima(_s(osData, 'division_minima', _s(osData, 'div_minima', ''))));
     final tipoInst = _s(osData, 'tipo_instrumento', '').toLowerCase();
     final tipoInstOtro = _s(osData, 'tipo_instrumento_otro', '');
 
@@ -3813,7 +3811,7 @@ void _dibujarCircular(PdfGraphics c, PdfPoint size) {
 void _dibujarTanque(PdfGraphics c, PdfPoint size) {
   final cx = size.x / 2;
   final cy = size.y / 2 - 1;
-  const col = PdfColor.fromInt(0xFFC8102E);
+  const col = PdfColor.fromInt(0xFFB91C1C);
   const fillCol = PdfColor.fromInt(0xFFFFE5E5);
 
   c.saveContext();
@@ -3857,6 +3855,226 @@ void _dibujarTanque(PdfGraphics c, PdfPoint size) {
   c.setLineWidth(1.0);
   c.moveTo(cx - 3, cy + 14);
   c.lineTo(cx + 3, cy + 14);
+  c.strokePath();
+
+  c.restoreContext();
+}
+
+/// Vector dibujo Grúa / Gancho de izaje para recuadro No Aplica Excentricidad
+void _dibujarGrua(PdfGraphics c, PdfPoint size) {
+  final cx = size.x / 2;
+  final cy = size.y / 2;
+  const col = PdfColor.fromInt(0xFFB91C1C);
+  const fillCol = PdfColor.fromInt(0xFFFFE5E5);
+
+  c.saveContext();
+  c.setStrokeColor(col);
+  c.setFillColor(fillCol);
+  c.setLineWidth(1.1);
+
+  // Argolla superior
+  c.drawEllipse(cx, cy + 9, 2.8, 2.5);
+  c.strokePath();
+
+  // Cuerpo dinamómetro
+  c.drawRect(cx - 5.5, cy - 1, 11, 8.5);
+  c.fillPath();
+  c.drawRect(cx - 5.5, cy - 1, 11, 8.5);
+  c.strokePath();
+
+  // Pantalla interna del dinamómetro
+  c.drawRect(cx - 3.5, cy + 2, 7, 3.2);
+  c.strokePath();
+
+  // Vástago inferior y gancho curvo
+  c.setLineWidth(1.4);
+  c.moveTo(cx, cy - 1);
+  c.lineTo(cx, cy - 4);
+  c.strokePath();
+
+  c.moveTo(cx, cy - 4);
+  c.curveTo(cx + 5, cy - 5, cx + 5, cy - 10.5, cx, cy - 10.5);
+  c.curveTo(cx - 3.5, cy - 10.5, cx - 4, cy - 7.5, cx - 1.5, cy - 7);
+  c.strokePath();
+
+  c.restoreContext();
+}
+
+/// Vector dibujo Patín hidráulico / Transpaleta para recuadro No Aplica Excentricidad
+void _dibujarPatin(PdfGraphics c, PdfPoint size) {
+  final cx = size.x / 2;
+  final cy = size.y / 2;
+  const col = PdfColor.fromInt(0xFFB91C1C);
+  const fillCol = PdfColor.fromInt(0xFFFFE5E5);
+
+  c.saveContext();
+  c.setStrokeColor(col);
+  c.setFillColor(fillCol);
+  c.setLineWidth(1.1);
+
+  // Maneral / timón inclinado
+  c.setLineWidth(1.4);
+  c.moveTo(cx - 7, cy - 1);
+  c.lineTo(cx - 11, cy + 9);
+  c.strokePath();
+  c.moveTo(cx - 13.5, cy + 9);
+  c.lineTo(cx - 8.5, cy + 9);
+  c.strokePath();
+
+  // Columna de bomba hidráulica
+  c.setLineWidth(1.0);
+  c.drawRect(cx - 8, cy - 4, 4.5, 6.5);
+  c.fillPath();
+  c.drawRect(cx - 8, cy - 4, 4.5, 6.5);
+  c.strokePath();
+
+  // Horquillas horizontales
+  c.drawRect(cx - 3.5, cy - 4, 15.5, 3.2);
+  c.fillPath();
+  c.drawRect(cx - 3.5, cy - 4, 15.5, 3.2);
+  c.strokePath();
+
+  // Rueda trasera motriz y rodillos delanteros
+  c.drawEllipse(cx - 6.5, cy - 6.8, 2.4, 2.4);
+  c.fillPath();
+  c.drawEllipse(cx - 6.5, cy - 6.8, 2.4, 2.4);
+  c.strokePath();
+
+  c.drawEllipse(cx + 9.5, cy - 6.2, 1.8, 1.8);
+  c.fillPath();
+  c.drawEllipse(cx + 9.5, cy - 6.2, 1.8, 1.8);
+  c.strokePath();
+
+  c.restoreContext();
+}
+
+/// Vector dibujo Tolva (cuerpo recto superior + cono invertido inferior)
+void _dibujarTolva(PdfGraphics c, PdfPoint size) {
+  final cx = size.x / 2;
+  final cy = size.y / 2;
+  const col = PdfColor.fromInt(0xFFB91C1C);
+  const fillCol = PdfColor.fromInt(0xFFFFE5E5);
+
+  c.saveContext();
+  c.setStrokeColor(col);
+  c.setFillColor(fillCol);
+  c.setLineWidth(1.0);
+
+  // Cuerpo superior recto
+  c.drawRect(cx - 8, cy + 2, 16, 6.5);
+  c.fillPath();
+  c.drawRect(cx - 8, cy + 2, 16, 6.5);
+  c.strokePath();
+
+  // Cono / trapecio invertido inferior
+  c.moveTo(cx - 8, cy + 2);
+  c.lineTo(cx - 3, cy - 6);
+  c.lineTo(cx + 3, cy - 6);
+  c.lineTo(cx + 8, cy + 2);
+  c.closePath();
+  c.fillPath();
+
+  c.moveTo(cx - 8, cy + 2);
+  c.lineTo(cx - 3, cy - 6);
+  c.lineTo(cx + 3, cy - 6);
+  c.lineTo(cx + 8, cy + 2);
+  c.closePath();
+  c.strokePath();
+
+  // Boca de descarga y soportes laterales
+  c.drawRect(cx - 2, cy - 9, 4, 3);
+  c.strokePath();
+  c.moveTo(cx - 11, cy + 3);
+  c.lineTo(cx - 8, cy + 3);
+  c.lineTo(cx - 8, cy - 9);
+  c.strokePath();
+  c.moveTo(cx + 11, cy + 3);
+  c.lineTo(cx + 8, cy + 3);
+  c.lineTo(cx + 8, cy - 9);
+  c.strokePath();
+
+  c.restoreContext();
+}
+
+/// Vector dibujo Silo vertical alto con techo cónico y cono inferior
+void _dibujarSilo(PdfGraphics c, PdfPoint size) {
+  final cx = size.x / 2;
+  final cy = size.y / 2;
+  const col = PdfColor.fromInt(0xFFB91C1C);
+  const fillCol = PdfColor.fromInt(0xFFFFE5E5);
+
+  c.saveContext();
+  c.setStrokeColor(col);
+  c.setFillColor(fillCol);
+  c.setLineWidth(1.0);
+
+  // Techo cónico superior
+  c.moveTo(cx - 6.5, cy + 6.5);
+  c.lineTo(cx, cy + 10.5);
+  c.lineTo(cx + 6.5, cy + 6.5);
+  c.closePath();
+  c.fillPath();
+  c.moveTo(cx - 6.5, cy + 6.5);
+  c.lineTo(cx, cy + 10.5);
+  c.lineTo(cx + 6.5, cy + 6.5);
+  c.closePath();
+  c.strokePath();
+
+  // Torre cilíndrica alta
+  c.drawRect(cx - 6.5, cy - 3.5, 13, 10);
+  c.fillPath();
+  c.drawRect(cx - 6.5, cy - 3.5, 13, 10);
+  c.strokePath();
+
+  // Anillos estructurales horizontales
+  c.setLineWidth(0.6);
+  c.moveTo(cx - 6.5, cy + 3);
+  c.lineTo(cx + 6.5, cy + 3);
+  c.strokePath();
+  c.moveTo(cx - 6.5, cy - 0.5);
+  c.lineTo(cx + 6.5, cy - 0.5);
+  c.strokePath();
+
+  // Cono inferior de descarga y estructura de patas
+  c.setLineWidth(1.0);
+  c.moveTo(cx - 6.5, cy - 3.5);
+  c.lineTo(cx - 2, cy - 8);
+  c.lineTo(cx + 2, cy - 8);
+  c.lineTo(cx + 6.5, cy - 3.5);
+  c.strokePath();
+
+  c.moveTo(cx - 5.5, cy - 4.5);
+  c.lineTo(cx - 6.5, cy - 10);
+  c.strokePath();
+  c.moveTo(cx + 5.5, cy - 4.5);
+  c.lineTo(cx + 6.5, cy - 10);
+  c.strokePath();
+
+  c.restoreContext();
+}
+
+/// Vector dibujo técnico fallback para otro instrumento especial
+void _dibujarInstrumentoEspecial(PdfGraphics c, PdfPoint size) {
+  final cx = size.x / 2;
+  final cy = size.y / 2;
+  const col = PdfColor.fromInt(0xFFB91C1C);
+  const fillCol = PdfColor.fromInt(0xFFFFE5E5);
+
+  c.saveContext();
+  c.setStrokeColor(col);
+  c.setFillColor(fillCol);
+  c.setLineWidth(1.0);
+
+  // Indicador / módulo técnico con carátula
+  c.drawRect(cx - 8, cy - 6, 16, 12);
+  c.fillPath();
+  c.drawRect(cx - 8, cy - 6, 16, 12);
+  c.strokePath();
+
+  c.drawEllipse(cx, cy, 4, 4);
+  c.strokePath();
+  c.moveTo(cx, cy);
+  c.lineTo(cx + 2.5, cy + 2);
   c.strokePath();
 
   c.restoreContext();

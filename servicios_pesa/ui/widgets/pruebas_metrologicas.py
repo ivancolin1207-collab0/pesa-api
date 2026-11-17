@@ -890,9 +890,11 @@ class ExcentricidadCondicionalWidget(QWidget):
 
         self._combo_motivo_no = QComboBox()
         self._combo_motivo_no.addItems([
-            "Tolva / Tanque / Silo",
-            "Bascula de Grua / Gancho Dinamometrico",
-            "Otro (No apto)",
+            "Grúa",
+            "Patín",
+            "Tanque",
+            "Tolva",
+            "Silo",
         ])
         self._combo_motivo_no.setFixedWidth(300)
         self._combo_motivo_no.setStyleSheet(
@@ -1119,22 +1121,32 @@ class ExcentricidadCondicionalWidget(QWidget):
         return self._spin_secciones.value()
 
     def get_tipo_no_aplica(self) -> str:
-        """Retorna el motivo de no aplicacion: 'tolva', 'grua' o 'otro'."""
-        txt = self._combo_motivo_no.currentText()
-        if "Tolva" in txt or "Tanque" in txt or "Silo" in txt:
-            return "tolva"
-        elif "Grua" in txt or "Gancho" in txt:
+        """Retorna el motivo de no aplicacion: 'grua', 'patin', 'tanque', 'tolva' o 'silo'."""
+        txt = self._combo_motivo_no.currentText().lower()
+        if "grua" in txt or "grúa" in txt or "gancho" in txt:
             return "grua"
-        return "otro"
+        if "patin" in txt or "patín" in txt or "transpaleta" in txt:
+            return "patin"
+        if "silo" in txt and "tanque" not in txt:
+            return "silo"
+        if "tanque" in txt:
+            return "tanque"
+        if "tolva" in txt:
+            return "tolva"
+        return "tolva"
 
     def set_tipo_no_aplica(self, tipo: str) -> None:
         tipo = (tipo or "").lower()
-        if "tolva" in tipo or "tanque" in tipo or "silo" in tipo:
-            self._combo_motivo_no.setCurrentText("Tolva / Tanque / Silo")
-        elif "grua" in tipo or "gancho" in tipo:
-            self._combo_motivo_no.setCurrentText("Bascula de Grua / Gancho Dinamometrico")
+        if "grua" in tipo or "grúa" in tipo or "gancho" in tipo or "colgante" in tipo:
+            self._combo_motivo_no.setCurrentText("Grúa")
+        elif "patin" in tipo or "patín" in tipo or "transpaleta" in tipo:
+            self._combo_motivo_no.setCurrentText("Patín")
+        elif "silo" in tipo and "tanque" not in tipo:
+            self._combo_motivo_no.setCurrentText("Silo")
+        elif "tanque" in tipo:
+            self._combo_motivo_no.setCurrentText("Tanque")
         else:
-            self._combo_motivo_no.setCurrentText("Otro (No apto)")
+            self._combo_motivo_no.setCurrentText("Tolva")
 
     def set_geometria_plataforma(self, geometria: str, secciones: int = 4) -> None:
         """Restaura la geometria al cargar una OS guardada."""

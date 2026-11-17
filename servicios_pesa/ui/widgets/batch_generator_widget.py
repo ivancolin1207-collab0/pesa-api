@@ -503,10 +503,11 @@ class EquipoCard(QFrame):
         _col_no.addWidget(_lbl_no)
         self._cmb_no = QComboBox()
         self._cmb_no.addItems([
-            "Báscula tipo Tanque",
-            "Báscula tipo Tolva",
-            "Báscula tipo Gancho / Grúa suspendida",
-            "Báscula tipo Patín / Transpaleta hidráulica",
+            "Grúa",
+            "Patín",
+            "Tanque",
+            "Tolva",
+            "Silo",
         ])
         self._cmb_no.setStyleSheet(_EQUIPO_FIELD_STYLE)
         self._cmb_no.setFixedHeight(40)
@@ -732,29 +733,45 @@ class EquipoCard(QFrame):
             return
         tipo_txt = self._cmb_tipo_inst.currentText()
         t_low = tipo_txt.lower()
-        es_tanque = "tanque" in t_low or "silo" in t_low
+        es_silo = "silo" in t_low and "tanque" not in t_low
+        es_tanque = "tanque" in t_low
         es_colgante = any(k in t_low for k in ["colgante", "grúa", "grua", "gancho"])
+        es_patin = any(k in t_low for k in ["patín", "patin", "transpaleta"])
         es_tolva = "tolva" in t_low
 
         if es_tanque:
             self._cmb_aplica_exc.setCurrentText("NO")
             self._cmb_aplica_exc.setEnabled(False)
             try:
-                self._cmb_no.setCurrentText("Báscula tipo Tanque")
+                self._cmb_no.setCurrentText("Tanque")
+            except Exception:
+                pass
+        elif es_silo:
+            self._cmb_aplica_exc.setEnabled(True)
+            self._cmb_aplica_exc.setCurrentText("NO")
+            try:
+                self._cmb_no.setCurrentText("Silo")
             except Exception:
                 pass
         elif es_colgante:
             self._cmb_aplica_exc.setEnabled(True)
             self._cmb_aplica_exc.setCurrentText("NO")
             try:
-                self._cmb_no.setCurrentText("Báscula tipo Gancho / Grúa suspendida")
+                self._cmb_no.setCurrentText("Grúa")
+            except Exception:
+                pass
+        elif es_patin:
+            self._cmb_aplica_exc.setEnabled(True)
+            self._cmb_aplica_exc.setCurrentText("NO")
+            try:
+                self._cmb_no.setCurrentText("Patín")
             except Exception:
                 pass
         elif es_tolva:
             self._cmb_aplica_exc.setEnabled(True)
             self._cmb_aplica_exc.setCurrentText("NO")
             try:
-                self._cmb_no.setCurrentText("Báscula tipo Tolva")
+                self._cmb_no.setCurrentText("Tolva")
             except Exception:
                 pass
         else:
@@ -978,13 +995,17 @@ class EquipoCard(QFrame):
             # Inferir tipo_no_aplica_exc desde el combo o desde el tipo de instrumento
             no_txt = _cmb("_cmb_no", "")
             tipo_inst_txt = _cmb("_cmb_tipo_inst", "")
-            if "Tanque" in no_txt or "Tanque" in tipo_inst_txt:
+            no_low = no_txt.lower()
+            ti_low = tipo_inst_txt.lower()
+            if "silo" in no_low or ("silo" in ti_low and "tanque" not in ti_low and not no_low):
+                tipo_no = "silo"
+            elif "tanque" in no_low or "tanque" in ti_low:
                 tipo_no = "tanque"
-            elif "Tolva" in no_txt or "Tolva" in tipo_inst_txt:
+            elif "tolva" in no_low or "tolva" in ti_low:
                 tipo_no = "tolva"
-            elif "Gancho" in no_txt or "Grúa" in no_txt or "Colgante" in tipo_inst_txt or "Gancho" in tipo_inst_txt or "Grúa" in tipo_inst_txt:
-                tipo_no = "gancho"
-            elif "Patín" in no_txt or "Transpaleta" in no_txt or "Patín" in tipo_inst_txt or "Transpaleta" in tipo_inst_txt:
+            elif any(k in no_low or k in ti_low for k in ("gancho", "grúa", "grua", "colgante")):
+                tipo_no = "grua"
+            elif any(k in no_low or k in ti_low for k in ("patín", "patin", "transpaleta")):
                 tipo_no = "patin"
             else:
                 tipo_no = "tolva"   # fallback seguro con dibujo
@@ -998,6 +1019,9 @@ class EquipoCard(QFrame):
         filas_exc_val = max(puntos_exc, secciones) if (aplica_exc and secciones) else puntos_exc
         pts_exact_val = self._spin_pts_exact.value()
 
+        from services.metrology import formatear_division_minima
+        _div_norm = formatear_division_minima(_v("_inp_division"))
+
         return {
             # ── Folio Manual ───────────────────────────────────────────────────
             "folio_base":          _v("input_folio_inicial"),
@@ -1007,7 +1031,7 @@ class EquipoCard(QFrame):
             "equipo_ns":           _v("_inp_ns")       or None,
             "equipo_id":           _v("_inp_id")       or None,
             "equipo_alcance":      _v("_inp_alcance")  or None,
-            "equipo_division":     _v("_inp_division") or None,
+            "equipo_division":     _div_norm           or None,
             "equipo_dve":          _v("_inp_dve")      or None,
             "equipo_ubicacion":    _v("_inp_ubicacion") or None,
             # Alias adicionales para compatibilidad con os_pdf_generator y tablet
@@ -1020,9 +1044,9 @@ class EquipoCard(QFrame):
             "capacidad_maxima":    _v("_inp_alcance"),
             "capacidad_max":       _v("_inp_alcance"),
             "alcance_max":         _v("_inp_alcance"),
-            "division_minima":     _v("_inp_division"),
-            "division_min":        _v("_inp_division"),
-            "div_minima":          _v("_inp_division"),
+            "division_minima":     _div_norm,
+            "division_min":        _div_norm,
+            "div_minima":          _div_norm,
             "dve":                 _v("_inp_dve"),
             "ubicacion":           _v("_inp_ubicacion"),
             "planta":              _v("_inp_ubicacion"),
@@ -1052,6 +1076,9 @@ class EquipoCard(QFrame):
             "aplica_excentricidad":    aplica_exc,
             "geometria_plataforma":    geo,
             "tipo_no_aplica_exc":      tipo_no,
+            "motivo_no_excentricidad": _cmb("_cmb_no", "") if not aplica_exc else "",
+            "tipo_no_apto":            _cmb("_cmb_no", "") if not aplica_exc else "",
+            "motivo_no_aplica":        _cmb("_cmb_no", "") if not aplica_exc else "",
             "puntos_apoyo":            filas_exc_val,
             "puntos_excentricidad":    puntos_exc,
             "filas_excentricidad":     filas_exc_val,
@@ -4242,12 +4269,13 @@ class BatchGeneratorWidget(QWidget):
                             except Exception:
                                 return None
 
+                        from services.metrology import formatear_division_minima
                         _cap_raw  = capacidad_maxima
                         _div_raw  = division_minima
                         _cap_num  = _to_num(_cap_raw)
                         _div_num  = _to_num(_div_raw)
                         _cap_str  = str(_cap_raw).strip() or None
-                        _div_str  = str(_div_raw).strip() or None
+                        _div_str  = formatear_division_minima(_div_raw) or None
 
                         # secciones: del eq o del campo general
                         _secciones = datos_eq.get("secciones") or datos_eq.get("num_secciones") or datos.get("secciones_camionera") or None

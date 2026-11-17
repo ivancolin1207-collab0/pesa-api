@@ -25,6 +25,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
+import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/nombre_recibe.dart';
@@ -311,7 +312,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     _modeloCtrl.text = pickField(['modelo', 'equipo_modelo', 'instrumento_modelo']);
     _serieCtrl.text = pickField(['serie', 'ns', 'numero_serie', 'equipo_ns']);
     _capMaxCtrl.text = pickField(['capacidad_maxima', 'alcance_max', 'cap_maxima', 'instrumento_capacidad']);
-    _divMinCtrl.text = pickField(['division_minima', 'div_minima', 'instrumento_division']);
+    _divMinCtrl.text = formatearDivisionMinima(pickField(['division_minima', 'div_minima', 'instrumento_division']));
 
     final rawTipoInst = pickField(['tipo_instrumento'], 'Mesa');
     final tl = rawTipoInst.toLowerCase();

@@ -800,8 +800,9 @@ class CapturaDigitalDialog(QDialog):
                 _anio = str(datetime.datetime.now().year)[-2:]
                 _cca_v = f"CCA.{_anio}."
             self._le_num_cca.setText(_cca_v)
+            from services.metrology import formatear_division_minima
             self._le_capacidad.setText(str(djp.get("alcance_max") or self._os_data.get("alcance_max") or ""))
-            self._le_div_min.setText(str(djp.get("div_minima") or self._os_data.get("div_minima") or ""))
+            self._le_div_min.setText(formatear_division_minima(djp.get("div_minima") or self._os_data.get("div_minima") or ""))
             self._le_ubicacion.setText(str(djp.get("ubicacion") or self._os_data.get("ubicacion") or ""))
             self._le_holo_ant.setText(djp.get("holograma_anterior") or "")
             self._le_holo_nuevo.setText(djp.get("holograma_nuevo") or "")
@@ -1078,7 +1079,7 @@ class CapturaDigitalDialog(QDialog):
                 "holograma_nuevo": self._le_holo_nuevo.text().strip(),
                 "dve": self._le_dve.text().strip(),
                 "alcance_max": self._le_capacidad.text().strip(),
-                "div_minima": self._le_div_min.text().strip(),
+                "div_minima": formatear_division_minima(self._le_div_min.text().strip()),
                 "ubicacion": self._le_ubicacion.text().strip(),
                 "funcionamiento": self._cmb_funcionamiento.currentText(),
                 "puntos_apoyo": self._spn_puntos_apoyo.value(),
@@ -1240,7 +1241,7 @@ class CapturaDigitalDialog(QDialog):
                 "holograma_nuevo": self._le_holo_nuevo.text().strip(),
                 "dve": self._le_dve.text().strip(),
                 "alcance_max": self._le_capacidad.text().strip(),
-                "div_minima": self._le_div_min.text().strip(),
+                "div_minima": formatear_division_minima(self._le_div_min.text().strip()),
                 "unidad_medida": self._cmb_unidad.currentText(),  # kg / g / t / lb
                 "ubicacion": self._le_ubicacion.text().strip(),
                 "aplica_excentricidad": (self._cmb_excentricidad.currentText() == "Sí"),
@@ -1275,7 +1276,7 @@ class CapturaDigitalDialog(QDialog):
                 "holograma_nuevo": self._le_holo_nuevo.text().strip() or self._os_data.get("holograma_nuevo", ""),
                 "div_verificacion": self._le_dve.text().strip() or self._os_data.get("div_verificacion", ""),
                 "alcance_max": self._le_capacidad.text().strip() or self._os_data.get("alcance_max", ""),
-                "div_minima": self._le_div_min.text().strip() or self._os_data.get("div_minima", ""),
+                "div_minima": formatear_division_minima(self._le_div_min.text().strip() or self._os_data.get("div_minima", "")),
                 "unidad_medida": self._cmb_unidad.currentText(),  # para títulos dinámicos en PDF
                 "ubicacion": self._le_ubicacion.text().strip() or self._os_data.get("ubicacion", ""),
                 "aplica_excentricidad": (self._cmb_excentricidad.currentText() == "Sí"),

@@ -217,3 +217,58 @@ String formatearCargaSugerida(double carga, {double? divMin, double? capMax}) {
   return carga.toStringAsFixed(dec);
 }
 
+/// Normaliza el texto de división mínima eliminando ceros insignificantes a la derecha
+/// (ej. '0.020 kg' -> '0.02 kg', '0.100' -> '0.1', '5.00' -> '5') sin alterar la precisión numérica.
+String formatearDivisionMinima(dynamic rawDiv) {
+  if (rawDiv == null) return '';
+  final str = rawDiv.toString().trim();
+  if (str.isEmpty) return '';
+  final match = RegExp(r'^([+-]?\d+(?:[.,]\d+)?)\s*(.*)$').firstMatch(str);
+  if (match == null) return str;
+  final numStr = match.group(1)!.replaceAll(',', '.');
+  final unidad = match.group(2)!.trim();
+  final val = double.tryParse(numStr);
+  if (val == null) return str;
+  // Eliminar ceros insignificantes a la derecha (0.020 -> 0.02, 0.100 -> 0.1, 1.00 -> 1)
+  final String limpio = val.toStringAsFixed(6).replaceAll(RegExp(r'\.?0+$'), '');
+  return unidad.isNotEmpty ? '$limpio $unidad' : limpio;
+}
+
+/// Opciones oficiales de tipo de instrumento no apto para prueba de excentricidad.
+const List<String> kTiposNoAptosExcentricidad = [
+  'Grúa',
+  'Patín',
+  'Tanque',
+  'Tolva',
+  'Silo',
+];
+
+/// Infiere o normaliza el motivo/tipo de instrumento no apto ('Grúa', 'Patín', 'Tanque', 'Tolva', 'Silo')
+/// a partir del motivo explícito o del tipo de instrumento seleccionado.
+String inferirMotivoNoExcentricidad(String? rawMotivo, [String? tipoInstrumento]) {
+  for (final src in [rawMotivo, tipoInstrumento]) {
+    if (src == null || src.trim().isEmpty) continue;
+    final s = src.toLowerCase().trim();
+    if (s.contains('grua') || s.contains('grúa') || s.contains('colgante') || s.contains('gancho')) {
+      return 'Grúa';
+    }
+    if (s.contains('patin') || s.contains('patín') || s.contains('transpaleta')) {
+      return 'Patín';
+    }
+    if (s.contains('silo')) {
+      return 'Silo';
+    }
+    if (s.contains('tanque')) {
+      return 'Tanque';
+    }
+    if (s.contains('tolva')) {
+      return 'Tolva';
+    }
+  }
+  if (rawMotivo != null && rawMotivo.trim().isNotEmpty) {
+    return rawMotivo.trim();
+  }
+  return 'Tolva';
+}
+
+

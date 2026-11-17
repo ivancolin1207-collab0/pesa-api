@@ -163,6 +163,7 @@ class _CapturaScreenState extends State<CapturaScreen>
   bool    _jChecked = false, _iChecked = false, _aChecked = false;
   bool    _usaSustitucion = false;
   bool?   _aplExcOverride;  // null = auto-determinar por instrumento
+  String  _motivoNoExcentricidad = 'Tolva'; // Grúa | Patín | Tanque | Tolva | Silo
 
   // ── Lecturas de medición ─────────────────────────────────────────────────
   List<Map<String, dynamic>> _repRows  = [];
@@ -189,6 +190,9 @@ class _CapturaScreenState extends State<CapturaScreen>
     'Báscula de ferrocarril',
     'Báscula tolva',
     'Báscula colgante / grúa',
+    'Patín hidráulico',
+    'Báscula tipo tanque',
+    'Báscula tipo silo',
     'Báscula analítica',
     'Báscula de piso',
     'Báscula de mostrador',
@@ -304,12 +308,12 @@ class _CapturaScreenState extends State<CapturaScreen>
     }
 
     if (div != null && div.toString().trim().isNotEmpty) {
-      final s = div.toString().replaceAll(RegExp(r'[^0-9.]'), '').trim();
+      final s = formatearDivisionMinima(div).replaceAll(RegExp(r'[^0-9.]'), '').trim();
       _divMinCtrl.text = s;
     } else {
       final divStr = _str('instrumento_division');
       _divMinCtrl.text = divStr.isNotEmpty
-          ? divStr.replaceAll(RegExp(r'[^0-9.]'), '').trim()
+          ? formatearDivisionMinima(divStr).replaceAll(RegExp(r'[^0-9.]'), '').trim()
           : '';
     }
     _divVerCtrl.text = dve != null ? dve.toString() : '';
@@ -333,8 +337,14 @@ class _CapturaScreenState extends State<CapturaScreen>
     for (final item in _tiposInstrumento) {
       if (item.toLowerCase() == tiLower) return item;
     }
-    if (tiLower.contains('tanque') || tiLower.contains('silo')) {
+    if (tiLower.contains('tanque') && tiLower.contains('silo')) {
       return 'Tanque / Silo';
+    } else if (tiLower.contains('silo')) {
+      return 'Báscula tipo silo';
+    } else if (tiLower.contains('tanque')) {
+      return 'Báscula tipo tanque';
+    } else if (tiLower.contains('patin') || tiLower.contains('patín') || tiLower.contains('transpaleta')) {
+      return 'Patín hidráulico';
     } else if (tiLower.contains('camion') || tiLower.contains('puente')) {
       return 'Báscula camionera';
     } else if (tiLower.contains('ferrocarril') || tiLower.contains('ferrovi')) {
@@ -411,23 +421,49 @@ class _CapturaScreenState extends State<CapturaScreen>
     }
 
     // Carga de sustitución: herencia estricta desde Logística o Tanque
-    final bool isTanque = (_tipoInstrumento ?? '').toLowerCase().contains('tanque');
+    final tLowInit = (_tipoInstrumento ?? '').toLowerCase();
+    final bool isTanque = tLowInit.contains('tanque');
+    final bool isSilo   = tLowInit.contains('silo') && !isTanque;
+    final bool isColg   = tLowInit.contains('colgante') || tLowInit.contains('grúa') || tLowInit.contains('grua') || tLowInit.contains('gancho');
+    final bool isPatin  = tLowInit.contains('patin') || tLowInit.contains('patín') || tLowInit.contains('transpaleta');
+    final bool isTolva  = tLowInit.contains('tolva');
+
     _usaSustitucion = _asBool(_os['usa_sustitucion']) ||
                       _asBool(_os['es_sustitucion']) ||
                       _asBool(_os['es_enlace_sustitucion']) ||
                       _asBool(_os['aplica_sustitucion']) ||
                       isTanque;
 
-    if (isTanque) {
+    final rawMotivoInit = (_os['motivo_no_excentricidad'] ??
+        _os['tipo_no_apto'] ??
+        _os['motivo_no_aplica'] ??
+        _os['tipo_no_aplica_exc'])?.toString();
+    _motivoNoExcentricidad = inferirMotivoNoExcentricidad(rawMotivoInit, _tipoInstrumento);
+
+    if (isTanque || isSilo || isColg || isPatin || isTolva) {
       _aplExcOverride = false;
       _os['aplica_excentricidad'] = false;
-      _os['motivo_no_aplica'] = 'Tanque';
-    } else if ((_tipoInstrumento ?? '').toLowerCase().contains('plataforma') ||
-               (_tipoInstrumento ?? '').toLowerCase().contains('camion') ||
-               (_tipoInstrumento ?? '').toLowerCase().contains('puente') ||
-               (_tipoInstrumento ?? '').toLowerCase().contains('ferro')) {
+      _motivoNoExcentricidad = isTanque
+          ? 'Tanque'
+          : isSilo
+              ? 'Silo'
+              : isColg
+                  ? 'Grúa'
+                  : isPatin
+                      ? 'Patín'
+                      : 'Tolva';
+      _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
+      _os['tipo_no_apto']            = _motivoNoExcentricidad;
+      _os['motivo_no_aplica']        = _motivoNoExcentricidad;
+      _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
+    } else if (tLowInit.contains('plataforma') ||
+               tLowInit.contains('camion') ||
+               tLowInit.contains('puente') ||
+               tLowInit.contains('ferro')) {
       _aplExcOverride = true;
       _os['aplica_excentricidad'] = true;
+      _os['motivo_no_excentricidad'] = '';
+      _os['tipo_no_apto'] = '';
       _os['motivo_no_aplica'] = '';
       _os['tipo_no_aplica_exc'] = null;
     }
@@ -448,7 +484,9 @@ class _CapturaScreenState extends State<CapturaScreen>
     final tipoLow = (_tipoInstrumento ?? '').toLowerCase();
     if (tipoLow.contains('tanque') || tipoLow.contains('silo') ||
         tipoLow.contains('colgante') || tipoLow.contains('grúa') ||
-        tipoLow.contains('grua') || tipoLow.contains('gancho')) {
+        tipoLow.contains('grua') || tipoLow.contains('gancho') ||
+        tipoLow.contains('patin') || tipoLow.contains('patín') ||
+        tipoLow.contains('tolva')) {
       return false;
     }
     if (tipoLow.contains('plataforma') || tipoLow.contains('camion') ||
@@ -537,7 +575,7 @@ class _CapturaScreenState extends State<CapturaScreen>
             _os['alcance_max'] = _capMaxCtrl.text;
           }
           if (draft['div_min'] != null && draft['div_min'].toString().isNotEmpty) {
-            _divMinCtrl.text = draft['div_min'].toString();
+            _divMinCtrl.text = formatearDivisionMinima(draft['div_min']).replaceAll(RegExp(r'[^0-9.]'), '').trim();
             _os['div_minima'] = _divMinCtrl.text;
           }
           if (draft['div_ver'] != null && draft['div_ver'].toString().isNotEmpty) {
@@ -598,6 +636,17 @@ class _CapturaScreenState extends State<CapturaScreen>
             } else {
               _aplExcOverride = draft['aplica_excentricidad'] == true;
             }
+          }
+          final rawMotDraft = (draft['motivo_no_excentricidad'] ??
+              draft['tipo_no_apto'] ??
+              draft['motivo_no_aplica'] ??
+              draft['tipo_no_aplica_exc'])?.toString();
+          if (rawMotDraft != null && rawMotDraft.trim().isNotEmpty) {
+            _motivoNoExcentricidad = inferirMotivoNoExcentricidad(rawMotDraft, _tipoInstrumento);
+            _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
+            _os['tipo_no_apto'] = _motivoNoExcentricidad;
+            _os['motivo_no_aplica'] = _motivoNoExcentricidad;
+            _os['tipo_no_aplica_exc'] = _motivoNoExcentricidad.toLowerCase();
           }
           if (draft['usa_sustitucion'] != null) {
             _usaSustitucion = draft['usa_sustitucion'] == true;
@@ -1026,34 +1075,48 @@ class _CapturaScreenState extends State<CapturaScreen>
             _tipoInstrumento = v;
             _os['tipo_instrumento'] = v;
             final vLow = (v ?? '').toLowerCase();
-            final isTanque = vLow.contains('tanque') || vLow.contains('silo');
+            final isSilo     = vLow.contains('silo') && !vLow.contains('tanque');
+            final isTanque   = vLow.contains('tanque');
             final isColgante = vLow.contains('colgante') || vLow.contains('grúa') || vLow.contains('grua') || vLow.contains('gancho');
+            final isPatin    = vLow.contains('patin') || vLow.contains('patín') || vLow.contains('transpaleta');
+            final isTolva    = vLow.contains('tolva');
 
-            if (isTanque) {
-              _usaSustitucion = true;
+            if (isTanque || isSilo) {
+              _usaSustitucion = isTanque;
               _aplExcOverride = false;
               _os['aplica_excentricidad'] = false;
-              _os['motivo_no_aplica'] = 'Tanque';
-              _os['tipo_no_aplica_exc'] = 'tanque';
-              _os['usa_sustitucion'] = true;
-              _os['es_sustitucion'] = true;
-              _os['es_enlace_sustitucion'] = true;
-            } else if (isColgante) {
+              _motivoNoExcentricidad = isSilo ? 'Silo' : 'Tanque';
+              _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
+              _os['tipo_no_apto']            = _motivoNoExcentricidad;
+              _os['motivo_no_aplica']        = _motivoNoExcentricidad;
+              _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
+              _os['usa_sustitucion'] = isTanque;
+              _os['es_sustitucion'] = isTanque;
+              _os['es_enlace_sustitucion'] = isTanque;
+            } else if (isColgante || isPatin || isTolva) {
               _usaSustitucion = false;
               _aplExcOverride = false;
               _os['aplica_excentricidad'] = false;
-              _os['motivo_no_aplica'] = 'Colgante';
-              _os['tipo_no_aplica_exc'] = 'gancho';
+              _motivoNoExcentricidad = isColgante
+                  ? 'Grúa'
+                  : isPatin
+                      ? 'Patín'
+                      : 'Tolva';
+              _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
+              _os['tipo_no_apto']            = _motivoNoExcentricidad;
+              _os['motivo_no_aplica']        = _motivoNoExcentricidad;
+              _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
               _os['usa_sustitucion'] = false;
               _os['aplica_sustitucion'] = false;
               _os['es_sustitucion'] = false;
               _os['es_enlace_sustitucion'] = false;
             } else {
-              // Cualquier instrumento que NO sea Tanque ni Colgante (ej. Báscula de plataforma, Báscula camionera):
-              // Activar automáticamente aplicaExcentricidad = true y limpiar bloqueos heredados.
+              // Cualquier instrumento que sí aplica excentricidad:
               _usaSustitucion = false;
               _aplExcOverride = true;
               _os['aplica_excentricidad'] = true;
+              _os['motivo_no_excentricidad'] = '';
+              _os['tipo_no_apto'] = '';
               _os['motivo_no_aplica'] = '';
               _os['tipo_no_aplica_exc'] = null;
               _os['usa_sustitucion'] = false;
@@ -1194,6 +1257,8 @@ class _CapturaScreenState extends State<CapturaScreen>
                     _aplExcOverride = nuevoVal;
                     _os['aplica_excentricidad'] = nuevoVal;
                     if (nuevoVal) {
+                      _os['motivo_no_excentricidad'] = '';
+                      _os['tipo_no_apto'] = '';
                       _os['motivo_no_aplica'] = '';
                       _os['tipo_no_aplica_exc'] = null;
                       if (_puntosApoyo < 4) {
@@ -1221,6 +1286,12 @@ class _CapturaScreenState extends State<CapturaScreen>
                         });
                       }
                       _actualizarCargasSugeridas(force: false);
+                    } else {
+                      _motivoNoExcentricidad = inferirMotivoNoExcentricidad(_motivoNoExcentricidad, _tipoInstrumento);
+                      _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
+                      _os['tipo_no_apto']            = _motivoNoExcentricidad;
+                      _os['motivo_no_aplica']        = _motivoNoExcentricidad;
+                      _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
                     }
                     _dataVersion++;
                   }),
@@ -1230,6 +1301,103 @@ class _CapturaScreenState extends State<CapturaScreen>
             ),
           ),
         ),
+        if (!_aplExc) ...[
+          const SizedBox(height: 10),
+          Card(
+            margin: EdgeInsets.zero,
+            elevation: 0,
+            color: const Color(0xFFFFF8F8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: const BorderSide(color: Color(0xFFFFCCCC), width: 1.2),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.category_outlined, size: 18, color: _kRed),
+                      SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Motivo / Tipo de Instrumento No Apto para Excentricidad *',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _kRed),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: const <Map<String, dynamic>>[
+                      {'key': 'Grúa',   'sub': 'Báscula de grúa / colgante',     'icon': Icons.precision_manufacturing_outlined},
+                      {'key': 'Patín',  'sub': 'Patín hidráulico / transpaleta', 'icon': Icons.rv_hookup_outlined},
+                      {'key': 'Tanque', 'sub': 'Báscula tipo tanque',            'icon': Icons.propane_tank_outlined},
+                      {'key': 'Tolva',  'sub': 'Báscula tipo tolva',             'icon': Icons.filter_alt_outlined},
+                      {'key': 'Silo',   'sub': 'Báscula tipo silo',              'icon': Icons.factory_outlined},
+                    ].map((opt) {
+                      final String k = opt['key'] as String;
+                      final String sub = opt['sub'] as String;
+                      final IconData ic = opt['icon'] as IconData;
+                      final bool active = _motivoNoExcentricidad.toLowerCase() == k.toLowerCase();
+                      return InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => setState(() {
+                          _motivoNoExcentricidad = k;
+                          _os['motivo_no_excentricidad'] = k;
+                          _os['tipo_no_apto']            = k;
+                          _os['motivo_no_aplica']        = k;
+                          _os['tipo_no_aplica_exc']      = k.toLowerCase();
+                          _dataVersion++;
+                        }),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: active ? _kRed.withValues(alpha: 0.12) : Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: active ? _kRed : Colors.grey.shade300,
+                              width: active ? 1.6 : 1.0,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(ic, size: 18, color: active ? _kRed : Colors.grey.shade700),
+                              const SizedBox(width: 6),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    k,
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: active ? _kRed : const Color(0xFF1D1D1F),
+                                    ),
+                                  ),
+                                  Text(
+                                    sub,
+                                    style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 16),
 
         // ── CASO B: Sección CCA / DVE ─────────────────────────────────────
@@ -1524,7 +1692,7 @@ class _CapturaScreenState extends State<CapturaScreen>
             ]),
           ),
           ExcentricidadTable(
-            key: ValueKey('exc_${_dataVersion}_${_aplExc}_${_tipoInstrumento}_${_geometriaExcentricidad}_$_dValue'),
+            key: ValueKey('exc_${_dataVersion}_${_aplExc}_${_tipoInstrumento}_${_geometriaExcentricidad}_${_motivoNoExcentricidad}_$_dValue'),
             numCeldas: nCeldas,
             numSecciones: _numSeccionesExc,
             rows: _excRows,
@@ -1532,6 +1700,16 @@ class _CapturaScreenState extends State<CapturaScreen>
             geometria: _geometriaExcentricidad,
             tipoInstrumento: _tipoInstrumento,
             aplicaExcentricidad: _aplExc,
+            motivoNoExcentricidad: _motivoNoExcentricidad,
+            onMotivoNoChanged: (mot) {
+              setState(() {
+                _motivoNoExcentricidad = mot;
+                _os['motivo_no_excentricidad'] = mot;
+                _os['tipo_no_apto']            = mot;
+                _os['motivo_no_aplica']        = mot;
+                _os['tipo_no_aplica_exc']      = mot.toLowerCase();
+              });
+            },
             onGeometriaChanged: (geo) {
               setState(() {
                 _geometriaExcentricidad = geo;
@@ -1845,7 +2023,23 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['jia_j']                 = _jEf;
     _os['jia_i']                 = _iEf;
     _os['jia_a']                 = _aEf;
+    final divNorm = formatearDivisionMinima(_divMinCtrl.text.trim());
+    if (_divMinCtrl.text.trim() != divNorm && divNorm.isNotEmpty) {
+      _divMinCtrl.text = divNorm;
+    }
     _os['aplica_excentricidad']  = _aplExc;
+    if (_aplExc) {
+      _os['motivo_no_excentricidad'] = '';
+      _os['tipo_no_apto']            = '';
+      _os['motivo_no_aplica']        = '';
+      _os['tipo_no_aplica_exc']      = null;
+    } else {
+      _motivoNoExcentricidad = inferirMotivoNoExcentricidad(_motivoNoExcentricidad, _tipoInstrumento);
+      _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
+      _os['tipo_no_apto']            = _motivoNoExcentricidad;
+      _os['motivo_no_aplica']        = _motivoNoExcentricidad;
+      _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
+    }
     _os['usa_sustitucion']       = _aplicaSustitucion;
     _os['aplica_sustitucion']    = _aplicaSustitucion;
     _os['funcionamiento']        = _funcionamiento;
@@ -1856,7 +2050,7 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['secciones_camionera']     = _numSeccionesExc;
     _os['unidad_medida']         = _unidadMedida;
     _os['capacidad_max']         = _capMaxCtrl.text.trim();
-    _os['division_minima']       = _divMinCtrl.text.trim();
+    _os['division_minima']       = divNorm;
 
     // Campos condicionales: solo se guardan si aplican; si NO aplican se
     // vacían para no arrastrar datos precargados al PDF ni al servidor.
@@ -1985,8 +2179,8 @@ class _CapturaScreenState extends State<CapturaScreen>
         'ubicacion':             _ubicCtrl.text.trim(),
         'cap_max':               _capMaxCtrl.text.trim(),
         'capacidad_max':         _capMaxCtrl.text.trim(),
-        'div_min':               _divMinCtrl.text.trim(),
-        'division_minima':       _divMinCtrl.text.trim(),
+        'div_min':               formatearDivisionMinima(_divMinCtrl.text.trim()),
+        'division_minima':       formatearDivisionMinima(_divMinCtrl.text.trim()),
         'div_ver':               _dveEf,
         'div_verificacion':      _dveEf,
         'folio_dve':             _dveEf,
@@ -2011,6 +2205,10 @@ class _CapturaScreenState extends State<CapturaScreen>
         'jia_a':                 _aEf,
         'aplica_excentricidad':  _aplExc,
         'apl_exc_override':      _aplExcOverride,
+        'motivo_no_excentricidad': _aplExc ? '' : _motivoNoExcentricidad,
+        'tipo_no_apto':            _aplExc ? '' : _motivoNoExcentricidad,
+        'motivo_no_aplica':        _aplExc ? '' : _motivoNoExcentricidad,
+        'tipo_no_aplica_exc':      _aplExc ? null : _motivoNoExcentricidad.toLowerCase(),
         'usa_sustitucion':       _usaSustitucion,
         'aplica_sustituto':      _hasValidSustitutos,
         'sustitutos':            _sustitutosRows,
@@ -2224,9 +2422,9 @@ class _CapturaScreenState extends State<CapturaScreen>
         'capacidad_max':         _capMaxCtrl.text.trim(),
         'alcance_max':           _capMaxCtrl.text.trim(),
         'equipo_alcance':        _capMaxCtrl.text.trim(),
-        'division_minima':       _divMinCtrl.text.trim(),
-        'div_minima':            _divMinCtrl.text.trim(),
-        'equipo_division':       _divMinCtrl.text.trim(),
+        'division_minima':       formatearDivisionMinima(_divMinCtrl.text.trim()),
+        'div_minima':            formatearDivisionMinima(_divMinCtrl.text.trim()),
+        'equipo_division':       formatearDivisionMinima(_divMinCtrl.text.trim()),
         'div_verificacion':      _dveEf,
         'div_ver':               _dveEf,
         'folio_dve':             _dveEf,
@@ -2256,6 +2454,10 @@ class _CapturaScreenState extends State<CapturaScreen>
         'num_secciones':           _numSeccionesExc,
         'secciones_camionera':     _numSeccionesExc,
         'aplica_excentricidad':  _aplExc,
+        'motivo_no_excentricidad': _aplExc ? '' : _motivoNoExcentricidad,
+        'tipo_no_apto':            _aplExc ? '' : _motivoNoExcentricidad,
+        'motivo_no_aplica':        _aplExc ? '' : _motivoNoExcentricidad,
+        'tipo_no_aplica_exc':      _aplExc ? null : _motivoNoExcentricidad.toLowerCase(),
       });
     }
   }

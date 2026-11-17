@@ -112,6 +112,30 @@ def formato_miles_espacio(valor) -> str:
     return f"{res} {sufijo}".strip() if sufijo else res
 
 
+def formatear_division_minima(raw_div) -> str:
+    """
+    Normaliza el texto de división mínima eliminando ceros insignificantes a la derecha
+    (ej. '0.020 kg' -> '0.02 kg', '0.100' -> '0.1', '5.00' -> '5') sin alterar la precisión numérica.
+    """
+    if raw_div is None:
+        return ""
+    s = str(raw_div).strip()
+    if not s:
+        return ""
+    m = re.match(r'^([+-]?\d+(?:[.,]\d+)?)\s*(.*)$', s)
+    if not m:
+        return s
+    num_str = m.group(1).replace(',', '.')
+    unidad = m.group(2).strip()
+    try:
+        val = float(num_str)
+    except ValueError:
+        return s
+    limpio = f"{val:.6f}".rstrip('0').rstrip('.')
+    return f"{limpio} {unidad}".strip() if unidad else limpio
+
+
+
 def fmt(value: float | None, d: float, *, zero_as_empty: bool = False) -> str:
     """
     Formatea un valor numérico con exactamente los decimales que indica d.

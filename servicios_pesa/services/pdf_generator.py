@@ -340,6 +340,9 @@ class PdfGenerator:
             x = self.ML
             for label, key, w in fields:
                 valor_raw = str(os_data.get(key, "") or "")
+                if key in ("div_minima", "division_minima", "equipo_division"):
+                    from services.metrology import formatear_division_minima
+                    valor_raw = formatear_division_minima(valor_raw)
                 if key in ("alcance_max", "capacidad_max", "capacidad_maxima", "div_minima", "div_verificacion"):
                     valor_raw = formato_miles_espacio(valor_raw)
                 valor = valor_raw[:int(w / 5)]

@@ -79,6 +79,26 @@ def formato_miles_espacio(valor) -> str:
     return f"{res} {sufijo}".strip() if sufijo else res
 
 
+def formatear_division_minima(raw_div) -> str:
+    if raw_div is None:
+        return ""
+    s = str(raw_div).strip()
+    if not s:
+        return ""
+    m = re.match(r'^([+-]?\d+(?:[.,]\d+)?)\s*(.*)$', s)
+    if not m:
+        return s
+    num_str = m.group(1).replace(',', '.')
+    unidad = m.group(2).strip()
+    try:
+        val = float(num_str)
+    except ValueError:
+        return s
+    limpio = f"{val:.6f}".rstrip('0').rstrip('.')
+    return f"{limpio} {unidad}".strip() if unidad else limpio
+
+
+
 
 # [FIX colors] import top-level garantizado
 from reportlab.lib import colors
@@ -210,23 +230,33 @@ def _parse_aplica_excentricidad(os_data: dict) -> bool:
 def _inferir_tipo_no_aplica(os_data: dict) -> str:
     """
     Infiere el tipo de instrumento no apto para excentricidad.
-    Retorna: 'tanque' | 'tolva' | 'gancho' | 'patin' | 'tolva' (fallback)
+    Retorna: 'grua' | 'patin' | 'tanque' | 'tolva' | 'silo' (o texto capturado)
     """
-    tipo_no = str(os_data.get("tipo_no_aplica_exc") or "").lower()
-    tipo_inst = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or "").lower()
-    combined = tipo_no + " " + tipo_inst
+    motivo_exp = str(
+        os_data.get("motivo_no_excentricidad")
+        or os_data.get("tipo_no_apto")
+        or os_data.get("motivo_no_aplica")
+        or os_data.get("tipo_no_aplica_exc")
+        or ""
+    ).strip()
+    tipo_inst = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or "").strip()
 
-    if "tanque" in combined:
-        return "tanque"
-    elif "tolva" in combined:
-        return "tolva"
-    elif "gancho" in combined or "grúa" in combined or "grua" in combined:
-        return "gancho"
-    elif "patín" in combined or "patin" in combined or "transpaleta" in combined:
-        return "patin"
-    elif "tolva" in combined or "silo" in combined:
-        return "tolva"
-    return "tolva"  # fallback con dibujo disponible
+    for src in (motivo_exp, tipo_inst):
+        s = src.lower()
+        if not s:
+            continue
+        if "gancho" in s or "grúa" in s or "grua" in s or "colgante" in s:
+            return "grua"
+        if "patín" in s or "patin" in s or "transpaleta" in s:
+            return "patin"
+        if "silo" in s and "tanque" not in s:
+            return "silo"
+        if "tanque" in s:
+            return "tanque"
+        if "tolva" in s:
+            return "tolva"
+
+    return motivo_exp if motivo_exp else "tolva"
 
 def _flag_sustitucion_estricto(raw) -> bool:
     """True SOLO si el valor es explícitamente verdadero (True/1/'1'/'true'/'SI'/'SÍ')."""
@@ -872,8 +902,9 @@ class OsPdfGenerator:
         _puntos_apoyo = _puntos_apoyo_raw if _puntos_apoyo_raw.lower() not in ['libre', 'none', 'null', '\u2014', '0', ''] else ''
 
         _cap_val = os_data.get("equipo_alcance") or os_data.get("alcance_max") or os_data.get("capacidad_max") or os_data.get("capacidad_maxima") or os_data.get("cap_max")
-        _div_val  = os_data.get("equipo_division") or os_data.get("div_minima")   or os_data.get("division_min")
-        _dve_val  = os_data.get("dve") or os_data.get("equipo_dve") or ""
+        _div_val_raw = os_data.get("equipo_division") or os_data.get("div_minima") or os_data.get("division_minima") or os_data.get("division_min")
+        _div_val = formatear_division_minima(_div_val_raw) if _div_val_raw is not None else None
+        _dve_val = os_data.get("dve") or os_data.get("equipo_dve") or ""
         _ubic    = str(os_data.get("ubicacion") or os_data.get("area") or os_data.get("ubicacion_equipo") or os_data.get("equipo_ubicacion") or "").strip()
 
         def _fmt_unidad(raw, unidad="kg"):
@@ -1033,20 +1064,24 @@ class OsPdfGenerator:
 
         # Normalizar aplica_excentricidad (puede llegar como bool, str o int)
         aplica_exc = _parse_aplica_excentricidad(os_data)
-        # Tipo de instrumento no apto: priorizar motivo_no_aplica guardado explicitamente
-        _motivo_directo = str(os_data.get("motivo_no_aplica") or "").strip()
-        tipo_no = _motivo_directo if _motivo_directo else _inferir_tipo_no_aplica(os_data)
+        # Tipo de instrumento no apto: priorizar motivo explícito guardado
+        _motivo_directo = str(
+            os_data.get("motivo_no_excentricidad")
+            or os_data.get("tipo_no_apto")
+            or os_data.get("motivo_no_aplica")
+            or os_data.get("tipo_no_aplica_exc")
+            or ""
+        ).strip()
+        tipo_no = _inferir_tipo_no_aplica(os_data) if not _motivo_directo else _inferir_tipo_no_aplica({**os_data, "motivo_no_excentricidad": _motivo_directo})
 
         tipo_inst = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or "").lower()
-        # Un motivo 'Tanque' heredado no aplica si el instrumento ya no es Tanque
-        if "tanque" in tipo_no.lower() and "tanque" not in tipo_inst:
-            tipo_no = _inferir_tipo_no_aplica({**os_data, "tipo_no_aplica_exc": ""})
-        if "tanque" in tipo_inst or _es_modo_sustitucion(os_data):
+        es_sust = "tanque" in tipo_inst or _es_modo_sustitucion(os_data)
+        if es_sust:
             aplica_exc = False
-            if "tanque" in tipo_inst:
+            if "tanque" in tipo_inst and not _motivo_directo:
                 tipo_no = "tanque"
 
-        if aplica_exc:
+        if not es_sust:
             # ── Layout 2 columnas: MITADES IGUALES para que los encabezados se alineen exactamente
             GAP     = 8                         # separacion entre columnas
             left_w  = (self.CW - GAP) / 2       # mitades perfectamente iguales
@@ -1054,13 +1089,16 @@ class OsPdfGenerator:
             left_x  = self.ML
             right_x = self.ML + left_w + GAP
 
-            # -- Columna izquierda: Repetibilidad + Excentricidad
+            # -- Columna izquierda: Repetibilidad + Excentricidad (o Recuadro No Aplica)
             y_left = y   # mismo punto de partida que la derecha
             y_left = self._draw_repetibilidad_table(c, left_x, y_left, left_w, rep, os_data)
             y_left -= 6
-            y_left = self._draw_metrol_table(c, left_x, y_left, left_w, "EXCENTRICIDAD", exc, os_data)
+            if aplica_exc:
+                y_left = self._draw_metrol_table(c, left_x, y_left, left_w, "EXCENTRICIDAD", exc, os_data)
+            else:
+                y_left = self._draw_no_aplica_exc_box(c, left_x, y_left, left_w, tipo_no)
 
-            # -- Columna derecha: Exactitud
+            # -- Columna derecha: Exactitud + Posiciones de Excentricidad
             y_right = y  # mismo punto de partida exacto
             y_right = self._draw_exactitud_table(c, right_x, y_right, right_w, exac, os_data)
 
@@ -1243,11 +1281,18 @@ class OsPdfGenerator:
             num_label(px, py, t, dx, dy)
 
         sep_line(p1_x + panel_w)
-        # Camionera detectada por geo O por tipo_instrumento
-        _es_camionera = ("camionera" in geo_key or "ferro" in geo_key or "camionera" in _tipo_raw
-                         or "puente" in _tipo_raw or "ferro" in _tipo_raw)
-        _is_circular = not _es_camionera and ("circular" in geo_key or "circular" in _tipo_raw)
-        _is_plataforma = not _es_camionera and not _is_circular
+        # Regla estricta: si aplica_excentricidad es False o geo es 'libre', dejar las 3 casillas desmarcadas
+        _aplica_exc_diag = _parse_aplica_excentricidad(os_data or {})
+        _es_libre = ("libre" in geo_raw)
+        if not _aplica_exc_diag or _es_libre:
+            _es_camionera = False
+            _is_circular = False
+            _is_plataforma = False
+        else:
+            _es_camionera = ("camionera" in geo_key or "ferro" in geo_key or "camionera" in _tipo_raw
+                             or "puente" in _tipo_raw or "ferro" in _tipo_raw)
+            _is_circular = not _es_camionera and ("circular" in geo_key or "circular" in _tipo_raw)
+            _is_plataforma = not _es_camionera and not _is_circular
         checkbox_row(p1_cx, body_top - body_h + 1,
                      "Plataforma", _is_plataforma)
 
@@ -1482,233 +1527,228 @@ class OsPdfGenerator:
         y -= row_h
         return y
 
+    @staticmethod
+    def _dibujar_icono_grua(c, cx: float, icy: float) -> None:
+        from reportlab.lib.colors import HexColor
+        col = HexColor("#B91C1C")
+        fill_col = HexColor("#FFE5E5")
+        c.saveState()
+        c.translate(cx, icy)
+        c.scale(0.65, 0.65)
+        c.translate(-cx, -icy)
+        c.setStrokeColor(col)
+        # Argolla superior
+        c.setLineWidth(1.8)
+        c.circle(cx, icy + 18, 4.5, stroke=1, fill=0)
+        # Cuerpo dinamómetro
+        c.setFillColor(fill_col)
+        c.roundRect(cx - 10, icy - 1, 20, 15, radius=2.5, fill=1, stroke=1)
+        # Pantalla del dinamómetro
+        c.setFillColor(HexColor("#FFFFFF"))
+        c.rect(cx - 6.5, icy + 4.5, 13, 5.5, fill=1, stroke=1)
+        c.setFillColor(col)
+        # Vástago y gancho inferior curvo
+        c.setLineWidth(2.2)
+        c.line(cx, icy - 1, cx, icy - 6)
+        p = c.beginPath()
+        p.moveTo(cx, icy - 6)
+        p.curveTo(cx + 9, icy - 8, cx + 9, icy - 19, cx, icy - 19)
+        p.curveTo(cx - 6, icy - 19, cx - 7, icy - 13, cx - 2.5, icy - 12)
+        c.drawPath(p, stroke=1, fill=0)
+        c.restoreState()
+
+    @staticmethod
+    def _dibujar_icono_patin(c, cx: float, icy: float) -> None:
+        from reportlab.lib.colors import HexColor
+        col = HexColor("#B91C1C")
+        fill_col = HexColor("#FFE5E5")
+        c.saveState()
+        c.translate(cx, icy)
+        c.scale(0.65, 0.65)
+        c.translate(-cx, -icy)
+        c.setStrokeColor(col)
+        c.setLineWidth(1.8)
+        # Maneral / timón inclinado
+        p = c.beginPath()
+        p.moveTo(cx - 12, icy + 4)
+        p.lineTo(cx - 19, icy + 20)
+        c.drawPath(p, stroke=1, fill=0)
+        c.line(cx - 24, icy + 20, cx - 14, icy + 20)
+        # Bomba hidráulica
+        c.setFillColor(fill_col)
+        c.rect(cx - 14, icy - 6, 8, 11, fill=1, stroke=1)
+        # Horquillas
+        c.rect(cx - 6, icy - 6, 26, 5.5, fill=1, stroke=1)
+        # Rueda trasera y rodillos delanteros
+        c.circle(cx - 11, icy - 11, 4.2, fill=1, stroke=1)
+        c.circle(cx + 15, icy - 10, 3.2, fill=1, stroke=1)
+        c.restoreState()
+
+    @staticmethod
+    def _dibujar_icono_tanque(c, cx: float, icy: float) -> None:
+        from reportlab.lib.colors import HexColor
+        col = HexColor("#B91C1C")
+        fill_col = HexColor("#FFE5E5")
+        c.saveState()
+        c.translate(cx, icy)
+        c.scale(0.57, 0.57)
+        c.translate(-cx, -icy)
+        c.setStrokeColor(col)
+        c.setLineWidth(1.8)
+        # Cuerpo cilíndrico con tapas curvas
+        c.setFillColor(fill_col)
+        c.rect(cx - 16, icy - 10, 32, 22, fill=1, stroke=1)
+        c.ellipse(cx - 16, icy + 8, cx + 16, icy + 16, stroke=1, fill=1)
+        c.setLineWidth(1.3)
+        c.ellipse(cx - 16, icy - 14, cx + 16, icy - 6, stroke=1, fill=0)
+        # Patas / soportes con celdas
+        c.setLineWidth(2.0)
+        for dx in (-14, 0, 14):
+            c.line(cx + dx, icy - 12, cx + dx - 3, icy - 22)
+            c.line(cx + dx, icy - 12, cx + dx + 3, icy - 22)
+            c.line(cx + dx - 5, icy - 22, cx + dx + 5, icy - 22)
+        # Boquilla superior
+        c.setLineWidth(2.2)
+        c.line(cx, icy + 16, cx, icy + 23)
+        c.line(cx - 5, icy + 23, cx + 5, icy + 23)
+        c.restoreState()
+
+    @staticmethod
+    def _dibujar_icono_tolva(c, cx: float, icy: float) -> None:
+        from reportlab.lib.colors import HexColor
+        col = HexColor("#B91C1C")
+        fill_col = HexColor("#FFE5E5")
+        c.saveState()
+        c.translate(cx, icy)
+        c.scale(0.65, 0.65)
+        c.translate(-cx, -icy)
+        c.setStrokeColor(col)
+        c.setFillColor(fill_col)
+        c.setLineWidth(1.6)
+        # Rectángulo superior recto
+        c.rect(cx - 14, icy + 4, 28, 11, fill=1, stroke=1)
+        # Trapecio / cono invertido inferior
+        p_tolva = c.beginPath()
+        p_tolva.moveTo(cx - 14, icy + 4)
+        p_tolva.lineTo(cx - 5,  icy - 10)
+        p_tolva.lineTo(cx + 5,  icy - 10)
+        p_tolva.lineTo(cx + 14, icy + 4)
+        p_tolva.close()
+        c.drawPath(p_tolva, stroke=1, fill=1)
+        # Boca de descarga y estructura lateral
+        c.rect(cx - 3.5, icy - 15, 7, 5, fill=1, stroke=1)
+        c.line(cx - 18, icy + 6, cx - 14, icy + 6)
+        c.line(cx - 14, icy + 4, cx - 14, icy - 15)
+        c.line(cx + 14, icy + 6, cx + 18, icy + 6)
+        c.line(cx + 14, icy + 4, cx + 14, icy - 15)
+        c.restoreState()
+
+    @staticmethod
+    def _dibujar_icono_silo(c, cx: float, icy: float) -> None:
+        from reportlab.lib.colors import HexColor
+        col = HexColor("#B91C1C")
+        fill_col = HexColor("#FFE5E5")
+        c.saveState()
+        c.translate(cx, icy)
+        c.scale(0.62, 0.62)
+        c.translate(-cx, -icy)
+        c.setStrokeColor(col)
+        c.setFillColor(fill_col)
+        c.setLineWidth(1.6)
+        # Techo cónico superior
+        p_techo = c.beginPath()
+        p_techo.moveTo(cx - 11, icy + 12)
+        p_techo.lineTo(cx,      icy + 20)
+        p_techo.lineTo(cx + 11, icy + 12)
+        p_techo.close()
+        c.drawPath(p_techo, stroke=1, fill=1)
+        # Torre cilíndrica alta
+        c.rect(cx - 11, icy - 6, 22, 18, fill=1, stroke=1)
+        c.setLineWidth(1.0)
+        c.line(cx - 11, icy + 6, cx + 11, icy + 6)
+        c.line(cx - 11, icy,     cx + 11, icy)
+        # Cono inferior y estructura de soporte
+        c.setLineWidth(1.6)
+        p_cono = c.beginPath()
+        p_cono.moveTo(cx - 11, icy - 6)
+        p_cono.lineTo(cx - 3,  icy - 14)
+        p_cono.lineTo(cx + 3,  icy - 14)
+        p_cono.lineTo(cx + 11, icy - 6)
+        p_cono.close()
+        c.drawPath(p_cono, stroke=1, fill=1)
+        c.line(cx - 9, icy - 8, cx - 11, icy - 18)
+        c.line(cx + 9, icy - 8, cx + 11, icy - 18)
+        c.restoreState()
+
     def _draw_no_aplica_exc_box(self, c, x: float, y: float, w: float, tipo_no: str) -> float:
         """
-        Dibuja un recuadro vectorial 'INSTRUMENTO NO APTO PARA PRUEBA DE EXCENTRICIDAD'
-        con dibujo vectorial específico y leyenda oficial por tipo de instrumento.
+        Dibuja un recuadro vectorial 'NO APLICA PRUEBA DE EXCENTRICIDAD'
+        con dibujo vectorial específico (#B91C1C) y leyenda oficial por tipo de instrumento.
 
-        tipo_no: 'tanque' | 'tolva' | 'gancho' | 'patin'
+        tipo_no: 'grua' | 'patin' | 'tanque' | 'tolva' | 'silo'
         Retorna la posición Y tras el recuadro.
         """
         from reportlab.lib.colors import HexColor
-        _BOX_BORDER = HexColor("#FFCCCC")
+        _BOX_BORDER = HexColor("#B91C1C")
         _BOX_BG     = HexColor("#FFF8F8")
-        _ICON_COLOR = HexColor("#C8102E")
-        _TEXT_COLOR = HexColor("#7A0010")
-        _ICON_STRUCT = HexColor("#8B0000")  # estructura del dibujo
+        _ICON_COLOR = HexColor("#B91C1C")
+        _SUB_COLOR  = HexColor("#555555")
 
-        total_h = 75 # Altura máxima solicitada
+        total_h = 75
         hdr_h   = 14
         body_h  = total_h - hdr_h
         y_bottom = y - total_h
 
-        tipo = (tipo_no or "tolva").lower()
+        tipo = (tipo_no or "tolva").strip().lower()
 
-        # ── Cabecera roja tenue con etiqueta ────────────────────────────────────
-        c.setFillColor(_BOX_BORDER)
+        # ── Cabecera oscura de sección ──────────────────────────────────────────
+        c.setFillColor(_DARK_HDR)
         c.rect(x, y - hdr_h, w, hdr_h, fill=1, stroke=0)
-        c.setFillColor(_TEXT_COLOR)
-        c.setFont("Helvetica-Bold", 7.0)
+        c.setFillColor(_WHITE)
+        c.setFont("Helvetica-Bold", 7.5)
         c.drawCentredString(x + w / 2, y - hdr_h + 4, "EXCENTRICIDAD")
 
-        # ── Cuerpo del recuadro ──────────────────────────────────────────────────
+        # ── Cuerpo del recuadro ─────────────────────────────────────────────────
         c.setFillColor(_BOX_BG)
         c.setStrokeColor(_BOX_BORDER)
-        c.setLineWidth(1.0)
+        c.setLineWidth(0.9)
         c.rect(x, y_bottom, w, body_h, fill=1, stroke=1)
 
-        cx  = x + w / 2
+        cx = x + w / 2
 
-        c.setStrokeColor(_ICON_COLOR)
-        c.setFillColor(_ICON_COLOR)
-
-        # ══════════════════════════════════════════════════════
-        # DIBUJOS VECTORIALES DIFERENCIADOS
-        # ══════════════════════════════════════════════════════
-        if "tanque" in tipo:
-            msg_lineas = [
-                ("INSTRUMENTO NO APTO PARA PRUEBA DE EXCENTRICIDAD", "Helvetica-Bold", 6.5, _ICON_COLOR),
-                (f"B\u00e1scula tipo: {tipo.title()} \u2014 pesaje de carga est\u00e1tica", "Helvetica-Oblique", 5.5, colors.HexColor("#555555")),
-                ("No aplica prueba de excentricidad.", "Helvetica-Oblique", 5.5, colors.HexColor("#555555")),
-            ]
-            
-            # Calcular icy dinámicamente para que el ícono flote en el espacio sobrante
-            total_text_h = sum(fsize + 2.5 for _, _, fsize, _ in msg_lineas)
-            icon_space_bottom = y_bottom + 6 + total_text_h
-            icon_space_top = y_bottom + body_h
-            icy = (icon_space_bottom + icon_space_top) / 2
-            
-            # ── TANQUE: cuerpo cilíndrico + celdas de apoyo laterales ──────────
-            c.setLineWidth(1.8)
-            c.saveState()
-            c.translate(cx, icy)
-            c.scale(0.57, 0.57) # Escalar a 28pt altura total según solicitud
-            c.translate(-cx, -icy)
-            # Elipse superior (tapa del tanque)
-            c.ellipse(cx - 16, icy + 12, cx + 16, icy + 20, stroke=1, fill=0)
-            # Cuerpo cilíndrico (rectángulo lateral)
-            c.setFillColor(HexColor("#FFE5E5"))
-            c.rect(cx - 16, icy - 10, 32, 22, fill=1, stroke=1)
-            c.setFillColor(_ICON_COLOR)
-            # Elipse inferior (fondo visible del cilindro)
-            c.setLineWidth(1.2)
-            c.ellipse(cx - 16, icy - 14, cx + 16, icy - 6, stroke=1, fill=0)
-            # Celdas de carga (tripos de apoyo)
-            c.setLineWidth(2.0)
-            for dx in [-14, 0, 14]:
-                c.line(cx + dx, icy - 12, cx + dx - 3, icy - 22)
-                c.line(cx + dx, icy - 12, cx + dx + 3, icy - 22)
-                c.line(cx + dx - 5, icy - 22, cx + dx + 5, icy - 22)
-            # Tubo de entrada (arriba)
-            c.setLineWidth(2.5)
-            c.line(cx, icy + 19, cx, icy + 27)
-            c.setLineWidth(1.5)
-            c.line(cx - 5, icy + 27, cx + 5, icy + 27)
-            c.restoreState()
-
-        elif "patin" in tipo or "transpaleta" in tipo:
-            msg_lineas = [
-                ("INSTRUMENTO NO APTO PARA", "Helvetica-Bold", 6.5, _ICON_COLOR),
-                ("PRUEBA DE EXCENTRICIDAD", "Helvetica-Bold", 6.5, _ICON_COLOR),
-                ("(Báscula tipo Patín hidraúlico /", "Helvetica-Oblique", 5.5, HexColor("#555555")),
-                ("Transpaleta - NOM-010-SCFI)", "Helvetica-Oblique", 5.5, HexColor("#555555")),
-            ]
-            total_text_h = sum(fsize + 2.5 for _, _, fsize, _ in msg_lineas)
-            icy = (y_bottom + 6 + total_text_h + y_bottom + body_h) / 2
-            
-            c.saveState()
-            c.translate(cx, icy)
-            c.scale(0.65, 0.65)
-            c.translate(-cx, -icy)
-            # ── PATIN / TRANSPALETA: timón + chasis + ruedas + horquillas ─────
-            c.setLineWidth(1.8)
-            # Chasis principal (rectángulo horizontal bajo)
-            c.setFillColor(HexColor("#FFE5E5"))
-            c.rect(cx - 18, icy - 3, 36, 8, fill=1, stroke=1)
-            c.setFillColor(_ICON_COLOR)
-            # Horquillas (rectángulos delgados proyectando hacia adelante)
-            c.setLineWidth(1.5)
-            for dy_fork in [-10, -2]:
-                c.setFillColor(HexColor("#FFE5E5"))
-                c.rect(cx + 2, icy + dy_fork - 7, 20, 5, fill=1, stroke=1)
-                c.setFillColor(_ICON_COLOR)
-            # Rueda trasera
-            c.saveState()
-            c.setFillColor(HexColor("#FFE5E5"))
-            c.circle(cx - 14, icy - 8, 5, fill=1, stroke=1)
-            c.setFillColor(_ICON_COLOR)
-            c.circle(cx - 14, icy - 8, 2, fill=1, stroke=0)
-            c.restoreState()
-            # Ruedas delanteras (horquillas)
-            for yf in [icy - 14, icy - 6]:
-                c.setFillColor(HexColor("#FFE5E5"))
-                c.circle(cx + 20, yf, 3.5, fill=1, stroke=1)
-                c.setFillColor(_ICON_COLOR)
-                c.circle(cx + 20, yf, 1.5, fill=1, stroke=0)
-            # Timón (brazo inclinado arriba-izquierda)
-            c.setStrokeColor(_ICON_COLOR)
-            c.setLineWidth(2.5)
-            p = c.beginPath()
-            p.moveTo(cx - 12, icy + 5)
-            p.curveTo(cx - 18, icy + 10, cx - 20, icy + 20, cx - 15, icy + 26)
-            c.drawPath(p, stroke=1, fill=0)
-            # Manija horizontal del timón
-            c.setLineWidth(2.0)
-            c.line(cx - 22, icy + 26, cx - 8, icy + 26)
-            c.restoreState()
-
-        elif "gancho" in tipo or "grua" in tipo:
-            msg_lineas = [
-                ("INSTRUMENTO NO APTO PARA", "Helvetica-Bold", 6.5, _ICON_COLOR),
-                ("PRUEBA DE EXCENTRICIDAD", "Helvetica-Bold", 6.5, _ICON_COLOR),
-                ("(Báscula Grúa / Gancho Din-", "Helvetica-Oblique", 5.5, HexColor("#555555")),
-                ("amométrico – Un solo punto de carga)", "Helvetica-Oblique", 5.5, HexColor("#555555")),
-            ]
-            total_text_h = sum(fsize + 2.5 for _, _, fsize, _ in msg_lineas)
-            icy = (y_bottom + 6 + total_text_h + y_bottom + body_h) / 2
-            
-            c.saveState()
-            c.translate(cx, icy)
-            c.scale(0.65, 0.65)
-            c.translate(-cx, -icy)
-            # ── GANCHO / GRUA: dinamometro + grillete + gancho curvo ────────────
-            c.setLineWidth(1.8)
-            # Barra horizontal superior (viga de la grúa)
-            c.setFillColor(HexColor("#FFE5E5"))
-            c.rect(cx - 18, icy + 22, 36, 6, fill=1, stroke=1)
-            c.setFillColor(_ICON_COLOR)
-            c.setLineWidth(1.5)
-            c.line(cx - 18, icy + 22, cx - 18, icy + 28)
-            c.line(cx + 18, icy + 22, cx + 18, icy + 28)
-            # Cadena / cable
-            c.setLineWidth(1.5)
-            c.setDash([2, 2])
-            c.line(cx, icy + 22, cx, icy + 14)
-            c.setDash()
-            # Cuerpo del dinamometro
-            c.setFillColor(HexColor("#FFE5E5"))
-            c.ellipse(cx - 8, icy + 4, cx + 8, icy + 14, stroke=1, fill=1)
-            c.setFillColor(_ICON_COLOR)
-            # Caratula del dinamometro
-            c.setLineWidth(0.8)
-            c.ellipse(cx - 5, icy + 6, cx + 5, icy + 12, stroke=1, fill=0)
-            c.setLineWidth(1.2)
-            c.line(cx, icy + 9, cx + 3, icy + 11)
-            # Grillete (U invertida)
-            c.setLineWidth(2.2)
-            c.line(cx - 5, icy + 4, cx - 5, icy - 1)
-            c.line(cx + 5, icy + 4, cx + 5, icy - 1)
-            c.arc(cx - 5, icy - 4, cx + 5, icy + 0, startAng=180, extent=180)
-            # Gancho curvo (bezier)
-            c.setLineWidth(2.5)
-            p2 = c.beginPath()
-            p2.moveTo(cx + 5, icy - 2)
-            p2.curveTo(cx + 14, icy - 8, cx + 14, icy - 20, cx + 3, icy - 20)
-            p2.curveTo(cx - 4, icy - 20, cx - 6, icy - 14, cx - 2, icy - 14)
-            c.drawPath(p2, stroke=1, fill=0)
-            c.restoreState()
-
+        if "grua" in tipo or "grúa" in tipo or "gancho" in tipo or "colgante" in tipo:
+            desc_linea = "Báscula tipo: Grúa — pesaje suspendido"
+            draw_fn = self._dibujar_icono_grua
+        elif "patin" in tipo or "patín" in tipo or "transpaleta" in tipo:
+            desc_linea = "Báscula tipo: Patín hidráulico — equipo móvil"
+            draw_fn = self._dibujar_icono_patin
+        elif "silo" in tipo and "tanque" not in tipo:
+            desc_linea = "Báscula tipo: Silo — almacenamiento a granel"
+            draw_fn = self._dibujar_icono_silo
+        elif "tanque" in tipo:
+            desc_linea = "Báscula tipo: Tanque — pesaje de carga estática"
+            draw_fn = self._dibujar_icono_tanque
+        elif "tolva" in tipo:
+            desc_linea = "Báscula tipo: Tolva — pesaje de proceso"
+            draw_fn = self._dibujar_icono_tolva
         else:
-            msg_lineas = [
-                ("INSTRUMENTO NO APTO PARA PRUEBA DE EXCENTRICIDAD", "Helvetica-Bold", 6.5, _ICON_COLOR),
-                ("(Báscula tipo Tolva / Silo dosificador con carga suspendida)", "Helvetica-Oblique", 5.5, HexColor("#555555")),
-            ]
-            total_text_h = sum(fsize + 2.5 for _, _, fsize, _ in msg_lineas)
-            icy = (y_bottom + 6 + total_text_h + y_bottom + body_h) / 2
-            
-            c.saveState()
-            c.translate(cx, icy)
-            c.scale(0.65, 0.65)
-            c.translate(-cx, -icy)
-            # ── TOLVA (default): tolva cónica reducida + pico + soportes ─────────
-            # Altura del cono + cilindro = 45 pt (reducido para no amontonarse)
-            c.setLineWidth(1.5)
-            # Cuerpo cilíndrico superior
-            c.ellipse(cx - 14, icy + 8, cx + 14, icy + 16, stroke=1, fill=0)
-            # Paredes de la tolva (trapecio invertido)
-            c.setFillColor(HexColor("#FFE5E5"))
-            p_tolva = c.beginPath()
-            p_tolva.moveTo(cx - 14, icy + 12)
-            p_tolva.lineTo(cx - 6,  icy - 8)
-            p_tolva.lineTo(cx + 6,  icy - 8)
-            p_tolva.lineTo(cx + 14, icy + 12)
-            c.drawPath(p_tolva, stroke=1, fill=1)
-            c.setFillColor(_ICON_COLOR)
-            # Pico de descarga inferior
-            c.setLineWidth(2)
-            c.line(cx - 3, icy - 8, cx - 3, icy - 14)
-            c.line(cx + 3, icy - 8, cx + 3, icy - 14)
-            c.line(cx - 6, icy - 14, cx + 6, icy - 14)
-            # Barras de soporte lateral
-            c.setLineWidth(1)
-            c.line(cx - 18, icy + 14, cx - 14, icy + 12)
-            c.line(cx + 14, icy + 12, cx + 18, icy + 14)
-            c.restoreState()
+            limpio = (tipo_no or "Instrumento especial").strip()
+            desc_linea = f"Báscula tipo: {limpio}"
+            draw_fn = self._dibujar_icono_tolva
+
+        msg_lineas = [
+            ("NO APLICA PRUEBA DE EXCENTRICIDAD", "Helvetica-Bold", 6.5, _ICON_COLOR),
+            (desc_linea, "Helvetica-Bold", 5.8, _BLACK),
+            ("No aplica prueba de excentricidad.", "Helvetica-Oblique", 5.3, _SUB_COLOR),
+        ]
+
+        total_text_h = sum(fsize + 2.5 for _, _, fsize, _ in msg_lineas)
+        icy = (y_bottom + 5 + total_text_h + y_bottom + body_h) / 2
+        draw_fn(c, cx, icy)
 
         # ── Texto centrado alineado a la parte baja (y_bottom + 4) ──────────────
-        total_text_h = sum(fsize + 2.5 for _, _, fsize, _ in msg_lineas)
         ty = y_bottom + 4 + total_text_h - msg_lineas[0][2]
-        
+
         for text, font_name, font_size, text_color in msg_lineas:
             c.setFillColor(text_color)
             c.setFont(font_name, font_size)
@@ -3233,7 +3273,7 @@ class OsobPdfGenerator:
         div_raw = d.get("division_minima") if d.get("division_minima") not in (None, "") else d.get("div_minima")
         if div_raw in (None, "", 0, "0", 0.0):
             div_raw = d.get("instrumento_division") or ""
-        div_str = str(div_raw).strip()
+        div_str = formatear_division_minima(div_raw)
         if div_str and unidad.lower() not in div_str.lower():
             div_str = f"{div_str} {unidad}"
 
