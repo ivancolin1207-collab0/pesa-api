@@ -400,6 +400,16 @@ class SyncService extends ChangeNotifier {
       }
 
       try {
+        final parcialesOk = await _pushInstrumentosParcialesPendientes()
+            .timeout(const Duration(seconds: 15), onTimeout: () => 0);
+        if (parcialesOk > 0) {
+          debugPrint('[Sync PUSH Parcial] $parcialesOk actualizaciones de instrumento enviadas');
+        }
+      } catch (e) {
+        debugPrint('[Sync PUSH Parcial] Error ignorado: $e');
+      }
+
+      try {
         final pushed = await _pushPendientes()
             .timeout(const Duration(seconds: 25), onTimeout: () => 0);
         debugPrint('[Sync PUSH] $pushed OS subidas');
@@ -507,8 +517,29 @@ class SyncService extends ChangeNotifier {
           },
         );
 
-        // Catálogos lazy: pull solo si > 24h desde la última descarga
-        if (catalogStale) {
+        // Catálogos lazy + Catálogos Admin completos (clientes, sucursales, técnicos, historial de equipos)
+        final existingCli = await LocalDbService.instance.getCatalogoClientes();
+        final existingSuc = await LocalDbService.instance.getCatalogoSucursales();
+        final usuarioSync = AuthService.usuarioActual;
+        final rolSync = (usuarioSync?.rol ?? ApiService.instance.userRole ?? '').toLowerCase();
+        final esAdminSync = rolSync.contains('admin') ||
+            rolSync.contains('logist') ||
+            rolSync.contains('recep') ||
+            (usuarioSync?.username.toLowerCase() == 'ivancolin1207');
+        final bool requiereCatAdmin = forceFull ||
+            catalogStale ||
+            existingCli.isEmpty ||
+            existingSuc.isEmpty ||
+            esAdminSync;
+
+        if (requiereCatAdmin) {
+          try {
+            await _pullAdminCatalogos()
+                .timeout(const Duration(seconds: 18), onTimeout: () => false);
+          } catch (_) {}
+        }
+
+        if (catalogStale || forceFull) {
           try {
             await _pullMarcasModelos()
                 .timeout(const Duration(seconds: 8), onTimeout: () {});
@@ -778,8 +809,9 @@ class SyncService extends ChangeNotifier {
         'folio_os':          folio,
         'device_id':         await db.getDeviceId(),
         'sync_version_base': os['sync_version'] ?? 0,
-        'nuevo_estado':      cerradaLocal ? 'COMPLETADA_DIGITAL' : (os['estado'] ?? 'COMPLETADA_DIGITAL'),
-        'estatus':           cerradaLocal ? 'Cerrado' : (os['estatus'] ?? 'Proceso'),
+        'nuevo_estado':      cerradaLocal ? 'COMPLETADA_DIGITAL' : 'EN_PROCESO',
+        'estatus':           cerradaLocal ? 'Cerrado' : 'En Proceso',
+        if (!cerradaLocal) 'parcial_instrumento': true,
         if ((os['modalidad'] as String?)?.isNotEmpty == true) 'modalidad': os['modalidad'],
         if (fechaStr != null && fechaStr.isNotEmpty) 'fecha': fechaStr,
         if (fechaStr != null && fechaStr.isNotEmpty) 'fecha_servicio': fechaStr,
@@ -801,10 +833,19 @@ class SyncService extends ChangeNotifier {
         if ((os['puesto_ing']           as String?)?.isNotEmpty == true) 'puesto_ing': os['puesto_ing'],
         if ((os['dictamen']             as String?)?.isNotEmpty == true) 'dictamen': os['dictamen'],
         if ((os['id_equipo']            as String?)?.isNotEmpty == true) 'id_equipo': os['id_equipo'],
+        if ((os['id_equipo']            as String?)?.isNotEmpty == true) 'id_indicador': os['id_equipo'],
         if ((os['marca']                as String?)?.isNotEmpty == true) 'marca': os['marca'],
         if ((os['modelo']               as String?)?.isNotEmpty == true) 'modelo': os['modelo'],
         if ((os['ns']                   as String?)?.isNotEmpty == true) 'ns': os['ns'],
+        if ((os['ns']                   as String?)?.isNotEmpty == true) 'serie': os['ns'],
         if ((os['ubicacion']            as String?)?.isNotEmpty == true) 'ubicacion': os['ubicacion'],
+        if ((os['tipo_instrumento']     as String?)?.isNotEmpty == true) 'tipo_instrumento': os['tipo_instrumento'],
+        if ((os['numero_cca']           as String?)?.isNotEmpty == true) 'numero_cca': os['numero_cca'],
+        if ((os['numero_dve']           as String?)?.isNotEmpty == true) 'numero_dve': os['numero_dve'],
+        if ((os['motivo_no_excentricidad'] as String?)?.isNotEmpty == true)
+          'motivo_no_excentricidad': os['motivo_no_excentricidad'],
+        if (os['aplica_excentricidad'] != null)
+          'aplica_excentricidad': os['aplica_excentricidad'] == 1 || os['aplica_excentricidad'] == true,
         'unidad_medida': os['unidad_medida'] ?? 'kg',
       };
 
@@ -862,11 +903,11 @@ class SyncService extends ChangeNotifier {
         await sqldb.update(
           'ordenes_servicio',
           {
-            'sync_status': 'Enviada',
+            'sync_status': cerradaLocal ? 'Enviada' : 'SINCRONIZADO',
             'needs_push': 0,
             'is_dirty': 0,
             'is_synced': 1,
-            'sync_check_status': 'SUBIDA_SERVIDOR',
+            if (cerradaLocal) 'sync_check_status': 'SUBIDA_SERVIDOR',
             if (pdfUploadedOk) 'pdf_subido': 1,
           },
           where: 'folio_os = ? OR folio = ?',
@@ -875,9 +916,9 @@ class SyncService extends ChangeNotifier {
 
         updateLocalOrder(folio, {
           'is_dirty': 0,
-          'sync_check_status': 'SUBIDA_SERVIDOR',
+          if (cerradaLocal) 'sync_check_status': 'SUBIDA_SERVIDOR',
           'is_synced': 1,
-          'sync_status': 'Enviada',
+          'sync_status': cerradaLocal ? 'Enviada' : 'SINCRONIZADO',
           'needs_push': 0,
           if (pdfUploadedOk) 'pdf_subido': 1,
         });
@@ -1513,9 +1554,11 @@ class SyncService extends ChangeNotifier {
 
       // ── UPDATE directo obligatorio en SQLite local (PULL) ────────────────
       final sqldb = await db.database;
+      final foliosColaParcial = await db.getFoliosEnColaInstrumentoParcial();
       for (final remota in filteredList) {
         final folio = (remota['folio_os'] ?? remota['folio'])?.toString().trim();
         if (folio == null || folio.isEmpty) continue;
+        final bool tieneParcialPendiente = foliosColaParcial.contains(folio);
 
         final String estatusRemoto = (remota['estatus'] ?? remota['estado'] ?? 'Asignada').toString();
         final String? pdfUrl = remota['pdf_url']?.toString().trim();
@@ -1620,7 +1663,7 @@ class SyncService extends ChangeNotifier {
               needs_push = 0,
               partidas = COALESCE(?, partidas),
               tipo_documento = COALESCE(?, tipo_documento),
-              datos_tecnicos_json = COALESCE(?, datos_tecnicos_json)
+              datos_tecnicos_json = CASE WHEN ? = 1 THEN datos_tecnicos_json ELSE COALESCE(?, datos_tecnicos_json) END
           WHERE folio_os = ? OR folio = ?
         ''', [
           estatusFinal,
@@ -1634,14 +1677,16 @@ class SyncService extends ChangeNotifier {
           hasPdfVal,
           partidasVal,
           tipoDocVal,
+          tieneParcialPendiente ? 1 : 0,
           dtVal,
           folio,
           folio,
         ]);
 
         // Si la orden viene en ASIGNADA / En Proceso (no cerrada) y el servidor trae datos de instrumento vacíos,
-        // sobrescribir las columnas locales incluso si vienen vacías ('') o null y limpiar borrador viejo.
-        if (hasPdfVal == 0) {
+        // sobrescribir las columnas locales incluso si vienen vacías ('') o null y limpiar borrador viejo,
+        // EXCEPTO cuando hay datos parciales de instrumento pendientes de subir.
+        if (hasPdfVal == 0 && !tieneParcialPendiente) {
           final String srvMarca = (remota['marca'] ?? '').toString().trim();
           final String srvModelo = (remota['modelo'] ?? '').toString().trim();
           final String srvNs = (remota['ns'] ?? remota['serie'] ?? '').toString().trim();
@@ -1789,10 +1834,100 @@ class SyncService extends ChangeNotifier {
   }
 
 
+  // ── Guardado Parcial de Equipo (Sin Finalizar) + Catálogos Admin ─────────
+
+  /// Guarda inmediatamente los datos de instrumento (y CCA/DVE) en SQLite local,
+  /// actualiza en tiempo real el Dashboard en memoria y envía `PATCH /api/ordenes/{folio}/instrumento`
+  /// (o encola automáticamente en modo offline) manteniendo la orden abierta (`En Proceso`).
+  /// Retorna `true` si ya quedó sincronizado con el servidor, `false` si quedó guardado offline en cola.
+  Future<bool> guardarYSincronizarInstrumentoParcial(
+    String folio,
+    Map<String, dynamic> datos, {
+    int? localId,
+  }) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return false;
+    final db = LocalDbService.instance;
+
+    final updates = await db.guardarInstrumentoParcialLocal(
+      folioKey,
+      datos,
+      localId: localId,
+      encolarSync: true,
+    );
+    if (updates.isNotEmpty) {
+      updateLocalOrder(folioKey, updates);
+    }
+
+    try {
+      final onlineOk = await ApiService.instance
+          .patchInstrumentoOrden(folioKey, {
+            'folio_os': folioKey,
+            ...datos,
+          })
+          .timeout(const Duration(seconds: 12), onTimeout: () => false);
+      if (onlineOk) {
+        await db.eliminarDeColaInstrumentoParcial(folioKey);
+        await _refreshPending();
+        notifyListeners();
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[Sync] Guardado parcial offline para $folioKey (en cola): $e');
+    }
+    await _refreshPending();
+    notifyListeners();
+    return false;
+  }
+
+  Future<int> _pushInstrumentosParcialesPendientes() async {
+    final db = LocalDbService.instance;
+    final cola = await db.getColaInstrumentoParcial();
+    if (cola.isEmpty) return 0;
+    int enviados = 0;
+    for (final row in cola) {
+      final folio = (row['folio_os'] ?? '').toString().trim();
+      final rawJson = (row['payload_json'] ?? '').toString().trim();
+      if (folio.isEmpty || rawJson.isEmpty) continue;
+      try {
+        final payload = jsonDecode(rawJson) as Map<String, dynamic>;
+        final ok = await ApiService.instance
+            .patchInstrumentoOrden(folio, payload, timeout: const Duration(seconds: 10));
+        if (ok) {
+          await db.eliminarDeColaInstrumentoParcial(folio);
+          enviados++;
+        }
+      } catch (e) {
+        debugPrint('[Sync PUSH Parcial] Falló reintento para $folio: $e');
+      }
+    }
+    return enviados;
+  }
+
+  /// Sincroniza explícitamente todos los catálogos completos de Administración
+  /// (clientes + direcciones/sucursales + técnicos + historial de instrumentos).
+  Future<bool> sincronizarCatalogosAdmin() => _pullAdminCatalogos();
+
+  Future<bool> _pullAdminCatalogos() async {
+    try {
+      final data = await ApiService.instance.getAdminCatalogos();
+      if (data != null && data.isNotEmpty) {
+        await LocalDbService.instance.guardarCatalogosAdmin(data);
+        await LocalDbService.instance.setLastCatalogSyncTime(DateTime.now().toUtc());
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[Sync] _pullAdminCatalogos error: $e');
+    }
+    return false;
+  }
+
   // ── Utilidades ────────────────────────────────────────────────────────────
 
   Future<void> _refreshPending() async {
-    _pending = await LocalDbService.instance.getPendingCount();
+    final osPend = await LocalDbService.instance.getPendingCount();
+    final parciales = await LocalDbService.instance.getFoliosEnColaInstrumentoParcial();
+    _pending = osPend + parciales.length;
     notifyListeners();
   }
 

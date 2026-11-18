@@ -55,6 +55,12 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_path      TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_url       TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_b64       TEXT",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_cca    VARCHAR(100)",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_dve    VARCHAR(100)",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_no_excentricidad VARCHAR(100)",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS capacidad_maxima DOUBLE PRECISION",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS division_minima DOUBLE PRECISION",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS tipo_instrumento VARCHAR(150)",
                 """CREATE TABLE IF NOT EXISTS catalogo_marcas_modelos (
                     id SERIAL PRIMARY KEY,
                     marca VARCHAR(100) NOT NULL,
@@ -145,6 +151,7 @@ app.include_router(usuarios_router.router,  prefix="/api/v1/usuarios",     tags=
 app.include_router(errores_router.router,   prefix="/api/v1/errores-tecnicos", tags=["Errores Técnicos"])
 # ── Administración y mantenimiento de datos (solo admin) ──────────────
 app.include_router(admin_router.router,     prefix="/api/v1/admin",          tags=["Administración"])
+app.include_router(admin_router.router,     prefix="/api/admin",             tags=["Administración Legacy"])
 
 # ── Archivos Estáticos (PDFs y adjuntos) ──────────────────────────────────────
 import os

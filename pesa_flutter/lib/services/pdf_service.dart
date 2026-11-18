@@ -409,21 +409,22 @@ class PdfService {
     final div    = formatearDivisionMinima(divRaw);
     final unidad = _s(os, 'unidad_medida', 'kg');
     final apoyo  = _s(os, 'puntos_apoyo', '4');
-    final cca      = _s(os, 'numero_cca', _s(os, 'cca', _s(os, 'numeroCca', '')));
-    final folioDve = _s(os, 'folio_dve', _s(os, 'numero_dve', _s(os, 'div_verificacion', _s(os, 'div_ver', _s(os, 'folioDve', _s(os, 'numeroDve', ''))))));
+    final cca      = extraerNumeroCca(os);
+    final folioDve = extraerNumeroDve(os);
     final holoAnt  = _s(os, 'holograma_anterior', _s(os, 'hologramaAnterior', ''));
     final holoNue  = _s(os, 'holograma_actualizado', _s(os, 'holograma_nuevo', _s(os, 'hologramaNuevo', '')));
 
-    // Reglas por tipo de servicio real (nombre → ID). Si la OS llegó sin tipo,
-    // solo se imprime lo que efectivamente fue capturado. Nunca se imprime "N/A".
+    // Reglas por tipo de servicio real + visibilidad automática siempre que CCA y/o DVE se capturen.
     final rules = tsr.getRules(
       id: int.tryParse('${os['id_tipo_servicio'] ?? ''}'),
       nombre: (os['tipo_servicio'] ?? os['tipo_servicio_nombre'])?.toString(),
       folio: os['folio']?.toString(),
     );
-    final bool mostrarCca = rules.pideCca || (rules.sinTipo && cca.isNotEmpty);
+    final bool mostrarCca = rules.pideCca || cca.isNotEmpty;
     final bool mostrarDve = rules.pideDve ||
-        (rules.sinTipo && (folioDve.isNotEmpty || holoAnt.isNotEmpty || holoNue.isNotEmpty));
+        folioDve.isNotEmpty ||
+        holoAnt.isNotEmpty ||
+        holoNue.isNotEmpty;
 
     final j = os['jia_j'] == true || os['inicial_calibrador'] == 'J';
     final i = os['jia_i'] == true || os['inicial_calibrador'] == 'I';
@@ -3107,6 +3108,10 @@ class PdfService {
                 pw.Row(children: [
                   pw.Expanded(child: pw.Text('Capacidad Máx. (Max): $capMax', style: const pw.TextStyle(fontSize: 6.3))),
                   pw.Expanded(child: pw.Text('División Mínima (d / e): $divMin', style: const pw.TextStyle(fontSize: 6.3))),
+                  if (extraerNumeroCca(osData).isNotEmpty)
+                    pw.Expanded(child: pw.Text('Número CCA: ${extraerNumeroCca(osData)}', style: pw.TextStyle(fontSize: 6.3, fontWeight: pw.FontWeight.bold))),
+                  if (extraerNumeroDve(osData).isNotEmpty)
+                    pw.Expanded(child: pw.Text('Número DVE: ${extraerNumeroDve(osData)}', style: pw.TextStyle(fontSize: 6.3, fontWeight: pw.FontWeight.bold))),
                 ]),
                 pw.SizedBox(height: 2),
                 pw.Text(

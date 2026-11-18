@@ -226,6 +226,9 @@ class DatabasePool:
             # Lógica dinámica Excentricidad
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS aplica_excentricidad BOOLEAN DEFAULT TRUE;",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS filas_excentricidad INTEGER DEFAULT 5;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_no_excentricidad VARCHAR(100);",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_cca VARCHAR(100);",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_dve VARCHAR(100);",
             # Campos de Tipo de Estructura (RE)
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS tipo_estructura TEXT;",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS tipo_instalacion_camionera TEXT;",

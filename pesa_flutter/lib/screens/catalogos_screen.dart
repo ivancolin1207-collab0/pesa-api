@@ -110,13 +110,20 @@ class _CatalogosScreenState extends State<CatalogosScreen>
                 children: [
                   _CatalogTab(
                     endpoint: '/api/v1/clientes',
-                    columns: const ['nombre', 'rfc', 'telefono'],
-                    headers: const ['Nombre', 'RFC', 'Teléfono'],
+                    columns: const ['nombre', 'rfc', 'direccion', 'telefono'],
+                    headers: const ['Nombre / Razón Social', 'RFC', 'Dirección / Sucursales', 'Teléfono'],
                     emptyLabel: 'Sin clientes registrados',
+                    formatCell: (col, val) {
+                      if (col == 'direccion') {
+                        final s = val?.toString().trim() ?? '';
+                        return s.isNotEmpty ? s : '—';
+                      }
+                      return val?.toString() ?? '—';
+                    },
                   ),
                   _CatalogTab(
                     endpoint: '/api/v1/tecnicos',
-                    columns: const ['nombre_completo', 'usuario', 'rol', 'activo'],
+                    columns: const ['nombre', 'username', 'rol', 'activo'],
                     headers: const ['Nombre', 'Usuario', 'Rol', 'Activo'],
                     emptyLabel: 'Sin técnicos registrados',
                     formatCell: (col, val) {
@@ -191,31 +198,48 @@ class _CatalogTabState extends State<_CatalogTab>
   Future<void> _load() async {
     setState(() { _loading = true; _error = ''; });
     try {
-      final data = await ApiService.instance.getCatalogo(widget.endpoint);
+      final adminData = await ApiService.instance.getAdminCatalogos();
+      if (adminData != null && adminData.isNotEmpty) {
+        await LocalDbService.instance.guardarCatalogosAdmin(adminData);
+      }
+      List<Map<String, dynamic>> data;
+      if (widget.endpoint.contains('/clientes')) {
+        data = await LocalDbService.instance.getCatalogoClientes();
+        data = data.map((c) {
+          final sucs = (c['sucursales'] as List?) ?? const [];
+          final dirBase = (c['direccion'] ?? '').toString().trim();
+          final dirDisplay = sucs.isNotEmpty
+              ? '${sucs.length} dir.: ${(sucs.first['direccion'] ?? sucs.first['nombre'] ?? dirBase)}'
+              : dirBase;
+          return {...c, 'direccion': dirDisplay};
+        }).toList();
+      } else if (widget.endpoint.contains('/tecnicos')) {
+        data = await LocalDbService.instance.getCatalogoTecnicos();
+      } else if (widget.endpoint.contains('/tipos-servicio')) {
+        data = await LocalDbService.instance.getCatalogoTiposServicio();
+      } else if (widget.endpoint.contains('/tipos-instrumento')) {
+        data = await LocalDbService.instance.getCatalogoTiposInstrumento();
+      } else {
+        data = await ApiService.instance.getCatalogo(widget.endpoint);
+      }
       if (mounted) setState(() { _items = data; _loading = false; });
     } catch (e) {
-      // Fallback para /api/v1/clientes: usar registros locales de SQLite
-      if (widget.endpoint.contains('/clientes')) {
-        try {
-          final rows = await LocalDbService.instance.getClientesFromLocalOrders();
-          if (mounted) {
-            setState(() { _items = List<Map<String, dynamic>>.from(rows); _loading = false; _error = ''; });
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Usando catálogo local de clientes (servidor no disponible temporalmente).',
-                  style: TextStyle(fontSize: 12),
-                ),
-                duration: Duration(seconds: 4),
-                backgroundColor: Color(0xFF374151),
-              ),
-            );
-          }
-          return;
-        } catch (localErr) {
-          // Si incluso el fallback local falla, mostrar error original
+      try {
+        List<Map<String, dynamic>> localRows = [];
+        if (widget.endpoint.contains('/clientes')) {
+          localRows = await LocalDbService.instance.getCatalogoClientes();
+        } else if (widget.endpoint.contains('/tecnicos')) {
+          localRows = await LocalDbService.instance.getCatalogoTecnicos();
+        } else if (widget.endpoint.contains('/tipos-servicio')) {
+          localRows = await LocalDbService.instance.getCatalogoTiposServicio();
+        } else if (widget.endpoint.contains('/tipos-instrumento')) {
+          localRows = await LocalDbService.instance.getCatalogoTiposInstrumento();
         }
-      }
+        if (localRows.isNotEmpty && mounted) {
+          setState(() { _items = localRows; _loading = false; _error = ''; });
+          return;
+        }
+      } catch (_) {}
       if (mounted) setState(() {
         _error   = 'Error al cargar datos: $e';
         _loading = false;

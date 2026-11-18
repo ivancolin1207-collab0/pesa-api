@@ -469,6 +469,31 @@ class ApiService {
     return _postWithRetry(uri, jsonEncode(payload), timeout: timeout);
   }
 
+  /// Realiza PATCH con interceptor 401 automático (_renovarSesionSilenciosa + retry).
+  Future<http.Response> _patchWithRetry(Uri uri, String body,
+      {Duration? timeout}) async {
+    if (_token == null) {
+      await _renovarSesionSilenciosa();
+    }
+    var resp = await http.patch(uri, headers: _headers, body: body)
+        .timeout(timeout ?? _connTimeout);
+
+    if (resp.statusCode == 401) {
+      debugPrint('[API] 401 en PATCH $uri → invocando _renovarSesionSilenciosa()...');
+      bool ok = false;
+      try {
+        ok = await _renovarSesionSilenciosa()
+            .timeout(const Duration(seconds: 35), onTimeout: () => false);
+      } catch (_) {}
+      if (ok) {
+        resp = await http.patch(uri, headers: _headers, body: body)
+            .timeout(timeout ?? _connTimeout);
+        debugPrint('[API] Retry PATCH post-refresh → ${resp.statusCode}');
+      }
+    }
+    return resp;
+  }
+
   // ── Sync Pull ─────────────────────────────────────────────────────────────
 
   /// Repositorio de calibraciones concluidas (solo lectura, supervisión metrológica).
@@ -1045,18 +1070,196 @@ class ApiService {
     return false;
   }
 
+  // ── Catálogo Unificado de Administración y Guardado Parcial de Equipo ────
+
+  /// Descarga en una sola llamada todos los catálogos de Administración:
+  /// clientes (con sus direcciones/sucursales anidadas), técnicos activos,
+  /// tipos de servicio, tipos de instrumento e historial de instrumentos.
+  Future<Map<String, dynamic>?> getAdminCatalogos() async {
+    for (final path in ['/api/admin/catalogos', '/api/v1/admin/catalogos']) {
+      try {
+        final uri = Uri.parse('$_baseUrl$path');
+        debugPrint('[API] getAdminCatalogos → $uri');
+        final resp = await _getWithRetry(uri, timeout: const Duration(seconds: 25));
+        if (resp.statusCode == 200) {
+          final dec = jsonDecode(utf8.decode(resp.bodyBytes));
+          if (dec is Map<String, dynamic>) return dec;
+          if (dec is Map) return Map<String, dynamic>.from(dec);
+        } else if (resp.statusCode != 404) {
+          debugPrint('[API] getAdminCatalogos HTTP ${resp.statusCode}');
+        }
+      } catch (e) {
+        debugPrint('[API] getAdminCatalogos ($path) error: $e');
+      }
+    }
+
+    // Fallback compatible con servidores que aún no exponen /api/admin/catalogos:
+    // descarga en paralelo los catálogos individuales y anida las sucursales por cliente.
+    try {
+      final results = await Future.wait<List<Map<String, dynamic>>>([
+        getCatalogo('/api/v1/clientes').catchError((_) => <Map<String, dynamic>>[]),
+        getCatalogo('/api/v1/sucursales').catchError((_) => <Map<String, dynamic>>[]),
+        getCatalogo('/api/v1/tecnicos').catchError((_) => <Map<String, dynamic>>[]),
+        getCatalogo('/api/v1/tipos-servicio').catchError((_) => <Map<String, dynamic>>[]),
+        getCatalogo('/api/v1/tipos-instrumento').catchError((_) => <Map<String, dynamic>>[]),
+        getMarcasModelos().catchError((_) => <Map<String, dynamic>>[]),
+      ]);
+
+      final clientes = results[0];
+      final sucursales = results[1];
+      final tecnicos = results[2];
+      final tiposSvc = results[3];
+      final tiposInst = results[4];
+      final marcasModelos = results[5];
+
+      if (clientes.isEmpty && tecnicos.isEmpty) return null;
+
+      final sucsByCli = <int, List<Map<String, dynamic>>>{};
+      for (final s in sucursales) {
+        final cid = int.tryParse('${s['cliente_id'] ?? s['id_cliente'] ?? ''}');
+        if (cid != null && cid > 0) {
+          sucsByCli.putIfAbsent(cid, () => []).add(s);
+        }
+      }
+
+      final clientesEnriquecidos = clientes.map((c) {
+        final cid = int.tryParse('${c['id'] ?? c['id_cliente'] ?? ''}') ?? 0;
+        final list = List<Map<String, dynamic>>.from(sucsByCli[cid] ?? const []);
+        final dirBase = (c['direccion'] ?? '').toString().trim();
+        if (dirBase.isNotEmpty && !list.any((s) => (s['direccion'] ?? '') == dirBase)) {
+          list.insert(0, {
+            'id': null,
+            'cliente_id': cid,
+            'nombre': 'Matriz',
+            'direccion': dirBase,
+          });
+        }
+        return {
+          ...c,
+          'sucursales': list,
+        };
+      }).toList();
+
+      final historial = marcasModelos
+          .map((mm) => {
+                'cliente': '',
+                'sucursal': '',
+                'marca': (mm['marca'] ?? '').toString(),
+                'modelo': (mm['modelo'] ?? '').toString(),
+                'serie': '',
+                'id_indicador': '',
+                'capacidad_maxima': '',
+                'division_minima': '',
+                'ubicacion': '',
+                'tipo_instrumento': '',
+              })
+          .toList();
+
+      return {
+        'clientes': clientesEnriquecidos,
+        'sucursales': sucursales,
+        'tecnicos': tecnicos,
+        'tipos_servicio': tiposSvc,
+        'tipos_instrumento': tiposInst,
+        'historial_instrumentos': historial,
+      };
+    } catch (e) {
+      debugPrint('[API] Fallback getAdminCatalogos falló: $e');
+      return null;
+    }
+  }
+
+  /// Envía actualización ligera y parcial de datos de instrumento (`PATCH /api/ordenes/{folio}/instrumento`)
+  /// manteniendo el estatus de la orden abierto (`EN_PROCESO` / `ASIGNADA`) sin finalizarla.
+  Future<bool> patchInstrumentoOrden(
+    String folio,
+    Map<String, dynamic> payload, {
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final f = Uri.encodeComponent(folio.trim());
+    if (f.isEmpty) return false;
+    final bodyStr = jsonEncode(payload);
+
+    final patchPaths = [
+      '/api/ordenes/$f/instrumento',
+      '/api/v1/ordenes/$f/instrumento',
+    ];
+
+    for (final pth in patchPaths) {
+      try {
+        final resp = await _patchWithRetry(
+          Uri.parse('$_baseUrl$pth'),
+          bodyStr,
+          timeout: timeout,
+        );
+        if (resp.statusCode == 200 || resp.statusCode == 201) {
+          debugPrint('[API] ✅ patchInstrumentoOrden exitoso para $folio vía PATCH $pth');
+          return true;
+        }
+        if (resp.statusCode != 404 && resp.statusCode != 405) {
+          debugPrint('[API] ⚠️ PATCH $pth retornó HTTP ${resp.statusCode}: ${resp.body}');
+        }
+      } catch (e) {
+        debugPrint('[API] Error en PATCH $pth ($folio): $e');
+        return false;
+      }
+    }
+
+    // Fallback POST alias
+    try {
+      final respPost = await _postWithRetry(
+        Uri.parse('$_baseUrl/api/v1/ordenes/$f/instrumento'),
+        bodyStr,
+        timeout: timeout,
+      );
+      if (respPost.statusCode == 200 || respPost.statusCode == 201) {
+        debugPrint('[API] ✅ patchInstrumentoOrden exitoso para $folio vía POST');
+        return true;
+      }
+    } catch (_) {}
+
+    // Fallback a /api/v1/sync/push con bandera parcial_instrumento = true (sin cerrar orden)
+    try {
+      final respSync = await _postWithRetry(
+        Uri.parse('$_baseUrl/api/v1/sync/push'),
+        jsonEncode({
+          'folio_os': folio.trim(),
+          'parcial_instrumento': true,
+          'nuevo_estado': 'EN_PROCESO',
+          'estatus': 'En Proceso',
+          ...payload,
+        }),
+        timeout: timeout,
+      );
+      if (respSync.statusCode == 200 || respSync.statusCode == 201) {
+        debugPrint('[API] ✅ patchInstrumentoOrden exitoso vía sync/push parcial para $folio');
+        return true;
+      }
+    } catch (e) {
+      debugPrint('[API] Fallback sync/push parcial falló ($folio): $e');
+    }
+
+    return false;
+  }
+
   // ── Crear Orden de Servicio ───────────────────────────────────────────────
 
-  /// Crea una nueva Orden de Servicio en el servidor.
+  /// Crea una nueva Orden de Servicio (individual o lote, cualquiera de los 7 formatos) en el servidor.
   Future<Map<String, dynamic>> crearOrden(
       Map<String, dynamic> payload) async {
-    final resp = await _postWithRetry(
+    var resp = await _postWithRetry(
       Uri.parse('$_baseUrl/api/v1/ordenes'),
       jsonEncode(payload),
     );
+    if (resp.statusCode == 404) {
+      resp = await _postWithRetry(
+        Uri.parse('$_baseUrl/api/ordenes'),
+        jsonEncode(payload),
+      );
+    }
 
     if (resp.statusCode == 200 || resp.statusCode == 201) {
-      return jsonDecode(resp.body) as Map<String, dynamic>;
+      return jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
     }
     throw HttpException(
         'crearOrden failed: HTTP ${resp.statusCode} — ${resp.body}');

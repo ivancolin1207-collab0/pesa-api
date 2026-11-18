@@ -106,6 +106,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   Uint8List? _firmaTecPre;
   bool _usarFirmaPre = false;
   bool _guardando = false;
+  bool _guardandoParcial = false;
 
   Map<String, dynamic> _datosCombinados = {};
 
@@ -1093,6 +1094,74 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                         ],
                       ),
                     ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: 40,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF1D4ED8),
+                      backgroundColor: const Color(0xFFEFF6FF),
+                      side: const BorderSide(color: Color(0xFF93C5FD), width: 1.4),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: _guardandoParcial
+                        ? null
+                        : () async {
+                            final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? '').toString().trim();
+                            if (folio.isEmpty) return;
+                            setState(() => _guardandoParcial = true);
+                            try {
+                              await _guardarBorradorSilencioso();
+                              final parcial = <String, dynamic>{
+                                'marca': _marcaIndCtrl.text.trim(),
+                                'modelo': _modeloIndCtrl.text.trim(),
+                                'serie': _serieIndCtrl.text.trim(),
+                                'ns': _serieIndCtrl.text.trim(),
+                                'id_indicador': _idIndCtrl.text.trim(),
+                                'id_equipo': _idIndCtrl.text.trim(),
+                                'capacidad_maxima': _capMaxCtrl.text.trim(),
+                                'division_minima': formatearDivisionMinima(_divMinCtrl.text.trim()),
+                                'ubicacion': _ubicacionCtrl.text.trim(),
+                                'tipo_instrumento': _tipoEstructura,
+                              };
+                              final ok = await context.read<SyncService>().guardarYSincronizarInstrumentoParcial(
+                                    folio,
+                                    parcial,
+                                    localId: widget.orden['local_id'] as int?,
+                                  );
+                              if (mounted) {
+                                final etiq = construirEtiquetaInstrumento({'folio_os': folio, ...parcial});
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFF1D4ED8),
+                                    content: Text(
+                                      ok
+                                          ? 'Equipo guardado y sincronizado (orden sigue En Proceso): $etiq'
+                                          : 'Equipo guardado localmente (se sincronizará al conectar): $etiq',
+                                    ),
+                                  ),
+                                );
+                              }
+                            } finally {
+                              if (mounted) setState(() => _guardandoParcial = false);
+                            }
+                          },
+                    icon: _guardandoParcial
+                        ? const SizedBox(
+                            width: 15,
+                            height: 15,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1D4ED8)),
+                          )
+                        : const Icon(Icons.cloud_upload_outlined, size: 18),
+                    label: Text(
+                      _guardandoParcial
+                          ? 'Guardando y sincronizando equipo...'
+                          : 'Guardar Datos de Equipo (Sin Finalizar)',
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                    ),
                   ),
                 ),
               ],

@@ -70,15 +70,128 @@ class TipoInstrumentoOut(BaseModel):
 
 
 class CrearOrdenBody(BaseModel):
-    tipo:                 str = "Individual"   # Individual | Lote
-    modalidad:            str = "Digital"      # Digital | Físico
-    tipo_documento:       Optional[str] = None # OS | RMA | RE | OSOB | LV | LP
-    id_cliente:           Optional[int] = None
-    id_tecnico:           Optional[int] = None
-    id_tipo_servicio:     Optional[int] = None
-    id_tipo_instrumento:  Optional[int] = None
-    observaciones:        Optional[str] = None
-    cantidad:             int = 1              # Solo para lote
+    tipo:                    str = "Individual"   # Individual | Lote
+    modalidad:               str = "Digital"      # Digital | Físico
+    tipo_documento:          Optional[str] = None # OS | RMA | RE | OSOB | OSOCC | LV | LP
+    id_cliente:              Optional[int] = None
+    sucursal_id:             Optional[int] = None
+    sucursal:                Optional[str] = None
+    direccion:               Optional[str] = None
+    id_tecnico:              Optional[int] = None
+    id_tipo_servicio:        Optional[int] = None
+    id_tipo_instrumento:     Optional[int] = None
+    tipo_instrumento:        Optional[str] = None
+    fecha:                   Optional[str] = None
+    observaciones:           Optional[str] = None
+    cantidad:                int = 1              # Solo para lote
+    # Datos parciales o completos del instrumento (asignación temporal o completa)
+    marca:                   Optional[str] = None
+    modelo:                  Optional[str] = None
+    serie:                   Optional[str] = None
+    ns:                      Optional[str] = None
+    id_indicador:            Optional[str] = None
+    id_equipo:               Optional[str] = None
+    capacidad_maxima:        Optional[Union[float, str]] = None
+    division_minima:         Optional[Union[float, str]] = None
+    ubicacion:               Optional[str] = None
+    numero_cca:              Optional[str] = None
+    numero_dve:              Optional[str] = None
+    aplica_excentricidad:    Optional[bool] = True
+    motivo_no_excentricidad: Optional[str] = None
+    unidad_medida:           Optional[str] = "kg"
+
+
+class ActualizarInstrumentoBody(BaseModel):
+    marca:                   Optional[str] = None
+    modelo:                  Optional[str] = None
+    serie:                   Optional[str] = None
+    ns:                      Optional[str] = None
+    id_indicador:            Optional[str] = None
+    id_equipo:               Optional[str] = None
+    capacidad_maxima:        Optional[Union[float, str]] = None
+    alcance_max:             Optional[Union[float, str]] = None
+    division_minima:         Optional[Union[float, str]] = None
+    div_minima:              Optional[Union[float, str]] = None
+    ubicacion:               Optional[str] = None
+    tipo_instrumento:        Optional[str] = None
+    numero_cca:              Optional[str] = None
+    cca:                     Optional[str] = None
+    numero_dve:              Optional[str] = None
+    folio_dve:               Optional[str] = None
+    aplica_excentricidad:    Optional[bool] = None
+    motivo_no_excentricidad: Optional[str] = None
+    unidad_medida:           Optional[str] = None
+    holograma_anterior:      Optional[str] = None
+    holograma_actualizado:   Optional[str] = None
+    sucursal_id:             Optional[int] = None
+    estatus:                 Optional[str] = None
+
+
+def _limpiar_num_reg(val: Optional[str]) -> str:
+    import re
+    s = str(val or "").strip()
+    if not s or s.lower() in {"none", "null", "n/a", "na", "--", "-"}:
+        return ""
+    if re.match(r"^(CCA|DVE)\.\d{2}\.?$", s, flags=re.IGNORECASE):
+        return ""
+    return s
+
+
+def _norm_div_min_str(raw_val) -> str:
+    if raw_val is None:
+        return ""
+    import re
+    s = str(raw_val).strip()
+    if not s:
+        return ""
+    m = re.match(r"^([+-]?\d+(?:[.,]\d+)?)\s*(.*)$", s)
+    if not m:
+        return s
+    try:
+        val = float(m.group(1).replace(",", "."))
+    except ValueError:
+        return s
+    unidad = m.group(2).strip()
+    limpio = f"{val:.6f}".rstrip("0").rstrip(".")
+    return f"{limpio} {unidad}".strip() if unidad else limpio
+
+
+def _parse_float_opt(raw_val) -> Optional[float]:
+    if raw_val is None:
+        return None
+    import re
+    s = str(raw_val).strip()
+    if not s:
+        return None
+    m = re.match(r"^([+-]?\d+(?:[.,]\d+)?)", s)
+    if not m:
+        return None
+    try:
+        return float(m.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _construir_etiqueta_instrumento_dict(orden: dict) -> str:
+    folio = str(orden.get("folio") or orden.get("folio_os") or "").strip()
+    invalidos = {"", "none", "null", "sin id", "sin modelo", "sin serie", "n/a", "na", "--"}
+    partes = [folio] if folio else []
+    for aliases in (
+        ("marca",),
+        ("modelo",),
+        ("serie", "ns"),
+        ("id_indicador", "id_equipo"),
+        ("ubicacion",),
+    ):
+        val = ""
+        for k in aliases:
+            cand = str(orden.get(k) or "").strip()
+            if cand and cand.lower() not in invalidos:
+                val = cand
+                break
+        if val:
+            partes.append(val)
+    return " - ".join(partes)
 
 
 # ── Catálogos ──────────────────────────────────────────────────────────────────
@@ -262,10 +375,18 @@ async def get_ordenes(
             COALESCE(os.ns, '') AS ns,
             COALESCE(os.ns, '') AS serie,
             COALESCE(os.ubicacion, '') AS ubicacion,
+            COALESCE(os.alcance_max, 0) AS alcance_max_raw,
             os.alcance_max,
             os.div_minima,
             os.div_verificacion,
             COALESCE(os.id_equipo::text, '') AS id_equipo,
+            COALESCE(os.id_equipo::text, '') AS id_indicador,
+            COALESCE(os.numero_cca, '') AS numero_cca,
+            COALESCE(os.numero_dve, '') AS numero_dve,
+            COALESCE(os.motivo_no_excentricidad, '') AS motivo_no_excentricidad,
+            COALESCE(os.id_lote, '') AS id_lote,
+            COALESCE(os.rango_lote, '') AS rango_lote,
+            COALESCE(cs.direccion, cl.direccion, '') AS direccion,
             COALESCE(os.sync_version, 1) AS sync_version,
             COALESCE(os.updated_at, NOW()) AS updated_at,
             COALESCE(
@@ -374,13 +495,22 @@ async def get_ordenes(
                             d["tipo_instrumento"] = str(dt_obj.get("tipo_instrumento"))
                         if dt_obj.get("aplica_excentricidad") is not None:
                             d["aplica_excentricidad"] = bool(dt_obj.get("aplica_excentricidad"))
-                        for str_key in ("marca", "modelo", "ns", "serie", "ubicacion", "id_equipo"):
+                        for str_key in ("marca", "modelo", "ns", "serie", "ubicacion", "id_equipo", "numero_cca", "numero_dve", "motivo_no_excentricidad"):
                             if not d.get(str_key) and dt_obj.get(str_key):
                                 d[str_key] = str(dt_obj.get(str_key))
                         if not d.get("id_equipo") and dt_obj.get("id_indicador"):
                             d["id_equipo"] = str(dt_obj.get("id_indicador"))
+                        if not d.get("id_indicador") and d.get("id_equipo"):
+                            d["id_indicador"] = str(d.get("id_equipo"))
+                        if not d.get("numero_cca") and dt_obj.get("cca"):
+                            d["numero_cca"] = str(dt_obj.get("cca"))
+                        if not d.get("numero_dve") and dt_obj.get("folio_dve"):
+                            d["numero_dve"] = str(dt_obj.get("folio_dve"))
                 except Exception:
                     pass
+            d["numero_cca"] = _limpiar_num_reg(d.get("numero_cca"))
+            d["numero_dve"] = _limpiar_num_reg(d.get("numero_dve"))
+            d["etiqueta_instrumento"] = _construir_etiqueta_instrumento_dict(d)
             d["partidas"] = partidas_list
             d["refacciones"] = partidas_list
             resultado.append(d)
@@ -399,7 +529,7 @@ async def get_ordenes(
 
 @router.post(
     "/ordenes",
-    summary="Crear nueva Orden de Servicio desde la tablet",
+    summary="Crear nueva Orden de Servicio desde la tablet (Admin / Técnico)",
     tags=["Catálogos"],
     status_code=status.HTTP_201_CREATED,
 )
@@ -409,19 +539,28 @@ async def crear_orden(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Crea una nueva OS (o lote de OS) directamente desde la tablet.
-    Asigna folio autogenerado y devuelve los datos creados.
+    Crea una nueva OS (o lote de OS) directamente desde la tablet con paridad completa
+    con el generador de formatos de Windows:
+      - Todos los tipos de documento: OS, RMA, RE, LP, LV, OSOB, OSOCC
+      - Modalidad: Digital | Físico
+      - Individual o Lote (con id_lote y rango_lote)
+      - Cliente, Sucursal/Dirección completa y Técnico asignado
+      - Datos parciales o completos del instrumento (Marca, Modelo, Serie, ID, Ubicación, CCA, DVE)
     """
-    # Generar folio/s
     today = date.today()
     year_short = today.strftime("%y")
+    fecha_orden = today
+    if body.fecha and str(body.fecha).strip():
+        try:
+            fecha_orden = date.fromisoformat(str(body.fecha).strip()[:10])
+        except Exception:
+            fecha_orden = today
 
-    # [SEC] Un técnico solo puede crear OS asignadas a sí mismo.
+    # [SEC] Un técnico solo puede crear OS asignadas a sí mismo; Admin/Logística a cualquiera.
     id_tecnico_asignado = body.id_tecnico
     if not tiene_visibilidad_global(current_user):
         id_tecnico_asignado = id_tecnico_de(current_user)
 
-    # Obtener el siguiente número de secuencia
     pref = (body.tipo_documento or "OS").strip().upper()
     if pref not in ("OS", "RMA", "RE", "OSOB", "OSOCC", "LV", "LP"):
         pref = "OS"
@@ -441,48 +580,580 @@ async def crear_orden(
     )
     siguiente = seq_row["siguiente"] if seq_row else 1
 
-    cantidad = max(1, body.cantidad) if body.tipo == "Lote" else 1
-    folios_creados = []
+    es_lote = str(body.tipo or "").strip().lower() == "lote" and (body.cantidad or 1) > 1
+    cantidad = max(1, body.cantidad) if es_lote else 1
+    folios_creados = [f"{pref}-{year_short}-{siguiente + i:03d}" for i in range(cantidad)]
 
-    for i in range(cantidad):
-        folio = f"{pref}-{year_short}-{siguiente + i:03d}"
-        if pref == "OSOB":
-            tipo_srv_txt = "Formato de Inspección y Revisión de Básculas"
-        elif pref == "OSOCC":
-            tipo_srv_txt = "Formato de Diagnóstico y Revisión de Celda de Carga"
-        else:
-            tipo_srv_txt = None
-        await db.execute(
-            """
-            INSERT INTO ordenes_servicio (
-                folio_os, tipo_documento, tipo_servicio, estado, modalidad, fecha,
-                id_cliente, id_tecnico, id_tipo_servicio,
-                observaciones, sync_version, updated_at
-            ) VALUES (
-                $1, $2, $3, 'PROCESO', $4, NOW()::date,
-                $5, $6, $7,
-                $8, 1, NOW()
+    id_lote_val = f"LOTE-{uuid.uuid4().hex[:10].upper()}" if cantidad > 1 else None
+    rango_lote_val = f"{folios_creados[0]} al {folios_creados[-1]}" if cantidad > 1 else None
+
+    modalidad_norm = _normalizar_modalidad(body.modalidad) or "DIGITAL"
+
+    # Resolver nombres de cliente, sucursal y técnico para respuesta enriquecida
+    cliente_nom = ""
+    cliente_dir = (body.direccion or "").strip()
+    sucursal_nom = (body.sucursal or "").strip()
+    if body.id_cliente:
+        try:
+            crow = await db.fetchrow(
+                "SELECT razon_social, COALESCE(direccion, '') AS direccion FROM cat_clientes WHERE id = $1",
+                body.id_cliente,
             )
-            ON CONFLICT (folio_os) DO NOTHING
-            """,
-            folio,
-            pref,
-            tipo_srv_txt,
-            body.modalidad.upper(),
-            body.id_cliente,
-            id_tecnico_asignado,
-            body.id_tipo_servicio,
-            body.observaciones or "",
+            if crow:
+                cliente_nom = str(crow["razon_social"] or "")
+                if not cliente_dir:
+                    cliente_dir = str(crow["direccion"] or "")
+        except Exception:
+            pass
+    if body.sucursal_id:
+        try:
+            srow = await db.fetchrow(
+                "SELECT COALESCE(nombre_sucursal, '') AS nombre_sucursal, COALESCE(direccion, '') AS direccion FROM cliente_sucursales WHERE id = $1",
+                body.sucursal_id,
+            )
+            if srow:
+                if not sucursal_nom:
+                    sucursal_nom = str(srow["nombre_sucursal"] or "")
+                if srow["direccion"]:
+                    cliente_dir = str(srow["direccion"])
+        except Exception:
+            pass
+
+    tecnico_nom = ""
+    if id_tecnico_asignado:
+        try:
+            trow = await db.fetchrow("SELECT nombre_completo FROM cat_tecnicos WHERE id = $1", id_tecnico_asignado)
+            if trow:
+                tecnico_nom = str(trow["nombre_completo"] or "")
+        except Exception:
+            pass
+
+    tipo_srv_txt = None
+    if pref == "OSOB":
+        tipo_srv_txt = "Formato de Inspección y Revisión de Básculas"
+    elif pref == "OSOCC":
+        tipo_srv_txt = "Formato de Diagnóstico y Revisión de Celda de Carga"
+    elif pref == "RMA":
+        tipo_srv_txt = "Remisión de Material"
+    elif pref == "RE":
+        tipo_srv_txt = "Revisión de Báscula"
+    elif pref == "LP":
+        tipo_srv_txt = "Levantamiento de Proyecto"
+    elif pref == "LV":
+        tipo_srv_txt = "Levantamiento Metrológico"
+    elif body.id_tipo_servicio:
+        try:
+            ts_row = await db.fetchrow("SELECT nombre FROM cat_tipo_servicio WHERE id = $1", body.id_tipo_servicio)
+            if ts_row:
+                tipo_srv_txt = str(ts_row["nombre"] or "")
+        except Exception:
+            pass
+
+    # Instrumento parcial / inicial (solo en Individual o en primera orden si es lote;
+    # si es Individual o si envían marca/modelo generales se guardan en la orden)
+    marca_in = (body.marca or "").strip() or None
+    modelo_in = (body.modelo or "").strip() or None
+    serie_in = (body.serie or body.ns or "").strip() or None
+    id_eq_in = (body.id_indicador or body.id_equipo or "").strip() or None
+    ubic_in = (body.ubicacion or "").strip() or None
+    cap_str = str(body.capacidad_maxima).strip() if body.capacidad_maxima is not None and str(body.capacidad_maxima).strip() else None
+    div_str = _norm_div_min_str(body.division_minima) if body.division_minima is not None and str(body.division_minima).strip() else None
+    cap_num = _parse_float_opt(body.capacidad_maxima)
+    div_num = _parse_float_opt(div_str)
+    cca_in = _limpiar_num_reg(body.numero_cca) or None
+    dve_in = _limpiar_num_reg(body.numero_dve) or None
+    aplica_exc = True if body.aplica_excentricidad is None else bool(body.aplica_excentricidad)
+    motivo_no_exc = (body.motivo_no_excentricidad or "").strip() if not aplica_exc else None
+    tipo_inst_txt = (body.tipo_instrumento or "").strip() or None
+
+    dt_json_dict = {
+        k: v
+        for k, v in {
+            "marca": marca_in,
+            "modelo": modelo_in,
+            "serie": serie_in,
+            "ns": serie_in,
+            "id_indicador": id_eq_in,
+            "id_equipo": id_eq_in,
+            "capacidad_maxima": cap_str,
+            "division_minima": div_str,
+            "ubicacion": ubic_in,
+            "tipo_instrumento": tipo_inst_txt,
+            "numero_cca": cca_in,
+            "numero_dve": dve_in,
+            "aplica_excentricidad": aplica_exc,
+            "motivo_no_excentricidad": motivo_no_exc,
+            "direccion": cliente_dir,
+            "sucursal": sucursal_nom,
+            "unidad_medida": (body.unidad_medida or "kg").strip() or "kg",
+        }.items()
+        if v is not None and v != ""
+    }
+    dt_json_str = json.dumps(dt_json_dict, ensure_ascii=False) if dt_json_dict else "{}"
+
+    ordenes_creadas = []
+    for idx, folio in enumerate(folios_creados):
+        consec_num = siguiente + idx
+        # En lote, serie e id_equipo únicos no se clonan en las demás tarjetas salvo marca/modelo/ubicacion parciales
+        f_serie = serie_in if (cantidad == 1 or idx == 0) else None
+        f_ideq = id_eq_in if (cantidad == 1 or idx == 0) else None
+        f_cca = cca_in if (cantidad == 1 or idx == 0) else None
+        f_dve = dve_in if (cantidad == 1 or idx == 0) else None
+        f_dt = dt_json_str if (cantidad == 1 or idx == 0) else json.dumps(
+            {k: v for k, v in dt_json_dict.items() if k not in ("serie", "ns", "id_indicador", "id_equipo", "numero_cca", "numero_dve")},
+            ensure_ascii=False,
         )
-        folios_creados.append(folio)
+
+        try:
+            await db.execute(
+                """
+                INSERT INTO ordenes_servicio (
+                    folio_os, consecutivo, tipo_documento, tipo_servicio,
+                    estado, estatus, modalidad, fecha,
+                    id_cliente, cliente, sucursal_id, id_tecnico,
+                    id_tipo_servicio, id_tipo_instrumento,
+                    marca, modelo, ns, id_equipo, ubicacion,
+                    alcance_max, div_minima, instrumento_capacidad, instrumento_division,
+                    numero_cca, numero_dve, aplica_excentricidad, motivo_no_excentricidad,
+                    id_lote, rango_lote, datos_tecnicos_json,
+                    observaciones, sync_check_status, sync_version, updated_at
+                ) VALUES (
+                    $1, $2, $3, $4,
+                    'PROCESO', 'Asignada', $5, $6,
+                    $7, $8, $9, $10,
+                    $11, $12,
+                    $13, $14, $15, $16, $17,
+                    $18, $19, $20, $21,
+                    $22, $23, $24, $25,
+                    $26, $27, $28,
+                    $29, 'ASIGNADA', 1, NOW()
+                )
+                ON CONFLICT (folio_os) DO NOTHING
+                """,
+                folio,
+                consec_num,
+                pref,
+                tipo_srv_txt,
+                modalidad_norm,
+                fecha_orden,
+                body.id_cliente,
+                cliente_nom or None,
+                body.sucursal_id,
+                id_tecnico_asignado,
+                body.id_tipo_servicio,
+                body.id_tipo_instrumento,
+                marca_in,
+                modelo_in,
+                f_serie,
+                f_ideq,
+                ubic_in,
+                cap_num,
+                div_num,
+                cap_str,
+                div_str,
+                f_cca,
+                f_dve,
+                aplica_exc,
+                motivo_no_exc,
+                id_lote_val,
+                rango_lote_val,
+                f_dt,
+                body.observaciones or "",
+            )
+        except Exception as exc_ins:
+            logger.warning("[CREAR ORDEN] INSERT extendido falló (%s), aplicando fallback compatible", exc_ins)
+            await db.execute(
+                """
+                INSERT INTO ordenes_servicio (
+                    folio_os, tipo_documento, tipo_servicio, estado, modalidad, fecha,
+                    id_cliente, sucursal_id, id_tecnico, id_tipo_servicio,
+                    marca, modelo, ns, id_equipo, ubicacion, numero_cca,
+                    datos_tecnicos_json, observaciones, sync_version, updated_at
+                ) VALUES (
+                    $1, $2, $3, 'PROCESO', $4, $5,
+                    $6, $7, $8, $9,
+                    $10, $11, $12, $13, $14, $15,
+                    $16, $17, 1, NOW()
+                )
+                ON CONFLICT (folio_os) DO NOTHING
+                """,
+                folio,
+                pref,
+                tipo_srv_txt,
+                modalidad_norm,
+                fecha_orden,
+                body.id_cliente,
+                body.sucursal_id,
+                id_tecnico_asignado,
+                body.id_tipo_servicio,
+                marca_in,
+                modelo_in,
+                f_serie,
+                f_ideq,
+                ubic_in,
+                f_cca,
+                f_dt,
+                body.observaciones or "",
+            )
+
+        orden_dict = {
+            "folio_os": folio,
+            "folio": folio,
+            "tipo_documento": pref,
+            "tipo_servicio": tipo_srv_txt or "",
+            "id_tipo_servicio": body.id_tipo_servicio,
+            "estado": "PROCESO",
+            "estatus": "Asignada",
+            "modalidad": modalidad_norm,
+            "fecha": fecha_orden.isoformat(),
+            "id_cliente": body.id_cliente,
+            "cliente": cliente_nom,
+            "sucursal_id": body.sucursal_id,
+            "sucursal": sucursal_nom,
+            "direccion": cliente_dir,
+            "id_tecnico": id_tecnico_asignado,
+            "tecnico": tecnico_nom,
+            "marca": marca_in or "",
+            "modelo": modelo_in or "",
+            "ns": f_serie or "",
+            "serie": f_serie or "",
+            "id_equipo": f_ideq or "",
+            "id_indicador": f_ideq or "",
+            "ubicacion": ubic_in or "",
+            "alcance_max": cap_num,
+            "div_minima": div_num,
+            "instrumento_capacidad": cap_str or "",
+            "instrumento_division": div_str or "",
+            "tipo_instrumento": tipo_inst_txt or "",
+            "numero_cca": f_cca or "",
+            "numero_dve": f_dve or "",
+            "aplica_excentricidad": aplica_exc,
+            "motivo_no_excentricidad": motivo_no_exc or "",
+            "id_lote": id_lote_val or "",
+            "rango_lote": rango_lote_val or "",
+            "datos_tecnicos_json": f_dt,
+            "observaciones": body.observaciones or "",
+            "sync_check_status": "ASIGNADA",
+        }
+        orden_dict["etiqueta_instrumento"] = _construir_etiqueta_instrumento_dict(orden_dict)
+        ordenes_creadas.append(orden_dict)
+
+    if marca_in and modelo_in:
+        try:
+            await db.execute(
+                "INSERT INTO catalogo_marcas_modelos (marca, modelo) VALUES ($1, $2) ON CONFLICT (marca, modelo) DO NOTHING",
+                marca_in, modelo_in,
+            )
+        except Exception:
+            pass
 
     return {
         "folio_os": folios_creados[0],
-        "folios":   folios_creados,
+        "folios": folios_creados,
         "cantidad": cantidad,
-        "tipo":     body.tipo,
-        "modalidad": body.modalidad,
+        "tipo": body.tipo,
+        "modalidad": modalidad_norm,
+        "id_lote": id_lote_val,
+        "rango_lote": rango_lote_val,
+        "ordenes": ordenes_creadas,
     }
+
+
+# ── Guardado Parcial de Datos de Instrumento (sin cerrar la orden) ────────────
+
+@router.patch(
+    "/ordenes/{folio}/instrumento",
+    summary="Guardar y sincronizar datos parciales del instrumento sin finalizar la orden",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+@router.post(
+    "/ordenes/{folio}/instrumento",
+    summary="Alias POST para guardar datos parciales del instrumento sin finalizar la orden",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+async def actualizar_instrumento_parcial(
+    folio: str,
+    body: ActualizarInstrumentoBody,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Actualiza únicamente los datos del instrumento y números regulatorios (CCA / DVE)
+    manteniendo la orden en estado 'EN_PROCESO' o 'ASIGNADA' (NUNCA la cierra).
+    """
+    clean_folio = (folio or "").strip()
+    row = await db.fetchrow(
+        """
+        SELECT id, folio_os, id_tecnico, sucursal_id, estado, estatus,
+               COALESCE(datos_tecnicos_json, '{}') AS datos_tecnicos_json,
+               marca, modelo, ns, id_equipo, ubicacion,
+               numero_cca, numero_dve
+        FROM ordenes_servicio
+        WHERE folio_os = $1 OR id::text = $1
+        """,
+        clean_folio,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Orden '{clean_folio}' no encontrada")
+
+    verificar_acceso_os(current_user, row["id_tecnico"])
+
+    actual_id = row["id"]
+    actual_folio = row["folio_os"]
+    estado_actual = str(row["estado"] or "").strip().upper()
+    estatus_actual = str(row["estatus"] or "").strip().upper()
+
+    _ESTADOS_FINALES = {
+        "CERRADO", "CERRADA", "COMPLETADA", "COMPLETADO",
+        "COMPLETADA_DIGITAL", "COMPLETADA_FISICA", "ESCANEADA", "FIRMADA", "CANCELADA",
+    }
+    ya_cerrada = estado_actual in _ESTADOS_FINALES or estatus_actual in _ESTADOS_FINALES
+
+    if ya_cerrada:
+        nuevo_estado = row["estado"]
+        nuevo_estatus = row["estatus"]
+    else:
+        req_est = str(body.estatus or "").strip().upper()
+        if req_est == "ASIGNADA":
+            nuevo_estado = "ASIGNADA"
+            nuevo_estatus = "Asignada"
+        else:
+            nuevo_estado = "EN_PROCESO"
+            nuevo_estatus = "En Proceso"
+
+    # Resolver valores proporcionados (permitiendo limpiar CCA o DVE si se envía cadena vacía explícita)
+    marca_val = body.marca.strip() if body.marca is not None else None
+    modelo_val = body.modelo.strip() if body.modelo is not None else None
+    serie_raw = body.serie if body.serie is not None else body.ns
+    serie_val = serie_raw.strip() if serie_raw is not None else None
+    id_ind_raw = body.id_indicador if body.id_indicador is not None else body.id_equipo
+    id_ind_val = id_ind_raw.strip() if id_ind_raw is not None else None
+    ubic_val = body.ubicacion.strip() if body.ubicacion is not None else None
+    tipo_inst_val = body.tipo_instrumento.strip() if body.tipo_instrumento is not None else None
+
+    cap_raw = body.capacidad_maxima if body.capacidad_maxima is not None else body.alcance_max
+    cap_str = str(cap_raw).strip() if cap_raw is not None else None
+    cap_num = _parse_float_opt(cap_raw)
+
+    div_raw = body.division_minima if body.division_minima is not None else body.div_minima
+    div_str = _norm_div_min_str(div_raw) if div_raw is not None else None
+    div_num = _parse_float_opt(div_str)
+
+    cca_provided = (body.numero_cca is not None) or (body.cca is not None)
+    cca_val = _limpiar_num_reg(body.numero_cca if body.numero_cca is not None else body.cca) if cca_provided else None
+
+    dve_provided = (body.numero_dve is not None) or (body.folio_dve is not None)
+    dve_val = _limpiar_num_reg(body.numero_dve if body.numero_dve is not None else body.folio_dve) if dve_provided else None
+
+    aplica_exc_val = body.aplica_excentricidad
+    motivo_no_val = body.motivo_no_excentricidad.strip() if body.motivo_no_excentricidad is not None else None
+    if aplica_exc_val is True:
+        motivo_no_val = ""
+
+    # Fusionar en datos_tecnicos_json existente sin perder mediciones ni otros metadatos
+    dt_existing: dict = {}
+    try:
+        raw_dt = row["datos_tecnicos_json"]
+        if isinstance(raw_dt, dict):
+            dt_existing = dict(raw_dt)
+        elif isinstance(raw_dt, str) and raw_dt.strip():
+            parsed = json.loads(raw_dt)
+            if isinstance(parsed, dict):
+                dt_existing = parsed
+    except Exception:
+        dt_existing = {}
+
+    merge_updates = {
+        "marca": marca_val,
+        "modelo": modelo_val,
+        "serie": serie_val,
+        "ns": serie_val,
+        "id_indicador": id_ind_val,
+        "id_equipo": id_ind_val,
+        "capacidad_maxima": cap_str,
+        "division_minima": div_str,
+        "ubicacion": ubic_val,
+        "tipo_instrumento": tipo_inst_val,
+        "aplica_excentricidad": aplica_exc_val,
+        "motivo_no_excentricidad": motivo_no_val,
+        "unidad_medida": body.unidad_medida,
+        "holograma_anterior": body.holograma_anterior,
+        "holograma_actualizado": body.holograma_actualizado,
+    }
+    for k, v in merge_updates.items():
+        if v is not None:
+            dt_existing[k] = v
+    if cca_provided:
+        dt_existing["numero_cca"] = cca_val or ""
+        dt_existing["cca"] = cca_val or ""
+    if dve_provided:
+        dt_existing["numero_dve"] = dve_val or ""
+        dt_existing["folio_dve"] = dve_val or ""
+
+    dt_json_final = json.dumps(dt_existing, ensure_ascii=False)
+
+    # Resolver id_tipo_instrumento si se proporcionó nombre
+    id_tipo_inst = None
+    if tipo_inst_val:
+        try:
+            ti_r = await db.fetchrow(
+                "SELECT id FROM cat_tipo_instrumento WHERE LOWER(TRIM(nombre)) = LOWER(TRIM($1)) LIMIT 1",
+                tipo_inst_val,
+            )
+            if ti_r:
+                id_tipo_inst = int(ti_r["id"])
+        except Exception:
+            pass
+
+    try:
+        await db.execute(
+            """
+            UPDATE ordenes_servicio SET
+                estado                  = $1,
+                estatus                 = $2,
+                marca                   = COALESCE($3, marca),
+                modelo                  = COALESCE($4, modelo),
+                ns                      = COALESCE($5, ns),
+                id_equipo               = COALESCE($6, id_equipo),
+                ubicacion               = COALESCE($7, ubicacion),
+                alcance_max             = COALESCE($8, alcance_max),
+                div_minima              = COALESCE($9, div_minima),
+                instrumento_capacidad   = COALESCE($10, instrumento_capacidad),
+                instrumento_division    = COALESCE($11, instrumento_division),
+                id_tipo_instrumento     = COALESCE($12, id_tipo_instrumento),
+                numero_cca              = CASE WHEN $13::boolean THEN $14 ELSE numero_cca END,
+                numero_dve              = CASE WHEN $15::boolean THEN $16 ELSE numero_dve END,
+                aplica_excentricidad    = COALESCE($17, aplica_excentricidad),
+                motivo_no_excentricidad = COALESCE($18, motivo_no_excentricidad),
+                unidad_medida           = COALESCE($19, unidad_medida),
+                holograma_anterior      = COALESCE($20, holograma_anterior),
+                holograma_actualizado   = COALESCE($21, holograma_actualizado),
+                sucursal_id             = COALESCE($22, sucursal_id),
+                datos_tecnicos_json     = $23,
+                sync_version            = COALESCE(sync_version, 0) + 1,
+                updated_at              = NOW()
+            WHERE id = $24
+            """,
+            nuevo_estado,
+            nuevo_estatus,
+            marca_val,
+            modelo_val,
+            serie_val,
+            id_ind_val,
+            ubic_val,
+            cap_num,
+            div_num,
+            cap_str,
+            div_str,
+            id_tipo_inst,
+            cca_provided,
+            cca_val or "",
+            dve_provided,
+            dve_val or "",
+            aplica_exc_val,
+            motivo_no_val,
+            body.unidad_medida,
+            body.holograma_anterior,
+            body.holograma_actualizado,
+            body.sucursal_id,
+            dt_json_final,
+            actual_id,
+        )
+    except Exception as exc_upd:
+        logger.warning("[PATCH INSTRUMENTO] UPDATE completo falló (%s), usando fallback compatible", exc_upd)
+        await db.execute(
+            """
+            UPDATE ordenes_servicio SET
+                estado              = $1,
+                estatus             = $2,
+                marca               = COALESCE($3, marca),
+                modelo              = COALESCE($4, modelo),
+                ns                  = COALESCE($5, ns),
+                id_equipo           = COALESCE($6, id_equipo),
+                ubicacion           = COALESCE($7, ubicacion),
+                alcance_max         = COALESCE($8, alcance_max),
+                div_minima          = COALESCE($9, div_minima),
+                numero_cca          = CASE WHEN $10::boolean THEN $11 ELSE numero_cca END,
+                aplica_excentricidad= COALESCE($12, aplica_excentricidad),
+                datos_tecnicos_json = $13,
+                updated_at          = NOW()
+            WHERE id = $14
+            """,
+            nuevo_estado,
+            nuevo_estatus,
+            marca_val,
+            modelo_val,
+            serie_val,
+            id_ind_val,
+            ubic_val,
+            cap_num,
+            div_num,
+            cca_provided,
+            cca_val or "",
+            aplica_exc_val,
+            dt_json_final,
+            actual_id,
+        )
+
+    # Registrar marca/modelo y equipo de sucursal para autocompletado futuro
+    eff_marca = marca_val if marca_val is not None else str(row["marca"] or "").strip()
+    eff_modelo = modelo_val if modelo_val is not None else str(row["modelo"] or "").strip()
+    eff_serie = serie_val if serie_val is not None else str(row["ns"] or "").strip()
+    eff_id_ind = id_ind_val if id_ind_val is not None else str(row["id_equipo"] or "").strip()
+    eff_ubic = ubic_val if ubic_val is not None else str(row["ubicacion"] or "").strip()
+    eff_cca = cca_val if cca_provided else _limpiar_num_reg(row["numero_cca"])
+    eff_dve = dve_val if dve_provided else _limpiar_num_reg(row.get("numero_dve") if isinstance(row, dict) else row["numero_dve"])
+    eff_suc_id = body.sucursal_id or row["sucursal_id"]
+
+    if eff_marca and eff_modelo:
+        try:
+            await db.execute(
+                "INSERT INTO catalogo_marcas_modelos (marca, modelo) VALUES ($1, $2) ON CONFLICT (marca, modelo) DO NOTHING",
+                eff_marca, eff_modelo,
+            )
+        except Exception:
+            pass
+
+    if eff_suc_id and eff_serie:
+        try:
+            await db.execute(
+                """
+                INSERT INTO cliente_equipos (
+                    sucursal_id, marca, modelo, numero_serie,
+                    id_indicador_equipo, ubicacion_interna,
+                    capacidad_maxima, division_minima, tipo_instrumento, activo
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, TRUE)
+                ON CONFLICT (sucursal_id, numero_serie) DO UPDATE SET
+                    marca               = COALESCE(NULLIF(EXCLUDED.marca, ''), cliente_equipos.marca),
+                    modelo              = COALESCE(NULLIF(EXCLUDED.modelo, ''), cliente_equipos.modelo),
+                    id_indicador_equipo = COALESCE(NULLIF(EXCLUDED.id_indicador_equipo, ''), cliente_equipos.id_indicador_equipo),
+                    ubicacion_interna   = COALESCE(NULLIF(EXCLUDED.ubicacion_interna, ''), cliente_equipos.ubicacion_interna),
+                    capacidad_maxima    = COALESCE(NULLIF(EXCLUDED.capacidad_maxima, ''), cliente_equipos.capacidad_maxima),
+                    division_minima     = COALESCE(NULLIF(EXCLUDED.division_minima, ''), cliente_equipos.division_minima),
+                    tipo_instrumento    = COALESCE(NULLIF(EXCLUDED.tipo_instrumento, ''), cliente_equipos.tipo_instrumento)
+                """,
+                eff_suc_id, eff_marca, eff_modelo, eff_serie,
+                eff_id_ind, eff_ubic, cap_str, div_str, tipo_inst_val,
+            )
+        except Exception:
+            pass
+
+    resumen = {
+        "ok": True,
+        "folio_os": actual_folio,
+        "folio": actual_folio,
+        "estado": nuevo_estado,
+        "estatus": nuevo_estatus,
+        "marca": eff_marca,
+        "modelo": eff_modelo,
+        "serie": eff_serie,
+        "id_indicador": eff_id_ind,
+        "ubicacion": eff_ubic,
+        "numero_cca": eff_cca or "",
+        "numero_dve": eff_dve or "",
+    }
+    resumen["etiqueta_instrumento"] = _construir_etiqueta_instrumento_dict(resumen)
+    return resumen
 
 
 # ── Adjuntar escaneo ──────────────────────────────────────────────────────────

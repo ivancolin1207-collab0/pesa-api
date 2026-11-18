@@ -5,7 +5,9 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
+import 'package:provider/provider.dart';
 import '../services/local_db_service.dart';
+import '../services/sync_service.dart';
 import '../services/tipo_servicio_rules.dart';
 import '../services/metrology_helper.dart';
 import '../widgets/repetibilidad_table.dart';
@@ -105,15 +107,16 @@ class _CapturaScreenState extends State<CapturaScreen>
     return esDve ? _prefijoDve : _prefijoCca;
   }
 
-  // Valores efectivos: si la sección no aplica se envían vacíos (no se
-  // arrastran datos precargados ni bloquean el guardado / PDF).
-  String get _ccaEf     => _aplicaCCA ? _ccaCtrl.text.trim() : '';
-  bool   get _jEf       => _aplicaCCA && _jChecked;
-  bool   get _iEf       => _aplicaCCA && _iChecked;
-  bool   get _aEf       => _aplicaCCA && _aChecked;
-  String get _dveEf     => _aplicaDVE ? _divVerCtrl.text.trim() : '';
-  String get _holoAntEf => _aplicaDVE ? _holoAntCtrl.text.trim() : '';
-  String get _holoActEf => _aplicaDVE ? _holoActCtrl.text.trim() : '';
+  // Valores efectivos: CCA y DVE son números regulatorios independientes;
+  // si cualquiera fue capturado se conserva en SQLite, servidor y PDF.
+  String get _ccaEf       => limpiarNumeroRegulatorio(_ccaCtrl.text);
+  String get _numeroDveEf => limpiarNumeroRegulatorio(_numeroDveCtrl.text);
+  bool   get _jEf         => (_aplicaCCA || _ccaEf.isNotEmpty) && _jChecked;
+  bool   get _iEf         => (_aplicaCCA || _ccaEf.isNotEmpty) && _iChecked;
+  bool   get _aEf         => (_aplicaCCA || _ccaEf.isNotEmpty) && _aChecked;
+  String get _dveEf       => _aplicaDVE ? _divVerCtrl.text.trim() : '';
+  String get _holoAntEf   => (_aplicaDVE || _numeroDveEf.isNotEmpty) ? _holoAntCtrl.text.trim() : '';
+  String get _holoActEf   => (_aplicaDVE || _numeroDveEf.isNotEmpty) ? _holoActCtrl.text.trim() : '';
 
   /// Carga de sustitución OPCIONAL: solo aplica si el técnico eligió "Sí"
   /// y capturó un valor > 0. Vacío / 0 / "No" ⇒ aplica_sustitucion = false.
@@ -138,17 +141,22 @@ class _CapturaScreenState extends State<CapturaScreen>
   // ── Controladores Paso 0 — Instrumento ───────────────────────────────────
   final _marcaCtrl      = TextEditingController();
   final _modeloCtrl     = TextEditingController();
-  final _marcaFocusNode  = FocusNode();
-  final _modeloFocusNode = FocusNode();
+  final _marcaFocusNode    = FocusNode();
+  final _modeloFocusNode   = FocusNode();
+  final _nsFocusNode       = FocusNode();
+  final _idEquipoFocusNode = FocusNode();
   List<String> _marcasSugeridas  = [];
   List<String> _modelosSugeridos = [];
+  List<Map<String, dynamic>> _historialInstrumentos = [];
+  bool _savingParcial = false;
   final _nsCtrl         = TextEditingController();
   final _idEquipoCtrl   = TextEditingController();
   final _capMaxCtrl     = TextEditingController();
   final _divMinCtrl     = TextEditingController();
-  final _divVerCtrl     = TextEditingController(); // DVE — solo en Inspección
+  final _divVerCtrl     = TextEditingController(); // Div. Verificación (e) en kg
   final _ubicCtrl       = TextEditingController();
-  final _ccaCtrl        = TextEditingController();
+  final _ccaCtrl        = TextEditingController(); // Número CCA independiente (ej. CCA.26.02163)
+  final _numeroDveCtrl  = TextEditingController(); // Número DVE independiente (ej. DVE.26.00412)
   final _holoAntCtrl    = TextEditingController();
   final _holoActCtrl    = TextEditingController();
   final _masaPatronCtrl = TextEditingController();
@@ -222,14 +230,138 @@ class _CapturaScreenState extends State<CapturaScreen>
     try {
       final marcas = await LocalDbService.instance.getMarcas();
       final modelos = await LocalDbService.instance.getModelos(marca: _marcaCtrl.text.trim());
+      final hist = await LocalDbService.instance.getHistorialInstrumentos(
+        clienteId: _intOrNull(_os['id_cliente']),
+        cliente: (_os['cliente'] ?? _os['cliente_nombre'])?.toString(),
+        sucursalId: _intOrNull(_os['sucursal_id']),
+        sucursal: (_os['sucursal'] ?? _os['direccion'])?.toString(),
+      );
       if (mounted) {
         setState(() {
           _marcasSugeridas = marcas;
           _modelosSugeridos = modelos;
+          _historialInstrumentos = hist;
         });
       }
     } catch (e) {
-      debugPrint('[Captura] Error cargando marcas/modelos sugeridos: $e');
+      debugPrint('[Captura] Error cargando marcas/modelos/historial sugeridos: $e');
+    }
+  }
+
+  void _aplicarInstrumentoDelHistorial(Map<String, dynamic> inst) {
+    setState(() {
+      final m = (inst['marca'] ?? '').toString().trim();
+      final mod = (inst['modelo'] ?? '').toString().trim();
+      final ser = (inst['serie'] ?? inst['ns'] ?? '').toString().trim();
+      final idEq = (inst['id_indicador'] ?? inst['id_equipo'] ?? '').toString().trim();
+      final cap = (inst['capacidad_maxima'] ?? '').toString().replaceAll(RegExp(r'[^0-9.]'), '').trim();
+      final div = formatearDivisionMinima(inst['division_minima']).replaceAll(RegExp(r'[^0-9.]'), '').trim();
+      final ubic = (inst['ubicacion'] ?? '').toString().trim();
+      final tInst = _normalizarNombreTipoInstrumento(inst['tipo_instrumento']?.toString());
+
+      if (m.isNotEmpty) {
+        _marcaCtrl.text = m;
+        _os['marca'] = m;
+      }
+      if (mod.isNotEmpty) {
+        _modeloCtrl.text = mod;
+        _os['modelo'] = mod;
+      }
+      if (ser.isNotEmpty) {
+        _nsCtrl.text = ser;
+        _os['ns'] = ser;
+      }
+      if (idEq.isNotEmpty) {
+        _idEquipoCtrl.text = idEq;
+        _os['id_equipo'] = idEq;
+      }
+      if (cap.isNotEmpty) {
+        _capMaxCtrl.text = cap;
+      }
+      if (div.isNotEmpty) {
+        _divMinCtrl.text = div;
+      }
+      if (ubic.isNotEmpty) {
+        _ubicCtrl.text = ubic;
+        _os['ubicacion'] = ubic;
+      }
+      if (tInst != null && tInst.isNotEmpty) {
+        _tipoInstrumento = tInst;
+        _os['tipo_instrumento'] = tInst;
+        _aplicarParametrosPostTipoInstrumento();
+      }
+      _actualizarCargasSugeridas(force: false);
+    });
+    if (_marcaCtrl.text.trim().isNotEmpty) {
+      _actualizarModelosParaMarca(_marcaCtrl.text.trim());
+    }
+  }
+
+  Future<void> _guardarEquipoSinFinalizar() async {
+    if (_savingParcial) return;
+    _guardarDatosInstrumento();
+    final folio = (_os['folio_os'] ?? widget.osData['folio_os'] ?? widget.osId.toString()).toString().trim();
+    if (folio.isEmpty) return;
+
+    setState(() => _savingParcial = true);
+    try {
+      final divNorm = formatearDivisionMinima(_divMinCtrl.text.trim());
+      final payloadParcial = <String, dynamic>{
+        'marca': _marcaCtrl.text.trim(),
+        'modelo': _modeloCtrl.text.trim(),
+        'serie': _nsCtrl.text.trim(),
+        'ns': _nsCtrl.text.trim(),
+        'id_indicador': _idEquipoCtrl.text.trim(),
+        'id_equipo': _idEquipoCtrl.text.trim(),
+        'capacidad_maxima': _capMaxCtrl.text.trim(),
+        'division_minima': divNorm,
+        'ubicacion': _ubicCtrl.text.trim(),
+        'tipo_instrumento': _tipoInstrumento ?? '',
+        'numero_cca': _ccaEf,
+        'numero_dve': _numeroDveEf,
+        'aplica_excentricidad': _aplExc,
+        'motivo_no_excentricidad': _aplExc ? '' : _motivoNoExcentricidad,
+      };
+
+      await _guardarBorrador(mostrarSnackbar: false);
+      bool onlineOk = false;
+      if (mounted) {
+        onlineOk = await context.read<SyncService>().guardarYSincronizarInstrumentoParcial(
+              folio,
+              payloadParcial,
+              localId: widget.osId,
+            );
+      } else {
+        await LocalDbService.instance.guardarInstrumentoParcialLocal(
+          folio,
+          payloadParcial,
+          localId: widget.osId,
+          encolarSync: true,
+        );
+      }
+      await _cargarMarcasModelos();
+
+      if (mounted) {
+        final etiq = construirEtiquetaInstrumento({
+          'folio_os': folio,
+          ...payloadParcial,
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: onlineOk ? const Color(0xFF15803D) : const Color(0xFF1D4ED8),
+            duration: const Duration(seconds: 3),
+            content: Text(
+              onlineOk
+                  ? 'Equipo guardado y sincronizado (orden sigue En Proceso): $etiq'
+                  : 'Equipo guardado localmente (se sincronizará al conectar): $etiq',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      _showError('No se pudo guardar temporalmente el equipo: $e');
+    } finally {
+      if (mounted) setState(() => _savingParcial = false);
     }
   }
 
@@ -263,20 +395,28 @@ class _CapturaScreenState extends State<CapturaScreen>
     _modeloCtrl.text     = _str('modelo');
     // ns / serie: varios alias posibles
     _nsCtrl.text         = _str('ns').isNotEmpty ? _str('ns') : _str('serie');
-    _idEquipoCtrl.text   = _str('id_equipo');
+    _idEquipoCtrl.text   = _str('id_equipo').isNotEmpty ? _str('id_equipo') : _str('id_indicador');
     _ubicCtrl.text       = _str('ubicacion');
 
-    final rawCca = _str('numero_cca').isNotEmpty
-        ? _str('numero_cca')
-        : (_str('cca').isNotEmpty ? _str('cca') : _str('numero_dve'));
-    if (rawCca.trim().isEmpty) {
-      final pfx = _prefijoActivo;
-      _ccaCtrl.text = pfx;
-      _ccaCtrl.selection = TextSelection.fromPosition(TextPosition(offset: pfx.length));
-    } else {
+    final rawCca = extraerNumeroCca(_os);
+    if (rawCca.isNotEmpty) {
       _ccaCtrl.text = rawCca;
-      _ccaCtrl.selection = TextSelection.fromPosition(TextPosition(offset: rawCca.length));
+    } else if (_aplicaCCA) {
+      _ccaCtrl.text = _prefijoCca;
+    } else {
+      _ccaCtrl.text = '';
     }
+    _ccaCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _ccaCtrl.text.length));
+
+    final rawNumDve = extraerNumeroDve(_os);
+    if (rawNumDve.isNotEmpty) {
+      _numeroDveCtrl.text = rawNumDve;
+    } else if (_aplicaDVE && !_aplicaCCA) {
+      _numeroDveCtrl.text = _prefijoDve;
+    } else {
+      _numeroDveCtrl.text = '';
+    }
+    _numeroDveCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _numeroDveCtrl.text.length));
 
     _holoAntCtrl.text    = _str('holograma_anterior');
     _holoActCtrl.text    = _str('holograma_actualizado');
@@ -517,10 +657,12 @@ class _CapturaScreenState extends State<CapturaScreen>
     _obsFocusNode.dispose();
     _marcaFocusNode.dispose();
     _modeloFocusNode.dispose();
+    _nsFocusNode.dispose();
+    _idEquipoFocusNode.dispose();
     for (final c in [
       _marcaCtrl, _modeloCtrl, _nsCtrl, _idEquipoCtrl,
       _capMaxCtrl, _divMinCtrl, _divVerCtrl, _ubicCtrl,
-      _ccaCtrl, _holoAntCtrl, _holoActCtrl,
+      _ccaCtrl, _numeroDveCtrl, _holoAntCtrl, _holoActCtrl,
       _masaPatronCtrl, _factorSustCtrl, _obsCtrl,
       _firmaClienteNombreCtrl,
     ]) { c.dispose(); }
@@ -582,13 +724,15 @@ class _CapturaScreenState extends State<CapturaScreen>
             _divVerCtrl.text = draft['div_ver'].toString();
             _os['div_verificacion'] = _divVerCtrl.text;
           }
-          if (draft['numero_cca'] != null && draft['numero_cca'].toString().trim().isNotEmpty) {
-            _ccaCtrl.text = draft['numero_cca'].toString();
-            _os['numero_cca'] = _ccaCtrl.text;
-          } else if (_ccaCtrl.text.trim().isEmpty) {
-            final pfx = _prefijoActivo;
-            _ccaCtrl.text = pfx;
-            _ccaCtrl.selection = TextSelection.fromPosition(TextPosition(offset: pfx.length));
+          final draftCca = extraerNumeroCca(draft);
+          if (draftCca.isNotEmpty) {
+            _ccaCtrl.text = draftCca;
+            _os['numero_cca'] = draftCca;
+          }
+          final draftDve = extraerNumeroDve(draft);
+          if (draftDve.isNotEmpty) {
+            _numeroDveCtrl.text = draftDve;
+            _os['numero_dve'] = draftDve;
           }
           if (draft['holograma_anterior'] != null && draft['holograma_anterior'].toString().isNotEmpty) {
             _holoAntCtrl.text = draft['holograma_anterior'].toString();
@@ -1007,57 +1151,99 @@ class _CapturaScreenState extends State<CapturaScreen>
         _ServicioBanner(rules: rules, tipoServicioNombre: _os['tipo_servicio'] as String?),
         const SizedBox(height: 16),
 
-        // ── Identificación del instrumento (siempre visible) ───────────────
-        _SectionTitle('Identificación del Instrumento'),
+        // ── Identificación del instrumento (con autocompletado de historial) ─
+        Row(
+          children: [
+            const Expanded(child: _SectionTitle('Identificación del Instrumento')),
+            if (_historialInstrumentos.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.bolt_rounded, size: 13, color: Color(0xFF1D4ED8)),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Autocompletado (${_historialInstrumentos.length} eq.)',
+                      style: const TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        color: Color(0xFF1D4ED8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _AutocompleteField(
+          Expanded(child: _EquipoHistorialAutocomplete(
             label: 'Marca',
             ctrl: _marcaCtrl,
             focusNode: _marcaFocusNode,
-            suggestions: _marcasSugeridas,
-            hint: 'METTLER TOLEDO',
+            fieldKey: 'marca',
+            historial: _historialInstrumentos,
+            fallbackStrings: _marcasSugeridas,
+            hint: 'Rice Lake, Mettler...',
             required: true,
             hasError: _mostrarErroresInstrumento && _marcaCtrl.text.trim().isEmpty,
             onChanged: (val) {
               _actualizarModelosParaMarca(val);
               if (_mostrarErroresInstrumento) setState(() {});
             },
-            onSelected: (val) {
-              _actualizarModelosParaMarca(val);
-              setState(() {});
-            },
+            onSelectedInstrument: _aplicarInstrumentoDelHistorial,
           )),
           const SizedBox(width: 12),
-          Expanded(child: _AutocompleteField(
+          Expanded(child: _EquipoHistorialAutocomplete(
             label: 'Modelo',
             ctrl: _modeloCtrl,
             focusNode: _modeloFocusNode,
-            suggestions: _modelosSugeridos,
-            hint: 'IND560',
+            fieldKey: 'modelo',
+            historial: _historialInstrumentos,
+            fallbackStrings: _modelosSugeridos,
+            hint: '920i-4A, IND560...',
             required: true,
             hasError: _mostrarErroresInstrumento && _modeloCtrl.text.trim().isEmpty,
             onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
-            onSelected: (_) { setState(() {}); },
+            onSelectedInstrument: _aplicarInstrumentoDelHistorial,
           )),
           const SizedBox(width: 12),
-          Expanded(child: _Field('N° de Serie', _nsCtrl, hint: 'B215004321')),
+          Expanded(child: _EquipoHistorialAutocomplete(
+            label: 'N° de Serie',
+            ctrl: _nsCtrl,
+            focusNode: _nsFocusNode,
+            fieldKey: 'serie',
+            historial: _historialInstrumentos,
+            fallbackStrings: const [],
+            hint: '1318400062',
+            onSelectedInstrument: _aplicarInstrumentoDelHistorial,
+          )),
         ]),
         const SizedBox(height: 10),
         Row(children: [
-          Expanded(child: _Field(
-            'ID Indicador / Equipo',
-            _idEquipoCtrl,
+          Expanded(child: _EquipoHistorialAutocomplete(
+            label: 'ID Indicador / Equipo',
+            ctrl: _idEquipoCtrl,
+            focusNode: _idEquipoFocusNode,
+            fieldKey: 'id_indicador',
+            historial: _historialInstrumentos,
+            fallbackStrings: const [],
             hint: 'Trailer A, Báscula 3...',
             required: true,
             hasError: _mostrarErroresInstrumento && _idEquipoCtrl.text.trim().isEmpty,
             onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
+            onSelectedInstrument: _aplicarInstrumentoDelHistorial,
           )),
           const SizedBox(width: 12),
           Expanded(child: _Field(
             'Ubicación',
             _ubicCtrl,
-            hint: 'Planta Norte',
+            hint: 'Taller, Planta Norte...',
             required: true,
             hasError: _mostrarErroresInstrumento && _ubicCtrl.text.trim().isEmpty,
             onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
@@ -1400,55 +1586,62 @@ class _CapturaScreenState extends State<CapturaScreen>
         ],
         const SizedBox(height: 16),
 
-        // ── CASO B: Sección CCA / DVE ─────────────────────────────────────
-        if (rules.tieneCalibracion || rules.tieneInspeccion) ...[
-          _SectionTitle(rules.tieneCalibracion
-              ? 'Certificado de Calibración Acreditada (CCA)'
-              : 'Dictamen de Verificación (DVE)'),
-          const SizedBox(height: 10),
-          _Field(
-            rules.tieneCalibracion ? 'Número de CCA' : 'Número de DVE',
-            _ccaCtrl,
-            hint: rules.tieneCalibracion ? '${_prefijoCca}001' : '${_prefijoDve}001',
-            required: true,
-            keyboardType: TextInputType.text,
-            textCapitalization: TextCapitalization.characters,
-            inputFormatters: [
-              CcaDvePrefixFormatter(defaultPrefix: _prefijoActivo),
-            ],
+        // ── Sección Números Regulatorios Independientes (CCA y DVE) ───────
+        _SectionTitle('Números Regulatorios (CCA y/o DVE)'),
+        const SizedBox(height: 8),
+        Row(children: [
+          Expanded(
+            child: _Field(
+              'Número CCA',
+              _ccaCtrl,
+              hint: '${_prefijoCca}02163',
+              required: rules.tieneCalibracion,
+              keyboardType: TextInputType.text,
+              textCapitalization: TextCapitalization.characters,
+            ),
           ),
-          if (rules.tieneCalibracion) ...[
-            const SizedBox(height: 10),
-            const Text('Inicial del Calibrador (NOM-010-SCFI-2020):',
-                style: TextStyle(fontSize: 12, color: Color(0xFF374151),
-                    fontWeight: FontWeight.w600)),
-            const SizedBox(height: 6),
-            Row(children: [
-              _JiaToggle('J', _jChecked, (v) => setState(() => _jChecked = v)),
-              const SizedBox(width: 8),
-              _JiaToggle('I', _iChecked, (v) => setState(() => _iChecked = v)),
-              const SizedBox(width: 8),
-              _JiaToggle('A', _aChecked, (v) => setState(() => _aChecked = v)),
-              const SizedBox(width: 12),
-              Flexible(child: Text(
-                _jChecked ? 'Jefe Laboratorio'
-                    : _iChecked ? 'Inspector EMA'
-                    : _aChecked ? 'Auxiliar'
-                    : '— Sin selección',
-                style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                overflow: TextOverflow.ellipsis,
-              )),
-            ]),
-          ],
-          const SizedBox(height: 16),
+          const SizedBox(width: 12),
+          Expanded(
+            child: _Field(
+              'Número DVE',
+              _numeroDveCtrl,
+              hint: '${_prefijoDve}00412',
+              required: rules.tieneInspeccion && !rules.tieneCalibracion,
+              keyboardType: TextInputType.text,
+              textCapitalization: TextCapitalization.characters,
+            ),
+          ),
+        ]),
+        if (rules.tieneCalibracion) ...[
+          const SizedBox(height: 10),
+          const Text('Inicial del Calibrador (NOM-010-SCFI-2020):',
+              style: TextStyle(fontSize: 12, color: Color(0xFF374151),
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          Row(children: [
+            _JiaToggle('J', _jChecked, (v) => setState(() => _jChecked = v)),
+            const SizedBox(width: 8),
+            _JiaToggle('I', _iChecked, (v) => setState(() => _iChecked = v)),
+            const SizedBox(width: 8),
+            _JiaToggle('A', _aChecked, (v) => setState(() => _aChecked = v)),
+            const SizedBox(width: 12),
+            Flexible(child: Text(
+              _jChecked ? 'Jefe Laboratorio'
+                  : _iChecked ? 'Inspector EMA'
+                  : _aChecked ? 'Auxiliar'
+                  : '— Sin selección',
+              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+              overflow: TextOverflow.ellipsis,
+            )),
+          ]),
         ],
+        const SizedBox(height: 16),
 
         // ── CASO C/D: Sección Inspección + DVE (solo si incluye Inspección) ─
         if (rules.tieneInspeccion) ...[
           _SectionTitle('Inspección / Verificación Metrológica'),
           const SizedBox(height: 10),
-          // DVE va AQUÍ — dentro del bloque condicional de Inspección
-          _NumField('DVE — Div. Verificación (kg)', _divVerCtrl),
+          _NumField('Div. Verificación e (kg)', _divVerCtrl),
           const SizedBox(height: 10),
           Row(children: [
             Expanded(child: _Field('Holograma Anterior', _holoAntCtrl,
@@ -1565,7 +1758,36 @@ class _CapturaScreenState extends State<CapturaScreen>
             ),
           ),
         ]),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
+
+        // ── Botón Guardar Datos de Equipo (Sin Finalizar) ──────────────────
+        SizedBox(
+          width: double.infinity,
+          height: 46,
+          child: OutlinedButton.icon(
+            style: OutlinedButton.styleFrom(
+              foregroundColor: const Color(0xFF1D4ED8),
+              backgroundColor: const Color(0xFFEFF6FF),
+              side: const BorderSide(color: Color(0xFF93C5FD), width: 1.5),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: _savingParcial ? null : _guardarEquipoSinFinalizar,
+            icon: _savingParcial
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1D4ED8)),
+                  )
+                : const Icon(Icons.cloud_upload_outlined, size: 19),
+            label: Text(
+              _savingParcial
+                  ? 'Guardando y sincronizando equipo...'
+                  : 'Guardar Datos de Equipo (Sin Finalizar)',
+              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
 
         // ── Botón continuar a mediciones ───────────────────────────────────
         SizedBox(
@@ -2052,26 +2274,23 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['capacidad_max']         = _capMaxCtrl.text.trim();
     _os['division_minima']       = divNorm;
 
-    // Campos condicionales: solo se guardan si aplican; si NO aplican se
-    // vacían para no arrastrar datos precargados al PDF ni al servidor.
-    if (rules.tieneCalibracion) {
-      _os['numero_cca'] = _ccaCtrl.text.trim();
-      _os['cca_aplica'] = true;
-    } else {
-      _os['numero_cca'] = '';
-      _os['cca']        = '';
-      _os['cca_aplica'] = false;
-    }
-    if (rules.tieneInspeccion) {
+    // Números regulatorios independientes CCA y DVE: se preservan siempre que se capturen
+    final ccaClean = _ccaEf;
+    final numDveClean = _numeroDveEf;
+    _os['numero_cca'] = ccaClean;
+    _os['cca']        = ccaClean;
+    _os['cca_aplica'] = rules.tieneCalibracion || ccaClean.isNotEmpty;
+    _os['numero_dve'] = numDveClean;
+    _os['folio_dve']  = numDveClean;
+
+    if (rules.tieneInspeccion || numDveClean.isNotEmpty) {
       _os['holograma_anterior']    = _holoAntCtrl.text.trim();
       _os['holograma_actualizado'] = _holoActCtrl.text.trim();
-      _os['div_verificacion']      = double.tryParse(_divVerCtrl.text.replaceAll(',', '.')) ?? 0;
+      _os['div_verificacion']      = double.tryParse(_divVerCtrl.text.replaceAll(',', '.'));
     } else {
       _os['holograma_anterior']    = '';
       _os['holograma_actualizado'] = '';
       _os['holograma_nuevo']       = '';
-      _os['folio_dve']             = '';
-      _os['numero_dve']            = '';
       _os['div_ver']               = '';
       _os['div_verificacion']      = null;
     }
@@ -2183,11 +2402,11 @@ class _CapturaScreenState extends State<CapturaScreen>
         'division_minima':       formatearDivisionMinima(_divMinCtrl.text.trim()),
         'div_ver':               _dveEf,
         'div_verificacion':      _dveEf,
-        'folio_dve':             _dveEf,
-        'numero_dve':            _dveEf,
+        'folio_dve':             _numeroDveEf,
+        'numero_dve':            _numeroDveEf,
         'numero_cca':            _ccaEf,
         'cca':                   _ccaEf,
-        'cca_aplica':            rules.tieneCalibracion,
+        'cca_aplica':            rules.tieneCalibracion || _ccaEf.isNotEmpty,
         'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
         'holograma_anterior':    _holoAntEf,
         'holograma_actualizado': _holoActEf,
@@ -2334,12 +2553,12 @@ class _CapturaScreenState extends State<CapturaScreen>
     // ── Validaciones obligatorias de servicio (solo si la sección aplica) ──
     //  !_aplicaCCA → se omiten "Número de CCA" e "Inicial del Calibrador".
     //  !_aplicaDVE → se omiten "División de Verificación" y hologramas.
-    if (_aplicaCCA && (_ccaCtrl.text.trim().isEmpty || _ccaCtrl.text.trim() == _prefijoCca)) {
+    if (_aplicaCCA && _ccaEf.isEmpty) {
       _tabCtrl.animateTo(0);
       _showError('Ingresa el Número de CCA completo (ej: ${_prefijoCca}001).');
       return;
     }
-    if (_aplicaDVE && !_aplicaCCA && (_ccaCtrl.text.trim().isEmpty || _ccaCtrl.text.trim() == _prefijoDve)) {
+    if (_aplicaDVE && !_aplicaCCA && _numeroDveEf.isEmpty) {
       _tabCtrl.animateTo(0);
       _showError('Ingresa el Número de DVE completo (ej: ${_prefijoDve}001).');
       return;
@@ -2427,13 +2646,13 @@ class _CapturaScreenState extends State<CapturaScreen>
         'equipo_division':       formatearDivisionMinima(_divMinCtrl.text.trim()),
         'div_verificacion':      _dveEf,
         'div_ver':               _dveEf,
-        'folio_dve':             _dveEf,
-        'numero_dve':            _dveEf,
+        'folio_dve':             _numeroDveEf,
+        'numero_dve':            _numeroDveEf,
         'numero_cca':            _ccaEf,
         'cca':                   _ccaEf,
-        'cca_aplica':            _aplicaCCA,
-        'aplica_cca':            _aplicaCCA,
-        'aplica_dve':            _aplicaDVE,
+        'cca_aplica':            _aplicaCCA || _ccaEf.isNotEmpty,
+        'aplica_cca':            _aplicaCCA || _ccaEf.isNotEmpty,
+        'aplica_dve':            _aplicaDVE || _numeroDveEf.isNotEmpty,
         'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
         'unidad_medida':         _unidadMedida,
         'holograma_anterior':    _holoAntEf,
@@ -2621,6 +2840,144 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) => Text(text,
       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800,
           color: Color(0xFF374151), letterSpacing: 0.5));
+}
+
+class _EquipoHistorialAutocomplete extends StatelessWidget {
+  final String label;
+  final TextEditingController ctrl;
+  final FocusNode focusNode;
+  final String fieldKey;
+  final List<Map<String, dynamic>> historial;
+  final List<String> fallbackStrings;
+  final String? hint;
+  final bool required;
+  final bool hasError;
+  final ValueChanged<String>? onChanged;
+  final ValueChanged<Map<String, dynamic>> onSelectedInstrument;
+
+  const _EquipoHistorialAutocomplete({
+    required this.label,
+    required this.ctrl,
+    required this.focusNode,
+    required this.fieldKey,
+    required this.historial,
+    required this.fallbackStrings,
+    required this.onSelectedInstrument,
+    this.hint,
+    this.required = false,
+    this.hasError = false,
+    this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return RawAutocomplete<Map<String, dynamic>>(
+      textEditingController: ctrl,
+      focusNode: focusNode,
+      displayStringForOption: (opt) => (opt[fieldKey] ?? '').toString(),
+      optionsBuilder: (TextEditingValue tev) {
+        final q = LocalDbService.normalizarTexto(tev.text);
+        final out = <Map<String, dynamic>>[];
+        final seen = <String>{};
+
+        for (final inst in historial) {
+          final v = (inst[fieldKey] ?? '').toString().trim();
+          if (v.isEmpty) continue;
+          final blob = LocalDbService.normalizarTexto(
+            '${inst['marca']} ${inst['modelo']} ${inst['serie']} ${inst['id_indicador']} ${inst['ubicacion']}',
+          );
+          if (q.isEmpty || blob.contains(q)) {
+            final key = '${inst['marca']}|${inst['modelo']}|${inst['serie']}|${inst['id_indicador']}|${inst['ubicacion']}'.toLowerCase();
+            if (seen.add(key)) out.add(inst);
+          }
+          if (out.length >= 16) break;
+        }
+
+        if (out.length < 16 && fallbackStrings.isNotEmpty) {
+          for (final s in fallbackStrings) {
+            final st = s.trim();
+            if (st.isEmpty) continue;
+            if (q.isEmpty || LocalDbService.normalizarTexto(st).contains(q)) {
+              final key = '$fieldKey:$st'.toLowerCase();
+              if (seen.add(key)) {
+                out.add({fieldKey: st});
+              }
+            }
+            if (out.length >= 16) break;
+          }
+        }
+        return out;
+      },
+      onSelected: (Map<String, dynamic> selection) {
+        final v = (selection[fieldKey] ?? '').toString().trim();
+        if (v.isNotEmpty) ctrl.text = v;
+        onSelectedInstrument(selection);
+      },
+      optionsViewBuilder: (context, onSelect, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 6.0,
+            borderRadius: BorderRadius.circular(8),
+            color: Colors.white,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 240, maxWidth: 360),
+              child: ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                shrinkWrap: true,
+                itemCount: options.length,
+                separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                itemBuilder: (BuildContext context, int index) {
+                  final opt = options.elementAt(index);
+                  final titleParts = [
+                    opt['marca'],
+                    opt['modelo'],
+                    if ((opt['serie'] ?? '').toString().trim().isNotEmpty) 'SN: ${opt['serie']}',
+                    if ((opt['id_indicador'] ?? '').toString().trim().isNotEmpty) 'ID: ${opt['id_indicador']}',
+                  ].where((e) => e != null && e.toString().trim().isNotEmpty).join(' • ');
+                  final subParts = [
+                    if ((opt['ubicacion'] ?? '').toString().trim().isNotEmpty) opt['ubicacion'],
+                    if ((opt['capacidad_maxima'] ?? '').toString().trim().isNotEmpty) 'Cap: ${opt['capacidad_maxima']}',
+                    if ((opt['division_minima'] ?? '').toString().trim().isNotEmpty) 'd: ${opt['division_minima']}',
+                  ].join(' · ');
+
+                  return InkWell(
+                    onTap: () => onSelect(opt),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            titleParts.isNotEmpty ? titleParts : (opt[fieldKey] ?? '').toString(),
+                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.black87),
+                          ),
+                          if (subParts.isNotEmpty)
+                            Text(
+                              subParts,
+                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF6B7280)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+      fieldViewBuilder: (context, controller, fNode, onFieldSubmitted) {
+        return TextFormField(
+          controller: controller,
+          focusNode: fNode,
+          onChanged: onChanged,
+          decoration: _kInputDeco(label + (required ? ' *' : ''), hint: hint, hasError: hasError),
+          style: const TextStyle(fontSize: 13),
+        );
+      },
+    );
+  }
 }
 
 class _AutocompleteField extends StatelessWidget {

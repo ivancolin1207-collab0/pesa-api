@@ -72,8 +72,12 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
   final _serieCtrl = TextEditingController();
   final _capMaxCtrl = TextEditingController();
   final _divMinCtrl = TextEditingController();
+  final _numeroCcaCtrl = TextEditingController();
+  final _numeroDveCtrl = TextEditingController();
   final _tipoInstOtroCtrl = TextEditingController();
   String _tipoInstrumento = 'Mesa'; // 'Mesa' | 'Camionera' | 'Colgante' | 'Tolva' | 'Tanque' | 'Otro'
+  List<Map<String, dynamic>> _historialInstrumentos = [];
+  bool _guardandoParcial = false;
 
   // SECCIÓN 2: Checklist 1..14
   final Map<int, String> _chkEstado = {for (int i = 1; i <= 14; i++) i: 'B'};
@@ -153,6 +157,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
       _serieCtrl,
       _capMaxCtrl,
       _divMinCtrl,
+      _numeroCcaCtrl,
+      _numeroDveCtrl,
       _tipoInstOtroCtrl,
       ..._chkObsCtrls.values,
       _estabCeroComCtrl,
@@ -313,6 +319,15 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     _serieCtrl.text = pickField(['serie', 'ns', 'numero_serie', 'equipo_ns']);
     _capMaxCtrl.text = pickField(['capacidad_maxima', 'alcance_max', 'cap_maxima', 'instrumento_capacidad']);
     _divMinCtrl.text = formatearDivisionMinima(pickField(['division_minima', 'div_minima', 'instrumento_division']));
+    _numeroCcaCtrl.text = limpiarNumeroRegulatorio(pickField(['numero_cca', 'cca']));
+    _numeroDveCtrl.text = limpiarNumeroRegulatorio(pickField(['numero_dve', 'folio_dve']));
+
+    try {
+      _historialInstrumentos = await LocalDbService.instance.getHistorialInstrumentos(
+        cliente: _clienteCtrl.text.trim(),
+        sucursal: _plantaCtrl.text.trim(),
+      );
+    } catch (_) {}
 
     final rawTipoInst = pickField(['tipo_instrumento'], 'Mesa');
     final tl = rawTipoInst.toLowerCase();
@@ -536,6 +551,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     payload['division_minima'] = _divMinCtrl.text.trim();
     payload['div_minima'] = _divMinCtrl.text.trim();
     payload['instrumento_division'] = _divMinCtrl.text.trim();
+    payload['numero_cca'] = limpiarNumeroRegulatorio(_numeroCcaCtrl.text);
+    payload['cca'] = limpiarNumeroRegulatorio(_numeroCcaCtrl.text);
+    payload['numero_dve'] = limpiarNumeroRegulatorio(_numeroDveCtrl.text);
+    payload['folio_dve'] = limpiarNumeroRegulatorio(_numeroDveCtrl.text);
     payload.remove('indicador_marca_modelo');
     payload['tipo_instrumento'] = _tipoInstrumento;
     payload['tipo_instrumento_otro'] = _tipoInstOtroCtrl.text.trim();
@@ -611,6 +630,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                alcance_max = ?,
                div_minima = ?,
                ubicacion = ?,
+               numero_cca = ?,
+               numero_dve = ?,
                observaciones = ?,
                dictamen = ?,
                datos_tecnicos_json = ?
@@ -623,6 +644,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
           _capMaxCtrl.text.trim(),
           _divMinCtrl.text.trim(),
           _plantaCtrl.text.trim(),
+          limpiarNumeroRegulatorio(_numeroCcaCtrl.text),
+          limpiarNumeroRegulatorio(_numeroDveCtrl.text),
           _obsTecnicasCtrl.text.trim(),
           _dictamenEstado,
           jsonStr,
@@ -638,6 +661,82 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
   }
 
   Future<void> _guardarBorradorSilencioso() => _guardarBorradorLocal();
+
+  void _aplicarInstrumentoHistorial(Map<String, dynamic> inst) {
+    setState(() {
+      final m = (inst['marca'] ?? '').toString().trim();
+      final mod = (inst['modelo'] ?? '').toString().trim();
+      final ser = (inst['serie'] ?? inst['ns'] ?? '').toString().trim();
+      final idEq = (inst['id_indicador'] ?? inst['id_equipo'] ?? '').toString().trim();
+      final cap = (inst['capacidad_maxima'] ?? '').toString().trim();
+      final div = formatearDivisionMinima(inst['division_minima']);
+      final ubic = (inst['ubicacion'] ?? '').toString().trim();
+      final tInst = (inst['tipo_instrumento'] ?? '').toString().toLowerCase();
+
+      if (m.isNotEmpty) _marcaCtrl.text = m;
+      if (mod.isNotEmpty) _modeloCtrl.text = mod;
+      if (ser.isNotEmpty) _serieCtrl.text = ser;
+      if (idEq.isNotEmpty) _idTagCtrl.text = idEq;
+      if (cap.isNotEmpty) _capMaxCtrl.text = cap;
+      if (div.isNotEmpty) _divMinCtrl.text = div;
+      if (ubic.isNotEmpty && _plantaCtrl.text.trim().isEmpty) _plantaCtrl.text = ubic;
+      if (tInst.isNotEmpty) {
+        if (tInst.contains('camion')) _tipoInstrumento = 'Camionera';
+        else if (tInst.contains('colg') || tInst.contains('grua') || tInst.contains('grúa')) _tipoInstrumento = 'Colgante';
+        else if (tInst.contains('tolva')) _tipoInstrumento = 'Tolva';
+        else if (tInst.contains('tanque') || tInst.contains('silo')) _tipoInstrumento = 'Tanque';
+        else if (tInst.contains('mesa') || tInst.contains('mostrador')) _tipoInstrumento = 'Mesa';
+      }
+    });
+    _programarAutoGuardado();
+  }
+
+  Future<void> _guardarEquipoSinFinalizar() async {
+    if (_guardandoParcial) return;
+    final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? '').toString().trim();
+    if (folio.isEmpty) return;
+    setState(() => _guardandoParcial = true);
+    try {
+      await _guardarBorradorLocal();
+      final datosParcial = <String, dynamic>{
+        'marca': _marcaCtrl.text.trim(),
+        'modelo': _modeloCtrl.text.trim(),
+        'serie': _serieCtrl.text.trim(),
+        'ns': _serieCtrl.text.trim(),
+        'id_indicador': _idTagCtrl.text.trim(),
+        'id_equipo': _idTagCtrl.text.trim(),
+        'capacidad_maxima': _capMaxCtrl.text.trim(),
+        'division_minima': formatearDivisionMinima(_divMinCtrl.text.trim()),
+        'ubicacion': _plantaCtrl.text.trim(),
+        'tipo_instrumento': _tipoInstrumento == 'Otro' ? _tipoInstOtroCtrl.text.trim() : _tipoInstrumento,
+        'numero_cca': limpiarNumeroRegulatorio(_numeroCcaCtrl.text),
+        'numero_dve': limpiarNumeroRegulatorio(_numeroDveCtrl.text),
+      };
+      bool onlineOk = false;
+      if (mounted) {
+        onlineOk = await context.read<SyncService>().guardarYSincronizarInstrumentoParcial(
+              folio,
+              datosParcial,
+              localId: widget.orden['local_id'] as int?,
+            );
+      }
+      if (mounted) {
+        final etiq = construirEtiquetaInstrumento({'folio_os': folio, ...datosParcial});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: onlineOk ? const Color(0xFF15803D) : const Color(0xFF1D4ED8),
+            content: Text(
+              onlineOk
+                  ? 'Equipo guardado y sincronizado (orden sigue En Proceso): $etiq'
+                  : 'Equipo guardado localmente (se sincronizará al conectar): $etiq',
+            ),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _guardandoParcial = false);
+    }
+  }
 
   Future<void> _finalizar() async {
     final cliente = _clienteCtrl.text.trim();
@@ -1063,6 +1162,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     _serieCtrl.dispose();
     _capMaxCtrl.dispose();
     _divMinCtrl.dispose();
+    _numeroCcaCtrl.dispose();
+    _numeroDveCtrl.dispose();
     _tipoInstOtroCtrl.dispose();
     for (final ctrl in _chkObsCtrls.values) {
       ctrl.dispose();
@@ -1347,13 +1448,13 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                       const SizedBox(height: 10),
                       Row(
                         children: [
-                          Expanded(child: _textInput('ID Interno / Tag', _idTagCtrl)),
+                          Expanded(child: _autocompleteInput('ID Interno / Tag', _idTagCtrl, 'id_indicador')),
                           const SizedBox(width: 10),
-                          Expanded(child: _textInput('Marca', _marcaCtrl)),
+                          Expanded(child: _autocompleteInput('Marca', _marcaCtrl, 'marca')),
                           const SizedBox(width: 10),
-                          Expanded(child: _textInput('Modelo', _modeloCtrl)),
+                          Expanded(child: _autocompleteInput('Modelo', _modeloCtrl, 'modelo')),
                           const SizedBox(width: 10),
-                          Expanded(child: _textInput('Número de Serie', _serieCtrl)),
+                          Expanded(child: _autocompleteInput('Número de Serie', _serieCtrl, 'serie')),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -1362,6 +1463,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                           Expanded(child: _textInput('Capacidad Máx. (Max)', _capMaxCtrl)),
                           const SizedBox(width: 10),
                           Expanded(child: _textInput('División Mínima (d / e)', _divMinCtrl)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _textInput('Número CCA (Opcional)', _numeroCcaCtrl)),
+                          const SizedBox(width: 10),
+                          Expanded(child: _textInput('Número DVE (Opcional)', _numeroDveCtrl)),
                         ],
                       ),
                     ] else ...[
@@ -1371,17 +1476,17 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                       const SizedBox(height: 10),
                       Row(
                         children: [
-                          Expanded(child: _textInput('ID Interno / Tag', _idTagCtrl)),
+                          Expanded(child: _autocompleteInput('ID Interno / Tag', _idTagCtrl, 'id_indicador')),
                           const SizedBox(width: 8),
-                          Expanded(child: _textInput('Marca', _marcaCtrl)),
+                          Expanded(child: _autocompleteInput('Marca', _marcaCtrl, 'marca')),
                         ],
                       ),
                       const SizedBox(height: 10),
                       Row(
                         children: [
-                          Expanded(child: _textInput('Modelo', _modeloCtrl)),
+                          Expanded(child: _autocompleteInput('Modelo', _modeloCtrl, 'modelo')),
                           const SizedBox(width: 8),
-                          Expanded(child: _textInput('Número de Serie', _serieCtrl)),
+                          Expanded(child: _autocompleteInput('Número de Serie', _serieCtrl, 'serie')),
                         ],
                       ),
                       const SizedBox(height: 10),
@@ -1390,6 +1495,14 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                           Expanded(child: _textInput('Capacidad Máx. (Max)', _capMaxCtrl)),
                           const SizedBox(width: 8),
                           Expanded(child: _textInput('División Mínima (d / e)', _divMinCtrl)),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(child: _textInput('Número CCA (Opcional)', _numeroCcaCtrl)),
+                          const SizedBox(width: 8),
+                          Expanded(child: _textInput('Número DVE (Opcional)', _numeroDveCtrl)),
                         ],
                       ),
                     ],
@@ -1423,6 +1536,33 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                       const SizedBox(height: 8),
                       _textInput('Especifique', _tipoInstOtroCtrl),
                     ],
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 42,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFF1D4ED8),
+                          backgroundColor: const Color(0xFFEFF6FF),
+                          side: const BorderSide(color: Color(0xFF93C5FD), width: 1.4),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: _guardandoParcial ? null : _guardarEquipoSinFinalizar,
+                        icon: _guardandoParcial
+                            ? const SizedBox(
+                                width: 15,
+                                height: 15,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1D4ED8)),
+                              )
+                            : const Icon(Icons.cloud_upload_outlined, size: 18),
+                        label: Text(
+                          _guardandoParcial
+                              ? 'Guardando y sincronizando equipo...'
+                              : 'Guardar Datos de Equipo (Sin Finalizar)',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                    ),
                   ],
                 );
               },
@@ -2019,6 +2159,73 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _autocompleteInput(String label, TextEditingController ctrl, String fieldKey) {
+    return RawAutocomplete<Map<String, dynamic>>(
+      textEditingController: ctrl,
+      focusNode: FocusNode(),
+      displayStringForOption: (opt) => (opt[fieldKey] ?? '').toString(),
+      optionsBuilder: (TextEditingValue tev) {
+        if (_historialInstrumentos.isEmpty) return const Iterable<Map<String, dynamic>>.empty();
+        final q = LocalDbService.normalizarTexto(tev.text);
+        return _historialInstrumentos.where((inst) {
+          final vf = (inst[fieldKey] ?? '').toString().trim();
+          if (vf.isEmpty) return false;
+          if (q.isEmpty) return (inst['_prio'] as int? ?? 3) <= 1;
+          final blob = LocalDbService.normalizarTexto(
+            '${inst['marca']} ${inst['modelo']} ${inst['serie']} ${inst['id_indicador']} ${inst['ubicacion']}',
+          );
+          return blob.contains(q);
+        }).take(14);
+      },
+      onSelected: _aplicarInstrumentoHistorial,
+      fieldViewBuilder: (ctx, textCtrl, fNode, onSub) {
+        return TextField(
+          controller: textCtrl,
+          focusNode: fNode,
+          decoration: InputDecoration(
+            labelText: label,
+            isDense: true,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            border: const OutlineInputBorder(),
+          ),
+          style: const TextStyle(fontSize: 12.5),
+        );
+      },
+      optionsViewBuilder: (ctx, onSel, options) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 6,
+            borderRadius: BorderRadius.circular(8),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 220, maxWidth: 340),
+              child: ListView.separated(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (ctx, i) {
+                  final opt = options.elementAt(i);
+                  final title = [
+                    opt['marca'],
+                    opt['modelo'],
+                    if ((opt['serie'] ?? '').toString().isNotEmpty) 'SN: ${opt['serie']}',
+                    if ((opt['id_indicador'] ?? '').toString().isNotEmpty) 'ID: ${opt['id_indicador']}',
+                  ].where((e) => e != null && e.toString().trim().isNotEmpty).join(' • ');
+                  return ListTile(
+                    dense: true,
+                    title: Text(title, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                    onTap: () => onSel(opt),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 

@@ -11,6 +11,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
 import '../services/api_service.dart';
 import '../services/local_db_service.dart';
+import '../services/metrology_helper.dart';
 import '../services/pdf_storage_service.dart';
 
 const _kMetroPurple = Color(0xFF5B3FD6);
@@ -108,6 +109,9 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
     if (q.isEmpty) return base;
     return base.where((r) {
       final hay = [
+        construirEtiquetaInstrumento(r),
+        extraerNumeroCca(r),
+        extraerNumeroDve(r),
         r['folio_os'], r['cliente'], r['sucursal'], r['tecnico'], r['tipo_servicio'], r['fecha'],
       ].map((e) => (e ?? '').toString().toLowerCase()).join(' ');
       return hay.contains(q);
@@ -368,11 +372,11 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
       );
 
   static const _cols = <(String, int)>[
-    ('FOLIO OS', 2),
+    ('FOLIO / INSTRUMENTO', 4),
     ('FECHA', 2),
     ('CLIENTE', 4),
     ('TÉCNICO EJECUTOR', 3),
-    ('TIPO SERVICIO', 4),
+    ('TIPO SERVICIO', 3),
     ('ACCIONES', 4),
   ];
 
@@ -421,13 +425,41 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   Widget _filaTabla(Map<String, dynamic> r) {
     const cell = TextStyle(fontSize: 12.5, color: _kTextPrim);
     final folio = (r['folio_os'] ?? '').toString();
+    final etiq = construirEtiquetaInstrumento(r);
+    final cca = extraerNumeroCca(r);
+    final dve = extraerNumeroDve(r);
     return Container(
-      constraints: const BoxConstraints(minHeight: 48, maxHeight: 56),
+      constraints: const BoxConstraints(minHeight: 52),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(children: [
         Expanded(
-          flex: 2,
-          child: Text(folio, style: cell.copyWith(fontWeight: FontWeight.w700)),
+          flex: 4,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  etiq.isNotEmpty ? etiq : folio,
+                  style: cell.copyWith(fontWeight: FontWeight.w700, fontSize: 11.5),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (cca.isNotEmpty || dve.isNotEmpty) ...[
+                  const SizedBox(height: 3),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 3,
+                    children: [
+                      if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF1D4ED8), const Color(0xFFDBEAFE)),
+                      if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF6D28D9), const Color(0xFFEDE9FE)),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
         ),
         Expanded(flex: 2, child: Text(_fmtFecha(r['fecha']), style: cell)),
         Expanded(
@@ -447,7 +479,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
           ]),
         ),
         Expanded(
-          flex: 4,
+          flex: 3,
           child: Text((r['tipo_servicio'] ?? '—').toString(),
               style: cell.copyWith(color: _kTextSec), maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
@@ -465,6 +497,15 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
     );
   }
 
+  Widget _chipReg(String pfx, String val, Color fg, Color bg) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
+        child: Text(
+          '$pfx: $val',
+          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: fg),
+        ),
+      );
+
   Widget _listaMobile(List<Map<String, dynamic>> rows) {
     return RefreshIndicator(
       color: _kMetroPurple,
@@ -475,6 +516,9 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (_, i) {
           final r = rows[i];
+          final etiq = construirEtiquetaInstrumento(r);
+          final cca = extraerNumeroCca(r);
+          final dve = extraerNumeroDve(r);
           return Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
@@ -486,12 +530,27 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   bottom: BorderSide(color: _kBorder)),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Row(children: [
-                Text((r['folio_os'] ?? '').toString(),
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                const Spacer(),
+              Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Expanded(
+                  child: Text(
+                    etiq.isNotEmpty ? etiq : (r['folio_os'] ?? '').toString(),
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                  ),
+                ),
+                const SizedBox(width: 8),
                 Text(_fmtFecha(r['fecha']), style: const TextStyle(fontSize: 12, color: _kTextSec)),
               ]),
+              if (cca.isNotEmpty || dve.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF1D4ED8), const Color(0xFFDBEAFE)),
+                    if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF6D28D9), const Color(0xFFEDE9FE)),
+                  ],
+                ),
+              ],
               const SizedBox(height: 4),
               Text((r['cliente'] ?? '—').toString(), style: const TextStyle(fontSize: 13)),
               const SizedBox(height: 2),

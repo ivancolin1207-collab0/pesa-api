@@ -15,6 +15,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
+import '../services/metrology_helper.dart';
 import '../services/pdf_storage_service.dart';
 import '../services/sync_service.dart';
 import '../services/tipo_servicio_rules.dart';
@@ -72,7 +73,7 @@ const _kTableHead  = Color(0xFFF3F4F6);
 /// LP   -> LevantamientoProyectoScreen
 /// LV   -> LevantamientoMetrologicoScreen
 /// Resto (OS-) -> CalibracionAjusteScreen (CapturaScreen)
-void navegarCapturaSegunTipo(BuildContext context, Map<String, dynamic> orden) {
+Future<void> navegarCapturaSegunTipo(BuildContext context, Map<String, dynamic> orden) async {
   final String folioUpper = (orden['folio'] ?? orden['folio_os'] ?? orden['folio_rma'] ?? '').toString().trim().toUpperCase();
   final String tipoDocUpper = (orden['tipo_documento'] ?? '').toString().trim().toUpperCase();
   final String tipoUpper = (orden['tipo_servicio'] ?? '').toString().trim().toUpperCase();
@@ -84,24 +85,15 @@ void navegarCapturaSegunTipo(BuildContext context, Map<String, dynamic> orden) {
     orden['folio_os'] = orden['folio'];
   }
 
-  // 0. PRIMERA CONDICIÓN EXPLÍCITA: OSOCC (Formato de Diagnóstico y Revisión de Celda de Carga)
+  Widget targetScreen;
   if (folioUpper.startsWith('OSOCC-') ||
       tipoDocUpper == 'OSOCC' ||
       tipoUpper.contains('OSOCC') ||
       tipoUpper.contains('OBSERVACIONES CELDA') ||
       (tipoUpper.contains('DIAGNOSTICO') && tipoUpper.contains('CELDA')) ||
       (tipoUpper.contains('DIAGNÓSTICO') && tipoUpper.contains('CELDA'))) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ObservacionesCeldaScreen(orden: orden),
-      ),
-    );
-    return;
-  }
-
-  // 1. SEGUNDA CONDICIÓN EXPLÍCITA: OSOB (Formato de Inspección y Revisión de Básculas)
-  if (folioUpper.startsWith('OSOB-') ||
+    targetScreen = ObservacionesCeldaScreen(orden: orden);
+  } else if (folioUpper.startsWith('OSOB-') ||
       tipoDocUpper == 'OSOB' ||
       tipoUpper.contains('OSOB') ||
       tipoUpper.contains('OBSERVACION') ||
@@ -109,75 +101,37 @@ void navegarCapturaSegunTipo(BuildContext context, Map<String, dynamic> orden) {
           !folioUpper.startsWith('RMA-') &&
           !folioUpper.startsWith('RE-') &&
           (tipoUpper.contains('INSPECCION') || tipoUpper.contains('INSPECCIÓN')))) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ObservacionesBasculaScreen(orden: orden),
-      ),
-    );
-    return;
-  }
-
-  // 2. RMA (Remisión de Material) — prefijo explícito RMA- (sin coincidir 'RMA' dentro de 'FORMATO')
-  if (folioUpper.startsWith('RMA-') ||
+    targetScreen = ObservacionesBasculaScreen(orden: orden);
+  } else if (folioUpper.startsWith('RMA-') ||
       tipoDocUpper == 'RMA' ||
       tipoUpper.contains('REMISI') ||
       tipoUpper.contains('REFACCI')) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => RemisionCapturaScreen(orden: orden),
-      ),
-    );
-    return;
-  }
-
-  // 3. RE (Revisión de Celdas / Báscula)
-  if (folioUpper.startsWith('RE-') ||
+    targetScreen = RemisionCapturaScreen(orden: orden);
+  } else if (folioUpper.startsWith('RE-') ||
       tipoDocUpper == 'RE' ||
       (!folioUpper.startsWith('OS-') && tipoUpper.contains('REVISI'))) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => RevisionBasculaScreen(orden: orden),
-      ),
-    );
-    return;
-  }
-
-  // 4. LP (Levantamiento de Proyecto)
-  if (folioUpper.startsWith('LP-') ||
+    targetScreen = RevisionBasculaScreen(orden: orden);
+  } else if (folioUpper.startsWith('LP-') ||
       tipoDocUpper == 'LP' ||
       tipoUpper.contains('PROYECTO')) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LevantamientoProyectoScreen(orden: orden),
-      ),
-    );
-    return;
-  }
-
-  // 5. LV (Levantamiento Metrológico)
-  if (folioUpper.startsWith('LV-') ||
+    targetScreen = LevantamientoProyectoScreen(orden: orden);
+  } else if (folioUpper.startsWith('LV-') ||
       tipoDocUpper == 'LV' ||
       tipoUpper.contains('METROL')) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => LevantamientoMetrologicoScreen(orden: orden),
-      ),
-    );
-    return;
+    targetScreen = LevantamientoMetrologicoScreen(orden: orden);
+  } else {
+    targetScreen = CalibracionAjusteScreen(orden: orden);
   }
 
-  // 6. OS estándar (Calibración / Ajuste / Inspección)
-  Navigator.push(
+  await Navigator.push(
     context,
-    MaterialPageRoute(
-      builder: (_) => CalibracionAjusteScreen(orden: orden),
-    ),
+    MaterialPageRoute(builder: (_) => targetScreen),
   );
+  if (context.mounted) {
+    try {
+      await context.read<SyncService>().cargarOrdenes();
+    } catch (_) {}
+  }
 }
 
 /// Retorna true si la modalidad del documento es explícitamente física.
@@ -2309,8 +2263,17 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
 
     if (p.query.isNotEmpty) {
       final q = normalizarTexto(p.query);
-      final ok = ['folio_os', 'cliente', 'sucursal', 'tecnico', 'tipo_servicio', 'id_lote', 'lote']
-          .any((k) => normalizarTexto(os[k]?.toString() ?? '').contains(q));
+      final etiqueta = normalizarTexto(construirEtiquetaInstrumento(os));
+      final cca = normalizarTexto(extraerNumeroCca(os));
+      final dve = normalizarTexto(extraerNumeroDve(os));
+      final ok = etiqueta.contains(q) ||
+          cca.contains(q) ||
+          dve.contains(q) ||
+          [
+            'folio_os', 'cliente', 'sucursal', 'direccion', 'tecnico',
+            'tipo_servicio', 'id_lote', 'lote', 'marca', 'modelo',
+            'ns', 'serie', 'id_equipo', 'id_indicador', 'ubicacion',
+          ].any((k) => normalizarTexto(os[k]?.toString() ?? '').contains(q));
       if (!ok) return false;
     }
 
@@ -2425,6 +2388,15 @@ class _MobilePhoneDashboard extends StatelessWidget {
                   tooltip: sync.state == SyncState.syncing ? 'Toca para cancelar' : 'Sincronizar (mantén presionado para opciones)',
                 ),
               ),
+              if (!hideTecnico)
+                IconButton(
+                  icon: const Icon(Icons.add_circle_rounded, color: _kCarmineRed, size: 24),
+                  tooltip: 'Nuevo Documento / Asignar',
+                  onPressed: () async {
+                    await context.push('/nuevo-doc');
+                    await state._loadLocal();
+                  },
+                ),
             ],
           ),
         ),
@@ -2672,13 +2644,19 @@ class _MobilePhoneDashboard extends StatelessWidget {
           return _MobileLoteCard(
             group: group,
             state: state,
-            onCaptura: (os) => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
+            onCaptura: (os) async {
+              await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
+              await state._loadLocal();
+            },
           );
         }
         final os = group.items.first;
         return _MobileOsCard(
           os: os,
-          onCaptura: () => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
+          onCaptura: () async {
+            await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
+            await state._loadLocal();
+          },
           onAbrirPdf: state._abrirPdf,
           onDescargarPdf: state._descargarPdfConNomenclatura,
           onRehacer: state._mostrarDialogoRehacerToma,
@@ -2767,18 +2745,52 @@ class _MobileOsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Fila Superior: Folio destacado + Badge de Estatus
+          // Fila Superior: Identificador Dinámico Compuesto + Chips CCA/DVE + Badge Estatus
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                folioStr.isNotEmpty ? folioStr : '—',
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                  color: _kCarmineRed,
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      construirEtiquetaInstrumento(os).isNotEmpty
+                          ? construirEtiquetaInstrumento(os)
+                          : (folioStr.isNotEmpty ? folioStr : '—'),
+                      style: const TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w800,
+                        color: _kCarmineRed,
+                        height: 1.25,
+                      ),
+                    ),
+                    if (extraerNumeroCca(os).isNotEmpty || extraerNumeroDve(os).isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          if (extraerNumeroCca(os).isNotEmpty)
+                            _RegPillChip(
+                              prefix: 'CCA',
+                              value: extraerNumeroCca(os),
+                              fg: const Color(0xFF1D4ED8),
+                              bg: const Color(0xFFDBEAFE),
+                            ),
+                          if (extraerNumeroDve(os).isNotEmpty)
+                            _RegPillChip(
+                              prefix: 'DVE',
+                              value: extraerNumeroDve(os),
+                              fg: const Color(0xFF6D28D9),
+                              bg: const Color(0xFFEDE9FE),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ],
                 ),
               ),
+              const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
@@ -3403,7 +3415,7 @@ class _TabletDesktopDashboard extends StatelessWidget {
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              const double minTableWidth = 720.0;
+              const double minTableWidth = 860.0;
               final double effectiveWidth = constraints.maxWidth > minTableWidth
                   ? constraints.maxWidth
                   : minTableWidth;
@@ -3450,7 +3462,10 @@ class _TabletDesktopDashboard extends StatelessWidget {
             group: group,
             onEnviarLote: state._estaEnviandoEmail ? null : () => state._procesarEnvioCorreo(item: group, esLote: true),
             hideTecnico: hideTecnico,
-            onCaptura: (os) => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
+            onCaptura: (os) async {
+              await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
+              await state._loadLocal();
+            },
           );
         }
         final os = group.items.first;
@@ -3458,7 +3473,10 @@ class _TabletDesktopDashboard extends StatelessWidget {
           os: os,
           index: i,
           hideTecnico: hideTecnico,
-          onCaptura: () => navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os)),
+          onCaptura: () async {
+            await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
+            await state._loadLocal();
+          },
           onAbrirPdf: state._abrirPdf,
           onDescargarPdf: state._descargarPdfConNomenclatura,
           onRehacer: state._mostrarDialogoRehacerToma,
@@ -3580,7 +3598,10 @@ class _Header extends StatelessWidget {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   ),
-                  onPressed: () => context.push('/nuevo-doc'),
+                  onPressed: () async {
+                    await context.push('/nuevo-doc');
+                    onRefresh();
+                  },
                   icon: const Icon(Icons.add, size: 14),
                   label: const Text(
                     '+ Nuevo Documento',
@@ -3962,7 +3983,7 @@ class _TableHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          SizedBox(width: 110, child: _TH('FOLIO OS')),
+          SizedBox(width: 260, child: _TH('FOLIO / INSTRUMENTO')),
           SizedBox(width: 85, child: _TH('FECHA')),
           Expanded(
             flex: 3,
@@ -4134,13 +4155,53 @@ class _OsRow extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // [FOLIO OS] (110px)
+              // [FOLIO / INSTRUMENTO COMPUESTO + CCA/DVE] (260px)
               SizedBox(
-                width: 110,
-                child: Text(
-                  folioStr.isNotEmpty ? folioStr : '—',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5, color: _kCarmineRed),
-                  overflow: TextOverflow.ellipsis,
+                width: 260,
+                child: Padding(
+                  padding: const EdgeInsets.only(right: 8.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        construirEtiquetaInstrumento(os).isNotEmpty
+                            ? construirEtiquetaInstrumento(os)
+                            : (folioStr.isNotEmpty ? folioStr : '—'),
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 11.5,
+                          color: _kCarmineRed,
+                          height: 1.25,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (extraerNumeroCca(os).isNotEmpty || extraerNumeroDve(os).isNotEmpty) ...[
+                        const SizedBox(height: 3),
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 3,
+                          children: [
+                            if (extraerNumeroCca(os).isNotEmpty)
+                              _RegPillChip(
+                                prefix: 'CCA',
+                                value: extraerNumeroCca(os),
+                                fg: const Color(0xFF1D4ED8),
+                                bg: const Color(0xFFDBEAFE),
+                              ),
+                            if (extraerNumeroDve(os).isNotEmpty)
+                              _RegPillChip(
+                                prefix: 'DVE',
+                                value: extraerNumeroDve(os),
+                                fg: const Color(0xFF6D28D9),
+                                bg: const Color(0xFFEDE9FE),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
               // [FECHA] (85px)
@@ -4440,7 +4501,7 @@ class _LoteRowState extends State<_LoteRow> {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     SizedBox(
-                      width: 110,
+                      width: 260,
                       child: Row(
                         children: [
                           Icon(_expanded ? Icons.keyboard_arrow_down : Icons.chevron_right, size: 18, color: _kCarmineRed),
@@ -4450,6 +4511,16 @@ class _LoteRowState extends State<_LoteRow> {
                             decoration: BoxDecoration(color: _kCarmineRed, borderRadius: BorderRadius.circular(4)),
                             child: Text('LOTE • $count OS', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
                           ),
+                          if ((first['rango_lote'] ?? '').toString().trim().isNotEmpty) ...[
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                first['rango_lote'].toString().trim(),
+                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: _kTextPrim),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -4691,6 +4762,39 @@ class TipoServicioBadge extends StatelessWidget {
     return Tooltip(
       message: rules.etiquetaLarga,
       child: _Badge(label: label, fg: fg, bg: bg),
+    );
+  }
+}
+
+class _RegPillChip extends StatelessWidget {
+  final String prefix;
+  final String value;
+  final Color fg;
+  final Color bg;
+
+  const _RegPillChip({
+    required this.prefix,
+    required this.value,
+    required this.fg,
+    required this.bg,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        '$prefix: $value',
+        style: TextStyle(
+          fontSize: 9.5,
+          fontWeight: FontWeight.w800,
+          color: fg,
+        ),
+      ),
     );
   }
 }

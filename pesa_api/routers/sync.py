@@ -98,21 +98,26 @@ class OSCompleta(BaseModel):
     division_minima:       Optional[float] = None
     div_verificacion:      Optional[float] = None
     id_equipo:             Optional[str]   = None
+    id_indicador:          Optional[str]   = None
     equipo_catalogo_id:    Optional[int]   = None
     tipo_instrumento:      Optional[str]   = None
     id_tipo_instrumento:   Optional[int]   = None
     numero_cca:            Optional[str]   = None
+    numero_dve:            Optional[str]   = None
     holograma_anterior:    Optional[str]   = None
+    holograma_actualizado: Optional[str]   = None
     valor_repetibilidad:   Optional[float] = None
     valor_excentricidad:   Optional[float] = None
     clase_exactitud_codigo: Optional[str]  = None
     observaciones:         Optional[str]   = None
     aplica_excentricidad:  Optional[bool]  = True
+    motivo_no_excentricidad: Optional[str] = None
     num_celdas_camionera:  Optional[int]   = 0
     secciones_camionera:   Optional[int]   = 0
     filas_excentricidad:   Optional[int]   = 4
     num_secciones:         Optional[int]   = 0
     instrumento_capacidad: Optional[str]   = None
+    instrumento_division:  Optional[str]   = None
     datos_tecnicos_json:   Optional[str]   = '{}'
     partidas:              Optional[Union[List[dict], List[Any], str, Any]] = None
     refacciones:           Optional[Union[List[dict], List[Any], str, Any]] = None
@@ -167,11 +172,21 @@ class PushPayload(BaseModel):
     marca:              Optional[str] = None
     modelo:             Optional[str] = None
     ns:                 Optional[str] = None
+    serie:              Optional[str] = None
     ubicacion:          Optional[str] = None
     id_equipo:          Optional[str] = None
     id_indicador:       Optional[str] = None
     no_identificacion:  Optional[str] = None
     unidad_medida:      Optional[str] = None   # kg / g / t / lb
+    numero_cca:         Optional[str] = None
+    cca:                Optional[str] = None
+    numero_dve:         Optional[str] = None
+    folio_dve:          Optional[str] = None
+    holograma_anterior: Optional[str] = None
+    holograma_actualizado: Optional[str] = None
+    aplica_excentricidad: Optional[bool] = None
+    motivo_no_excentricidad: Optional[str] = None
+    parcial_instrumento: Optional[bool] = False
 
     # Vinculación a catálogo de sucursales (v13)
     sucursal_id:        Optional[int] = None
@@ -325,6 +340,15 @@ async def calibraciones_consulta(
                 COALESCE(os.estado, '')                          AS estado,
                 COALESCE(os.estatus, '')                         AS estatus,
                 COALESCE(os.modalidad, '')                       AS modalidad,
+                COALESCE(os.marca, '')                           AS marca,
+                COALESCE(os.modelo, '')                          AS modelo,
+                COALESCE(os.ns, '')                              AS ns,
+                COALESCE(os.ns, '')                              AS serie,
+                COALESCE(os.id_equipo::text, '')                 AS id_equipo,
+                COALESCE(os.id_equipo::text, '')                 AS id_indicador,
+                COALESCE(os.ubicacion, '')                       AS ubicacion,
+                COALESCE(os.numero_cca, '')                      AS numero_cca,
+                COALESCE(os.numero_dve, '')                      AS numero_dve,
                 (COALESCE(os.pdf_generado, FALSE)
                    OR COALESCE(os.pdf_url, '') <> ''
                    OR COALESCE(os.pdf_path, '') <> '')           AS tiene_pdf,
@@ -455,9 +479,14 @@ async def sync_pull(
             os.div_minima AS division_minima,
             os.div_verificacion,
             COALESCE(os.id_equipo::text, '') AS id_equipo,
-            os.numero_cca, os.holograma_anterior,
+            COALESCE(os.id_equipo::text, '') AS id_indicador,
+            COALESCE(os.numero_cca, '') AS numero_cca,
+            COALESCE(os.numero_dve, '') AS numero_dve,
+            os.holograma_anterior,
+            os.holograma_actualizado,
             os.valor_repetibilidad, os.valor_excentricidad,
             COALESCE(os.aplica_excentricidad, true)  AS aplica_excentricidad,
+            COALESCE(os.motivo_no_excentricidad, '') AS motivo_no_excentricidad,
             COALESCE(os.secciones_camionera,   0)    AS num_celdas_camionera,
             COALESCE(os.secciones_camionera,   0)    AS secciones_camionera,
             COALESCE(os.filas_excentricidad,   4)    AS filas_excentricidad,
@@ -798,11 +827,17 @@ async def sync_pull(
                                 d["tipo_instrumento"] = str(dt_obj.get("tipo_instrumento"))
                             if dt_obj.get("aplica_excentricidad") is not None:
                                 d["aplica_excentricidad"] = bool(dt_obj.get("aplica_excentricidad"))
-                            for str_key in ("marca", "modelo", "ns", "serie", "ubicacion", "id_equipo"):
+                            for str_key in ("marca", "modelo", "ns", "serie", "ubicacion", "id_equipo", "numero_cca", "numero_dve", "motivo_no_excentricidad"):
                                 if not d.get(str_key) and dt_obj.get(str_key):
                                     d[str_key] = str(dt_obj.get(str_key))
                             if not d.get("id_equipo") and dt_obj.get("id_indicador"):
                                 d["id_equipo"] = str(dt_obj.get("id_indicador"))
+                            if not d.get("id_indicador") and d.get("id_equipo"):
+                                d["id_indicador"] = str(d.get("id_equipo"))
+                            if not d.get("numero_cca") and dt_obj.get("cca"):
+                                d["numero_cca"] = str(dt_obj.get("cca"))
+                            if not d.get("numero_dve") and dt_obj.get("folio_dve"):
+                                d["numero_dve"] = str(dt_obj.get("folio_dve"))
                     except Exception:
                         pass
                 d["partidas"] = partidas_list
@@ -910,11 +945,27 @@ async def sync_push(
 
         # Si la tablet declara la orden Cerrada explícitamente, el estado final es COMPLETADA_DIGITAL
         if (not estado_protegido
+                and not payload.parcial_instrumento
                 and (payload.estatus or "").strip().upper() in ("CERRADO", "CERRADA", "COMPLETADO", "COMPLETADA")):
             nuevo_estado = "COMPLETADA_DIGITAL"
+        elif (not estado_protegido
+              and (payload.parcial_instrumento
+                   or (payload.nuevo_estado or "").strip().upper() in ("EN_PROCESO", "PROCESO", "ASIGNADA"))
+              and str(row["estado"] or "").strip().upper() not in ("COMPLETADA", "COMPLETADA_DIGITAL", "CERRADO", "CERRADA", "ESCANEADA", "FIRMADA")):
+            nuevo_estado = "EN_PROCESO" if (payload.nuevo_estado or "").strip().upper() != "ASIGNADA" else "ASIGNADA"
 
         _CERRADOS = {"COMPLETADA", "COMPLETADA_DIGITAL", "CERRADO", "CERRADA", "ESCANEADA", "FIRMADA"}
-        nuevo_estatus = "Cerrado" if str(nuevo_estado or "").upper() in _CERRADOS else None
+        if str(nuevo_estado or "").upper() in _CERRADOS:
+            nuevo_estatus = "Cerrado"
+        elif str(nuevo_estado or "").upper() == "ASIGNADA":
+            nuevo_estatus = "Asignada"
+        elif str(nuevo_estado or "").upper() in ("EN_PROCESO", "PROCESO"):
+            nuevo_estatus = "En Proceso"
+        else:
+            nuevo_estatus = None
+
+        if payload.serie and not payload.ns:
+            payload.ns = payload.serie
 
         # Resolver clase de exactitud (si viene el código, buscar el ID)
         id_clase = row["id_clase_exactitud"]
@@ -1068,22 +1119,43 @@ async def sync_push(
             except Exception as e_dtj:
                 logger.warning("[SYNC PUSH] Error guardando datos_tecnicos_json para %s: %s", payload.folio_os, e_dtj)
 
-        if any(v is not None for v in (payload.alcance_max, payload.capacidad_maxima, payload.div_minima, payload.division_minima, payload.cliente, payload.tipo_instrumento)):
+        if any(v is not None for v in (
+            payload.alcance_max, payload.capacidad_maxima,
+            payload.div_minima, payload.division_minima,
+            payload.cliente, payload.tipo_instrumento,
+            payload.numero_cca, payload.cca,
+            payload.numero_dve, payload.folio_dve,
+            payload.aplica_excentricidad, payload.motivo_no_excentricidad,
+            payload.holograma_anterior, payload.holograma_actualizado,
+        )):
             try:
+                import re as _re
                 cap_v = payload.alcance_max if payload.alcance_max is not None else payload.capacidad_maxima
                 div_v = payload.div_minima if payload.div_minima is not None else payload.division_minima
+                cca_raw = payload.numero_cca if payload.numero_cca is not None else payload.cca
+                dve_raw = payload.numero_dve if payload.numero_dve is not None else payload.folio_dve
+                cca_v = "" if (cca_raw is not None and _re.match(r"^(CCA|DVE)\.\d{2}\.?$", str(cca_raw).strip(), flags=_re.I)) else cca_raw
+                dve_v = "" if (dve_raw is not None and _re.match(r"^(CCA|DVE)\.\d{2}\.?$", str(dve_raw).strip(), flags=_re.I)) else dve_raw
                 await db.execute(
                     """
                     UPDATE ordenes_servicio SET
-                        alcance_max      = COALESCE($1, alcance_max),
-                        capacidad_maxima = COALESCE($1, capacidad_maxima),
-                        div_minima       = COALESCE($2, div_minima),
-                        division_minima  = COALESCE($2, division_minima),
-                        cliente          = COALESCE($3, cliente),
-                        tipo_instrumento = COALESCE($4, tipo_instrumento)
-                    WHERE id = $5
+                        alcance_max             = COALESCE($1, alcance_max),
+                        capacidad_maxima        = COALESCE($1, capacidad_maxima),
+                        div_minima              = COALESCE($2, div_minima),
+                        division_minima         = COALESCE($2, division_minima),
+                        cliente                 = COALESCE($3, cliente),
+                        tipo_instrumento        = COALESCE($4, tipo_instrumento),
+                        numero_cca              = COALESCE($5, numero_cca),
+                        numero_dve              = COALESCE($6, numero_dve),
+                        aplica_excentricidad    = COALESCE($7, aplica_excentricidad),
+                        motivo_no_excentricidad = COALESCE($8, motivo_no_excentricidad),
+                        holograma_anterior      = COALESCE($9, holograma_anterior),
+                        holograma_actualizado   = COALESCE($10, holograma_actualizado)
+                    WHERE id = $11
                     """,
-                    cap_v, div_v, payload.cliente, payload.tipo_instrumento, os_id,
+                    cap_v, div_v, payload.cliente, payload.tipo_instrumento,
+                    cca_v, dve_v, payload.aplica_excentricidad, payload.motivo_no_excentricidad,
+                    payload.holograma_anterior, payload.holograma_actualizado, os_id,
                 )
             except Exception as e_ext:
                 logger.warning("[SYNC PUSH] Error guardando campos extra de equipo para %s: %s", payload.folio_os, e_ext)

@@ -25,6 +25,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
+import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
 import '../widgets/nombre_recibe.dart';
@@ -1491,6 +1492,56 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              height: 40,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFF1D4ED8),
+                  backgroundColor: const Color(0xFFEFF6FF),
+                  side: const BorderSide(color: Color(0xFF93C5FD), width: 1.4),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () async {
+                  final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? '').toString().trim();
+                  if (folio.isEmpty) return;
+                  _programarAutoGuardado();
+                  final parcial = <String, dynamic>{
+                    'marca': _marcaCtrl.text.trim(),
+                    'modelo': _modeloCtrl.text.trim(),
+                    'serie': _serieCtrl.text.trim(),
+                    'ns': _serieCtrl.text.trim(),
+                    'capacidad_maxima': '${_capMaxCtrl.text.trim()} $_unidadCap'.trim(),
+                    'ubicacion': _clienteDestinoCtrl.text.trim(),
+                    'tipo_instrumento': 'Celda de Carga',
+                  };
+                  final ok = await context.read<SyncService>().guardarYSincronizarInstrumentoParcial(
+                        folio,
+                        parcial,
+                        localId: widget.orden['local_id'] as int?,
+                      );
+                  if (mounted) {
+                    final etiq = construirEtiquetaInstrumento({'folio_os': folio, ...parcial});
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFF1D4ED8),
+                        content: Text(
+                          ok
+                              ? 'Equipo guardado y sincronizado (orden sigue En Proceso): $etiq'
+                              : 'Equipo guardado localmente (se sincronizará al conectar): $etiq',
+                        ),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.cloud_upload_outlined, size: 18),
+                label: const Text(
+                  'Guardar Datos de Equipo (Sin Finalizar)',
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+                ),
+              ),
             ),
           ],
         ),

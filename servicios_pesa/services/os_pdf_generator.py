@@ -946,42 +946,70 @@ class OsPdfGenerator:
             ], y)
             y -= fila_h
 
-        # ── Fila 3 (condicional): CCA / Hologramas ────────────────────────────────────
-        # Caso 1 — Ajuste puro: omitir completamente, sin espacio residual
-        # Fallback triple de clave para el numero de certificado CCA
-        _numero_cca = (
+        # ── Fila 3 (condicional): CCA / DVE / Hologramas ──────────────────────────────
+        import re as _re_reg
+
+        def _limp_reg_pdf(val) -> str:
+            s = str(val or "").strip()
+            if not s or s.lower() in {"none", "null", "n/a", "na", "--", "-"}:
+                return ""
+            if _re_reg.match(r"^(CCA|DVE)\.\d{2}\.?$", s, flags=_re_reg.IGNORECASE):
+                return ""
+            return s
+
+        _numero_cca = _limp_reg_pdf(
             os_data.get("numero_cca") or
             os_data.get("numero_certificado") or
             os_data.get("cca") or
             ""
         )
-        if not mostrar_cca and not mostrar_hologramas:
-            pass   # no se dibuja nada, y permanece donde está
+        _numero_dve = _limp_reg_pdf(
+            os_data.get("numero_dve") or
+            os_data.get("folio_dve") or
+            ""
+        )
+        _holo_ant = str(os_data.get("holograma_anterior") or "").strip()
+        _holo_act = str(os_data.get("holograma_actualizado") or "").strip()
 
-        # Caso 2 — Solo CCA (Calibración sin Inspección)
-        elif mostrar_cca and not mostrar_hologramas:
+        _show_cca = mostrar_cca or bool(_numero_cca)
+        _show_dve = mostrar_hologramas or bool(_numero_dve)
+        _show_holos = mostrar_hologramas or bool(_holo_ant) or bool(_holo_act)
+
+        if not _show_cca and not _show_dve and not _show_holos:
+            pass
+        elif _show_cca and _show_dve and _show_holos:
+            w4 = (cw - 3 * GAP) / 4
+            field_row([
+                ("NÚMERO CCA",      _numero_cca, w4),
+                ("NÚMERO DVE",      _numero_dve, w4),
+                ("HOLO. ANTERIOR",  _holo_ant,   w4),
+                ("HOLO. ACTUALIZ.", _holo_act,   w4),
+            ], y)
+            y -= fila_h
+        elif _show_cca and _show_dve and not _show_holos:
+            w2 = (cw - GAP) / 2
+            field_row([
+                ("NÚMERO CCA", _numero_cca, w2),
+                ("NÚMERO DVE", _numero_dve, w2),
+            ], y)
+            y -= fila_h
+        elif _show_cca and not _show_dve and not _show_holos:
             field_row([
                 ("NÚMERO CCA", _numero_cca, cw),
             ], y)
             y -= fila_h
-
-        # Caso 3 — Solo Hologramas (Inspección sin Calibración)
-        elif not mostrar_cca and mostrar_hologramas:
-            # 2 columnas → 1 gap de 8pt (consistente con el gap del Caso 4)
-            half_w = (cw - 8) / 2
+        elif not _show_cca and _show_dve and not _show_holos:
             field_row([
-                ("HOLOGRAMA ANTERIOR",    os_data.get("holograma_anterior")    or "", half_w),
-                ("HOLOGRAMA ACTUALIZADO", os_data.get("holograma_actualizado") or "", half_w),
+                ("NÚMERO DVE", _numero_dve, cw),
             ], y)
             y -= fila_h
-
-        # Caso 4 — CCA + ambos hologramas (Calibración + Inspección)
         else:
-            third_w = (cw - 8) / 3
+            # Inspección / DVE + Hologramas (sin CCA)
+            w3 = (cw - 2 * GAP) / 3
             field_row([
-                ("NÚMERO CCA",            _numero_cca,                                                    third_w),
-                ("HOLOGRAMA ANTERIOR",    os_data.get("holograma_anterior")    or "", third_w),
-                ("HOLOGRAMA ACTUALIZADO", os_data.get("holograma_actualizado") or "", third_w),
+                ("NÚMERO DVE",            _numero_dve, w3),
+                ("HOLOGRAMA ANTERIOR",    _holo_ant,   w3),
+                ("HOLOGRAMA ACTUALIZADO", _holo_act,   w3),
             ], y)
             y -= fila_h
 

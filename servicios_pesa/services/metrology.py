@@ -135,6 +135,67 @@ def formatear_division_minima(raw_div) -> str:
     return f"{limpio} {unidad}".strip() if unidad else limpio
 
 
+def limpiar_numero_regulatorio(val) -> str:
+    """Limpia valores vacíos o prefijos sin folio (ej. 'CCA.26.' o 'DVE.26.')."""
+    s = str(val or "").strip()
+    if not s or s.lower() in {"none", "null", "n/a", "na", "--", "-"}:
+        return ""
+    if re.match(r"^(CCA|DVE)\.\d{2}\.?$", s, flags=re.IGNORECASE):
+        return ""
+    return s
+
+
+def construir_etiqueta_instrumento(orden: dict) -> str:
+    """
+    Construye dinámicamente el identificador compuesto con los campos disponibles del instrumento:
+      FOLIO - MARCA - MODELO - SERIE - ID - UBICACIÓN
+    Omitiendo valores vacíos, null, 'sin id', 'sin modelo' o 'sin serie'.
+    """
+    if not isinstance(orden, dict):
+        return ""
+    folio = str(orden.get("folio") or orden.get("folio_os") or "").strip()
+    invalidos = {
+        "", "none", "null", "sin id", "sin modelo", "sin serie",
+        "n/a", "na", "--", "s/n", "sn", "s/m", "s/i",
+    }
+
+    dt_map = {}
+    dt = orden.get("datos_tecnicos_json")
+    if isinstance(dt, dict):
+        dt_map = dt
+    elif isinstance(dt, str) and dt.strip().startswith("{"):
+        try:
+            import json as _json
+            parsed = _json.loads(dt)
+            if isinstance(parsed, dict):
+                dt_map = parsed
+        except Exception:
+            dt_map = {}
+
+    def _pick(*keys: str) -> str:
+        for k in keys:
+            v = orden.get(k)
+            if (v is None or str(v).strip() == "") and dt_map:
+                v = dt_map.get(k)
+            val = str(v or "").strip()
+            if val and val.lower() not in invalidos:
+                return val
+        return ""
+
+    partes = [folio] if folio else []
+    for group in (
+        ("marca", "equipo_marca"),
+        ("modelo", "equipo_modelo"),
+        ("serie", "ns", "numero_serie", "equipo_ns"),
+        ("id_indicador", "id_equipo", "equipo_id"),
+        ("ubicacion", "equipo_ubicacion"),
+    ):
+        val = _pick(*group)
+        if val:
+            partes.append(val)
+    return " - ".join(partes)
+
+
 
 def fmt(value: float | None, d: float, *, zero_as_empty: bool = False) -> str:
     """

@@ -1,5 +1,6 @@
 // lib/services/metrology_helper.dart
 // Funciones auxiliares de cálculo y validación metrológica (OIML R 76 / NOM-010-SCFI)
+import 'dart:convert';
 
 /// Retorna el número de decimales adecuado a partir de la división mínima d (OIML R 76).
 /// - Si d es entero o >= 1 (ej. d = 1, 2, 5, 10, 20, 50 kg) -> 0 decimales (ej. 1000, 2000, 5990)
@@ -270,5 +271,132 @@ String inferirMotivoNoExcentricidad(String? rawMotivo, [String? tipoInstrumento]
   }
   return 'Tolva';
 }
+
+const Set<String> _kValoresOmitirEtiqueta = {
+  '',
+  '-',
+  '--',
+  'none',
+  'null',
+  'n/a',
+  'na',
+  's/n',
+  'sn',
+  'sin id',
+  'sin modelo',
+  'sin serie',
+  'sin marca',
+  'sin ubicacion',
+  'sin ubicación',
+  'por definir',
+};
+
+/// Limpia un número regulatorio (CCA o DVE), descartando valores nulos o prefijos vacíos
+/// como 'CCA.26.' o 'DVE.26.' sin dígitos finales.
+String limpiarNumeroRegulatorio(dynamic rawVal) {
+  if (rawVal == null) return '';
+  final s = rawVal.toString().trim();
+  if (s.isEmpty) return '';
+  if (_kValoresOmitirEtiqueta.contains(s.toLowerCase())) return '';
+  if (RegExp(r'^(CCA|DVE)\.\d{2}\.?$', caseSensitive: false).hasMatch(s)) {
+    return '';
+  }
+  return s;
+}
+
+Map<String, dynamic> _extraerMapaDatosTecnicos(Map<String, dynamic> orden) {
+  final rawDt = orden['datos_tecnicos_json'] ?? orden['datos_captura'];
+  if (rawDt is Map<String, dynamic>) return rawDt;
+  if (rawDt is Map) return Map<String, dynamic>.from(rawDt);
+  if (rawDt is String && rawDt.trim().isNotEmpty) {
+    try {
+      final dec = jsonDecode(rawDt);
+      if (dec is Map) return Map<String, dynamic>.from(dec);
+    } catch (_) {}
+  }
+  return const {};
+}
+
+/// Extrae el Número CCA limpio desde la orden o su datos_tecnicos_json.
+String extraerNumeroCca(Map<String, dynamic> orden) {
+  for (final key in ['numero_cca', 'cca', 'folio_cca']) {
+    final clean = limpiarNumeroRegulatorio(orden[key]);
+    if (clean.isNotEmpty) return clean;
+  }
+  final dt = _extraerMapaDatosTecnicos(orden);
+  for (final key in ['numero_cca', 'cca', 'folio_cca']) {
+    final clean = limpiarNumeroRegulatorio(dt[key]);
+    if (clean.isNotEmpty) return clean;
+  }
+  return '';
+}
+
+/// Extrae el Número DVE (Dictamen de Verificación) limpio desde la orden o su datos_tecnicos_json.
+String extraerNumeroDve(Map<String, dynamic> orden) {
+  for (final key in ['numero_dve', 'folio_dve']) {
+    final clean = limpiarNumeroRegulatorio(orden[key]);
+    if (clean.isNotEmpty) return clean;
+  }
+  // Compatibilidad con registros donde folio DVE alfanumérico quedó en div_verificacion
+  final rawDivVer = orden['div_verificacion']?.toString().trim() ?? '';
+  if (rawDivVer.toUpperCase().startsWith('DVE')) {
+    final clean = limpiarNumeroRegulatorio(rawDivVer);
+    if (clean.isNotEmpty) return clean;
+  }
+  final dt = _extraerMapaDatosTecnicos(orden);
+  for (final key in ['numero_dve', 'folio_dve']) {
+    final clean = limpiarNumeroRegulatorio(dt[key]);
+    if (clean.isNotEmpty) return clean;
+  }
+  return '';
+}
+
+/// Construye dinámicamente el identificador compuesto del instrumento:
+/// `FOLIO - MARCA - MODELO - SN - ID - UBICACIÓN`
+/// omitiendo campos vacíos, null, 'sin id', 'sin modelo', 'sin serie', etc.
+String construirEtiquetaInstrumento(Map<String, dynamic> orden) {
+  final dt = _extraerMapaDatosTecnicos(orden);
+
+  String pickField(List<String> keys) {
+    for (final k in keys) {
+      final v = orden[k];
+      if (v != null) {
+        final s = v.toString().trim();
+        if (s.isNotEmpty && !_kValoresOmitirEtiqueta.contains(s.toLowerCase())) {
+          return s;
+        }
+      }
+    }
+    for (final k in keys) {
+      final v = dt[k];
+      if (v != null) {
+        final s = v.toString().trim();
+        if (s.isNotEmpty && !_kValoresOmitirEtiqueta.contains(s.toLowerCase())) {
+          return s;
+        }
+      }
+    }
+    return '';
+  }
+
+  final folio = (orden['folio_os'] ?? orden['folio'] ?? '').toString().trim();
+  final marca = pickField(['marca']);
+  final modelo = pickField(['modelo']);
+  final serie = pickField(['serie', 'ns', 'numero_serie']);
+  final idEquipo = pickField(['id_indicador', 'id_equipo', 'tag']);
+  final ubicacion = pickField(['ubicacion', 'ubicacion_equipo', 'area']);
+
+  final partes = <String>[];
+  if (folio.isNotEmpty) partes.add(folio);
+
+  for (final cand in [marca, modelo, serie, idEquipo, ubicacion]) {
+    if (cand.isEmpty) continue;
+    if (partes.any((p) => p.toLowerCase() == cand.toLowerCase())) continue;
+    partes.add(cand);
+  }
+
+  return partes.join(' - ');
+}
+
 
 

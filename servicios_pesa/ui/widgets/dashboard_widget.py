@@ -59,6 +59,7 @@ except ImportError:
 
 import re
 import json
+from services.metrology import construir_etiqueta_instrumento, limpiar_numero_regulatorio
 
 def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", ruta_pdf_disco=None):
     """
@@ -166,6 +167,105 @@ COLOR_TIPO_SERVICIO = {
     'Inspección y Revisión de Básculas (OSOB)': '#7C3AED',
     'Formato de Inspección y Revisión de Básculas': '#7C3AED',
 }
+
+
+# =============================================================================
+# Delegate para FOLIO OS compuesto + Badges CCA / DVE
+# =============================================================================
+class FolioInstrumentoDelegate(QStyledItemDelegate):
+    """
+    Pinta en la columna FOLIO OS:
+      - Línea superior: identificador dinámico compuesto (FOLIO - MARCA - MODELO - SN - ID - UBICACIÓN)
+      - Línea inferior (cuando existan): badges compactos redondeados para CCA y/o DVE.
+    """
+    ROLE_RAW_FOLIO = Qt.ItemDataRole.UserRole + 3
+    ROLE_CCA       = Qt.ItemDataRole.UserRole + 4
+    ROLE_DVE       = Qt.ItemDataRole.UserRole + 5
+    ROLE_IS_BATCH  = Qt.ItemDataRole.UserRole + 6
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        title = str(index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        if not title:
+            super().paint(painter, option, index)
+            return
+
+        cca = str(index.data(self.ROLE_CCA) or "").strip()
+        dve = str(index.data(self.ROLE_DVE) or "").strip()
+        is_batch = bool(index.data(self.ROLE_IS_BATCH))
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if is_batch and not (option.state & QStyle.StateFlag.State_Selected):
+            painter.fillRect(option.rect, QColor("#F0F4FF"))
+        elif option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, QColor("#F2F2F7"))
+        elif option.state & QStyle.StateFlag.State_MouseOver:
+            painter.fillRect(option.rect, QColor("#F9F9FB"))
+
+        rect = option.rect.adjusted(10, 4, -8, -4)
+        has_badges = bool(cca or dve)
+
+        title_font = QFont(option.font)
+        title_font.setPointSizeF(9.2)
+        title_font.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(title_font)
+        painter.setPen(QColor("#1D1D1F" if is_batch else _RED))
+
+        fm_title = QFontMetrics(title_font)
+        elided_title = fm_title.elidedText(title, Qt.TextElideMode.ElideRight, max(40, rect.width()))
+
+        if not has_badges:
+            painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_title)
+            painter.restore()
+            return
+
+        # Con badges CCA y/o DVE: título arriba, píldoras abajo
+        top_rect = QRect(rect.x(), rect.y() + 1, rect.width(), fm_title.height() + 2)
+        painter.drawText(top_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_title)
+
+        badge_font = QFont(option.font)
+        badge_font.setPointSizeF(7.6)
+        badge_font.setWeight(QFont.Weight.Bold)
+        painter.setFont(badge_font)
+        fm_b = QFontMetrics(badge_font)
+
+        bx = rect.x()
+        by = top_rect.bottom() + 3
+        bh = fm_b.height() + 5
+
+        for label_txt, bg_hex, fg_hex, brd_hex in (
+            (f"CCA: {cca}" if cca else "", "#EFF6FF", "#1D4ED8", "#BFDBFE"),
+            (f"DVE: {dve}" if dve else "", "#F3E8FF", "#6D28D9", "#DDD6FE"),
+        ):
+            if not label_txt:
+                continue
+            max_bw = rect.right() - bx
+            if max_bw < 36:
+                break
+            tw = fm_b.horizontalAdvance(label_txt)
+            bw = min(tw + 12, max_bw)
+            brect = QRect(bx, by, bw, bh)
+            path = QPainterPath()
+            path.addRoundedRect(
+                float(brect.x()), float(brect.y()),
+                float(brect.width()), float(brect.height()),
+                5.0, 5.0,
+            )
+            painter.fillPath(path, QBrush(QColor(bg_hex)))
+            painter.setPen(QPen(QColor(brd_hex), 1.0))
+            painter.drawPath(path)
+            painter.setPen(QColor(fg_hex))
+            elided_b = fm_b.elidedText(label_txt, Qt.TextElideMode.ElideRight, max(16, bw - 10))
+            painter.drawText(brect.adjusted(5, 0, -5, 0), Qt.AlignmentFlag.AlignCenter, elided_b)
+            bx += bw + 5
+
+        painter.restore()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
+        cca = str(index.data(self.ROLE_CCA) or "").strip()
+        dve = str(index.data(self.ROLE_DVE) or "").strip()
+        return QSize(280, 56 if (cca or dve) else 50)
 
 
 # =============================================================================
@@ -690,7 +790,7 @@ class _SyncWorker(QThread):
 class _DashboardLoader(QThread):
     """
     Carga KPIs, filtros y registros de tabla en un hilo separado.
-    Emite seÃ±ales con los resultados para que el hilo principal los aplique.
+    Emite señales con los resultados para que el hilo principal los aplique.
 
     Todas las queries se consolidan en UN SOLO viaje a la BD cuando es posible,
     y la query de tabla usa LEFT JOIN en lugar de EXISTS() subquery por fila.
@@ -784,6 +884,17 @@ class _DashboardLoader(QThread):
                     d.get("pdf_url"),
                     d.get("datos_tecnicos_json"),
                     d.get("estatus", d.get("estado")),
+                    d.get("tipo_instrumento", ""),
+                    d.get("marca", ""),
+                    d.get("modelo", ""),
+                    bool(d.get("email_enviado", False)),
+                    d.get("correo_cliente", ""),
+                    d.get("fecha_envio_email"),
+                    d.get("ns", ""),
+                    d.get("id_equipo", ""),
+                    d.get("ubicacion", ""),
+                    d.get("numero_cca", ""),
+                    d.get("numero_dve", ""),
                 )
                 for d in rows_dicts
             ]
@@ -925,7 +1036,12 @@ class _DashboardLoader(QThread):
                 modelo,
                 email_enviado,
                 correo_cliente,
-                fecha_envio_email
+                fecha_envio_email,
+                ns,
+                id_equipo,
+                ubicacion_equipo,
+                numero_cca,
+                numero_dve
             FROM (
                 -- Clave DISTINCT tolerante a id NULL: con DISTINCT ON (os.id) todas
                 -- las órdenes sin id se fusionaban en UNA sola fila.
@@ -973,6 +1089,11 @@ class _DashboardLoader(QThread):
                     COALESCE(os.email_enviado, FALSE)                     AS email_enviado,
                     COALESCE(os.correo_cliente, '')                       AS correo_cliente,
                     os.fecha_envio_email,
+                    COALESCE(os.ns, '')                                   AS ns,
+                    COALESCE(os.id_equipo::text, '')                      AS id_equipo,
+                    COALESCE(os.ubicacion, '')                            AS ubicacion_equipo,
+                    COALESCE(os.numero_cca, '')                           AS numero_cca,
+                    COALESCE(os.numero_dve, '')                           AS numero_dve,
                     os.fecha
                 FROM ordenes_servicio os
                 LEFT JOIN cat_clientes       cl  ON os.id_cliente       = cl.id
@@ -1032,7 +1153,12 @@ class _DashboardLoader(QThread):
                     COALESCE(os.modelo, '') AS modelo,
                     COALESCE(os.email_enviado, FALSE) AS email_enviado,
                     COALESCE(os.correo_cliente, '') AS correo_cliente,
-                    os.fecha_envio_email
+                    os.fecha_envio_email,
+                    COALESCE(os.ns, '') AS ns,
+                    COALESCE(os.id_equipo::text, '') AS id_equipo,
+                    COALESCE(os.ubicacion, '') AS ubicacion_equipo,
+                    COALESCE(os.numero_cca, '') AS numero_cca,
+                    COALESCE(os.numero_dve, '') AS numero_dve
                 FROM ordenes_servicio os
                 LEFT JOIN cat_clientes          cl  ON os.id_cliente       = cl.id
                 LEFT JOIN cat_tecnicos          tc  ON os.id_tecnico       = tc.id
@@ -1070,14 +1196,14 @@ class EditarActividadDialog(QDialog):
         self._folio  = folio
         self._tecnicos: list[tuple[int, str]] = []
 
-        self.setWindowTitle(f"ðŸ“…  Editar Actividad  —  {folio}")
+        self.setWindowTitle(f"📅  Editar Actividad  —  {folio}")
         self.setMinimumWidth(480)
         self.setModal(True)
 
         self._build_ui()
         self._load_data()
 
-    # â”€â”€ UI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── UI ────────────────────────────────────────────────────────────────────
     def _build_ui(self) -> None:
         lay = QVBoxLayout(self)
         lay.setContentsMargins(24, 20, 24, 20)
@@ -1094,7 +1220,7 @@ class EditarActividadDialog(QDialog):
             "}"
         )
 
-        title = QLabel(f"ðŸ“…  Actividad — {self._folio}")
+        title = QLabel(f"📅  Actividad — {self._folio}")
         title.setStyleSheet(
             "font-size: 15px; font-weight: 700; color: #1D1D1F;"
             " background: transparent;"
@@ -1144,7 +1270,7 @@ class EditarActividadDialog(QDialog):
         # Notas de ruta
         form.addWidget(QLabel("Notas de ruta:"), 4, 0)
         self._inp_notas = QLineEdit()
-        self._inp_notas.setPlaceholderText("Instrucciones adicionales para el técnicoâ€¦")
+        self._inp_notas.setPlaceholderText("Instrucciones adicionales para el técnico…")
         self._inp_notas.setStyleSheet(_STYLE_INPUT)
         form.addWidget(self._inp_notas, 4, 1)
 
@@ -1164,7 +1290,7 @@ class EditarActividadDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
 
-        self._btn_save = QPushButton("ðŸ’¾  Guardar Actividad")
+        self._btn_save = QPushButton("💾  Guardar Actividad")
         self._btn_save.setFixedHeight(36)
         self._btn_save.setStyleSheet(
             "QPushButton { background:#C8102E; color:#FFFFFF; border:none;"
@@ -1176,7 +1302,7 @@ class EditarActividadDialog(QDialog):
 
         lay.addLayout(btn_row)
 
-    # â”€â”€ Carga de datos actuales â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Carga de datos actuales ───────────────────────────────────────────────
     def _load_data(self) -> None:
         """Carga los datos actuales de la OS y la lista de técnicos desde BD."""
         if not _HAS_DB or not _db_pool:
@@ -1234,7 +1360,7 @@ class EditarActividadDialog(QDialog):
             logger.warning("EditarActividadDialog: error cargando datos OS=%s: %s",
                            self._os_id, exc)
 
-    # â”€â”€ Guardar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Guardar ───────────────────────────────────────────────────────────────
     def _on_save(self) -> None:
         """Guarda los campos de actividad logística en ordenes_servicio."""
         fecha = self._dte_fecha.date().toString("yyyy-MM-dd")
@@ -1248,7 +1374,7 @@ class EditarActividadDialog(QDialog):
             return
 
         self._btn_save.setEnabled(False)
-        self._btn_save.setText("Guardandoâ€¦")
+        self._btn_save.setText("Guardando…")
 
         try:
             conn = _db_pool.get_connection()
@@ -1287,7 +1413,7 @@ class EditarActividadDialog(QDialog):
             )
         finally:
             self._btn_save.setEnabled(True)
-            self._btn_save.setText("ðŸ’¾  Guardar Actividad")
+            self._btn_save.setText("💾  Guardar Actividad")
 
 
 # =============================================================================
@@ -1308,7 +1434,7 @@ class _SearchWorker(QThread):
             conn = _db_pool.get_connection()
             like_val = f"%{self.search_text}%"
             tec_clause = "AND os.id_tecnico = %s" if self.tec_id_filter is not None else ""
-            params_list = [like_val, like_val, like_val]
+            params_list = [like_val, like_val, like_val, like_val, like_val, like_val, like_val]
             if self.tec_id_filter is not None:
                 params_list.append(self.tec_id_filter)
 
@@ -1332,16 +1458,36 @@ class _SearchWorker(QThread):
                         EXISTS(SELECT 1 FROM adjuntos_os WHERE id_os = os.id) AS tiene_adjunto,
                         COALESCE(os.sync_status, 'SYNCED') AS sync_status,
                         os.rango_lote,
-                        COALESCE(os.sync_check_status, 'ASIGNADA') AS sync_check_status
+                        COALESCE(os.sync_check_status, 'ASIGNADA') AS sync_check_status,
+                        (COALESCE(os.has_pdf, FALSE) OR (os.pdf_b64 IS NOT NULL AND length(os.pdf_b64) > 500) OR os.pdf_generado IS TRUE) AS db_has_pdf,
+                        os.pdf_path,
+                        os.pdf_url,
+                        os.datos_tecnicos_json,
+                        COALESCE(os.estatus, os.estado) AS estatus_real,
+                        '' AS tipo_instrumento,
+                        COALESCE(os.marca, '') AS marca,
+                        COALESCE(os.modelo, '') AS modelo,
+                        COALESCE(os.email_enviado, FALSE) AS email_enviado,
+                        COALESCE(os.correo_cliente, '') AS correo_cliente,
+                        os.fecha_envio_email,
+                        COALESCE(os.ns, '') AS ns,
+                        COALESCE(os.id_equipo::text, '') AS id_equipo,
+                        COALESCE(os.ubicacion, '') AS ubicacion_equipo,
+                        COALESCE(os.numero_cca, '') AS numero_cca,
+                        COALESCE(os.numero_dve, '') AS numero_dve
                     FROM ordenes_servicio os
                     LEFT JOIN cat_clientes       cl  ON os.id_cliente       = cl.id
                     LEFT JOIN cat_tecnicos       tc  ON os.id_tecnico       = tc.id
                     LEFT JOIN cat_tipo_servicio  ts  ON os.id_tipo_servicio = ts.id
                     LEFT JOIN cliente_sucursales suc ON os.sucursal_id      = suc.id
                     WHERE (
-                        os.folio_os          ILIKE %s OR
-                        cl.razon_social      ILIKE %s OR
-                        suc.nombre_sucursal  ILIKE %s
+                        os.folio_os                ILIKE %s OR
+                        cl.razon_social            ILIKE %s OR
+                        suc.nombre_sucursal        ILIKE %s OR
+                        COALESCE(os.marca, '')     ILIKE %s OR
+                        COALESCE(os.modelo, '')    ILIKE %s OR
+                        COALESCE(os.ns, '')        ILIKE %s OR
+                        COALESCE(os.id_equipo::text, '') ILIKE %s
                     )
                     {tec_clause}
                     ORDER BY os.folio_os DESC
@@ -1387,7 +1533,7 @@ class DashboardWidget(QWidget):
     solicitar_nuevo_formato = pyqtSignal(str)
     navegar_a               = pyqtSignal(str)
 
-    # â”€â”€ Estilos de botones de acción — constantes de clase para no recrear por fila â”€â”€
+    # ── Estilos de botones de acción — constantes de clase para no recrear por fila ──
     _BTN_PDF_STYLE = (
         "QPushButton{background:#F2F2F7;color:#1D1D1F;border:1px solid #D1D1D6;"
         "border-radius:4px;font-size:9pt;font-weight:500;padding:0 8px;min-height:26px;}"
@@ -1421,7 +1567,7 @@ class DashboardWidget(QWidget):
     # Col 0: Checkbox  Col 1: Folio  Col 2: Fecha  Col 3: Cliente
     # Col 4: Sucursal  Col 5: Técnico  Col 6: Tipo Servicio
     # Col 7: Modalidad  Col 8: Estatus  Col 9: Sync
-    # ACCIONES â†’ sub-fila span completo (sin columna dedicada)
+    # ACCIONES → sub-fila span completo (sin columna dedicada)
     _COL_CHK      = 0   # checkbox de selección múltiple
     _COL_FOLIO    = 1
     _COL_FECHA    = 2
@@ -1432,9 +1578,9 @@ class DashboardWidget(QWidget):
     _COL_MODAL    = 7
     _COL_ESTADO   = 8
     _COL_SYNC     = 9
-    _COL_ACCIONES = 10  # columna dedicada de botones de acción (380px)
+    _COL_ACCIONES = 10  # columna dedicada de botones de acción (430px)
     _W_SYNC       = 100
-    _W_ACCIONES   = 380   # ancho útil para botones (contenido)
+    _W_ACCIONES   = 430   # ancho útil para botones sin recortar "Cambiar a Digital"
     _ITEM_PAD_H   = 14    # = padding horizontal de QTreeWidget::item en el QSS
 
     _sig_lote_email_result = pyqtSignal(bool, str, str, str, object, object)
@@ -1452,7 +1598,7 @@ class DashboardWidget(QWidget):
         self._date_preset  = "mes"
         self._filters_loaded = False
 
-        # â”€â”€ Caché en memoria para navegación instantánea entre pestaÃ±as â”€â”€â”€â”€â”€â”€
+        # ── Caché en memoria para navegación instantánea entre pestañas ──────
         # Estructura: {'kpis': (total, proceso, cerrados, fisicos),
         #              'rows': [...], 'filters': [...], 'preset': str}
         self._data_cache: dict = {}
@@ -1542,7 +1688,7 @@ class DashboardWidget(QWidget):
         )
         col.addWidget(lbl_title)
 
-        sub_text = "Ã“rdenes de Servicio, Remisiones, Revisiones y Levantamientos"
+        sub_text = "Órdenes de Servicio, Remisiones, Revisiones y Levantamientos"
         if self._rbac_filter == "calibrador":
             sub_text = "OS con componente de Calibración asignadas o completadas."
         elif self._rbac_filter == "inspector":
@@ -1769,7 +1915,7 @@ class DashboardWidget(QWidget):
         self._widget_custom_dates.setVisible(False)
         lay.addWidget(self._widget_custom_dates)
 
-        # â”€â”€ Separador vertical â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Separador vertical ─────────────────────────────────────────────
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.VLine)
         sep.setStyleSheet("background: #E5E5EA; border: none; max-width: 1px;")
@@ -1781,7 +1927,7 @@ class DashboardWidget(QWidget):
             "padding-left: 10px; font-size: 13px; color: #1D1D1F; min-height: 36px;"
         )
 
-        # â”€â”€ Filtro de Modalidad (NUEVO) — Todas / Solo Digitales / Solo Físicos â”€â”€
+        # ── Filtro de Modalidad (NUEVO) — Todas / Solo Digitales / Solo Físicos ──
         self._combo_modal_bar = QComboBox()
         self._combo_modal_bar.setFixedHeight(36)
         self._combo_modal_bar.setMinimumWidth(165)
@@ -1796,7 +1942,7 @@ class DashboardWidget(QWidget):
         self._combo_modal_bar.currentIndexChanged.connect(self._on_filter_changed)
         lay.addWidget(self._combo_modal_bar)
 
-        # â”€â”€ Filtro de Técnicos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Filtro de Técnicos ───────────────────────────────────────────────
         self._combo_tec_bar = QComboBox()
         self._combo_tec_bar.setFixedHeight(36)
         self._combo_tec_bar.setMinimumWidth(160)
@@ -1908,8 +2054,8 @@ class DashboardWidget(QWidget):
         lay.addWidget(self._lbl_pending_count)
         self._refresh_pending_count()
 
-        # â”€â”€ Indicador de carga asíncrona â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        self._lbl_loading = QLabel("âŸ³ Cargando...")
+        # ── Indicador de carga asíncrona ────────────────────────────────────
+        self._lbl_loading = QLabel("⟳ Cargando...")
         self._lbl_loading.setStyleSheet(
             "font-size: 9pt; color: #6B7280; font-style: italic; background: transparent;"
         )
@@ -2049,16 +2195,16 @@ class DashboardWidget(QWidget):
         filas padre de lote como en filas hijas / individuales."""
         cols = [
             "",                  # 0  - checkbox de selección
-            "FOLIO OS",          # 1  - bold rojo / resumen lote
-            "FECHA",             # 2  - 95px fijo
+            "FOLIO OS",          # 1  - etiqueta dinámica compuesta + CCA/DVE
+            "FECHA",             # 2  - 100px fijo
             "CLIENTE",           # 3  - Stretch (espacio central)
             "SUCURSAL / PLANTA", # 4  - Stretch secundario
-            "TÃ‰CNICO",           # 5  - 130px fijo
-            "TIPO SERVICIO",     # 6  - badge, 130px
+            "TÉCNICO",           # 5  - 150px fijo
+            "TIPO SERVICIO",     # 6  - badge, 210px
             "MODALIDAD",         # 7  - badge, 100px
             "ESTATUS",           # 8  - badge, 100px
             "SYNC",              # 9  - badge, 100px fijo
-            "ACCIONES",          # 10 - botones, 220px fijo
+            "ACCIONES",          # 10 - botones, 430px fijo
         ]
         table.setColumnCount(len(cols))
         table.setHeaderLabels(cols)
@@ -2087,7 +2233,7 @@ class DashboardWidget(QWidget):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
 
-        # â”€â”€ BLOQUEO DEFINITIVO de scroll horizontal: 100% ancho sin columna extra â”€â”€
+        # ── BLOQUEO DEFINITIVO de scroll horizontal: 100% ancho sin columna extra ──
         table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         header = table.header()
@@ -2097,18 +2243,21 @@ class DashboardWidget(QWidget):
         header.setStretchLastSection(False)
 
         table.setColumnWidth(self._COL_CHK, 32)
-        table.setColumnWidth(self._COL_FOLIO, 160)
+        table.setColumnWidth(self._COL_FOLIO, 285)
         table.setColumnWidth(self._COL_FECHA, 100)
-        table.setColumnWidth(self._COL_CLIENTE, 240)
-        table.setColumnWidth(self._COL_SUCURSAL, 320)
+        table.setColumnWidth(self._COL_CLIENTE, 220)
+        table.setColumnWidth(self._COL_SUCURSAL, 260)
         table.setColumnWidth(self._COL_TECNICO, 150)
-        table.setColumnWidth(self._COL_SERVICIO, 210)
+        table.setColumnWidth(self._COL_SERVICIO, 200)
         table.setColumnWidth(self._COL_MODAL, 100)
         table.setColumnWidth(self._COL_ESTADO, 100)
         table.setColumnWidth(self._COL_SYNC, 100)
-        table.setColumnWidth(self._COL_ACCIONES, 380)
+        table.setColumnWidth(self._COL_ACCIONES, 430)
 
-        # Delegates para columnas de estado, modalidad, servicio y sync
+        # Delegates para columnas de folio compuesto, estado, modalidad, servicio y sync
+        self._folio_delegate = FolioInstrumentoDelegate(table)
+        table.setItemDelegateForColumn(self._COL_FOLIO,    self._folio_delegate)
+
         self._status_delegate = StatusBadgeDelegate(table)
         table.setItemDelegateForColumn(self._COL_ESTADO,   self._status_delegate)
         table.setItemDelegateForColumn(self._COL_MODAL,    self._status_delegate)
@@ -2218,8 +2367,8 @@ class DashboardWidget(QWidget):
         if not text:
             return
 
-        # â”€â”€ Si no hay coincidencias en los datos ya cargados, relanzar la
-        # consulta SQL con ILIKE para superar el LIMIT 200 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Si no hay coincidencias en los datos ya cargados, relanzar la
+        # consulta SQL con ILIKE para superar el LIMIT 200 ─────────────────
         # Ejemplo: OS-26-688 podría estar fuera del top-200 por fecha/consecutivo.
         root = self._table.invisibleRootItem()
         any_visible = any(
@@ -2249,7 +2398,10 @@ class DashboardWidget(QWidget):
     def _on_search_worker_done(self, rows: list) -> None:
         if rows:
             existing_folios = {
-                self._table.invisibleRootItem().child(i).text(self._COL_FOLIO).strip()
+                str(
+                    self._table.invisibleRootItem().child(i).data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO)
+                    or self._table.invisibleRootItem().child(i).text(self._COL_FOLIO).split(" - ")[0]
+                ).strip()
                 for i in range(self._table.invisibleRootItem().childCount())
             }
             new_rows = [r for r in rows if r[0] not in existing_folios]
@@ -2501,12 +2653,12 @@ class DashboardWidget(QWidget):
         Inicia el loader en background.
         Muestra un overlay sutil y no congela el hilo principal.
         Si hay cache válida para el mismo preset, la sirve instantáneamente
-        sin tocar la red/BD (carga instantánea al volver a la pestaÃ±a).
+        sin tocar la red/BD (carga instantánea al volver a la pestaña).
         """
         if self._loader and self._loader.isRunning():
             return  # ya hay una carga en progreso
 
-        # â”€â”€ Servir desde caché si el preset no cambió â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Servir desde caché si el preset no cambió ─────────────────────────
         if self._cache_valid and not force:
             cached_preset = self._data_cache.get('preset')
             if cached_preset == self._date_preset:
@@ -2544,9 +2696,9 @@ class DashboardWidget(QWidget):
         self._loader.finished.connect(lambda: self._show_loading(False))
         self._loader.start()
 
-    # â”€â”€ Slots de resultados (ejecutan en hilo PRINCIPAL) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    # ── Slots de resultados (ejecutan en hilo PRINCIPAL) ──────────────────────
 
-    # Override showEvent: al volver a la pestaÃ±a Dashboard se sirve del caché
+    # Override showEvent: al volver a la pestaña Dashboard se sirve del caché
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if not self._cache_valid:
@@ -2668,7 +2820,7 @@ class DashboardWidget(QWidget):
         if hasattr(self, "_lbl_loading"):
             self._lbl_loading.setVisible(visible)
 
-    # â”€â”€ Métodos de carga síncronos (legacy) — ahora delegados al loader â”€â”€â”€â”€â”€â”€â”€
+    # ── Métodos de carga síncronos (legacy) — ahora delegados al loader ───────
 
     def _load_kpis(self) -> None:
         """Método legacy — ahora el loader asíncrono lo reemplaza."""
@@ -2694,7 +2846,7 @@ class DashboardWidget(QWidget):
         self._table.clear()
         self._table.setHeaderLabels([
             "", "FOLIO OS", "FECHA", "CLIENTE", "SUCURSAL / PLANTA",
-            "TECNICO", "TIPO SERVICIO", "MODALIDAD", "ESTATUS", "SYNC", "ACCIONES"
+            "TÉCNICO", "TIPO SERVICIO", "MODALIDAD", "ESTATUS", "SYNC", "ACCIONES"
         ])
 
         if not _DEPS_OK or _db_pool is None:
@@ -2732,6 +2884,11 @@ class DashboardWidget(QWidget):
                             bool(d.get("email_enviado", False)),
                             d.get("correo_cliente", ""),
                             d.get("fecha_envio_email"),
+                            d.get("ns", ""),
+                            d.get("id_equipo", ""),
+                            d.get("ubicacion", ""),
+                            d.get("numero_cca", ""),
+                            d.get("numero_dve", ""),
                         )
                         for d in rows_dicts
                     ]
@@ -2840,7 +2997,12 @@ class DashboardWidget(QWidget):
                             COALESCE(os.modelo, '') AS modelo,
                             COALESCE(os.email_enviado, FALSE) AS email_enviado,
                             COALESCE(os.correo_cliente, '') AS correo_cliente,
-                            os.fecha_envio_email
+                            os.fecha_envio_email,
+                            COALESCE(os.ns, '') AS ns,
+                            COALESCE(os.id_equipo::text, '') AS id_equipo,
+                            COALESCE(os.ubicacion, '') AS ubicacion_equipo,
+                            COALESCE(os.numero_cca, '') AS numero_cca,
+                            COALESCE(os.numero_dve, '') AS numero_dve
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes       cl    ON os.id_cliente       = cl.id
                         LEFT JOIN cat_tecnicos       tc    ON os.id_tecnico       = tc.id
@@ -2889,7 +3051,12 @@ class DashboardWidget(QWidget):
                             COALESCE(os.modelo, '') AS modelo,
                             COALESCE(os.email_enviado, FALSE) AS email_enviado,
                             COALESCE(os.correo_cliente, '') AS correo_cliente,
-                            os.fecha_envio_email
+                            os.fecha_envio_email,
+                            COALESCE(os.ns, '') AS ns,
+                            COALESCE(os.id_equipo::text, '') AS id_equipo,
+                            COALESCE(os.ubicacion, '') AS ubicacion_equipo,
+                            COALESCE(os.numero_cca, '') AS numero_cca,
+                            COALESCE(os.numero_dve, '') AS numero_dve
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes      cl ON os.id_cliente       = cl.id
                         LEFT JOIN cat_tecnicos      tc ON os.id_tecnico       = tc.id
@@ -3083,6 +3250,48 @@ class DashboardWidget(QWidget):
             return "✓✓ Gris — Recibida en Tablet / Tomada en campo offline"
         return "✓ Gris — Asignada en Servidor (Pendiente descarga en tablet)"
 
+    @staticmethod
+    def _extraer_orden_meta_de_row(row) -> tuple[str, str, str]:
+        """
+        Retorna (etiqueta_compuesta, cca_limpio, dve_limpio) a partir de una tupla row del Dashboard.
+        """
+        if not row:
+            return ("", "", "")
+        folio_raw = str(row[0] or "").strip()
+        dt_raw = row[17] if len(row) > 17 else None
+        dt_map = {}
+        if isinstance(dt_raw, dict):
+            dt_map = dt_raw
+        elif isinstance(dt_raw, str) and dt_raw.strip().startswith("{"):
+            try:
+                parsed = json.loads(dt_raw)
+                if isinstance(parsed, dict):
+                    dt_map = parsed
+            except Exception:
+                dt_map = {}
+
+        marca = str(row[20] or "") if len(row) > 20 else ""
+        modelo = str(row[21] or "") if len(row) > 21 else ""
+        ns = str(row[25] or "") if len(row) > 25 else ""
+        id_eq = str(row[26] or "") if len(row) > 26 else ""
+        ubic_eq = str(row[27] or "") if len(row) > 27 else ""
+        cca_col = str(row[28] or "") if len(row) > 28 else ""
+        dve_col = str(row[29] or "") if len(row) > 29 else ""
+
+        orden_dict = {
+            "folio": folio_raw,
+            "marca": marca,
+            "modelo": modelo,
+            "serie": ns,
+            "id_indicador": id_eq,
+            "ubicacion": ubic_eq,
+            "datos_tecnicos_json": dt_map,
+        }
+        etiqueta = construir_etiqueta_instrumento(orden_dict) or folio_raw
+        cca = limpiar_numero_regulatorio(cca_col or dt_map.get("numero_cca") or dt_map.get("cca"))
+        dve = limpiar_numero_regulatorio(dve_col or dt_map.get("numero_dve") or dt_map.get("folio_dve"))
+        return (etiqueta, cca, dve)
+
     def _populate_tree_item(
         self,
         item: QTreeWidgetItem,
@@ -3098,15 +3307,29 @@ class DashboardWidget(QWidget):
         os_id,
         is_batch_parent: bool = False,
         sync_check_status: str = "ASIGNADA",
+        raw_folio: str = "",
+        numero_cca: str = "",
+        numero_dve: str = "",
     ) -> None:
         """Rellena las columnas de texto de un QTreeWidgetItem."""
-        # Col 1: Folio
+        folio_base = (raw_folio or folio_text.split(" - ")[0]).strip()
+        # Col 1: Folio dinámico compuesto + badges CCA / DVE
         item.setText(self._COL_FOLIO, folio_text)
         font = item.font(self._COL_FOLIO)
         font.setWeight(QFont.Weight.DemiBold if is_batch_parent else QFont.Weight.Medium)
         item.setFont(self._COL_FOLIO, font)
         item.setForeground(self._COL_FOLIO, QBrush(QColor(_RED if not is_batch_parent else "#1D1D1F")))
         item.setData(self._COL_FOLIO, Qt.ItemDataRole.UserRole, os_id)
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO, folio_base)
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_CCA, numero_cca)
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_DVE, numero_dve)
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_IS_BATCH, is_batch_parent)
+        tooltip_lines = [folio_text]
+        if numero_cca:
+            tooltip_lines.append(f"CCA: {numero_cca}")
+        if numero_dve:
+            tooltip_lines.append(f"DVE: {numero_dve}")
+        item.setToolTip(self._COL_FOLIO, "\n".join(tooltip_lines))
 
         # Col 2-5: datos comunes
         item.setText(self._COL_FECHA,    fecha_str)
@@ -3117,7 +3340,7 @@ class DashboardWidget(QWidget):
 
         # Col 6-9: badges (texto para el delegate)
         # Col 6: TIPO SERVICIO homologado (CCA + DVE / DVE + Ajuste / CCA + Ajuste / Ajuste)
-        folio_clean = folio_text.replace("▸ LOTE ", "").strip()
+        folio_clean = folio_base.replace("▸ LOTE ", "").strip()
         srv_clean = str(servicio or "").strip()
         if folio_clean.startswith("LP-") or "LP-" in folio_text:
             servicio = "Levantamiento de Proyecto"
@@ -3168,7 +3391,7 @@ class DashboardWidget(QWidget):
         else:
             try:
                 from services.tipo_servicio_rules import etiqueta_corta, etiqueta_larga
-                _folio_ref = "" if is_batch_parent else folio_text
+                _folio_ref = "" if is_batch_parent else folio_base
                 item.setText(self._COL_SERVICIO, etiqueta_corta(servicio, folio=_folio_ref))
                 item.setToolTip(
                     self._COL_SERVICIO,
@@ -3213,18 +3436,18 @@ class DashboardWidget(QWidget):
         if not rows:
             print("ADVERTENCIA: La lista de rows para la tabla esta vacia.")
 
-        # â”€â”€ Desactivar redraws durante inserción masiva (crítico para 200+ filas) â”€â”€
+        # ── Desactivar redraws durante inserción masiva (crítico para 200+ filas) ──
         self._table.setUpdatesEnabled(False)
         self._table.blockSignals(True)
         try:
             self._table.clear()
             self._table.setHeaderLabels([
                 "", "FOLIO OS", "FECHA", "CLIENTE", "SUCURSAL / PLANTA",
-                "TÃ‰CNICO", "TIPO SERVICIO", "MODALIDAD", "ESTATUS", "SYNC", "ACCIONES"
+                "TÉCNICO", "TIPO SERVICIO", "MODALIDAD", "ESTATUS", "SYNC", "ACCIONES"
             ])
 
-        # â”€â”€ DEDUPLICACIÃ“N: un solo registro por folio_os (evita duplicados
-            # causados por JOINs multiplicativos en lotes/partidas) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── DEDUPLICACIÓN: un solo registro por folio_os (evita duplicados
+            # causados por JOINs multiplicativos en lotes/partidas) ──────────
             _seen_folios: dict = {}
             for _r in rows:
                 _folio_key = str(_r[0] or "").strip()
@@ -3279,7 +3502,7 @@ class DashboardWidget(QWidget):
                 hl.addWidget(c)
                 return w, c
 
-            # â”€â”€ 1. Lotes (filas padre + hijas) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # ── 1. Lotes (filas padre + hijas) ────────────────────────────────────
             for lote_id, group in all_groups.items():
                 if not group:
                     continue
@@ -3338,7 +3561,7 @@ class DashboardWidget(QWidget):
                     parent_item.setData(self._COL_FOLIO, Qt.ItemDataRole.UserRole + 1, folios_lote)
                     parent_item.setData(self._COL_FOLIO, Qt.ItemDataRole.UserRole + 2, (min_c, max_c))
 
-                    # Acciones del lote â†’ celda ACCIONES (col 10) de la fila padre
+                    # Acciones del lote → celda ACCIONES (col 10) de la fila padre
                     acts_p = self._build_action_cell_lote(
                         lote_id=lote_id, all_os_ids=ids_lote, all_folios=folios_lote,
                         folio_inicio=f_ini, folio_fin=f_fin,
@@ -3370,12 +3593,16 @@ class DashboardWidget(QWidget):
                             c_est_label = self._estado_label(c_est)
 
                         c_sync_label = self._get_sync_label(c_est, c_sync)
-                        
+                        c_etiqueta, c_cca, c_dve = self._extraer_orden_meta_de_row(row)
+
                         child = QTreeWidgetItem(parent_item)
                         self._populate_tree_item(
-                            child, c_folio, self._fmt_fecha(str(row[1] or "")), str(row[2] or ""), str(row[3] or ""),
+                            child, c_etiqueta, self._fmt_fecha(str(row[1] or "")), str(row[2] or ""), str(row[3] or ""),
                             str(row[4] or ""), str(row[5] or ""), str(row[6] or "").capitalize(), c_est_label, c_sync_label, c_oid,
-                            sync_check_status=c_sync_check
+                            sync_check_status=c_sync_check,
+                            raw_folio=c_folio,
+                            numero_cca=c_cca,
+                            numero_dve=c_dve,
                         )
                         
                         chk_c, _ = _make_chk([c_folio], [c_oid], is_batch=False, pdf_flags=[c_has_real_pdf])
@@ -3394,7 +3621,7 @@ class DashboardWidget(QWidget):
                     print(f"Error procesando lote {lote_id}: {e_lote}")
                     continue
 
-            # â”€â”€ 2. Registros individuales (sin lote) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # ── 2. Registros individuales (sin lote) ──────────────────────────────
             for row in singles:
                 try:
                     folio        = str(row[0] or "")
@@ -3424,12 +3651,16 @@ class DashboardWidget(QWidget):
                         estado_label = self._estado_label(estado)
 
                     sync_label   = self._get_sync_label(estado, sync_status)
+                    etiqueta_comp, num_cca, num_dve = self._extraer_orden_meta_de_row(row)
 
                     item = QTreeWidgetItem(self._table)
                     self._populate_tree_item(
-                        item, folio, fecha_str, cliente, sucursal,
+                        item, etiqueta_comp, fecha_str, cliente, sucursal,
                         tecnico, servicio, modal_label, estado_label, sync_label, os_id,
-                        sync_check_status=sync_check
+                        sync_check_status=sync_check,
+                        raw_folio=folio,
+                        numero_cca=num_cca,
+                        numero_dve=num_dve,
                     )
                     chk_w, _ = _make_chk([folio], [os_id], is_batch=False, pdf_flags=[has_real_pdf])
                     self._table.setItemWidget(item, self._COL_CHK, chk_w)
@@ -3449,7 +3680,7 @@ class DashboardWidget(QWidget):
             traceback.print_exc()
         finally:
             self._table.blockSignals(False)
-            # â”€â”€ Reactivar redraws y forzar repaint limpio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+            # ── Reactivar redraws y forzar repaint limpio ────────────────────────
             self._table.setUpdatesEnabled(True)
             self._table.viewport().update()
             self._place_header_checkbox(self._table)
@@ -3595,13 +3826,13 @@ class DashboardWidget(QWidget):
             QPushButton:hover { background: #FFE0E0; }
         """
 
-        # â”€â”€ Botón PDF Lote â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Botón PDF Lote ────────────────────────────────────────────────────
         btn_pdf_lote = QPushButton("PDF")
         btn_pdf_lote.setStyleSheet(_btn_lote_style)
         btn_pdf_lote.setFixedSize(62, 28)
         btn_pdf_lote.setToolTip(
             f"Buscar y abrir el PDF compilado del lote\n"
-            f"{folio_inicio or all_folios[0]} â†’ {folio_fin or all_folios[-1]}"
+            f"{folio_inicio or all_folios[0]} → {folio_fin or all_folios[-1]}"
         )
         fi = folio_inicio or (all_folios[0] if all_folios else "")
         ff = folio_fin   or (all_folios[-1] if all_folios else "")
@@ -3611,14 +3842,15 @@ class DashboardWidget(QWidget):
         )
         lay.addWidget(btn_pdf_lote)
 
-        # â”€â”€ Botón Modalidad (menú desplegable Físico â†” Digital) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Botón Modalidad (menú desplegable Físico ↔ Digital) ───────────────
         is_digital = (str(modalidad).upper() == "DIGITAL")
-        modal_text  = "ðŸ“± Digital" if is_digital else "ðŸ“„ Físico"
+        modal_text  = "📱 Digital" if is_digital else "📄 Físico"
         modal_style = _btn_modal_digital_style if is_digital else _btn_modal_fisico_style
 
-        btn_modal = QPushButton("Cambiar a Físico" if not is_digital else "Cambiar a Digital")
-        btn_modal.setStyleSheet(modal_style)
-        btn_modal.setFixedSize(72, 28)
+        btn_modal = QPushButton("Cambiar a Físico" if is_digital else "Cambiar a Digital")
+        btn_modal.setStyleSheet(modal_style.replace("padding: 0 4px;", "padding: 0 8px;"))
+        btn_modal.setMinimumWidth(124)
+        btn_modal.setFixedHeight(28)
         btn_modal.setToolTip("Cambiar modalidad del lote (Físico / Digital)")
         btn_modal.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -3634,8 +3866,8 @@ class DashboardWidget(QWidget):
             QMenu::item { padding: 8px 18px; border-radius: 4px; color: #1D1D1F; }
             QMenu::item:selected { background: #F5F5F7; }
         """)
-        act_fisico  = QAction("ðŸ“„  Físico  — formato impreso / escaneo", btn_modal)
-        act_digital = QAction("ðŸ“±  Digital — captura en tablet / app móvil", btn_modal)
+        act_fisico  = QAction("📄  Físico  — formato impreso / escaneo", btn_modal)
+        act_digital = QAction("📱  Digital — captura en tablet / app móvil", btn_modal)
         menu_modal.addAction(act_fisico)
         menu_modal.addAction(act_digital)
 
@@ -3741,7 +3973,7 @@ class DashboardWidget(QWidget):
             conn.commit()
             _db_pool.release_connection(conn)
             logger.info(
-                "_cambiar_modalidad_lote: %d registros â†’ %s",
+                "_cambiar_modalidad_lote: %d registros → %s",
                 len(os_ids), nueva_modalidad
             )
         except Exception as exc:
@@ -3752,9 +3984,9 @@ class DashboardWidget(QWidget):
             )
             return
 
-        # â”€â”€ Actualizar UI en tiempo real sin recargar toda la tabla â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Actualizar UI en tiempo real sin recargar toda la tabla ──────────
         is_digital = (nueva_modalidad.upper() == "DIGITAL")
-        new_text   = "ðŸ“± Digital" if is_digital else "ðŸ“„ Físico"
+        new_text   = "Cambiar a Físico" if is_digital else "Cambiar a Digital"
         new_label  = "Digital (Lote)" if is_digital else "Fisico (Lote)"
         new_style  = """
             QPushButton {
@@ -3792,7 +4024,7 @@ class DashboardWidget(QWidget):
 
         # Notificar éxito brevemente
         lbl = QLabel(
-            f"  âœ… Modalidad â†’ {'Digital' if is_digital else 'Físico'} guardada  ",
+            f"  ✅ Modalidad → {'Digital' if is_digital else 'Físico'} guardada  ",
             self
         )
         lbl.setStyleSheet(
@@ -3813,7 +4045,7 @@ class DashboardWidget(QWidget):
         2. Si no hay IDs válidos (lotes físicos), borra por folio_os.
         3. Si folios también está vacío, intenta desglosar el rango del texto.
         """
-        # â”€â”€ 1. Resolver lista de folios â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 1. Resolver lista de folios ───────────────────────────────────────
         folios_limpios = [f for f in (folios or []) if f]
 
         # Fallback: desglosar rango "OS-26-631 al OS-26-638" si folios viene vacío
@@ -3821,15 +4053,15 @@ class DashboardWidget(QWidget):
             # os_ids puede traer strings de folio en algunos contextos
             folios_limpios = [str(x) for x in os_ids if x and not str(x).isdigit()]
 
-        # â”€â”€ 2. Resolver IDs numéricos â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 2. Resolver IDs numéricos ─────────────────────────────────────────
         valid_ids = []
         for i in os_ids:
             try:
                 valid_ids.append(int(i))
             except (TypeError, ValueError):
-                pass  # None o strings de folio â†’ ignorar para esta lista
+                pass  # None o strings de folio → ignorar para esta lista
 
-        # â”€â”€ 3. Verificar que tengamos algo con qué borrar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 3. Verificar que tengamos algo con qué borrar ─────────────────────
         if not valid_ids and not folios_limpios:
             QMessageBox.warning(
                 self, "Sin datos para eliminar",
@@ -3840,13 +4072,13 @@ class DashboardWidget(QWidget):
 
         n_items = len(folios_limpios) or len(valid_ids)
         modo    = "folios" if folios_limpios else f"{len(valid_ids)} ID(s)"
-        label_f = f"{folios_limpios[0]} â€¦ {folios_limpios[-1]}" if folios_limpios else str(valid_ids[:3])
+        label_f = f"{folios_limpios[0]} … {folios_limpios[-1]}" if folios_limpios else str(valid_ids[:3])
 
-        # â”€â”€ 4. Diálogo de confirmación â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 4. Diálogo de confirmación ────────────────────────────────────────
         msg = QMessageBox(self)
         msg.setWindowTitle("âš ï¸  Eliminar Lote")
         msg.setText(
-            f"Â¿Eliminar el lote completo ({n_items} formato(s)) de forma definitiva?\n\n"
+            f"¿Eliminar el lote completo ({n_items} formato(s)) de forma definitiva?\n\n"
             f"Folios: {label_f}\n\n"
             "Esta acción es IRREVERSIBLE."
         )
@@ -3858,7 +4090,7 @@ class DashboardWidget(QWidget):
         if msg.exec() != QMessageBox.StandardButton.Yes:
             return
 
-        # â”€â”€ 5. Tablas hijas con SAVEPOINT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 5. Tablas hijas con SAVEPOINT ────────────────────────────────────
         _CHILD_TABLES = [
             ("adjuntos_os",        "id_os"),
             ("det_excentricidad",  "id_os"),
@@ -3876,7 +4108,7 @@ class DashboardWidget(QWidget):
             with conn.cursor() as cur:
 
                 if valid_ids:
-                    # â”€â”€ Borrado por IDs numéricos (cascada) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    # ── Borrado por IDs numéricos (cascada) ──────────────────
                     for tabla, col in _CHILD_TABLES:
                         sp = f"sp_{tabla[:20]}"
                         try:
@@ -3897,7 +4129,7 @@ class DashboardWidget(QWidget):
                     rows = cur.rowcount
 
                 else:
-                    # â”€â”€ Borrado por folio_os cuando no hay IDs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                    # ── Borrado por folio_os cuando no hay IDs ────────────────
                     # Primero obtener los IDs internos desde los folios
                     cur.execute(
                         "SELECT id FROM ordenes_servicio WHERE folio_os = ANY(%s)",
@@ -3976,8 +4208,8 @@ class DashboardWidget(QWidget):
                            tiene_adjunto: bool, sync_status: str,
                            row_data: tuple) -> QWidget:
         """Construye el widget de botones de acción (sin contenedor de celda propio).
-        - Cerrado + PDF: [ ðŸ‘ Ver PDF ] [ ðŸ“¥ Descargar ] [ ðŸ”„ Rehacer ]
-        - En Proceso:    [ âœï¸ Continuar Captura ]
+        - Cerrado + PDF: [ 👁 Ver PDF ] [ 📥 Descargar ] [ 🔄 Rehacer ]
+        - En Proceso:    [ ✏️ Continuar Captura ]
         - Asignado/Pendiente: etiqueta 'Pendiente'
         Altura de botones: 28px, border-radius: 6px, font-size: 12px.
         """
@@ -4003,9 +4235,9 @@ class DashboardWidget(QWidget):
 
         is_proceso = estatus in ('en proceso', 'proceso', 'pendiente de formato') or (not has_real_pdf and not has_med)
 
-        # â”€â”€ CONDICIÃ“N ESTRICTA: Solo si el archivo PDF existe realmente â”€â”€â”€â”€â”€â”€â”€
+        # ── CONDICIÓN ESTRICTA: Solo si el archivo PDF existe realmente ───────
         if has_real_pdf:
-            # 1. [ ðŸ‘ PDF ] — Azul suave, 54px de ancho para texto completo
+            # 1. [ 👁 PDF ] — Azul suave, 54px de ancho para texto completo
             btn_pdf = QPushButton("PDF")
             btn_pdf.setObjectName("btn_action_pdf")
             btn_pdf.setFixedSize(54, 28)
@@ -4026,7 +4258,7 @@ class DashboardWidget(QWidget):
             btn_pdf.clicked.connect(lambda _, fl=str(folio): self._open_pdf(fl))
             lay.addWidget(btn_pdf)
 
-            # 2. [ ðŸ“¥ Descargar ] — Verde suave, 80px de ancho para texto completo
+            # 2. [ 📥 Descargar ] — Verde suave, 80px de ancho para texto completo
             btn_dl = QPushButton("Descargar")
             btn_dl.setObjectName("btn_action_download")
             btn_dl.setFixedSize(80, 28)
@@ -4049,7 +4281,7 @@ class DashboardWidget(QWidget):
             )
             lay.addWidget(btn_dl)
 
-            # 3. [ ðŸ”„ Rehacer ] — Naranja suave, 68px de ancho para texto completo
+            # 3. [ 🔄 Rehacer ] — Naranja suave, 68px de ancho para texto completo
             btn_rehacer = QPushButton("Rehacer")
             btn_rehacer.setObjectName("btn_action_rehacer")
             btn_rehacer.setFixedSize(68, 28)
@@ -4074,7 +4306,7 @@ class DashboardWidget(QWidget):
 
         else:
             # Si has_pdf es False:
-            # Los botones [ ðŸ‘ PDF ] y [ ðŸ“¥ Descargar ] NO deben mostrarse habilitados como si ya existieran.
+            # Los botones [ 👁 PDF ] y [ 📥 Descargar ] NO deben mostrarse habilitados como si ya existieran.
             is_osob_folio = str(folio or "").strip().upper().startswith(("OSOB-", "OSOCC-"))
             btn_pdf = QPushButton("PDF")
             btn_pdf.setFixedSize(54, 28)
@@ -5237,7 +5469,7 @@ recepcion@basculaspesa.com.mx
         Antes de abrir, verifica que la OS exista en la BD para evitar abrir
         un diálogo de una orden huérfana (eliminada remotamente).
         """
-        # â”€â”€ Verificación de existencia: evitar abrir captura de orden huérfana â”€â”€â”€
+        # ── Verificación de existencia: evitar abrir captura de orden huérfana ───
         if folio:
             try:
                 _conn_chk = _db_pool.get_connection()
@@ -5335,11 +5567,11 @@ recepcion@basculaspesa.com.mx
         to_remove = []   # (parent_item_or_None, child_item)
         for i in range(root.childCount()):
             top = root.child(i)
-            # Â¿Es un nodo individual con ese folio?
+            # ¿Es un nodo individual con ese folio?
             if top.text(0).strip() == folio:
                 to_remove.append((None, top))
                 continue
-            # Â¿Es un grupo con ese folio como hijo?
+            # ¿Es un grupo con ese folio como hijo?
             for j in range(top.childCount()):
                 child = top.child(j)
                 if child.text(0).strip() == folio:
@@ -5370,10 +5602,10 @@ recepcion@basculaspesa.com.mx
         Filtrado jerárquico sobre el QTreeWidget de lotes.
 
         Reglas:
-          1. Si un HIJO (folio individual) coincide â†’ el padre se muestra y se expande.
-          2. Si el PADRE (rango del lote / cliente) coincide â†’ el grupo completo se muestra.
+          1. Si un HIJO (folio individual) coincide → el padre se muestra y se expande.
+          2. Si el PADRE (rango del lote / cliente) coincide → el grupo completo se muestra.
           3. Las ramas sin ninguna coincidencia se ocultan.
-          4. Sin texto â†’ todos los ítems visibles (sin modificar expansión del usuario).
+          4. Sin texto → todos los ítems visibles (sin modificar expansión del usuario).
         """
         if not hasattr(self, "_table"):
             return
@@ -5396,8 +5628,8 @@ recepcion@basculaspesa.com.mx
 
         words = search_term.split()
 
-        # â”€â”€ Detección de modo de búsqueda â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-        # Numérico puro (ej. "624") â†’ solo buscar en FOLIO (columna 0).
+        # ── Detección de modo de búsqueda ────────────────────────────────────
+        # Numérico puro (ej. "624") → solo buscar en FOLIO (columna 0).
         # Evita que códigos postales, teléfonos o números en direcciones
         # hagan falso-positivo.
         _is_numeric_search = search_term.isdigit()
@@ -5410,8 +5642,8 @@ recepcion@basculaspesa.com.mx
 
         def _matches_folio_only(folio_text: str) -> bool:
             """Coincidencia de subcadena SOLO sobre el texto del folio.
-            No evalúa sucursal ni dirección â†’ evita falsos positivos con CPs.
-            '624' â†’ True para 'OS-26-624', False para sucursal con '76246'
+            No evalúa sucursal ni dirección → evita falsos positivos con CPs.
+            '624' → True para 'OS-26-624', False para sucursal con '76246'
             porque la sucursal NUNCA se evalúa en este modo.
             """
             return search_term in folio_text.lower().strip()
@@ -5424,7 +5656,7 @@ recepcion@basculaspesa.com.mx
         for i in range(n_top):
             parent_item = root.child(i)
 
-            # â”€â”€ COLUMNA 1 = FOLIO OS (columna 0 es el checkbox, siempre vacío) â”€â”€
+            # ── COLUMNA 1 = FOLIO OS (columna 0 es el checkbox, siempre vacío) ──
             parent_folio = parent_item.text(1) or ""
             child_count  = parent_item.childCount()
 
@@ -5799,7 +6031,7 @@ recepcion@basculaspesa.com.mx
 
         total = len(valid_items)
         progress = QProgressDialog("Iniciando descarga por lotes...", "Cancelar", 0, total, self)
-        progress.setWindowTitle("Descarga Masiva de Ã“rdenes")
+        progress.setWindowTitle("Descarga Masiva de Órdenes")
         progress.setWindowModality(Qt.WindowModality.WindowModal)
         progress.setMinimumDuration(0)
         progress.setValue(0)
@@ -5905,7 +6137,7 @@ recepcion@basculaspesa.com.mx
             return
         n = len(self._get_selected_rows())
         if n > 0:
-            self._btn_eliminar_sel.setText(f"ðŸ—‘ï¸  Eliminar ({n})")
+            self._btn_eliminar_sel.setText(f"🗑️  Eliminar ({n})")
             self._btn_eliminar_sel.setEnabled(True)
             self._btn_eliminar_sel.setVisible(True)
         else:
@@ -5922,7 +6154,7 @@ recepcion@basculaspesa.com.mx
         if not self._is_admin():
             return
 
-        # â”€â”€ Resolver identificador â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── Resolver identificador ────────────────────────────────────────────
         # os_id puede ser None cuando la fila viene de un lote físico sin id en el row.
         # En ese caso usamos folio_fallback para buscar el id en la BD.
         _resolved_id = None
@@ -5942,7 +6174,7 @@ recepcion@basculaspesa.com.mx
         resp = QMessageBox.warning(
             self, "âš ï¸  Eliminar Orden",
             "Esta acción es IRREVERSIBLE.\n\n"
-            "Â¿Desea eliminar permanentemente esta orden de servicio?",
+            "¿Desea eliminar permanentemente esta orden de servicio?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if resp != QMessageBox.StandardButton.Yes:
@@ -5983,7 +6215,7 @@ recepcion@basculaspesa.com.mx
                     frow = cur.fetchone()
                     _folio_known = frow[0] if frow else _folio_known
 
-                # â”€â”€ BORRADO EN CASCADA â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                # ── BORRADO EN CASCADA ─────────────────────────────────────
                 # Si _resolved_id sigue None (no encontrado por folio en BD)
                 # abortar con mensaje cláro — evita 'id=None' confuso.
                 if _resolved_id is None and not _folio_known:
@@ -6045,7 +6277,7 @@ recepcion@basculaspesa.com.mx
                    else "Digital (captura en tablet)"
         resp = QMessageBox.question(
             self, "Cambiar Modalidad",
-            f"Â¿Cambiar esta orden a modalidad {etiqueta}?\n\n"
+            f"¿Cambiar esta orden a modalidad {etiqueta}?\n\n"
             "Si se cambia a Digital, la tablet podrá descargarla en la próxima sincronización.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -6064,7 +6296,7 @@ recepcion@basculaspesa.com.mx
                         """,
                         (nueva_modalidad, os_id),
                     )
-                    logger.info("[ADMIN] Modalidad OS id=%s â†’ %s", os_id, nueva_modalidad)
+                    logger.info("[ADMIN] Modalidad OS id=%s → %s", os_id, nueva_modalidad)
             QMessageBox.information(
                 self, "Listo",
                 f"Modalidad actualizada a {nueva_modalidad}.\n"
@@ -6087,18 +6319,18 @@ recepcion@basculaspesa.com.mx
             return
 
         n = len(seleccionados)
-        folios_str = "\n".join(f"  â€¢ {s['folio']}" for s in seleccionados[:20])
+        folios_str = "\n".join(f"  • {s['folio']}" for s in seleccionados[:20])
         if n > 20:
-            folios_str += f"\n  â€¦ y {n - 20} más"
+            folios_str += f"\n  … y {n - 20} más"
 
         resp = QMessageBox.warning(
             self, "âš ï¸  Confirmar eliminación",
-            f"Â¿Estás seguro de eliminar {n} formato(s) seleccionado(s)?\n\n"
+            f"¿Estás seguro de eliminar {n} formato(s) seleccionado(s)?\n\n"
             f"{folios_str}\n\n"
             "Esta acción:\n"
-            "  â€¢ Eliminará los registros de la base de datos\n"
-            "  â€¢ Borrará los archivos PDF generados del disco\n"
-            "  â€¢ Ajustará el consecutivo de folio si corresponde\n\n"
+            "  • Eliminará los registros de la base de datos\n"
+            "  • Borrará los archivos PDF generados del disco\n"
+            "  • Ajustará el consecutivo de folio si corresponde\n\n"
             "Esta acción es IRREVERSIBLE.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -6110,7 +6342,7 @@ recepcion@basculaspesa.com.mx
         folios  = [s["folio"]  for s in seleccionados if s["folio"]]
         errores = []
 
-        # â”€â”€ 1. Borrar archivos PDF del disco â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 1. Borrar archivos PDF del disco ─────────────────────────────────
         import os as _os, pathlib
         _PDF_DIRS = [
             pathlib.Path(r"C:\PesaServidorCentral\PDF_OS"),
@@ -6126,7 +6358,7 @@ recepcion@basculaspesa.com.mx
                 except Exception as exc:
                     logger.warning("[DELETE] No se pudo borrar %s: %s", pdf_path, exc)
 
-        # â”€â”€ 2. Eliminar de la BD (dentro de una transacción atómica) â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 2. Eliminar de la BD (dentro de una transacción atómica) ─────────
         if os_ids:
             try:
                 with _db_pool.transaction() as conn:
@@ -6144,7 +6376,7 @@ recepcion@basculaspesa.com.mx
                             cur.execute("ROLLBACK TO SAVEPOINT sp_adj")
                             logger.warning("[DELETE] adjuntos_os omitido: %s", exc_adj)
 
-                        # 2b. Ã“rdenes de servicio — sentencia principal
+                        # 2b. Órdenes de servicio — sentencia principal
                         cur.execute(
                             "DELETE FROM ordenes_servicio WHERE id = ANY(%s)",
                             (os_ids,)
@@ -6152,7 +6384,7 @@ recepcion@basculaspesa.com.mx
                         deleted = cur.rowcount
                         logger.info("[DELETE] %d fila(s) eliminadas de ordenes_servicio", deleted)
 
-                        # 2c. Ajuste del consecutivo de folio â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+                        # 2c. Ajuste del consecutivo de folio ─────────────────
                         cur.execute("SAVEPOINT sp_folio")
                         try:
                             import datetime as _dt
@@ -6210,7 +6442,7 @@ recepcion@basculaspesa.com.mx
                 logger.error("[DELETE] Error al eliminar lote: %s", exc)
                 errores.append(str(exc))
 
-        # â”€â”€ 4. Refrescar tabla y notificar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+        # ── 4. Refrescar tabla y notificar ───────────────────────────────────
         QTimer.singleShot(150, self.refresh)
 
         if errores:
@@ -6221,7 +6453,7 @@ recepcion@basculaspesa.com.mx
             )
         else:
             QMessageBox.information(
-                self, "âœ… Eliminación completada",
+                self, "✅ Eliminación completada",
                 f"Se eliminaron correctamente {n} formato(s):\n\n{folios_str}"
             )
 
@@ -6287,10 +6519,12 @@ recepcion@basculaspesa.com.mx
                     p_item.setToolTip(self._COL_SYNC, "✓✓ Verde — Abierto por Administración / Oficina en Windows")
                 for j in range(p_item.childCount()):
                     c_item = p_item.child(j)
-                    if c_item and c_item.text(self._COL_FOLIO).strip() == clean_folio:
-                        c_item.setData(self._COL_SYNC, Qt.ItemDataRole.UserRole, "AUDITADA_ADMIN")
-                        c_item.setData(self._COL_SYNC, Qt.ItemDataRole.DisplayRole, "AUDITADA_ADMIN")
-                        c_item.setToolTip(self._COL_SYNC, "✓✓ Verde — Abierto por Administración / Oficina en Windows")
+                    if c_item:
+                        c_raw = str(c_item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO) or c_item.text(self._COL_FOLIO).split(" - ")[0]).strip()
+                        if c_raw == clean_folio:
+                            c_item.setData(self._COL_SYNC, Qt.ItemDataRole.UserRole, "AUDITADA_ADMIN")
+                            c_item.setData(self._COL_SYNC, Qt.ItemDataRole.DisplayRole, "AUDITADA_ADMIN")
+                            c_item.setToolTip(self._COL_SYNC, "✓✓ Verde — Abierto por Administración / Oficina en Windows")
             self._table.viewport().update()
         except Exception as e_vis:
             logger.debug("[AUDIT ADMIN] Error actualizando vista QTreeWidget: %s", e_vis)
@@ -6348,7 +6582,7 @@ recepcion@basculaspesa.com.mx
                 pdf_bytes = base64.b64decode(row_b64[0])
                 if len(pdf_bytes) > 500:
                     target_path.write_bytes(pdf_bytes)
-                    logger.info("PDF obtenido desde PostgreSQL (pdf_b64) â†’ %s", target_path)
+                    logger.info("PDF obtenido desde PostgreSQL (pdf_b64) → %s", target_path)
                     _open_file(str(target_path))
                     return True
         except Exception as exc_db:
@@ -6375,7 +6609,7 @@ recepcion@basculaspesa.com.mx
                         content = resp.read()
                         if len(content) > 500 and (content.startswith(b"%PDF") or b"%PDF" in content[:1024] or "pdf" in c_type):
                             target_path.write_bytes(content)
-                            logger.info("PDF descargado exitosamente de Render â†’ %s", target_path)
+                            logger.info("PDF descargado exitosamente de Render → %s", target_path)
                             _open_file(str(target_path))
                             return True
             except Exception as exc_http:
@@ -6481,7 +6715,7 @@ recepcion@basculaspesa.com.mx
             f"No se encontró el archivo PDF para el folio: {folio_limpio}.\n"
             f"No está disponible en la nube (Render) ni en almacenamiento local.\n\n"
             f"El archivo aún no ha sido cargado por el técnico.\n\n"
-            f"Â¿Deseas marcar esta orden como 'En Proceso' para habilitar su captura?",
+            f"¿Deseas marcar esta orden como 'En Proceso' para habilitar su captura?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.Yes
         )
@@ -6570,7 +6804,7 @@ recepcion@basculaspesa.com.mx
         if not os_id:
             return
 
-        folio     = item.text(self._COL_FOLIO).strip()
+        folio     = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO) or item.text(self._COL_FOLIO).split(" - ")[0]).strip()
         modalidad = item.text(self._COL_MODAL)
 
         if folio.startswith("LP-"):

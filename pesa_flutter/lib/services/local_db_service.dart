@@ -78,6 +78,10 @@ class LocalDbService {
       div_minima             REAL,
       div_verificacion       REAL,
       numero_cca             TEXT,
+      numero_dve             TEXT,
+      motivo_no_excentricidad TEXT,
+      id_cliente             INTEGER,
+      sucursal_id            INTEGER,
       holograma_anterior     TEXT,
       holograma_actualizado  TEXT,
       funcionamiento         TEXT,
@@ -129,6 +133,7 @@ class LocalDbService {
   ''';
 
   bool _borradoresVerificada = false;
+  bool _adminTablesVerificada = false;
 
   static const Set<String> _loteLimpiarManualFolios = {
     'OS-26-725', 'OS-26-726', 'OS-26-727', 'OS-26-728',
@@ -318,6 +323,7 @@ class LocalDbService {
           CREATE INDEX IF NOT EXISTS idx_marcas_modelos_marca ON catalogo_marcas_modelos(marca)
         ''');
         await db.execute(_createTableBorradoresSql);
+        await _asegurarTablasCatalogosAdmin(db);
         final devId = _generateUuid();
         await db.insert('meta', {'key': 'device_id', 'value': devId});
       },
@@ -356,6 +362,10 @@ class LocalDbService {
             'div_minima': 'REAL',
             'div_verificacion': 'REAL',
             'numero_cca': 'TEXT',
+            'numero_dve': 'TEXT',
+            'motivo_no_excentricidad': 'TEXT',
+            'id_cliente': 'INTEGER',
+            'sucursal_id': 'INTEGER',
             'holograma_anterior': 'TEXT',
             'holograma_actualizado': 'TEXT',
             'funcionamiento': 'TEXT',
@@ -568,11 +578,139 @@ class LocalDbService {
             ''');
             debugPrint('[LocalDB] catalogo_marcas_modelos inicializado desde ordenes locales');
           }
-        } catch (e) {
+          } catch (e) {
           debugPrint('[LocalDB] catalogo_marcas_modelos setup error: $e');
         }
+        await _asegurarTablasCatalogosAdmin(db);
       },
     );
+  }
+
+  Future<void> _asegurarTablasCatalogosAdmin(Database db) async {
+    if (_adminTablesVerificada) return;
+    try {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS catalogo_clientes (
+          id              INTEGER PRIMARY KEY,
+          nombre          TEXT NOT NULL,
+          razon_social    TEXT,
+          rfc             TEXT,
+          correo          TEXT,
+          telefono        TEXT,
+          direccion       TEXT,
+          sucursales_json TEXT,
+          updated_at      TEXT
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS catalogo_sucursales (
+          id              INTEGER PRIMARY KEY AUTOINCREMENT,
+          sucursal_id     INTEGER,
+          cliente_id      INTEGER,
+          cliente_nombre  TEXT,
+          nombre          TEXT,
+          direccion       TEXT,
+          ciudad          TEXT,
+          contacto        TEXT,
+          telefono        TEXT,
+          correo          TEXT,
+          UNIQUE(cliente_id, nombre, direccion) ON CONFLICT REPLACE
+        )
+      ''');
+      await db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_cat_sucursales_cli ON catalogo_sucursales(cliente_id, cliente_nombre)
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS catalogo_tecnicos (
+          id       INTEGER PRIMARY KEY,
+          nombre   TEXT NOT NULL,
+          username TEXT,
+          rol      TEXT,
+          activo   INTEGER DEFAULT 1
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS catalogo_tipos_servicio (
+          id     INTEGER PRIMARY KEY,
+          nombre TEXT NOT NULL,
+          codigo TEXT
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS catalogo_tipos_instrumento (
+          id                   INTEGER PRIMARY KEY,
+          nombre               TEXT NOT NULL,
+          aplica_excentricidad INTEGER DEFAULT 1
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS historial_instrumentos (
+          id               INTEGER PRIMARY KEY AUTOINCREMENT,
+          cliente_id       INTEGER,
+          cliente_nombre   TEXT NOT NULL DEFAULT '',
+          sucursal_id      INTEGER,
+          sucursal_nombre  TEXT NOT NULL DEFAULT '',
+          marca            TEXT NOT NULL DEFAULT '',
+          modelo           TEXT NOT NULL DEFAULT '',
+          serie            TEXT NOT NULL DEFAULT '',
+          id_indicador     TEXT NOT NULL DEFAULT '',
+          capacidad_maxima TEXT NOT NULL DEFAULT '',
+          division_minima  TEXT NOT NULL DEFAULT '',
+          ubicacion        TEXT NOT NULL DEFAULT '',
+          tipo_instrumento TEXT NOT NULL DEFAULT '',
+          numero_cca       TEXT NOT NULL DEFAULT '',
+          numero_dve       TEXT NOT NULL DEFAULT '',
+          updated_at       TEXT,
+          UNIQUE(cliente_nombre, marca, modelo, serie, id_indicador, ubicacion) ON CONFLICT REPLACE
+        )
+      ''');
+      await db.execute('''
+        CREATE INDEX IF NOT EXISTS idx_hist_inst_cliente ON historial_instrumentos(cliente_nombre, sucursal_nombre)
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS cola_instrumento_parcial (
+          folio_os     TEXT PRIMARY KEY,
+          payload_json TEXT NOT NULL,
+          updated_at   TEXT NOT NULL
+        )
+      ''');
+
+      // Poblar historial_instrumentos inicialmente desde ordenes_servicio si está vacío
+      final cntHist = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM historial_instrumentos'),
+      ) ?? 0;
+      if (cntHist == 0) {
+        await db.execute('''
+          INSERT OR IGNORE INTO historial_instrumentos (
+            cliente_nombre, sucursal_nombre, marca, modelo, serie, id_indicador,
+            capacidad_maxima, division_minima, ubicacion, tipo_instrumento,
+            numero_cca, numero_dve, updated_at
+          )
+          SELECT DISTINCT
+            COALESCE(TRIM(cliente), ''),
+            COALESCE(NULLIF(TRIM(sucursal), ''), TRIM(direccion), ''),
+            COALESCE(TRIM(marca), ''),
+            COALESCE(TRIM(modelo), ''),
+            COALESCE(TRIM(ns), ''),
+            COALESCE(TRIM(id_equipo), ''),
+            COALESCE(NULLIF(TRIM(instrumento_capacidad), ''), CAST(alcance_max AS TEXT), ''),
+            COALESCE(NULLIF(TRIM(instrumento_division), ''), CAST(div_minima AS TEXT), ''),
+            COALESCE(TRIM(ubicacion), ''),
+            COALESCE(TRIM(tipo_instrumento), ''),
+            COALESCE(TRIM(numero_cca), ''),
+            COALESCE(TRIM(numero_dve), ''),
+            COALESCE(updated_at, datetime('now'))
+          FROM ordenes_servicio
+          WHERE (marca IS NOT NULL AND TRIM(marca) != '')
+             OR (modelo IS NOT NULL AND TRIM(modelo) != '')
+             OR (ns IS NOT NULL AND TRIM(ns) != '')
+             OR (id_equipo IS NOT NULL AND TRIM(id_equipo) != '')
+        ''');
+      }
+      _adminTablesVerificada = true;
+    } catch (e) {
+      debugPrint('[LocalDB] _asegurarTablasCatalogosAdmin error: $e');
+    }
   }
 
   bool _initializing = false;
@@ -582,6 +720,7 @@ class LocalDbService {
   Future<Database> _ensureInit() async {
     if (_db != null) {
       if (!_borradoresVerificada) await _asegurarTablaBorradores(_db!);
+      if (!_adminTablesVerificada) await _asegurarTablasCatalogosAdmin(_db!);
       return _db!;
     }
     while (_initializing) {
@@ -589,6 +728,7 @@ class LocalDbService {
     }
     if (_db != null) {
       if (!_borradoresVerificada) await _asegurarTablaBorradores(_db!);
+      if (!_adminTablesVerificada) await _asegurarTablasCatalogosAdmin(_db!);
       return _db!;
     }
     _initializing = true;
@@ -599,6 +739,7 @@ class LocalDbService {
     }
     // Salvaguarda obligatoria antes de devolver la instancia
     await _asegurarTablaBorradores(_db!);
+    await _asegurarTablasCatalogosAdmin(_db!);
     return _db!;
   }
 
@@ -647,6 +788,11 @@ class LocalDbService {
            OR COALESCE(firma_cliente, '') <> ''
       ''');
       for (final r in locales) {
+        final f = (r['folio_os'] as String? ?? '').trim();
+        if (f.isNotEmpty) protegidos.add(f);
+      }
+      final parciales = await db.rawQuery('SELECT folio_os FROM cola_instrumento_parcial');
+      for (final r in parciales) {
         final f = (r['folio_os'] as String? ?? '').trim();
         if (f.isNotEmpty) protegidos.add(f);
       }
@@ -730,11 +876,17 @@ class LocalDbService {
           'modelo':            raw['modelo']?.toString(),
           'ns':                (raw['ns'] ?? raw['serie'])?.toString(),
           'ubicacion':         raw['ubicacion']?.toString(),
-          'id_equipo':         raw['id_equipo']?.toString(),
+          'id_equipo':         (raw['id_equipo'] ?? raw['id_indicador'])?.toString(),
           'alcance_max':       _toDouble(raw['alcance_max'] ?? raw['capacidad_maxima']),
           'div_minima':        _toDouble(raw['div_minima'] ?? raw['division_minima']),
-          'div_verificacion':  (raw['div_verificacion'] ?? raw['folio_dve'] ?? raw['numero_dve'] ?? raw['div_ver'])?.toString(),
+          'div_verificacion':  _toDouble(raw['div_verificacion'] ?? raw['div_ver']),
           'numero_cca':        (raw['numero_cca'] ?? raw['cca'])?.toString(),
+          'numero_dve':        (raw['numero_dve'] ?? raw['folio_dve'])?.toString(),
+          'motivo_no_excentricidad': raw['motivo_no_excentricidad']?.toString(),
+          if (_toIntOrNull(raw['id_cliente'] ?? raw['cliente_id']) != null)
+            'id_cliente': _toIntOrNull(raw['id_cliente'] ?? raw['cliente_id']),
+          if (_toIntOrNull(raw['sucursal_id'] ?? raw['id_sucursal']) != null)
+            'sucursal_id': _toIntOrNull(raw['sucursal_id'] ?? raw['id_sucursal']),
           'holograma_anterior': raw['holograma_anterior']?.toString(),
           'usa_sustitucion': _toBoolInt(raw['usa_sustitucion']) > 0 || (raw['datos_tecnicos_json'] != null && raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion":true')) || (raw['datos_tecnicos_json'] != null && raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion": true')) ? 1 : 0,
           'factor_sustitucion': _toDouble(raw['factor_sustitucion']),
@@ -793,11 +945,23 @@ class LocalDbService {
               if (dt['aplica_excentricidad'] != null) {
                 mapped['aplica_excentricidad'] = _toBoolInt(dt['aplica_excentricidad']);
               }
-              for (final k in ['marca', 'modelo', 'ns', 'ubicacion', 'id_equipo']) {
+              for (final k in ['marca', 'modelo', 'ns', 'ubicacion', 'id_equipo', 'numero_cca', 'numero_dve', 'motivo_no_excentricidad']) {
                 if ((mapped[k] == null || mapped[k].toString().trim().isEmpty) &&
                     dt[k] != null && dt[k].toString().trim().isNotEmpty) {
                   mapped[k] = dt[k].toString().trim();
                 }
+              }
+              if ((mapped['ns'] == null || mapped['ns'].toString().trim().isEmpty) &&
+                  dt['serie'] != null && dt['serie'].toString().trim().isNotEmpty) {
+                mapped['ns'] = dt['serie'].toString().trim();
+              }
+              if ((mapped['numero_cca'] == null || mapped['numero_cca'].toString().trim().isEmpty) &&
+                  dt['cca'] != null && dt['cca'].toString().trim().isNotEmpty) {
+                mapped['numero_cca'] = dt['cca'].toString().trim();
+              }
+              if ((mapped['numero_dve'] == null || mapped['numero_dve'].toString().trim().isEmpty) &&
+                  dt['folio_dve'] != null && dt['folio_dve'].toString().trim().isNotEmpty) {
+                mapped['numero_dve'] = dt['folio_dve'].toString().trim();
               }
               if ((mapped['id_equipo'] == null || mapped['id_equipo'].toString().trim().isEmpty) &&
                   dt['id_indicador'] != null && dt['id_indicador'].toString().trim().isNotEmpty) {
@@ -1119,11 +1283,17 @@ class LocalDbService {
       'modelo':            data['modelo']?.toString(),
       'ns':                (data['ns'] ?? data['serie'])?.toString(),
       'ubicacion':         data['ubicacion']?.toString(),
-      'id_equipo':         data['id_equipo']?.toString(),
+      'id_equipo':         (data['id_equipo'] ?? data['id_indicador'])?.toString(),
       'alcance_max':       _toDouble(data['alcance_max'] ?? data['capacidad_maxima']),
       'div_minima':        _toDouble(data['div_minima'] ?? data['division_minima']),
-      'div_verificacion':  (data['div_verificacion'] ?? data['folio_dve'] ?? data['numero_dve'] ?? data['div_ver'])?.toString(),
+      'div_verificacion':  _toDouble(data['div_verificacion'] ?? data['div_ver']),
       'numero_cca':        (data['numero_cca'] ?? data['cca'])?.toString(),
+      'numero_dve':        (data['numero_dve'] ?? data['folio_dve'])?.toString(),
+      'motivo_no_excentricidad': data['motivo_no_excentricidad']?.toString(),
+      if (_toIntOrNull(data['id_cliente'] ?? data['cliente_id']) != null)
+        'id_cliente': _toIntOrNull(data['id_cliente'] ?? data['cliente_id']),
+      if (_toIntOrNull(data['sucursal_id'] ?? data['id_sucursal']) != null)
+        'sucursal_id': _toIntOrNull(data['sucursal_id'] ?? data['id_sucursal']),
       'holograma_anterior': data['holograma_anterior']?.toString(),
       'holograma_actualizado': (data['holograma_actualizado'] ?? data['holograma_nuevo'])?.toString(),
       'pdf_url':           data['pdf_url']?.toString(),
@@ -1301,6 +1471,26 @@ class LocalDbService {
         if (ex['puesto_ing'] != null) row['puesto_ing'] = ex['puesto_ing'];
         if (ex['dictamen'] != null) row['dictamen'] = ex['dictamen'];
 
+        // Si existen datos de instrumento guardados parcialmente pendientes de envío, preservarlos
+        try {
+          final pendParcial = await db.query(
+            'cola_instrumento_parcial',
+            where: 'folio_os = ?',
+            whereArgs: [folio],
+            limit: 1,
+          );
+          if (pendParcial.isNotEmpty) {
+            for (final col in [
+              'marca', 'modelo', 'ns', 'id_equipo', 'ubicacion',
+              'alcance_max', 'div_minima', 'instrumento_capacidad', 'instrumento_division',
+              'tipo_instrumento', 'aplica_excentricidad', 'motivo_no_excentricidad',
+              'numero_cca', 'numero_dve', 'datos_tecnicos_json', 'estado', 'estatus',
+            ]) {
+              if (ex[col] != null) row[col] = ex[col];
+            }
+          }
+        } catch (_) {}
+
         await db.update(
           'ordenes_servicio',
           row,
@@ -1441,21 +1631,41 @@ class LocalDbService {
     if (_calibTableReady) return;
     await db.execute('''
       CREATE TABLE IF NOT EXISTS calibraciones_consulta (
-        folio_os        TEXT PRIMARY KEY,
-        fecha           TEXT,
-        cliente         TEXT,
-        sucursal        TEXT,
-        tecnico         TEXT,
-        id_tecnico      INTEGER,
-        tipo_servicio   TEXT,
-        estado          TEXT,
-        estatus         TEXT,
-        modalidad       TEXT,
-        tiene_pdf       INTEGER DEFAULT 0,
-        pdf_path_local  TEXT,
-        updated_at      TEXT
+        folio_os            TEXT PRIMARY KEY,
+        fecha               TEXT,
+        cliente             TEXT,
+        sucursal            TEXT,
+        tecnico             TEXT,
+        id_tecnico          INTEGER,
+        tipo_servicio       TEXT,
+        estado              TEXT,
+        estatus             TEXT,
+        modalidad           TEXT,
+        marca               TEXT,
+        modelo              TEXT,
+        ns                  TEXT,
+        id_equipo           TEXT,
+        ubicacion           TEXT,
+        numero_cca          TEXT,
+        numero_dve          TEXT,
+        datos_tecnicos_json TEXT,
+        tiene_pdf           INTEGER DEFAULT 0,
+        pdf_path_local      TEXT,
+        updated_at          TEXT
       )
     ''');
+    try {
+      final info = await db.rawQuery('PRAGMA table_info(calibraciones_consulta)');
+      final cols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+      for (final col in [
+        'marca', 'modelo', 'ns', 'id_equipo', 'ubicacion',
+        'numero_cca', 'numero_dve', 'datos_tecnicos_json',
+      ]) {
+        if (!cols.contains(col)) {
+          await db.execute('ALTER TABLE calibraciones_consulta ADD COLUMN $col TEXT');
+        }
+      }
+    } catch (_) {}
     _calibTableReady = true;
   }
 
@@ -1493,6 +1703,16 @@ class LocalDbService {
             'estado': r['estado']?.toString(),
             'estatus': r['estatus']?.toString(),
             'modalidad': r['modalidad']?.toString(),
+            'marca': r['marca']?.toString(),
+            'modelo': r['modelo']?.toString(),
+            'ns': (r['ns'] ?? r['serie'])?.toString(),
+            'id_equipo': (r['id_equipo'] ?? r['id_indicador'])?.toString(),
+            'ubicacion': r['ubicacion']?.toString(),
+            'numero_cca': (r['numero_cca'] ?? r['cca'])?.toString(),
+            'numero_dve': (r['numero_dve'] ?? r['folio_dve'])?.toString(),
+            'datos_tecnicos_json': r['datos_tecnicos_json'] is String
+                ? r['datos_tecnicos_json']
+                : (r['datos_tecnicos_json'] != null ? jsonEncode(r['datos_tecnicos_json']) : null),
             'tiene_pdf': (tienePdf == true || tienePdf == 1 || tienePdf == '1') ? 1 : 0,
             'pdf_path_local': paths[folio],
             'updated_at': r['updated_at']?.toString(),
@@ -1526,6 +1746,7 @@ class LocalDbService {
     final propias = await db.rawQuery('''
       SELECT folio_os, fecha, cliente, sucursal, tecnico, id_tecnico,
              tipo_servicio, estado, estatus, modalidad, pdf_path_local,
+             marca, modelo, ns, id_equipo, ubicacion, numero_cca, numero_dve, datos_tecnicos_json,
              CASE WHEN COALESCE(pdf_path_local, '') != ''
                        OR COALESCE(pdf_subido, 0) = 1 THEN 1 ELSE 0 END AS tiene_pdf,
              updated_at
@@ -3333,6 +3554,737 @@ class LocalDbService {
       debugPrint('[LocalDB] Error insertMarcasModelosBatch: $e');
       return 0;
     }
+  }
+
+  // ── Catálogos Completos de Administración + Historial de Instrumentos + Cola Parcial ──
+
+  /// Persiste de forma atómica el payload completo de `GET /api/admin/catalogos`
+  /// (clientes con todas sus direcciones/sucursales, técnicos, tipos de servicio,
+  /// tipos de instrumento e historial de instrumentos para autocompletado).
+  Future<void> guardarCatalogosAdmin(Map<String, dynamic> data) async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+
+    final rawClientes = (data['clientes'] as List?) ?? const [];
+    final rawSucursales = (data['sucursales'] as List?) ?? const [];
+    final rawTecnicos = (data['tecnicos'] as List?) ?? const [];
+    final rawTiposSvc = (data['tipos_servicio'] as List?) ?? const [];
+    final rawTiposInst = (data['tipos_instrumento'] as List?) ?? const [];
+    final rawHistorial = (data['historial_instrumentos'] as List?) ?? const [];
+
+    await db.transaction((txn) async {
+      final batch = txn.batch();
+
+      if (rawClientes.isNotEmpty) {
+        batch.delete('catalogo_clientes');
+        batch.delete('catalogo_sucursales');
+        for (final item in rawClientes) {
+          if (item is! Map) continue;
+          final c = Map<String, dynamic>.from(item);
+          final cid = _toIntOrNull(c['id'] ?? c['id_cliente']);
+          if (cid == null || cid <= 0) continue;
+          final nombre = (c['nombre'] ?? c['razon_social'] ?? '').toString().trim();
+          if (nombre.isEmpty) continue;
+          final nestedSucs = (c['sucursales'] as List?) ?? const [];
+          batch.insert(
+            'catalogo_clientes',
+            {
+              'id': cid,
+              'nombre': nombre,
+              'razon_social': (c['razon_social'] ?? nombre).toString().trim(),
+              'rfc': (c['rfc'] ?? '').toString().trim(),
+              'correo': (c['correo'] ?? c['email'] ?? '').toString().trim(),
+              'telefono': (c['telefono'] ?? '').toString().trim(),
+              'direccion': (c['direccion'] ?? '').toString().trim(),
+              'sucursales_json': jsonEncode(nestedSucs),
+              'updated_at': nowIso,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+          for (final sItem in nestedSucs) {
+            if (sItem is! Map) continue;
+            final s = Map<String, dynamic>.from(sItem);
+            final sNom = (s['nombre'] ?? s['sucursal'] ?? '').toString().trim();
+            final sDir = (s['direccion'] ?? '').toString().trim();
+            if (sNom.isEmpty && sDir.isEmpty) continue;
+            batch.insert(
+              'catalogo_sucursales',
+              {
+                'sucursal_id': _toIntOrNull(s['id'] ?? s['sucursal_id']),
+                'cliente_id': cid,
+                'cliente_nombre': nombre,
+                'nombre': sNom.isNotEmpty ? sNom : sDir,
+                'direccion': sDir,
+                'ciudad': (s['ciudad'] ?? '').toString().trim(),
+                'contacto': (s['contacto'] ?? '').toString().trim(),
+                'telefono': (s['telefono'] ?? '').toString().trim(),
+                'correo': (s['correo'] ?? '').toString().trim(),
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          }
+        }
+      }
+
+      if (rawSucursales.isNotEmpty) {
+        for (final sItem in rawSucursales) {
+          if (sItem is! Map) continue;
+          final s = Map<String, dynamic>.from(sItem);
+          final cid = _toIntOrNull(s['cliente_id'] ?? s['id_cliente']);
+          final sNom = (s['nombre'] ?? s['sucursal'] ?? '').toString().trim();
+          final sDir = (s['direccion'] ?? '').toString().trim();
+          if (sNom.isEmpty && sDir.isEmpty) continue;
+          batch.insert(
+            'catalogo_sucursales',
+            {
+              'sucursal_id': _toIntOrNull(s['id'] ?? s['sucursal_id']),
+              'cliente_id': cid ?? 0,
+              'cliente_nombre': (s['cliente_nombre'] ?? s['cliente'] ?? '').toString().trim(),
+              'nombre': sNom.isNotEmpty ? sNom : sDir,
+              'direccion': sDir,
+              'ciudad': (s['ciudad'] ?? '').toString().trim(),
+              'contacto': (s['contacto'] ?? '').toString().trim(),
+              'telefono': (s['telefono'] ?? '').toString().trim(),
+              'correo': (s['correo'] ?? '').toString().trim(),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+
+      if (rawTecnicos.isNotEmpty) {
+        batch.delete('catalogo_tecnicos');
+        for (final tItem in rawTecnicos) {
+          if (tItem is! Map) continue;
+          final t = Map<String, dynamic>.from(tItem);
+          final tid = _toIntOrNull(t['id'] ?? t['id_tecnico']);
+          final nom = (t['nombre'] ?? t['nombre_completo'] ?? '').toString().trim();
+          if (tid == null || tid <= 0 || nom.isEmpty) continue;
+          batch.insert(
+            'catalogo_tecnicos',
+            {
+              'id': tid,
+              'nombre': nom,
+              'username': (t['username'] ?? '').toString().trim(),
+              'rol': (t['rol'] ?? 'TECNICO').toString().trim(),
+              'activo': _toBoolInt(t['activo'] ?? true),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+
+      if (rawTiposSvc.isNotEmpty) {
+        batch.delete('catalogo_tipos_servicio');
+        for (final tsItem in rawTiposSvc) {
+          if (tsItem is! Map) continue;
+          final ts = Map<String, dynamic>.from(tsItem);
+          final id = _toIntOrNull(ts['id']);
+          final nom = (ts['nombre'] ?? '').toString().trim();
+          if (id == null || id <= 0 || nom.isEmpty) continue;
+          batch.insert(
+            'catalogo_tipos_servicio',
+            {
+              'id': id,
+              'nombre': nom,
+              'codigo': (ts['codigo'] ?? '').toString().trim(),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+
+      if (rawTiposInst.isNotEmpty) {
+        batch.delete('catalogo_tipos_instrumento');
+        for (final tiItem in rawTiposInst) {
+          if (tiItem is! Map) continue;
+          final ti = Map<String, dynamic>.from(tiItem);
+          final id = _toIntOrNull(ti['id']);
+          final nom = (ti['nombre'] ?? '').toString().trim();
+          if (id == null || id <= 0 || nom.isEmpty) continue;
+          batch.insert(
+            'catalogo_tipos_instrumento',
+            {
+              'id': id,
+              'nombre': nom,
+              'aplica_excentricidad': _toBoolInt(ti['aplica_excentricidad'] ?? true),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+        }
+      }
+
+      if (rawHistorial.isNotEmpty) {
+        for (final hItem in rawHistorial) {
+          if (hItem is! Map) continue;
+          final h = Map<String, dynamic>.from(hItem);
+          final marca = (h['marca'] ?? '').toString().trim();
+          final modelo = (h['modelo'] ?? '').toString().trim();
+          final serie = (h['serie'] ?? h['ns'] ?? '').toString().trim();
+          final idInd = (h['id_indicador'] ?? h['id_equipo'] ?? '').toString().trim();
+          if (marca.isEmpty && modelo.isEmpty && serie.isEmpty && idInd.isEmpty) continue;
+          batch.insert(
+            'historial_instrumentos',
+            {
+              'cliente_id': _toIntOrNull(h['cliente_id'] ?? h['id_cliente']),
+              'cliente_nombre': (h['cliente'] ?? h['cliente_nombre'] ?? '').toString().trim(),
+              'sucursal_id': _toIntOrNull(h['sucursal_id']),
+              'sucursal_nombre': (h['sucursal'] ?? h['sucursal_nombre'] ?? '').toString().trim(),
+              'marca': marca,
+              'modelo': modelo,
+              'serie': serie,
+              'id_indicador': idInd,
+              'capacidad_maxima': (h['capacidad_maxima'] ?? h['alcance_max'] ?? '').toString().trim(),
+              'division_minima': (h['division_minima'] ?? h['div_minima'] ?? '').toString().trim(),
+              'ubicacion': (h['ubicacion'] ?? '').toString().trim(),
+              'tipo_instrumento': (h['tipo_instrumento'] ?? '').toString().trim(),
+              'numero_cca': (h['numero_cca'] ?? '').toString().trim(),
+              'numero_dve': (h['numero_dve'] ?? '').toString().trim(),
+              'updated_at': nowIso,
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace,
+          );
+          if (marca.isNotEmpty && modelo.isNotEmpty) {
+            batch.insert(
+              'catalogo_marcas_modelos',
+              {'marca': marca, 'modelo': modelo},
+              conflictAlgorithm: ConflictAlgorithm.ignore,
+            );
+          }
+        }
+      }
+
+      await batch.commit(noResult: true);
+    });
+    debugPrint('[LocalDB] ✅ Catálogos Admin guardados: ${rawClientes.length} clientes, ${rawTecnicos.length} técnicos, ${rawHistorial.length} instrumentos');
+  }
+
+  /// Devuelve el catálogo completo de clientes con sus sucursales/direcciones anidadas.
+  Future<List<Map<String, dynamic>>> getCatalogoClientes() async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final rows = await db.rawQuery(
+      'SELECT * FROM catalogo_clientes ORDER BY nombre COLLATE NOCASE ASC',
+    );
+    if (rows.isNotEmpty) {
+      final result = <Map<String, dynamic>>[];
+      for (final r in rows) {
+        final m = Map<String, dynamic>.from(r);
+        List<Map<String, dynamic>> sucs = [];
+        final rawJson = m['sucursales_json']?.toString();
+        if (rawJson != null && rawJson.trim().isNotEmpty) {
+          try {
+            final dec = jsonDecode(rawJson);
+            if (dec is List) {
+              sucs = dec.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+            }
+          } catch (_) {}
+        }
+        m['sucursales'] = sucs;
+        result.add(m);
+      }
+      return result;
+    }
+
+    // Fallback: derivar clientes y direcciones desde ordenes_servicio locales
+    final derived = await db.rawQuery('''
+      SELECT DISTINCT TRIM(cliente) AS nombre,
+             COALESCE(NULLIF(TRIM(direccion), ''), TRIM(sucursal), '') AS direccion
+      FROM ordenes_servicio
+      WHERE cliente IS NOT NULL AND TRIM(cliente) != ''
+      ORDER BY cliente COLLATE NOCASE ASC
+    ''');
+    final byName = <String, Map<String, dynamic>>{};
+    int fakeId = 1;
+    for (final r in derived) {
+      final nom = (r['nombre'] ?? '').toString().trim();
+      if (nom.isEmpty) continue;
+      final dir = (r['direccion'] ?? '').toString().trim();
+      final entry = byName.putIfAbsent(nom, () => {
+        'id': fakeId++,
+        'nombre': nom,
+        'razon_social': nom,
+        'rfc': '',
+        'telefono': '',
+        'direccion': dir,
+        'sucursales': <Map<String, dynamic>>[],
+      });
+      if (dir.isNotEmpty) {
+        final list = entry['sucursales'] as List<Map<String, dynamic>>;
+        if (!list.any((s) => (s['direccion'] ?? '') == dir || (s['nombre'] ?? '') == dir)) {
+          list.add({'id': null, 'nombre': dir, 'direccion': dir});
+        }
+      }
+    }
+    return byName.values.toList();
+  }
+
+  /// Devuelve todas las sucursales/direcciones registradas para un cliente (por ID y/o nombre).
+  Future<List<Map<String, dynamic>>> getCatalogoSucursales({
+    int? clienteId,
+    String? clienteNombre,
+  }) async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final out = <Map<String, dynamic>>[];
+    final seen = <String>{};
+
+    void addBranch(Map<String, dynamic> raw) {
+      final nom = (raw['nombre'] ?? raw['sucursal'] ?? '').toString().trim();
+      final dir = (raw['direccion'] ?? '').toString().trim();
+      if (nom.isEmpty && dir.isEmpty) return;
+      final key = '${nom.toLowerCase()}|${dir.toLowerCase()}';
+      if (seen.contains(key)) return;
+      seen.add(key);
+      out.add({
+        'id': _toIntOrNull(raw['sucursal_id'] ?? raw['id']),
+        'sucursal_id': _toIntOrNull(raw['sucursal_id'] ?? raw['id']),
+        'cliente_id': _toIntOrNull(raw['cliente_id']),
+        'nombre': nom.isNotEmpty ? nom : dir,
+        'direccion': dir.isNotEmpty ? dir : nom,
+        'ciudad': (raw['ciudad'] ?? '').toString().trim(),
+        'contacto': (raw['contacto'] ?? '').toString().trim(),
+        'telefono': (raw['telefono'] ?? '').toString().trim(),
+      });
+    }
+
+    if (clienteId != null && clienteId > 0) {
+      final rows = await db.query(
+        'catalogo_sucursales',
+        where: 'cliente_id = ?',
+        whereArgs: [clienteId],
+        orderBy: 'nombre COLLATE NOCASE ASC',
+      );
+      for (final r in rows) addBranch(r);
+
+      final cliRows = await db.query(
+        'catalogo_clientes',
+        where: 'id = ?',
+        whereArgs: [clienteId],
+        limit: 1,
+      );
+      if (cliRows.isNotEmpty) {
+        final cli = cliRows.first;
+        final cliDir = (cli['direccion'] ?? '').toString().trim();
+        if (cliDir.isNotEmpty) {
+          addBranch({'id': null, 'cliente_id': clienteId, 'nombre': 'Matriz', 'direccion': cliDir});
+        }
+        final sj = cli['sucursales_json']?.toString();
+        if (sj != null && sj.isNotEmpty) {
+          try {
+            final dec = jsonDecode(sj);
+            if (dec is List) {
+              for (final s in dec.whereType<Map>()) {
+                addBranch(Map<String, dynamic>.from(s));
+              }
+            }
+          } catch (_) {}
+        }
+      }
+    }
+
+    if (clienteNombre != null && clienteNombre.trim().isNotEmpty) {
+      final nomTrim = clienteNombre.trim();
+      final rowsByName = await db.rawQuery(
+        'SELECT * FROM catalogo_sucursales WHERE LOWER(TRIM(cliente_nombre)) = LOWER(?) ORDER BY nombre COLLATE NOCASE ASC',
+        [nomTrim],
+      );
+      for (final r in rowsByName) addBranch(r);
+
+      // Enriquecer también con direcciones históricas reales en ordenes_servicio
+      final histDirs = await db.rawQuery('''
+        SELECT DISTINCT TRIM(sucursal) AS nombre, TRIM(direccion) AS direccion
+        FROM ordenes_servicio
+        WHERE LOWER(TRIM(cliente)) = LOWER(?)
+          AND ((sucursal IS NOT NULL AND TRIM(sucursal) != '') OR (direccion IS NOT NULL AND TRIM(direccion) != ''))
+        ORDER BY local_id DESC
+        LIMIT 25
+      ''', [nomTrim]);
+      for (final r in histDirs) addBranch(r);
+    }
+
+    if (clienteId == null && (clienteNombre == null || clienteNombre.trim().isEmpty)) {
+      final allRows = await db.rawQuery(
+        'SELECT * FROM catalogo_sucursales ORDER BY cliente_nombre COLLATE NOCASE ASC, nombre COLLATE NOCASE ASC',
+      );
+      for (final r in allRows) addBranch(r);
+    }
+
+    return out;
+  }
+
+  /// Devuelve el catálogo completo de técnicos activos.
+  Future<List<Map<String, dynamic>>> getCatalogoTecnicos() async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final rows = await db.rawQuery(
+      'SELECT * FROM catalogo_tecnicos WHERE COALESCE(activo, 1) = 1 ORDER BY nombre COLLATE NOCASE ASC',
+    );
+    if (rows.isNotEmpty) {
+      return rows.map((r) => Map<String, dynamic>.from(r)).toList();
+    }
+    // Fallback offline garantizado con los técnicos oficiales de Básculas PESA
+    return const [
+      {'id': 8, 'nombre': 'Alan Guevara', 'rol': 'TECNICO'},
+      {'id': 10, 'nombre': 'Alan Terrazas', 'rol': 'TECNICO'},
+      {'id': 7, 'nombre': 'Alessandro Segovia', 'rol': 'TECNICO'},
+      {'id': 4, 'nombre': 'Fernando Arias', 'rol': 'TECNICO'},
+      {'id': 44, 'nombre': 'Jhonny Jiménez', 'rol': 'TECNICO'},
+      {'id': 171, 'nombre': 'José Landaverde', 'rol': 'TECNICO'},
+      {'id': 9, 'nombre': 'Néstor Arias', 'rol': 'TECNICO'},
+      {'id': 11, 'nombre': 'Adriana Arias', 'rol': 'LOGISTICA'},
+      {'id': 2, 'nombre': 'Iván Colín', 'rol': 'ADMIN'},
+    ];
+  }
+
+  /// Devuelve el catálogo de tipos de servicio.
+  Future<List<Map<String, dynamic>>> getCatalogoTiposServicio() async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final rows = await db.rawQuery(
+      'SELECT * FROM catalogo_tipos_servicio ORDER BY id ASC',
+    );
+    if (rows.isNotEmpty) {
+      return rows.map((r) => Map<String, dynamic>.from(r)).toList();
+    }
+    return const [
+      {'id': 1, 'nombre': 'Calibración'},
+      {'id': 2, 'nombre': 'Calibración + Ajuste'},
+      {'id': 3, 'nombre': 'Calibración + Ajuste + Inspección'},
+      {'id': 4, 'nombre': 'Inspección (Verificación UVA)'},
+      {'id': 5, 'nombre': 'Mantenimiento Preventivo'},
+      {'id': 6, 'nombre': 'Mantenimiento Correctivo'},
+      {'id': 7, 'nombre': 'Instalación y Puesta en Marcha'},
+    ];
+  }
+
+  /// Devuelve el catálogo de tipos de instrumento.
+  Future<List<Map<String, dynamic>>> getCatalogoTiposInstrumento() async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final rows = await db.rawQuery(
+      'SELECT * FROM catalogo_tipos_instrumento ORDER BY nombre COLLATE NOCASE ASC',
+    );
+    if (rows.isNotEmpty) {
+      return rows.map((r) => Map<String, dynamic>.from(r)).toList();
+    }
+    return const [
+      {'id': 1, 'nombre': 'Báscula de plataforma', 'aplica_excentricidad': 1},
+      {'id': 2, 'nombre': 'Báscula camionera', 'aplica_excentricidad': 1},
+      {'id': 3, 'nombre': 'Báscula de mostrador', 'aplica_excentricidad': 1},
+      {'id': 4, 'nombre': 'Báscula analítica / precisión', 'aplica_excentricidad': 1},
+      {'id': 5, 'nombre': 'Báscula colgante / Grúa', 'aplica_excentricidad': 0},
+      {'id': 6, 'nombre': 'Tolva / Tanque / Silo', 'aplica_excentricidad': 0},
+      {'id': 7, 'nombre': 'Patín hidráulico', 'aplica_excentricidad': 0},
+    ];
+  }
+
+  /// Devuelve el historial de instrumentos priorizando coincidencias del cliente y sucursal,
+  /// combinando `historial_instrumentos` y `ordenes_servicio` para autocompletado instantáneo.
+  Future<List<Map<String, dynamic>>> getHistorialInstrumentos({
+    int? clienteId,
+    String? cliente,
+    int? sucursalId,
+    String? sucursal,
+  }) async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+
+    final cliNorm = normalizarTexto(cliente ?? '');
+    final sucNorm = normalizarTexto(sucursal ?? '');
+
+    final rowsHist = await db.rawQuery('''
+      SELECT * FROM historial_instrumentos
+      ORDER BY updated_at DESC, id DESC
+      LIMIT 600
+    ''');
+
+    final rowsOs = await db.rawQuery('''
+      SELECT DISTINCT
+        id_cliente AS cliente_id,
+        COALESCE(TRIM(cliente), '') AS cliente_nombre,
+        sucursal_id,
+        COALESCE(NULLIF(TRIM(sucursal), ''), TRIM(direccion), '') AS sucursal_nombre,
+        COALESCE(TRIM(marca), '') AS marca,
+        COALESCE(TRIM(modelo), '') AS modelo,
+        COALESCE(TRIM(ns), '') AS serie,
+        COALESCE(TRIM(id_equipo), '') AS id_indicador,
+        COALESCE(NULLIF(TRIM(instrumento_capacidad), ''), CAST(alcance_max AS TEXT), '') AS capacidad_maxima,
+        COALESCE(NULLIF(TRIM(instrumento_division), ''), CAST(div_minima AS TEXT), '') AS division_minima,
+        COALESCE(TRIM(ubicacion), '') AS ubicacion,
+        COALESCE(TRIM(tipo_instrumento), '') AS tipo_instrumento,
+        COALESCE(TRIM(numero_cca), '') AS numero_cca,
+        COALESCE(TRIM(numero_dve), '') AS numero_dve
+      FROM ordenes_servicio
+      WHERE (marca IS NOT NULL AND TRIM(marca) != '')
+         OR (modelo IS NOT NULL AND TRIM(modelo) != '')
+         OR (ns IS NOT NULL AND TRIM(ns) != '')
+         OR (id_equipo IS NOT NULL AND TRIM(id_equipo) != '')
+      ORDER BY local_id DESC
+      LIMIT 400
+    ''');
+
+    final combined = <Map<String, dynamic>>[];
+    final seen = <String>{};
+
+    for (final raw in [...rowsHist, ...rowsOs]) {
+      final marca = (raw['marca'] ?? '').toString().trim();
+      final modelo = (raw['modelo'] ?? '').toString().trim();
+      final serie = (raw['serie'] ?? raw['ns'] ?? '').toString().trim();
+      final idInd = (raw['id_indicador'] ?? raw['id_equipo'] ?? '').toString().trim();
+      final ubic = (raw['ubicacion'] ?? '').toString().trim();
+      if (marca.isEmpty && modelo.isEmpty && serie.isEmpty && idInd.isEmpty) continue;
+
+      final cNom = (raw['cliente_nombre'] ?? raw['cliente'] ?? '').toString().trim();
+      final sNom = (raw['sucursal_nombre'] ?? raw['sucursal'] ?? '').toString().trim();
+      final cId = _toIntOrNull(raw['cliente_id']);
+      final sId = _toIntOrNull(raw['sucursal_id']);
+
+      final dedupKey = '${cNom.toLowerCase()}|${marca.toLowerCase()}|${modelo.toLowerCase()}|${serie.toLowerCase()}|${idInd.toLowerCase()}|${ubic.toLowerCase()}';
+      if (seen.contains(dedupKey)) continue;
+      seen.add(dedupKey);
+
+      int prio = 3;
+      final matchCli = (clienteId != null && clienteId > 0 && cId == clienteId) ||
+          (cliNorm.isNotEmpty && normalizarTexto(cNom) == cliNorm) ||
+          (cliNorm.isNotEmpty && cNom.isNotEmpty && (normalizarTexto(cNom).contains(cliNorm) || cliNorm.contains(normalizarTexto(cNom))));
+      if (matchCli) {
+        final matchSuc = (sucursalId != null && sucursalId > 0 && sId == sucursalId) ||
+            (sucNorm.isNotEmpty && sNom.isNotEmpty && (normalizarTexto(sNom) == sucNorm || normalizarTexto(sNom).contains(sucNorm)));
+        prio = matchSuc ? 0 : 1;
+      }
+
+      combined.add({
+        'cliente_id': cId,
+        'cliente': cNom,
+        'sucursal_id': sId,
+        'sucursal': sNom,
+        'marca': marca,
+        'modelo': modelo,
+        'serie': serie,
+        'id_indicador': idInd,
+        'capacidad_maxima': (raw['capacidad_maxima'] ?? '').toString().replaceAll(RegExp(r'\.0$'), '').trim(),
+        'division_minima': (raw['division_minima'] ?? '').toString().trim(),
+        'ubicacion': ubic,
+        'tipo_instrumento': (raw['tipo_instrumento'] ?? '').toString().trim(),
+        'numero_cca': (raw['numero_cca'] ?? '').toString().trim(),
+        'numero_dve': (raw['numero_dve'] ?? '').toString().trim(),
+        '_prio': prio,
+      });
+    }
+
+    combined.sort((a, b) {
+      final pa = a['_prio'] as int? ?? 3;
+      final pb = b['_prio'] as int? ?? 3;
+      if (pa != pb) return pa.compareTo(pb);
+      final ma = (a['marca'] ?? '').toString().toLowerCase();
+      final mb = (b['marca'] ?? '').toString().toLowerCase();
+      return ma.compareTo(mb);
+    });
+
+    // Si hay equipos del cliente seleccionado, mostrarlos primero (y también conservar catálogo general al final)
+    return combined;
+  }
+
+  /// Guarda/actualiza los datos del instrumento de una orden de forma PARCIAL en SQLite
+  /// SIN finalizar ni cerrar la orden (mantiene estatus 'En Proceso' / 'Asignada').
+  Future<Map<String, dynamic>> guardarInstrumentoParcialLocal(
+    String folio,
+    Map<String, dynamic> datos, {
+    int? localId,
+    bool encolarSync = true,
+  }) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return {};
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+
+    final existing = await getOsByFolio(folioKey);
+    Map<String, dynamic> dtMap = {};
+    if (existing != null && existing['datos_tecnicos_json'] != null) {
+      try {
+        final rawDt = existing['datos_tecnicos_json'];
+        final dec = rawDt is String ? jsonDecode(rawDt) : rawDt;
+        if (dec is Map) dtMap = Map<String, dynamic>.from(dec);
+      } catch (_) {}
+    }
+
+    final marca = (datos['marca'] ?? '').toString().trim();
+    final modelo = (datos['modelo'] ?? '').toString().trim();
+    final serie = (datos['serie'] ?? datos['ns'] ?? '').toString().trim();
+    final idInd = (datos['id_indicador'] ?? datos['id_equipo'] ?? '').toString().trim();
+    final capStr = (datos['capacidad_maxima'] ?? datos['instrumento_capacidad'] ?? datos['alcance_max'] ?? '').toString().trim();
+    final divStr = (datos['division_minima'] ?? datos['instrumento_division'] ?? datos['div_minima'] ?? '').toString().trim();
+    final ubicacion = (datos['ubicacion'] ?? '').toString().trim();
+    final tipoInst = (datos['tipo_instrumento'] ?? '').toString().trim();
+    final numCca = (datos['numero_cca'] ?? datos['cca'] ?? '').toString().trim();
+    final numDve = (datos['numero_dve'] ?? datos['folio_dve'] ?? '').toString().trim();
+    final motivoNoExc = (datos['motivo_no_excentricidad'] ?? '').toString().trim();
+    final bool? aplicaExc = datos['aplica_excentricidad'] is bool
+        ? datos['aplica_excentricidad'] as bool
+        : (datos['aplica_excentricidad'] != null ? _toBoolInt(datos['aplica_excentricidad']) == 1 : null);
+
+    dtMap['marca'] = marca;
+    dtMap['modelo'] = modelo;
+    dtMap['serie'] = serie;
+    dtMap['ns'] = serie;
+    dtMap['id_indicador'] = idInd;
+    dtMap['id_equipo'] = idInd;
+    if (capStr.isNotEmpty) dtMap['capacidad_maxima'] = capStr;
+    if (divStr.isNotEmpty) dtMap['division_minima'] = divStr;
+    dtMap['ubicacion'] = ubicacion;
+    if (tipoInst.isNotEmpty) dtMap['tipo_instrumento'] = tipoInst;
+    dtMap['numero_cca'] = numCca;
+    dtMap['cca'] = numCca;
+    dtMap['numero_dve'] = numDve;
+    dtMap['folio_dve'] = numDve;
+    if (aplicaExc != null) dtMap['aplica_excentricidad'] = aplicaExc;
+    if (motivoNoExc.isNotEmpty) dtMap['motivo_no_excentricidad'] = motivoNoExc;
+    dtMap.remove('instrumento_limpio_manual');
+
+    final double? capNum = double.tryParse(capStr.split(' ').first.replaceAll(',', '.'));
+    final double? divNum = double.tryParse(divStr.split(' ').first.replaceAll(',', '.'));
+
+    final String prevEstado = (existing?['estado'] ?? '').toString().toUpperCase().trim();
+    final bool yaCerrada = {'CERRADO', 'CERRADA', 'COMPLETADA', 'COMPLETADA_DIGITAL', 'COMPLETADA_FISICA', 'FIRMADA'}.contains(prevEstado);
+
+    final updates = <String, dynamic>{
+      'marca': marca,
+      'modelo': modelo,
+      'ns': serie,
+      'id_equipo': idInd,
+      'ubicacion': ubicacion,
+      'numero_cca': numCca,
+      'numero_dve': numDve,
+      if (tipoInst.isNotEmpty) 'tipo_instrumento': tipoInst,
+      if (capStr.isNotEmpty) 'instrumento_capacidad': capStr,
+      if (capNum != null) 'alcance_max': capNum,
+      if (divStr.isNotEmpty) 'instrumento_division': divStr,
+      if (divNum != null) 'div_minima': divNum,
+      if (aplicaExc != null) 'aplica_excentricidad': aplicaExc ? 1 : 0,
+      if (motivoNoExc.isNotEmpty) 'motivo_no_excentricidad': motivoNoExc,
+      'datos_tecnicos_json': jsonEncode(dtMap),
+      if (!yaCerrada) 'estado': 'PROCESO',
+      if (!yaCerrada) 'estatus': 'En Proceso',
+      'updated_at': nowIso,
+    };
+
+    if (localId != null && localId > 0) {
+      await db.update('ordenes_servicio', updates, where: 'local_id = ?', whereArgs: [localId]);
+    } else {
+      await db.update('ordenes_servicio', updates, where: 'folio_os = ? OR folio = ?', whereArgs: [folioKey, folioKey]);
+    }
+
+    // Fusionar en borrador local para que al reabrir la captura todo persista
+    try {
+      final draftActual = await getDraft(folioKey) ?? <String, dynamic>{};
+      draftActual.addAll({
+        'marca': marca,
+        'modelo': modelo,
+        'ns': serie,
+        'serie': serie,
+        'id_equipo': idInd,
+        'id_indicador': idInd,
+        'ubicacion': ubicacion,
+        'numero_cca': numCca,
+        'cca': numCca,
+        'numero_dve': numDve,
+        'folio_dve': numDve,
+        if (capStr.isNotEmpty) 'alcance_max': capStr,
+        if (divStr.isNotEmpty) 'div_minima': divStr,
+        if (tipoInst.isNotEmpty) 'tipo_instrumento': tipoInst,
+        if (aplicaExc != null) 'aplica_excentricidad': aplicaExc,
+        if (motivoNoExc.isNotEmpty) 'motivo_no_excentricidad': motivoNoExc,
+      });
+      await saveDraft(folioKey, draftActual);
+    } catch (_) {}
+
+    // Alimentar historial local de instrumentos y marcas/modelos para autocompletado inmediato
+    if (marca.isNotEmpty || modelo.isNotEmpty || serie.isNotEmpty || idInd.isNotEmpty) {
+      try {
+        await db.insert(
+          'historial_instrumentos',
+          {
+            'cliente_id': _toIntOrNull(existing?['id_cliente']),
+            'cliente_nombre': (existing?['cliente'] ?? '').toString().trim(),
+            'sucursal_id': _toIntOrNull(existing?['sucursal_id']),
+            'sucursal_nombre': (existing?['sucursal'] ?? existing?['direccion'] ?? '').toString().trim(),
+            'marca': marca,
+            'modelo': modelo,
+            'serie': serie,
+            'id_indicador': idInd,
+            'capacidad_maxima': capStr,
+            'division_minima': divStr,
+            'ubicacion': ubicacion,
+            'tipo_instrumento': tipoInst,
+            'numero_cca': numCca,
+            'numero_dve': numDve,
+            'updated_at': nowIso,
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      } catch (_) {}
+    }
+    if (marca.isNotEmpty && modelo.isNotEmpty) {
+      await saveMarcaModelo(marca, modelo);
+    }
+
+    if (encolarSync) {
+      final syncPayload = <String, dynamic>{
+        'folio_os': folioKey,
+        'marca': marca,
+        'modelo': modelo,
+        'serie': serie,
+        'ns': serie,
+        'id_indicador': idInd,
+        'id_equipo': idInd,
+        'capacidad_maxima': capStr,
+        'division_minima': divStr,
+        'ubicacion': ubicacion,
+        'tipo_instrumento': tipoInst,
+        'numero_cca': numCca,
+        'numero_dve': numDve,
+        if (aplicaExc != null) 'aplica_excentricidad': aplicaExc,
+        if (motivoNoExc.isNotEmpty) 'motivo_no_excentricidad': motivoNoExc,
+      };
+      await db.insert(
+        'cola_instrumento_parcial',
+        {
+          'folio_os': folioKey,
+          'payload_json': jsonEncode(syncPayload),
+          'updated_at': nowIso,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    }
+
+    return updates;
+  }
+
+  Future<List<Map<String, dynamic>>> getColaInstrumentoParcial() async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    return await db.query('cola_instrumento_parcial', orderBy: 'updated_at ASC');
+  }
+
+  Future<Set<String>> getFoliosEnColaInstrumentoParcial() async {
+    final rows = await getColaInstrumentoParcial();
+    return rows
+        .map((r) => (r['folio_os'] ?? '').toString().trim())
+        .where((s) => s.isNotEmpty)
+        .toSet();
+  }
+
+  Future<void> eliminarDeColaInstrumentoParcial(String folio) async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    await db.delete(
+      'cola_instrumento_parcial',
+      where: 'folio_os = ?',
+      whereArgs: [folio.trim()],
+    );
   }
 
   // ── UUID v4 simple ────────────────────────────────────────────────────────

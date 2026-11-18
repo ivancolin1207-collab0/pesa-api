@@ -94,28 +94,66 @@ class EquipoCard(QFrame):
         self._build()
 
     def set_instrument_catalog(self, catalog: list[dict]) -> None:
-        """Configura el catálogo de instrumentos sugeridos y actualiza el QCompleter."""
-        self._catalog = catalog
-        
-        # Extraer sugerencias únicas para ID y Serie
-        ids = list({str(item.get("id_indicador", "")) for item in catalog if item.get("id_indicador")})
-        series = list({str(item.get("numero_serie", "")) for item in catalog if item.get("numero_serie")})
-        
-        # Configurar completer para ID
-        if ids:
-            completer_id = QCompleter(ids, self)
-            completer_id.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-            completer_id.setFilterMode(Qt.MatchFlag.MatchContains)
-            completer_id.activated.connect(lambda text: self._on_completer_activated(text, "id_indicador"))
-            self._inp_id.setCompleter(completer_id)
-            
-        # Configurar completer para Serie
-        if series:
-            completer_ns = QCompleter(series, self)
-            completer_ns.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
-            completer_ns.setFilterMode(Qt.MatchFlag.MatchContains)
-            completer_ns.activated.connect(lambda text: self._on_completer_activated(text, "numero_serie"))
-            self._inp_ns.setCompleter(completer_ns)
+        """Configura el catálogo de instrumentos sugeridos del cliente/sucursal y actualiza QCompleter en Marca, Modelo, Serie, ID y Ubicación."""
+        self._catalog = list(catalog or [])
+
+        def _fmt_entry(item: dict, primary_val: str) -> str:
+            partes = [primary_val]
+            for lbl, key in (("Marca", "marca"), ("Mod", "modelo"), ("SN", "numero_serie"), ("ID", "id_indicador"), ("Ubic", "ubicacion")):
+                v = str(item.get(key) or "").strip()
+                if v and v != primary_val and v.lower() not in ("none", "null", "sin id", "sin modelo", "sin serie", "n/a", "na"):
+                    partes.append(f"{lbl}: {v}")
+            return "  ·  ".join(partes)
+
+        self._lookup_map: dict[str, dict] = {}
+        ids_display: list[str] = []
+        series_display: list[str] = []
+        ubicaciones_set: set[str] = set()
+
+        for item in self._catalog:
+            id_v = str(item.get("id_indicador") or "").strip()
+            ns_v = str(item.get("numero_serie") or "").strip()
+            ub_v = str(item.get("ubicacion") or "").strip()
+            if id_v and id_v.lower() not in ("none", "null", "sin id", "n/a", "na"):
+                disp = _fmt_entry(item, id_v)
+                self._lookup_map[disp] = item
+                self._lookup_map.setdefault(id_v, item)
+                if disp not in ids_display:
+                    ids_display.append(disp)
+            if ns_v and ns_v.lower() not in ("none", "null", "sin serie", "n/a", "na"):
+                disp = _fmt_entry(item, ns_v)
+                self._lookup_map[disp] = item
+                self._lookup_map.setdefault(ns_v, item)
+                if disp not in series_display:
+                    series_display.append(disp)
+            if ub_v and ub_v.lower() not in ("none", "null", "n/a", "na"):
+                ubicaciones_set.add(ub_v)
+
+        def _attach_completer(line_edit: QLineEdit, options: list[str], field_name: str):
+            if not options:
+                line_edit.setCompleter(None)
+                return
+            comp = QCompleter(options, self)
+            comp.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            comp.setFilterMode(Qt.MatchFlag.MatchContains)
+            comp.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+            comp.activated.connect(lambda text, fn=field_name: self._on_completer_activated(text, fn))
+            line_edit.setCompleter(comp)
+
+        _attach_completer(self._inp_id, ids_display, "id_indicador")
+        _attach_completer(self._inp_ns, series_display, "numero_serie")
+        _attach_completer(self._inp_ubicacion, sorted(ubicaciones_set), "ubicacion")
+
+        # Enriquecer marcas y modelos con los del historial del cliente/sucursal
+        extra_mm = [
+            (str(it.get("marca") or "").strip(), str(it.get("modelo") or "").strip())
+            for it in self._catalog
+            if it.get("marca") or it.get("modelo")
+        ]
+        base_mm = getattr(self, "_mm_list", [])
+        merged_mm = list(dict.fromkeys(list(extra_mm) + list(base_mm)))
+        if merged_mm:
+            self.set_marcas_modelos(merged_mm)
 
     def set_marcas_modelos(self, mm_list: list) -> None:
         """Configura el catálogo de marcas y modelos y autocompletado en cascada."""
@@ -159,32 +197,49 @@ class EquipoCard(QFrame):
             self._inp_modelo.setCompleter(completer_modelo)
 
     def _on_completer_activated(self, text: str, field_name: str) -> None:
-        """Al seleccionar un item del completer, rellena TODOS los campos del equipo."""
-        for item in self._catalog:
-            if str(item.get(field_name, "")) == text:
-                # Siempre rellenar (sobreescribir) para que el autocompletado sea útil
-                if item.get("marca"):
-                    self._inp_marca.setText(str(item["marca"]))
-                if item.get("modelo"):
-                    self._inp_modelo.setText(str(item["modelo"]))
-                if item.get("capacidad_max"):
-                    self._inp_alcance.setText(str(item["capacidad_max"]))
-                if item.get("division_min"):
-                    self._inp_division.setText(str(item["division_min"]))
-                if item.get("ubicacion"):
-                    self._inp_ubicacion.setText(str(item["ubicacion"]))
-                if item.get("tipo_instrumento"):
-                    cmb = getattr(self, '_cmb_tipo_inst', None) or getattr(self, '_cmb_tipo', None)
-                    if cmb:
-                        idx = cmb.findText(item["tipo_instrumento"], Qt.MatchFlag.MatchContains)
-                        if idx >= 0:
-                            cmb.setCurrentIndex(idx)
-                # Rellenar el campo cruzado (ID ↔ Serie)
-                if field_name == "numero_serie" and item.get("id_indicador"):
-                    self._inp_id.setText(str(item["id_indicador"]))
-                if field_name == "id_indicador" and item.get("numero_serie"):
-                    self._inp_ns.setText(str(item["numero_serie"]))
-                break
+        """Al seleccionar un item del completer, rellena TODOS los campos conocidos del equipo."""
+        from services.metrology import formatear_division_minima
+        lookup = getattr(self, "_lookup_map", {})
+        matched = lookup.get(text)
+        if not matched:
+            raw_key = text.split("  ·  ")[0].strip()
+            matched = lookup.get(raw_key)
+        if not matched:
+            for item in self._catalog:
+                if str(item.get(field_name, "")) == text:
+                    matched = item
+                    break
+        if not matched:
+            return
+
+        if field_name == "id_indicador" and matched.get("id_indicador"):
+            self._inp_id.setText(str(matched["id_indicador"]))
+        elif field_name == "numero_serie" and matched.get("numero_serie"):
+            self._inp_ns.setText(str(matched["numero_serie"]))
+        elif field_name == "ubicacion" and matched.get("ubicacion"):
+            self._inp_ubicacion.setText(str(matched["ubicacion"]))
+            return
+
+        if matched.get("marca"):
+            self._inp_marca.setText(str(matched["marca"]))
+        if matched.get("modelo"):
+            self._inp_modelo.setText(str(matched["modelo"]))
+        if matched.get("numero_serie"):
+            self._inp_ns.setText(str(matched["numero_serie"]))
+        if matched.get("id_indicador"):
+            self._inp_id.setText(str(matched["id_indicador"]))
+        if matched.get("capacidad_max"):
+            self._inp_alcance.setText(str(matched["capacidad_max"]))
+        if matched.get("division_min"):
+            self._inp_division.setText(formatear_division_minima(matched["division_min"]))
+        if matched.get("ubicacion"):
+            self._inp_ubicacion.setText(str(matched["ubicacion"]))
+        if matched.get("tipo_instrumento"):
+            cmb = getattr(self, '_cmb_tipo_inst', None) or getattr(self, '_cmb_tipo', None)
+            if cmb:
+                idx = cmb.findText(str(matched["tipo_instrumento"]), Qt.MatchFlag.MatchContains)
+                if idx >= 0:
+                    cmb.setCurrentIndex(idx)
 
     def _build(self) -> None:
         self.setObjectName(f"equipo_card_{self._index}")
@@ -379,21 +434,35 @@ class EquipoCard(QFrame):
         _calib_lay.addLayout(_col_ini, stretch=1)
 
         _col_cca = QVBoxLayout(); _col_cca.setSpacing(4)
-        self._lbl_cca = QLabel("Número de CCA")
+        self._lbl_cca = QLabel("Número CCA (Opcional)")
         self._lbl_cca.setStyleSheet("font-size: 11px; font-weight: 700; color: #86868B;")
         _col_cca.addWidget(self._lbl_cca)
         import datetime
         _anio = str(datetime.datetime.now().year)[-2:]
         self._inp_cca = QLineEdit()
         self._inp_cca.setPlaceholderText(f"CCA.{_anio}.XXXX")
-        if not self._inp_cca.text():
-            self._inp_cca.setText(f"CCA.{_anio}.")
         self._inp_cca.setStyleSheet(_EQUIPO_FIELD_STYLE)
         self._inp_cca.setFixedHeight(40)
         _col_cca.addWidget(self._inp_cca)
         _calib_lay.addLayout(_col_cca, stretch=2)
 
         row2.addWidget(self._widget_calibracion, stretch=3)
+
+        # ── Número DVE regulatorio independiente (puede llenarse junto con CCA, solo, o vacío) ──
+        self._widget_numero_dve = QWidget()
+        self._widget_numero_dve.setStyleSheet("background: transparent;")
+        _dve_num_lay = QVBoxLayout(self._widget_numero_dve)
+        _dve_num_lay.setContentsMargins(0, 0, 0, 0)
+        _dve_num_lay.setSpacing(4)
+        self._lbl_numero_dve = QLabel("Número DVE (Opcional)")
+        self._lbl_numero_dve.setStyleSheet("font-size: 11px; font-weight: 700; color: #86868B;")
+        _dve_num_lay.addWidget(self._lbl_numero_dve)
+        self._inp_numero_dve = QLineEdit()
+        self._inp_numero_dve.setPlaceholderText(f"DVE.{_anio}.XXXX")
+        self._inp_numero_dve.setStyleSheet(_EQUIPO_FIELD_STYLE)
+        self._inp_numero_dve.setFixedHeight(40)
+        _dve_num_lay.addWidget(self._inp_numero_dve)
+        row2.addWidget(self._widget_numero_dve, stretch=2)
 
         fields_lay.addWidget(self._fields_row2)
 
@@ -629,6 +698,7 @@ class EquipoCard(QFrame):
         self.label_cca                = self._lbl_cca
         self.widget_calibracion       = self._widget_calibracion
         self.input_cca                = self._inp_cca
+        self.input_numero_dve         = self._inp_numero_dve
         self.combo_aplica_excentricidad = self._cmb_aplica_exc
         self.combo_geometria          = self._cmb_geo
         self.spin_secciones           = self._spin_sec
@@ -1019,8 +1089,10 @@ class EquipoCard(QFrame):
         filas_exc_val = max(puntos_exc, secciones) if (aplica_exc and secciones) else puntos_exc
         pts_exact_val = self._spin_pts_exact.value()
 
-        from services.metrology import formatear_division_minima
+        from services.metrology import formatear_division_minima, limpiar_numero_regulatorio
         _div_norm = formatear_division_minima(_v("_inp_division"))
+        _cca_clean = limpiar_numero_regulatorio(_v("_inp_cca"))
+        _dve_num_clean = limpiar_numero_regulatorio(_v("_inp_numero_dve"))
 
         return {
             # ── Folio Manual ───────────────────────────────────────────────────
@@ -1070,8 +1142,10 @@ class EquipoCard(QFrame):
             "inicial_calibrador":      ini,
             "tipo_calibracion_inicial": ini,
             "inicial":                 ini,
-            "numero_cca":              _v("_inp_cca"),
-            "cca":                     _v("_inp_cca"),
+            "numero_cca":              _cca_clean,
+            "cca":                     _cca_clean,
+            "numero_dve":              _dve_num_clean,
+            "folio_dve":               _dve_num_clean,
             # ── Excentricidad ──────────────────────────────────────────────────
             "aplica_excentricidad":    aplica_exc,
             "geometria_plataforma":    geo,
@@ -2782,6 +2856,7 @@ class BatchGeneratorWidget(QWidget):
 
         self.cmb_sucursal.setEnabled(True)
         self.cmb_sucursal.blockSignals(False)
+        self._on_sucursal_changed()
 
     def _on_cliente_text_edited(self, text: str) -> None:
         """Si el usuario borra manualmente el texto del cliente, limpiar la sucursal inmediatamente."""
@@ -2798,39 +2873,99 @@ class BatchGeneratorWidget(QWidget):
         self._on_params_changed()
 
     def _on_sucursal_changed(self, index=0):
-        """Carga el catálogo de equipos de la sucursal seleccionada para el autocompletado."""
+        """Carga el catálogo e historial de equipos del cliente/sucursal seleccionado para QCompleter."""
         self._on_params_changed()
         if not hasattr(self, 'cmb_sucursal'):
             return
 
         sucursal_id = self.cmb_sucursal.currentData()
+        cliente_id = self.cmb_cliente.currentData() if hasattr(self, 'cmb_cliente') else None
         catalog = []
-        if sucursal_id and _HAS_DB and _db_pool:
+        seen_keys: set[tuple] = set()
+
+        def _push_eq(ns, marca, modelo, idi, ubic, cap, div, t_inst):
+            ns_s = str(ns or "").strip()
+            m_s = str(marca or "").strip()
+            mod_s = str(modelo or "").strip()
+            id_s = str(idi or "").strip()
+            ub_s = str(ubic or "").strip()
+            if not (ns_s or m_s or mod_s or id_s):
+                return
+            k = (m_s.lower(), mod_s.lower(), ns_s.lower(), id_s.lower())
+            if k in seen_keys:
+                return
+            seen_keys.add(k)
+            catalog.append({
+                "numero_serie": ns_s,
+                "marca": m_s,
+                "modelo": mod_s,
+                "id_indicador": id_s,
+                "ubicacion": ub_s,
+                "capacidad_max": str(cap or "").strip(),
+                "division_min": str(div or "").strip(),
+                "tipo_instrumento": str(t_inst or "").strip(),
+            })
+
+        if (sucursal_id or cliente_id) and _HAS_DB and _db_pool:
             try:
                 conn = _db_pool.get_connection()
                 try:
                     with conn.cursor() as cur:
-                        cur.execute('''
-                            SELECT numero_serie, marca, modelo, id_indicador_equipo,
-                                   ubicacion_interna, capacidad_maxima, division_minima, tipo_instrumento
-                            FROM cliente_equipos
-                            WHERE sucursal_id = %s AND activo = TRUE
-                        ''', (sucursal_id,))
+                        if sucursal_id:
+                            cur.execute('''
+                                SELECT numero_serie, marca, modelo, id_indicador_equipo,
+                                       ubicacion_interna, capacidad_maxima, division_minima, tipo_instrumento
+                                FROM cliente_equipos
+                                WHERE sucursal_id = %s AND activo IS NOT FALSE
+                            ''', (sucursal_id,))
+                            for row in cur.fetchall():
+                                _push_eq(*row)
+                        elif cliente_id:
+                            cur.execute('''
+                                SELECT ce.numero_serie, ce.marca, ce.modelo, ce.id_indicador_equipo,
+                                       ce.ubicacion_interna, ce.capacidad_maxima, ce.division_minima, ce.tipo_instrumento
+                                FROM cliente_equipos ce
+                                JOIN cliente_sucursales cs ON cs.id = ce.sucursal_id
+                                WHERE cs.cliente_id = %s AND ce.activo IS NOT FALSE
+                            ''', (cliente_id,))
+                            for row in cur.fetchall():
+                                _push_eq(*row)
+
+                        # Complementar con historial de ordenes_servicio del cliente / sucursal
+                        if sucursal_id:
+                            cur.execute('''
+                                SELECT os.ns, os.marca, os.modelo, os.id_equipo::text,
+                                       os.ubicacion,
+                                       COALESCE(NULLIF(TRIM(os.instrumento_capacidad), ''), os.alcance_max::text, ''),
+                                       COALESCE(NULLIF(TRIM(os.instrumento_division), ''), os.div_minima::text, ''),
+                                       COALESCE(ti.nombre, '')
+                                FROM ordenes_servicio os
+                                LEFT JOIN cat_tipo_instrumento ti ON ti.id = os.id_tipo_instrumento
+                                WHERE os.sucursal_id = %s
+                                  AND COALESCE(UPPER(TRIM(os.estado)), '') <> 'CANCELADA'
+                                ORDER BY os.updated_at DESC NULLS LAST, os.id DESC
+                                LIMIT 250
+                            ''', (sucursal_id,))
+                        else:
+                            cur.execute('''
+                                SELECT os.ns, os.marca, os.modelo, os.id_equipo::text,
+                                       os.ubicacion,
+                                       COALESCE(NULLIF(TRIM(os.instrumento_capacidad), ''), os.alcance_max::text, ''),
+                                       COALESCE(NULLIF(TRIM(os.instrumento_division), ''), os.div_minima::text, ''),
+                                       COALESCE(ti.nombre, '')
+                                FROM ordenes_servicio os
+                                LEFT JOIN cat_tipo_instrumento ti ON ti.id = os.id_tipo_instrumento
+                                WHERE os.id_cliente = %s
+                                  AND COALESCE(UPPER(TRIM(os.estado)), '') <> 'CANCELADA'
+                                ORDER BY os.updated_at DESC NULLS LAST, os.id DESC
+                                LIMIT 250
+                            ''', (cliente_id,))
                         for row in cur.fetchall():
-                            catalog.append({
-                                "numero_serie": row[0] or "",
-                                "marca": row[1] or "",
-                                "modelo": row[2] or "",
-                                "id_indicador": row[3] or "",
-                                "ubicacion": row[4] or "",
-                                "capacidad_max": row[5] or "",
-                                "division_min": row[6] or "",
-                                "tipo_instrumento": row[7] or "",
-                            })
+                            _push_eq(*row)
                 finally:
                     _db_pool.release_connection(conn)
             except Exception as e:
-                logger.warning(f"Error cargando equipos de la sucursal {sucursal_id}: {e}")
+                logger.warning(f"Error cargando historial de equipos (cliente={cliente_id}, sucursal={sucursal_id}): {e}")
 
         # Guardar el catálogo activo: las tarjetas creadas DESPUÉS del cambio
         # de sucursal también lo recibirán vía self._current_catalog en
@@ -4327,6 +4462,14 @@ class BatchGeneratorWidget(QWidget):
                         datos_eq["es_enlace_sustitucion"] = aplica_sustitucion
                         datos_eq["es_sustitucion"]       = aplica_sustitucion
 
+                        from services.metrology import limpiar_numero_regulatorio as _limp_reg
+                        _num_cca_eq = _limp_reg(datos_eq.get("numero_cca") or datos_eq.get("cca") or datos.get("numero_cca")) or None
+                        _num_dve_eq = _limp_reg(datos_eq.get("numero_dve") or datos_eq.get("folio_dve") or datos.get("numero_dve")) or None
+                        datos_eq["numero_cca"] = _num_cca_eq or ""
+                        datos_eq["cca"] = _num_cca_eq or ""
+                        datos_eq["numero_dve"] = _num_dve_eq or ""
+                        datos_eq["folio_dve"] = _num_dve_eq or ""
+
                         # Serializar datos_tecnicos_json independiente para el folio i
                         _rma_items = copy.deepcopy(datos.get("items") or datos.get("partidas") or [])
                         _dt_dict = {
@@ -4386,6 +4529,8 @@ class BatchGeneratorWidget(QWidget):
                                     div_minima            = %s,
                                     instrumento_capacidad = %s,
                                     instrumento_division  = %s,
+                                    numero_cca            = %s,
+                                    numero_dve            = %s,
                                     num_secciones         = %s,
                                     sync_status           = 'PENDIENTE',
                                     sync_check_status     = 'ASIGNADA',
@@ -4412,6 +4557,7 @@ class BatchGeneratorWidget(QWidget):
                                     _marca, _modelo, _ns, _id_eq, _ubicacion,
                                     _cap_num, _div_num,
                                     _cap_str, _div_str,
+                                    _num_cca_eq, _num_dve_eq,
                                     _secciones,
                                     os_existente[0],
                                 ),
@@ -4428,6 +4574,7 @@ class BatchGeneratorWidget(QWidget):
                                     marca, modelo, ns, id_equipo, ubicacion,
                                     alcance_max, div_minima,
                                     instrumento_capacidad, instrumento_division,
+                                    numero_cca, numero_dve,
                                     num_secciones, sucursal_id,
                                     datos_tecnicos_json, sync_status, updated_at
                                 ) VALUES (
@@ -4437,6 +4584,7 @@ class BatchGeneratorWidget(QWidget):
                                     %s, %s, %s,
                                     %s, %s, %s,
                                     %s, %s, %s, %s, %s,
+                                    %s, %s,
                                     %s, %s,
                                     %s, %s,
                                     %s, %s,
@@ -4463,6 +4611,7 @@ class BatchGeneratorWidget(QWidget):
                                     _marca, _modelo, _ns, _id_eq, _ubicacion,
                                     _cap_num, _div_num,
                                     _cap_str, _div_str,
+                                    _num_cca_eq, _num_dve_eq,
                                     _secciones,
                                     datos.get("sucursal_id"),
                                     _dt_json_str,
@@ -4929,11 +5078,14 @@ class BatchGeneratorWidget(QWidget):
             # Post-normalizacion de campos criticos per-equipo
             _ini = (equipo_data or {}).get('inicial_calibrador') or (equipo_data or {}).get('inicial') or datos.get('inicial_calibrador', '')
             _cca = (equipo_data or {}).get('numero_cca') or (equipo_data or {}).get('cca') or datos.get('numero_cca', '')
+            _dve_num = (equipo_data or {}).get('numero_dve') or (equipo_data or {}).get('folio_dve') or datos.get('numero_dve', '')
             os_data['inicial_calibrador']       = _ini
             os_data['tipo_calibracion_inicial'] = _ini
             os_data['inicial']                  = _ini
             os_data['numero_cca']               = _cca
             os_data['cca']                      = _cca
+            os_data['numero_dve']               = _dve_num
+            os_data['folio_dve']                = _dve_num
             # Post-normalizacion de hologramas: el valor per-equipo tiene prioridad sobre el de lote
             _holo_ant = (equipo_data or {}).get('holograma_anterior', '') or datos.get('holograma_anterior', '')
             _holo_act = (equipo_data or {}).get('holograma_actualizado', '') or datos.get('holograma_actualizado', '')

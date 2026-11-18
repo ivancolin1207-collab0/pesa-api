@@ -16,10 +16,10 @@ import 'screens/os_list_screen.dart';
 import 'screens/captura_screen.dart';
 import 'screens/firma_screen.dart';
 import 'screens/settings_screen.dart';
-import 'screens/placeholder_screen.dart';
 import 'screens/attach_scan_screen.dart';
 import 'screens/catalogos_screen.dart';
 import 'screens/nuevo_doc_screen.dart';
+import 'screens/buscar_historial_screen.dart';
 import 'screens/mi_firma_screen.dart';
 import 'screens/pdf_viewer_screen.dart';
 import 'screens/remision_captura_screen.dart';
@@ -186,24 +186,14 @@ final _router = GoRouter(
       path: '/settings',
       builder: (ctx, state) => const SettingsScreen(),
     ),
-    // ── Módulos secundarios (placeholder) ─────────────────────────────────
+    // ── Módulos de Generación y Búsqueda / Historial ─────────────────────
     GoRoute(
       path: '/formatos',
-      builder: (ctx, state) => const PlaceholderScreen(
-        title: 'Generar Formatos',
-        route: '/formatos',
-        icon: Icons.description_outlined,
-        description: 'Generación de formatos y reportes — disponible próximamente.',
-      ),
+      builder: (ctx, state) => const NuevoDocScreen(),
     ),
     GoRoute(
       path: '/historial',
-      builder: (ctx, state) => const PlaceholderScreen(
-        title: 'Buscar / Historial',
-        route: '/historial',
-        icon: Icons.history_outlined,
-        description: 'Búsqueda y consulta de órdenes históricas — disponible próximamente.',
-      ),
+      builder: (ctx, state) => const BuscarHistorialScreen(),
     ),
     GoRoute(
       path: '/escaneo',

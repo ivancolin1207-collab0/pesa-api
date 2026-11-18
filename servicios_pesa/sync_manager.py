@@ -113,10 +113,14 @@ CREATE TABLE IF NOT EXISTS ordenes_servicio (
     marca                   TEXT,
     modelo                  TEXT,
     ns                      TEXT,
+    id_equipo               TEXT,
     ubicacion               TEXT,
     alcance_max             REAL,
     div_minima              REAL,
     div_verificacion        REAL,
+    numero_cca              TEXT,
+    numero_dve              TEXT,
+    motivo_no_excentricidad TEXT,
     observaciones           TEXT,
     firma_cliente_nombre    TEXT,
     firma_tecnico_b64       TEXT,
@@ -197,6 +201,21 @@ class SyncManager:
 
         with self._get_local_conn() as conn:
             conn.executescript(_SCHEMA_SQL)
+            existing_cols = {
+                str(r[1]).lower()
+                for r in conn.execute("PRAGMA table_info(ordenes_servicio)").fetchall()
+            }
+            for col_name, col_type in (
+                ("id_equipo", "TEXT"),
+                ("numero_cca", "TEXT"),
+                ("numero_dve", "TEXT"),
+                ("motivo_no_excentricidad", "TEXT"),
+            ):
+                if col_name not in existing_cols:
+                    try:
+                        conn.execute(f"ALTER TABLE ordenes_servicio ADD COLUMN {col_name} {col_type}")
+                    except Exception:
+                        pass
             cur = conn.execute("SELECT COUNT(*) FROM schema_version")
             if cur.fetchone()[0] == 0:
                 conn.execute("INSERT INTO schema_version VALUES (?)", (_SCHEMA_VERSION,))
@@ -783,7 +802,8 @@ class SyncManager:
                     tecnico_nombre, tipo_servicio_nombre, modalidad, estado, id,
                     NULL AS id_lote,
                     CASE WHEN pdf_path IS NOT NULL AND pdf_path != '' THEN 1 ELSE 0 END AS tiene_adjunto,
-                    sync_status
+                    sync_status,
+                    marca, modelo, ns, id_equipo, ubicacion, numero_cca, numero_dve
                 FROM ordenes_servicio
                 WHERE {where}
                 ORDER BY fecha DESC, created_at DESC
