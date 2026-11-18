@@ -2769,42 +2769,41 @@ class _ServicioBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: rules.sinTipo ? const Color(0xFFFFFBEB) : const Color(0xFFF3F4F6),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: rules.sinTipo ? const Color(0xFFFCD34D) : const Color(0xFFE5E7EB)),
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: rules.sinTipo ? const Color(0xFF94A3B8) : const Color(0xFFE2E8F0)),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Icon(rules.sinTipo ? Icons.warning_amber_rounded : Icons.rule, size: 18,
-            color: rules.sinTipo ? const Color(0xFFD97706) : _kRed),
+            color: rules.sinTipo ? const Color(0xFFC8102E) : _kRed),
         const SizedBox(width: 10),
         Expanded(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Tipo de Servicio: ${rules.etiquetaLarga}',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF0F172A)),
             ),
             if (nombreReal.isNotEmpty && nombreReal != rules.etiquetaLarga)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text('Asignado por logística: $nombreReal',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
+                    style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
               ),
             const SizedBox(height: 6),
             Wrap(spacing: 6, children: [
-              // Solo mostrar badges de lo que APLICA
               if (rules.esRemision)
-                _Badge('Remisión — solo datos operativos', const Color(0xFF0F766E)),
+                const _Badge('Remisión — solo datos operativos', Color(0xFF0F172A)),
               if (rules.esRevisionCeldas)
-                _Badge('Revisión de Celdas', const Color(0xFF0F766E)),
+                const _Badge('Revisión de Celdas', Color(0xFF0F172A)),
               if (rules.tieneCalibracion)
-                _Badge('CCA requerido', const Color(0xFF1D4ED8)),
+                const _Badge('CCA requerido', Color(0xFF0F172A)),
               if (rules.tieneInspeccion)
-                _Badge('Hologramas + DVE', const Color(0xFF7C3AED)),
+                const _Badge('Hologramas + DVE', Color(0xFF0F172A)),
               if (rules.sinTipo)
-                _Badge('Sin tipo — sincroniza antes de capturar', const Color(0xFFD97706))
+                const _Badge('Sin tipo — sincroniza antes de capturar', Color(0xFF334155))
               else if (rules.esSoloAjuste && !rules.esRemision && !rules.esRevisionCeldas)
-                _Badge('Solo Ajuste — sin CCA ni DVE', Colors.grey),
+                const _Badge('Solo Ajuste — sin CCA ni DVE', Color(0xFF475569)),
             ]),
           ],
         )),
@@ -2822,8 +2821,8 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
     decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.1),
-      border: Border.all(color: color.withValues(alpha: 0.4)),
+      color: const Color(0xFFF8FAFC),
+      border: Border.all(color: const Color(0xFFCBD5E1)),
       borderRadius: BorderRadius.circular(4),
     ),
     child: Text(text, style: TextStyle(fontSize: 10, color: color,

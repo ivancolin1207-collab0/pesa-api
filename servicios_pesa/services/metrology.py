@@ -580,9 +580,9 @@ def construir_asunto_y_cuerpo_correo(
         f'<th style="{th_style}">ID / Equipo</th>',
     ]
     if tiene_cca:
-        headers_html.append(f'<th style="{th_style} text-align: center;">CCA</th>')
+        headers_html.append(f'<th style="{th_style}">CCA</th>')
     if tiene_dve:
-        headers_html.append(f'<th style="{th_style} text-align: center;">DVE</th>')
+        headers_html.append(f'<th style="{th_style}">DVE</th>')
     thead_cols_str = "\n                                        ".join(headers_html)
 
     tr_html_list: list[str] = []
@@ -603,25 +603,17 @@ def construir_asunto_y_cuerpo_correo(
         ]
         if tiene_cca:
             if f["cca"]:
-                cca_cell = (
-                    f'<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; '
-                    f'border:1px solid #C7D2FE; border-radius:4px; padding:2px 7px; font-weight:700; font-size:11.5px;">'
-                    f'{_html.escape(f["cca"])}</span>'
-                )
+                cca_cell = f'<span style="color: #0F172A; font-weight: 600; font-size: 12px;">{_html.escape(f["cca"])}</span>'
             else:
                 cca_cell = ""
-            celdas_fila.append(f'<td style="{td_base} text-align: center;">{cca_cell}</td>')
+            celdas_fila.append(f'<td style="{td_base}">{cca_cell}</td>')
 
         if tiene_dve:
             if f["dve"]:
-                dve_cell = (
-                    f'<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; '
-                    f'border:1px solid #A7F3D0; border-radius:4px; padding:2px 7px; font-weight:700; font-size:11.5px;">'
-                    f'{_html.escape(f["dve"])}</span>'
-                )
+                dve_cell = f'<span style="color: #0F172A; font-weight: 600; font-size: 12px;">{_html.escape(f["dve"])}</span>'
             else:
                 dve_cell = ""
-            celdas_fila.append(f'<td style="{td_base} text-align: center;">{dve_cell}</td>')
+            celdas_fila.append(f'<td style="{td_base}">{dve_cell}</td>')
 
         tr_html_list.append(f'<tr style="background-color: {bg};">' + "".join(celdas_fila) + "</tr>")
 

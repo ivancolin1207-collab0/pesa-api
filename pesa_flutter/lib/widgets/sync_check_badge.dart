@@ -26,10 +26,10 @@ class SyncCheckInfo {
     statusKey: 'ASIGNADA',
     checkSymbols: '✓',
     checkCount: 1,
-    color: Color(0xFF8E8E93),
-    backgroundColor: Color(0xFFF2F2F7),
+    color: Color(0xFF475569),
+    backgroundColor: Color(0xFFF8FAFC),
     label: 'Asignada',
-    title: '✓ Gris — Asignada en Servidor',
+    title: 'Asignada en Servidor',
     description: 'Logística generó y asignó la OS en Render/PostgreSQL. La tablet del técnico aún no se ha conectado a internet para descargarla.',
   );
 
@@ -37,10 +37,10 @@ class SyncCheckInfo {
     statusKey: 'RECIBIDA_TABLET',
     checkSymbols: '✓✓',
     checkCount: 2,
-    color: Color(0xFF8E8E93),
-    backgroundColor: Color(0xFFF2F2F7),
+    color: Color(0xFF334155),
+    backgroundColor: Color(0xFFF8FAFC),
     label: 'En Tablet',
-    title: '✓✓ Gris — Recibida en Tablet / Offline',
+    title: 'Recibida en Tablet / Offline',
     description: 'La tablet ya sincronizó y descargó la orden a su almacenamiento local. El técnico ya realizó o está realizando la toma en campo (incluso sin internet).',
   );
 
@@ -48,10 +48,10 @@ class SyncCheckInfo {
     statusKey: 'SUBIDA_SERVIDOR',
     checkSymbols: '✓✓',
     checkCount: 2,
-    color: Color(0xFF007AFF),
-    backgroundColor: Color(0xFFEBF5FF),
+    color: Color(0xFF0F172A),
+    backgroundColor: Color(0xFFF8FAFC),
     label: 'Enviada',
-    title: '✓✓ Azul — Enviada al Servidor / Concluida',
+    title: 'Enviada al Servidor / Concluida',
     description: 'El técnico finalizó la orden, capturó firmas, generó el PDF y subió exitosamente el PDF y datos a Render (HTTP 200 OK). Lista para consulta.',
   );
 
@@ -59,11 +59,11 @@ class SyncCheckInfo {
     statusKey: 'AUDITADA_ADMIN',
     checkSymbols: '✓✓',
     checkCount: 2,
-    color: Color(0xFF34C759),
-    backgroundColor: Color(0xFFE8F9ED),
+    color: Color(0xFF0F172A),
+    backgroundColor: Color(0xFFF8FAFC),
     label: 'Abierto',
-    title: '✓✓ Verde — Abierto en Windows',
-    description: 'Recepción o Administración (Iván / Recepción) abrió, descargó o confirmó la OS y PDF desde el sistema en Windows.',
+    title: 'Abierto en Windows',
+    description: 'Recepción o Administración abrió, descargó o confirmó la OS y PDF desde el sistema en Windows.',
   );
 
   static SyncCheckInfo fromStatus(String? status) {
@@ -128,14 +128,14 @@ class SyncCheckBadge extends StatelessWidget {
       ),
       child: InkWell(
         onTap: () => _mostrarLeyendaModal(context, info),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(4),
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
             color: info.backgroundColor,
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(4),
             border: Border.all(
-              color: info.color.withValues(alpha: 0.35),
+              color: const Color(0xFFCBD5E1),
               width: 1,
             ),
           ),

@@ -266,7 +266,7 @@ class SidebarNavButton(QPushButton):
     def _apply_active(self):
         self.setStyleSheet("""
             QPushButton {
-                background-color: #FFF1F2;
+                background-color: #F8FAFC;
                 border: none;
                 border-left: 3px solid #C8102E;
                 border-radius: 6px;
@@ -310,10 +310,10 @@ class UserChip(QFrame):
     """Muestra el usuario activo y su rol con diseño pill-chip."""
 
     _ROLE_COLORS = {
-        "admin":     ("#E63946", "#FEF2F2"),
-        "logistica": ("#007AFF", "#EBF5FF"),
-        "servicio":  ("#34C759", "#EDFBF2"),
-        "recepcion": ("#FF9F0A", "#FFF6E5"),
+        "admin":     ("#C8102E", "#F8FAFC"),
+        "logistica": ("#0F172A", "#F8FAFC"),
+        "servicio":  ("#334155", "#F8FAFC"),
+        "recepcion": ("#334155", "#F8FAFC"),
     }
 
     def __init__(self, parent=None):
@@ -552,16 +552,16 @@ class MainWindow(QMainWindow):
         icon_box = QFrame()
         icon_box.setStyleSheet("""
             QFrame {
-                background: #FFF1F2;
-                border: 1px solid #FECDD3;
-                border-radius: 8px;
+                background: #C8102E;
+                border: 1px solid #C8102E;
+                border-radius: 7px;
             }
         """)
         icon_box.setFixedSize(34, 34)
         ib_lay = QHBoxLayout(icon_box)
         ib_lay.setContentsMargins(0, 0, 0, 0)
         ib_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ib_lay.addWidget(VectorNavIcon("brand", "#C8102E", icon_box))
+        ib_lay.addWidget(VectorNavIcon("brand", "#FFFFFF", icon_box))
         brand_row.addWidget(icon_box)
 
         name_lay = QVBoxLayout()
@@ -636,12 +636,12 @@ class MainWindow(QMainWindow):
                 padding: 0 8px;
             }
             QPushButton#btn_logout:hover {
-                background: #FFF1F2;
+                background: #F8FAFC;
                 color: #C8102E;
-                border-color: #FECDD3;
+                border-color: #C8102E;
             }
             QPushButton#btn_logout:pressed {
-                background: #FFE4E6;
+                background: #F1F5F9;
             }
         """)
         self._btn_logout.clicked.connect(self._on_cerrar_sesion)
@@ -764,12 +764,13 @@ class MainWindow(QMainWindow):
             _role_txt = _role_labels.get(_session.role, _session.role.upper())
             role_chip = QLabel(f"  {_role_txt}  ")
             role_chip.setStyleSheet("""
-                background-color: rgba(230, 57, 70, 0.08);
-                color: #E63946;
+                background-color: #F8FAFC;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
                 font-size: 10px;
                 font-weight: 700;
-                border-radius: 5px;
-                padding: 2px 8px;
+                border-radius: 4px;
+                padding: 3px 8px;
                 letter-spacing: 0.5px;
             """)
             lay.addWidget(role_chip)
@@ -895,7 +896,7 @@ class MainWindow(QMainWindow):
 
             # Actualizar breadcrumb
             meta = self._page_meta.get(key, ("", key.replace("_", " ").title(), ""))
-            self._lbl_breadcrumb.setText(f"{meta[0]}  {meta[1]}")
+            self._lbl_breadcrumb.setText(meta[1])
             self.statusBar().showMessage("Listo")
             logger.debug("Navegado a: %s", key)
 

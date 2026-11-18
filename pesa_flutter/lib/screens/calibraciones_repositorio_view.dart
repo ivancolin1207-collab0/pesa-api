@@ -451,8 +451,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                           folio,
                           style: cell.copyWith(fontWeight: FontWeight.w800, fontSize: 12, color: const Color(0xFF111827)),
                         ),
-                        if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF3730A3), const Color(0xFFEEF2FF)),
-                        if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF065F46), const Color(0xFFECFDF5)),
+                        if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF0F172A), const Color(0xFFF8FAFC)),
+                        if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF0F172A), const Color(0xFFF8FAFC)),
                       ],
                     ),
                     if (specs.isNotEmpty) ...[
@@ -461,7 +461,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                         specs,
                         softWrap: true,
                         maxLines: 3,
-                        style: cell.copyWith(fontSize: 11, color: const Color(0xFF4B5563), height: 1.3),
+                        style: cell.copyWith(fontSize: 11, color: const Color(0xFF475569), height: 1.3),
                       ),
                     ],
                     if (formatearInfoEnvioCorreo(r).isNotEmpty) ...[
@@ -469,10 +469,14 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFECFDF5),
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF8FAFC),
+                          border: Border(
+                            left: BorderSide(color: Color(0xFF0F172A), width: 3),
+                            top: BorderSide(color: Color(0xFFE2E8F0)),
+                            right: BorderSide(color: Color(0xFFE2E8F0)),
+                            bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                          ),
                         ),
                         child: Text(
                           formatearInfoEnvioCorreo(r),
@@ -480,7 +484,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                           style: const TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFF065F46),
+                            color: Color(0xFF334155),
                             height: 1.25,
                           ),
                         ),
@@ -530,16 +534,20 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
 
   Widget _chipReg(String pfx, String val, Color fg, Color bg) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
         child: Text(
           val.toUpperCase().startsWith(pfx.toUpperCase()) ? val : '$pfx: $val',
-          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: fg),
+          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: fg),
         ),
       );
 
   Widget _listaMobile(List<Map<String, dynamic>> rows) {
     return RefreshIndicator(
-      color: _kMetroPurple,
+      color: const Color(0xFFC8102E),
       onRefresh: _refrescarServidor,
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -555,18 +563,15 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: const Border(left: BorderSide(color: _kMetroPurple, width: 4),
-                  top: BorderSide(color: _kBorder),
-                  right: BorderSide(color: _kBorder),
-                  bottom: BorderSide(color: _kBorder)),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: _kBorder),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
                   child: Text(
                     folioCard.isNotEmpty ? folioCard : '—',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF111827)),
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF0F172A)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -578,8 +583,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   spacing: 6,
                   runSpacing: 4,
                   children: [
-                    if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF3730A3), const Color(0xFFEEF2FF)),
-                    if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF065F46), const Color(0xFFECFDF5)),
+                    if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF0F172A), const Color(0xFFF8FAFC)),
+                    if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF0F172A), const Color(0xFFF8FAFC)),
                   ],
                 ),
               ],
@@ -589,14 +594,14 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   specsCard,
                   softWrap: true,
                   maxLines: 3,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563), height: 1.35),
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF475569), height: 1.35),
                 ),
               ],
               const SizedBox(height: 4),
-              Text((r['cliente'] ?? '—').toString(), style: const TextStyle(fontSize: 13)),
+              Text((r['cliente'] ?? '—').toString(), style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A))),
               const SizedBox(height: 2),
               Text('Técnico: ${(r['tecnico'] ?? '—')}',
-                  style: const TextStyle(fontSize: 12, color: _kMetroBlue)),
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
               Text((r['tipo_servicio'] ?? '—').toString(),
                   style: const TextStyle(fontSize: 12, color: _kTextSec)),
               if (formatearInfoEnvioCorreo(r).isNotEmpty) ...[
@@ -604,10 +609,14 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFECFDF5),
-                    borderRadius: BorderRadius.circular(5),
-                    border: Border.all(color: const Color(0xFFA7F3D0)),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFF8FAFC),
+                    border: Border(
+                      left: BorderSide(color: Color(0xFF0F172A), width: 3),
+                      top: BorderSide(color: Color(0xFFE2E8F0)),
+                      right: BorderSide(color: Color(0xFFE2E8F0)),
+                      bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                    ),
                   ),
                   child: Text(
                     formatearInfoEnvioCorreo(r),
@@ -615,7 +624,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                     style: const TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF065F46),
+                      color: Color(0xFF334155),
                       height: 1.3,
                     ),
                   ),

@@ -37,24 +37,28 @@ String formatearFechaHoraEnvio(dynamic val) {
   return fmt.isNotEmpty ? fmt : 'Reciente';
 }
 
-/// Banner institucional de trazabilidad de envío de correo (verde suave, multilínea sin truncar).
+/// Banner institucional neutro minimalista de trazabilidad de envío de correo.
 Widget buildEmailAuditBanner(String infoCorreo, {EdgeInsetsGeometry? margin}) {
   if (infoCorreo.trim().isEmpty) return const SizedBox.shrink();
   return Container(
     width: double.infinity,
     margin: margin ?? const EdgeInsets.only(top: 6),
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-    decoration: BoxDecoration(
-      color: const Color(0xFFECFDF5),
-      borderRadius: BorderRadius.circular(5),
-      border: Border.all(color: const Color(0xFFA7F3D0)),
+    decoration: const BoxDecoration(
+      color: Color(0xFFF8FAFC),
+      border: Border(
+        left: BorderSide(color: Color(0xFF0F172A), width: 3),
+        top: BorderSide(color: Color(0xFFE2E8F0)),
+        right: BorderSide(color: Color(0xFFE2E8F0)),
+        bottom: BorderSide(color: Color(0xFFE2E8F0)),
+      ),
     ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Padding(
           padding: EdgeInsets.only(top: 1.5, right: 6),
-          child: Icon(Icons.mark_email_read_outlined, size: 13, color: Color(0xFF065F46)),
+          child: Icon(Icons.mark_email_read_outlined, size: 13, color: Color(0xFF334155)),
         ),
         Expanded(
           child: Text(
@@ -63,7 +67,7 @@ Widget buildEmailAuditBanner(String infoCorreo, {EdgeInsetsGeometry? margin}) {
             style: const TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF065F46),
+              color: Color(0xFF334155),
               height: 1.3,
             ),
           ),
@@ -2993,17 +2997,17 @@ class _MobileOsCard extends StatelessWidget {
                                 _RegPillChip(
                                   prefix: 'CCA',
                                   value: ccaVal,
-                                  fg: const Color(0xFF3730A3),
-                                  bg: const Color(0xFFEEF2FF),
-                                  border: const Color(0xFFC7D2FE),
+                                  fg: const Color(0xFF0F172A),
+                                  bg: const Color(0xFFF8FAFC),
+                                  border: const Color(0xFFCBD5E1),
                                 ),
                               if (dveVal.isNotEmpty)
                                 _RegPillChip(
                                   prefix: 'DVE',
                                   value: dveVal,
-                                  fg: const Color(0xFF065F46),
-                                  bg: const Color(0xFFECFDF5),
-                                  border: const Color(0xFFA7F3D0),
+                                  fg: const Color(0xFF0F172A),
+                                  bg: const Color(0xFFF8FAFC),
+                                  border: const Color(0xFFCBD5E1),
                                 ),
                             ],
                           ),
@@ -3146,7 +3150,7 @@ class _MobileOsCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
 
-          // Fila Inferior (Acciones ergonómicas táctiles — iconografía vectorial limpia)
+          // Fila Inferior (Acciones ergonómicas táctiles — paleta corporativa minimalista Básculas PESA)
           if (isCerrado) ...[
             // A) TIENE PDF REAL GENERADO O ADJUNTADO
             Row(
@@ -3156,20 +3160,20 @@ class _MobileOsCard extends StatelessWidget {
                     height: 44,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFEFF6FF),
-                        foregroundColor: const Color(0xFF1D4ED8),
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF0F172A),
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFBFDBFE)),
+                          borderRadius: BorderRadius.circular(6),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
                         ),
                       ),
                       onPressed: () => onAbrirPdf(context, os),
                       icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
                       label: const Text(
                         'Ver PDF',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
@@ -3180,20 +3184,20 @@ class _MobileOsCard extends StatelessWidget {
                     height: 44,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFECFDF5),
-                        foregroundColor: const Color(0xFF047857),
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF0F172A),
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFA7F3D0)),
+                          borderRadius: BorderRadius.circular(6),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
                         ),
                       ),
                       onPressed: () => onDescargarPdf(context, os),
                       icon: const Icon(Icons.download_outlined, size: 15),
                       label: const Text(
                         'Descargar',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
@@ -3204,20 +3208,20 @@ class _MobileOsCard extends StatelessWidget {
                     height: 44,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFFFBEB),
-                        foregroundColor: const Color(0xFFB45309),
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF0F172A),
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFFDE68A)),
+                          borderRadius: BorderRadius.circular(6),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
                         ),
                       ),
                       onPressed: () => onRehacer(context, os),
                       icon: const Icon(Icons.refresh_rounded, size: 15),
                       label: const Text(
                         'Rehacer',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
@@ -3240,13 +3244,10 @@ class _MobileOsCard extends StatelessWidget {
                         final bool enviando = st != null && st._estaEnviandoEmail;
                         return ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: enviando
-                                ? const Color(0xFFE0E0E0)
-                                : (correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
-                            foregroundColor: enviando
-                                ? const Color(0xFF757575)
-                                : (correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
-                            side: BorderSide(color: enviando ? Colors.transparent : (correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
+                            backgroundColor: enviando ? const Color(0xFFF8FAFC) : Colors.white,
+                            foregroundColor: enviando ? const Color(0xFF94A3B8) : const Color(0xFF0F172A),
+                            elevation: 0,
+                            side: const BorderSide(color: Color(0xFFCBD5E1)),
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                           ),
@@ -3269,20 +3270,20 @@ class _MobileOsCard extends StatelessWidget {
                     height: 40,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFEDE7F6),
-                        foregroundColor: const Color(0xFF5E35B1),
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF0F172A),
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFD1C4E9)),
+                          borderRadius: BorderRadius.circular(6),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
                         ),
                       ),
                       onPressed: () => onSubirPdfManual(context, os),
                       icon: const Icon(Icons.upload_file_rounded, size: 16),
                       label: const Text(
                         'Subir PDF',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
@@ -3293,20 +3294,20 @@ class _MobileOsCard extends StatelessWidget {
                     height: 40,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFFEBEE),
-                        foregroundColor: const Color(0xFFC62828),
+                        backgroundColor: Colors.white,
+                        foregroundColor: _kCarmineRed,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFFFCDD2)),
+                          borderRadius: BorderRadius.circular(6),
+                          side: const BorderSide(color: _kCarmineRed),
                         ),
                       ),
                       onPressed: () => onEliminarDatos(context, os),
                       icon: const Icon(Icons.delete_forever_rounded, size: 16),
                       label: const Text(
                         'Eliminar',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
@@ -3314,18 +3315,18 @@ class _MobileOsCard extends StatelessWidget {
               ],
             ),
           ] else ...[
-            // B) SIN PDF / SIN INICIAR / PENDIENTE
+            // B) SIN PDF / SIN INICIAR / PENDIENTE (botón primario en Rojo Corporativo #C8102E)
             if (isFisico) ...[
               SizedBox(
                 width: double.infinity,
                 height: 44,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF7C3AED),
+                    backgroundColor: _kCarmineRed,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                   onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
@@ -3346,7 +3347,7 @@ class _MobileOsCard extends StatelessWidget {
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(6),
                     ),
                   ),
                   onPressed: onCaptura,
@@ -3366,20 +3367,20 @@ class _MobileOsCard extends StatelessWidget {
                     height: 40,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFEDE7F6),
-                        foregroundColor: const Color(0xFF5E35B1),
+                        backgroundColor: Colors.white,
+                        foregroundColor: const Color(0xFF0F172A),
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFD1C4E9)),
+                          borderRadius: BorderRadius.circular(6),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
                         ),
                       ),
                       onPressed: () => onSubirPdfManual(context, os),
                       icon: const Icon(Icons.upload_file_rounded, size: 16),
                       label: const Text(
                         'Subir PDF manual',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                     ),
                   ),
@@ -3391,20 +3392,20 @@ class _MobileOsCard extends StatelessWidget {
                       height: 40,
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFFFEBEE),
-                          foregroundColor: const Color(0xFFC62828),
+                          backgroundColor: Colors.white,
+                          foregroundColor: _kCarmineRed,
                           elevation: 0,
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                            side: const BorderSide(color: Color(0xFFFFCDD2)),
+                            borderRadius: BorderRadius.circular(6),
+                            side: const BorderSide(color: _kCarmineRed),
                           ),
                         ),
                         onPressed: () => onEliminarDatos(context, os),
                         icon: const Icon(Icons.delete_forever_rounded, size: 16),
                         label: const Text(
                           'Eliminar datos',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ),
@@ -3450,15 +3451,15 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFFFF7ED),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFFED7AA), width: 1),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _kBorder, width: 1),
       ),
       child: Column(
         children: [
           InkWell(
             onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(10),
             child: Padding(
               padding: const EdgeInsets.all(12),
               child: Row(
@@ -3466,12 +3467,13 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: _kCarmineRed,
+                      color: const Color(0xFFF8FAFC),
                       borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
                     ),
                     child: Text(
                       'LOTE · $count OS',
-                      style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: _kTextPrim, fontSize: 10, fontWeight: FontWeight.w700),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -3503,13 +3505,10 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                       final bool enviando = widget.state._estaEnviandoEmail;
                       return ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: enviando
-                              ? const Color(0xFFE0E0E0)
-                              : (loteEnviado ? const Color(0xFF2E7D32) : (loteEnCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
-                          foregroundColor: enviando
-                              ? const Color(0xFF757575)
-                              : (loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
-                          side: BorderSide(color: enviando ? Colors.transparent : (loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
+                          backgroundColor: enviando ? const Color(0xFFF8FAFC) : Colors.white,
+                          foregroundColor: enviando ? const Color(0xFF94A3B8) : _kTextPrim,
+                          elevation: 0,
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                         ),
@@ -3842,23 +3841,27 @@ class _SyncChip extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (sync.state) {
       case SyncState.syncing:
-        return _chip(Colors.blue.shade50, Colors.blue.shade700, 'Sincronizando...');
+        return _chip(const Color(0xFFF8FAFC), const Color(0xFF0F172A), 'Sincronizando...');
       case SyncState.success:
-        return _chip(Colors.green.shade50, Colors.green.shade700, 'Sincronizado');
+        return _chip(const Color(0xFFF8FAFC), const Color(0xFF0F172A), 'Sincronizado');
       case SyncState.error:
         final errText = (sync.errorMessage != null && sync.errorMessage!.isNotEmpty)
             ? sync.errorMessage!
             : (sync.message.isNotEmpty ? sync.message : 'Error');
-        return _chip(Colors.orange.shade50, Colors.orange.shade700, errText);
+        return _chip(Colors.white, _kCarmineRed, errText, borderColor: _kCarmineRed);
       case SyncState.offline:
-        return _chip(Colors.grey.shade100, Colors.grey.shade600, 'Sin conexión');
+        return _chip(const Color(0xFFF8FAFC), const Color(0xFF475569), 'Sin conexión');
       default:
-        return _chip(Colors.grey.shade100, Colors.grey.shade600, 'Listo');
+        return _chip(const Color(0xFFF8FAFC), const Color(0xFF475569), 'Listo');
     }
   }
-  Widget _chip(Color bg, Color fg, String label) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(12)),
+  Widget _chip(Color bg, Color fg, String label, {Color borderColor = const Color(0xFFCBD5E1)}) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: borderColor),
+        ),
         child: Text(label, style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
       );
 }
@@ -4321,9 +4324,9 @@ class _OsRow extends StatelessWidget {
 
     final String estatusLabel = isCerrado
         ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
-        : '📋 Sin Formato';
-    final Color estatusFg = isCerrado ? const Color(0xFF2E7D32) : const Color(0xFFD97706);
-    final Color estatusBg = isCerrado ? const Color(0xFFE8F5E9) : const Color(0xFFFFFBEB);
+        : 'Pend. Formato';
+    final Color estatusFg = isCerrado ? const Color(0xFF0F172A) : const Color(0xFF334155);
+    final Color estatusBg = const Color(0xFFF8FAFC);
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
@@ -4405,17 +4408,17 @@ class _OsRow extends StatelessWidget {
                                 _RegPillChip(
                                   prefix: 'CCA',
                                   value: ccaVal,
-                                  fg: const Color(0xFF3730A3),
-                                  bg: const Color(0xFFEEF2FF),
-                                  border: const Color(0xFFC7D2FE),
+                                  fg: const Color(0xFF0F172A),
+                                  bg: const Color(0xFFF8FAFC),
+                                  border: const Color(0xFFCBD5E1),
                                 ),
                               if (dveVal.isNotEmpty)
                                 _RegPillChip(
                                   prefix: 'DVE',
                                   value: dveVal,
-                                  fg: const Color(0xFF065F46),
-                                  bg: const Color(0xFFECFDF5),
-                                  border: const Color(0xFFA7F3D0),
+                                  fg: const Color(0xFF0F172A),
+                                  bg: const Color(0xFFF8FAFC),
+                                  border: const Color(0xFFCBD5E1),
                                 ),
                             ],
                           ),
@@ -4523,8 +4526,8 @@ class _OsRow extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: _Badge(
                     label: isFisico ? 'Físico' : 'Digital',
-                    fg: isFisico ? const Color(0xFF7C3AED) : const Color(0xFF2563EB),
-                    bg: isFisico ? const Color(0xFFF3F0FF) : const Color(0xFFEFF6FF),
+                    fg: const Color(0xFF0F172A),
+                    bg: const Color(0xFFF8FAFC),
                   ),
                 ),
               ),
@@ -4573,26 +4576,34 @@ class _OsRow extends StatelessWidget {
                   if (isCerrado) ...[
                     _buildBtnAccion(
                       label: "Ver PDF",
-                      icon: Icons.picture_as_pdf,
-                      color: const Color(0xFF1565C0),
+                      icon: Icons.picture_as_pdf_outlined,
+                      color: Colors.white,
+                      fg: const Color(0xFF0F172A),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
                       onPressed: () => onAbrirPdf(context, os),
                     ),
                     _buildBtnAccion(
                       label: "Descargar",
-                      icon: Icons.download,
-                      color: const Color(0xFF2E7D32),
+                      icon: Icons.download_outlined,
+                      color: Colors.white,
+                      fg: const Color(0xFF0F172A),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
                       onPressed: () => onDescargarPdf(context, os),
                     ),
                     _buildBtnAccion(
                       label: "Rehacer",
                       icon: Icons.replay,
-                      color: const Color(0xFFEF6C00),
+                      color: Colors.white,
+                      fg: const Color(0xFF0F172A),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
                       onPressed: () => onRehacer(context, os),
                     ),
                     _buildBtnAccion(
                       label: "Subir PDF",
-                      icon: Icons.upload_file,
-                      color: const Color(0xFF4527A0),
+                      icon: Icons.upload_file_outlined,
+                      color: Colors.white,
+                      fg: const Color(0xFF0F172A),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
                       onPressed: () => onSubirPdfManual(context, os),
                     ),
                     Builder(
@@ -4609,14 +4620,10 @@ class _OsRow extends StatelessWidget {
                               : (correoEnviado ? "Reenviar Correo" : (enCola ? "En cola (Offline)" : "Enviar Correo")),
                           icon: enviando
                               ? Icons.hourglass_top_rounded
-                              : (correoEnviado ? Icons.mark_email_read : (enCola ? Icons.schedule_send : Icons.mail_outline)),
-                          color: enviando
-                              ? const Color(0xFFE0E0E0)
-                              : (correoEnviado ? const Color(0xFF2E7D32) : (enCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
-                          fg: enviando
-                              ? const Color(0xFF757575)
-                              : (correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
-                          side: BorderSide(color: enviando ? Colors.transparent : (correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
+                              : (correoEnviado ? Icons.mark_email_read_outlined : (enCola ? Icons.schedule_send : Icons.mail_outline)),
+                          color: enviando ? const Color(0xFFF8FAFC) : Colors.white,
+                          fg: enviando ? const Color(0xFF94A3B8) : const Color(0xFF0F172A),
+                          side: const BorderSide(color: Color(0xFFCBD5E1)),
                           onPressed: enviando ? null : () {
                             if (st != null) {
                               st._procesarEnvioCorreo(item: item, esLote: false);
@@ -4628,9 +4635,11 @@ class _OsRow extends StatelessWidget {
                       },
                     ),
                     _buildBtnAccion(
-                      label: "Reset",
-                      icon: Icons.delete_forever,
-                      color: const Color(0xFFC62828),
+                      label: "Eliminar",
+                      icon: Icons.delete_forever_outlined,
+                      color: Colors.white,
+                      fg: _kCarmineRed,
+                      side: const BorderSide(color: _kCarmineRed),
                       onPressed: () => onEliminarDatos(context, os),
                     ),
                   ] else ...[
@@ -4638,21 +4647,25 @@ class _OsRow extends StatelessWidget {
                       _buildBtnAccion(
                         label: "Adjuntar PDF / Escaneo",
                         icon: Icons.camera_alt_rounded,
-                        color: const Color(0xFF7C3AED),
+                        color: _kCarmineRed,
+                        fg: Colors.white,
                         onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
                       ),
                     ] else ...[
                       _buildBtnAccion(
                         label: "Iniciar Captura",
                         icon: Icons.edit,
-                        color: const Color(0xFFEF6C00),
+                        color: _kCarmineRed,
+                        fg: Colors.white,
                         onPressed: onCaptura,
                       ),
                     ],
                     _buildBtnAccion(
                       label: "Subir PDF",
-                      icon: Icons.upload_file,
-                      color: const Color(0xFF4527A0),
+                      icon: Icons.upload_file_outlined,
+                      color: Colors.white,
+                      fg: const Color(0xFF0F172A),
+                      side: const BorderSide(color: Color(0xFFCBD5E1)),
                       onPressed: () => onSubirPdfManual(context, os),
                     ),
                   ],
@@ -4702,12 +4715,12 @@ class _LoteRowState extends State<_LoteRow> {
         InkWell(
           onTap: () => setState(() => _expanded = !_expanded),
           child: Container(
-            color: const Color(0xFFFFF7ED),
+            color: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: const BoxDecoration(
               border: Border(
-                bottom: BorderSide(color: Color(0xFFFED7AA)),
-                left: BorderSide(color: _kCarmineRed, width: 3.5),
+                bottom: BorderSide(color: _kBorder),
+                left: BorderSide(color: _kTextPrim, width: 3),
               ),
             ),
             child: Column(
@@ -4721,12 +4734,16 @@ class _LoteRowState extends State<_LoteRow> {
                       width: 335,
                       child: Row(
                         children: [
-                          Icon(_expanded ? Icons.keyboard_arrow_down : Icons.chevron_right, size: 18, color: _kCarmineRed),
+                          Icon(_expanded ? Icons.keyboard_arrow_down : Icons.chevron_right, size: 18, color: _kTextPrim),
                           const SizedBox(width: 4),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                            decoration: BoxDecoration(color: _kCarmineRed, borderRadius: BorderRadius.circular(4)),
-                            child: Text('LOTE • $count OS', style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: const Color(0xFFCBD5E1)),
+                            ),
+                            child: Text('LOTE • $count OS', style: const TextStyle(color: _kTextPrim, fontSize: 9.5, fontWeight: FontWeight.w700)),
                           ),
                           if ((first['rango_lote'] ?? '').toString().trim().isNotEmpty) ...[
                             const SizedBox(width: 6),
@@ -4812,7 +4829,7 @@ class _LoteRowState extends State<_LoteRow> {
 
                 // ── Bloque 2: Divisor ligero ──
                 const SizedBox(height: 6),
-                const Divider(height: 1, thickness: 0.5, color: Color(0xFFFED7AA)),
+                const Divider(height: 1, thickness: 0.5, color: _kBorder),
                 const SizedBox(height: 6),
 
                 // ── Bloque 3: Barra de Acciones del Lote ──
@@ -4824,11 +4841,11 @@ class _LoteRowState extends State<_LoteRow> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.layers, size: 14, color: Color(0xFFC2410C)),
+                          const Icon(Icons.layers_outlined, size: 14, color: _kTextSec),
                           const SizedBox(width: 5),
                           Text(
                             '$count órdenes en este lote • Toca para ${_expanded ? "contraer" : "expandir"}',
-                            style: const TextStyle(fontSize: 11, color: Color(0xFF9A3412), fontWeight: FontWeight.w500),
+                            style: const TextStyle(fontSize: 11, color: _kTextSec, fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
@@ -4844,13 +4861,9 @@ class _LoteRowState extends State<_LoteRow> {
                             height: 29,
                             child: ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: enviando
-                                    ? const Color(0xFFE0E0E0)
-                                    : (loteEnviado ? const Color(0xFF2E7D32) : (loteEnCola ? const Color(0xFFFFF8E1) : const Color(0xFFFFF3E0))),
-                                foregroundColor: enviando
-                                    ? const Color(0xFF757575)
-                                    : (loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
-                                side: BorderSide(color: enviando ? Colors.transparent : (loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
+                                backgroundColor: enviando ? const Color(0xFFF8FAFC) : Colors.white,
+                                foregroundColor: enviando ? const Color(0xFF94A3B8) : _kTextPrim,
+                                side: const BorderSide(color: Color(0xFFCBD5E1)),
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 minimumSize: const Size(0, 29),
@@ -4941,18 +4954,8 @@ class TipoServicioBadge extends StatelessWidget {
       folio: (os['folio_os'] ?? os['folio'])?.toString(),
     );
     final label = rules.etiquetaCorta;
-    final (Color fg, Color bg) = switch (rules) {
-      _ when rules.sinTipo              => (const Color(0xFFB45309), const Color(0xFFFFFBEB)), // ámbar
-      _ when rules.esObservacionesCelda => (const Color(0xFF0284C7), const Color(0xFFE0F2FE)), // azul cielo OSOCC
-      _ when rules.esObservaciones      => (const Color(0xFF7C3AED), const Color(0xFFF3E8FF)), // violeta OSOB
-      _ when rules.esRemision || rules.esRevisionCeldas
-                                        => (const Color(0xFF6B7280), const Color(0xFFF9FAFB)),
-      _ when rules.pideCca && rules.pideDve
-                                        => (const Color(0xFF3730A3), const Color(0xFFEEF2FF)), // índigo
-      _ when rules.pideCca              => (const Color(0xFF1D4ED8), const Color(0xFFEFF6FF)), // azul
-      _ when rules.pideDve              => (const Color(0xFF0F766E), const Color(0xFFF0FDFA)), // verde azulado
-      _                                 => (const Color(0xFF4B5563), const Color(0xFFF3F4F6)), // gris (Ajuste)
-    };
+    final Color fg = rules.sinTipo ? const Color(0xFF334155) : const Color(0xFF0F172A);
+    const Color bg = Color(0xFFF8FAFC);
     return Tooltip(
       message: rules.etiquetaLarga,
       child: _Badge(label: label, fg: fg, bg: bg),
@@ -4982,14 +4985,14 @@ class _RegPillChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
       decoration: BoxDecoration(
         color: bg,
-        borderRadius: BorderRadius.circular(5),
-        border: border != null ? Border.all(color: border!) : null,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: border ?? const Color(0xFFCBD5E1)),
       ),
       child: Text(
         hasPref ? value : '$prefix: $value',
         style: TextStyle(
           fontSize: 10,
-          fontWeight: FontWeight.w800,
+          fontWeight: FontWeight.w700,
           color: fg,
         ),
       ),
@@ -5005,7 +5008,11 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(4)),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(color: const Color(0xFFCBD5E1)),
+        ),
         child: Text(
           label,
           style: TextStyle(fontSize: 10, color: fg, fontWeight: FontWeight.w600, height: 1.2),
@@ -5034,25 +5041,25 @@ class EmailStatusBadge extends StatelessWidget {
     if (enviado) {
       return InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(4),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
-            color: const Color(0xFFE8F5E9),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: const Color(0xFF81C784), width: 0.8),
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: const Color(0xFFCBD5E1)),
           ),
-          child: Row(
+          child: const Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.mark_email_read_rounded, size: 13, color: Color(0xFF2E7D32)),
-              const SizedBox(width: 4),
-              const Text(
+              Icon(Icons.mark_email_read_outlined, size: 13, color: Color(0xFF0F172A)),
+              SizedBox(width: 4),
+              Text(
                 'Enviado',
                 style: TextStyle(
                   fontSize: 10.5,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF2E7D32),
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF0F172A),
                 ),
               ),
             ],
@@ -5062,25 +5069,32 @@ class EmailStatusBadge extends StatelessWidget {
     } else {
       return InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(4),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFFBEB),
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: const Color(0xFFFCD34D), width: 0.8),
+            color: const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(color: const Color(0xFF94A3B8)),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(enCola ? Icons.schedule_send : Icons.mail_outline_rounded, size: 13, color: const Color(0xFFD97706)),
-              const SizedBox(width: 4),
+              Container(
+                width: 5,
+                height: 5,
+                decoration: const BoxDecoration(
+                  color: Color(0xFFC8102E),
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 5),
               Text(
                 enCola ? 'En cola (Offline)' : 'Envío pendiente',
                 style: const TextStyle(
                   fontSize: 10.5,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFFB45309),
+                  fontWeight: FontWeight.w600,
+                  color: Color(0xFF334155),
                 ),
               ),
             ],

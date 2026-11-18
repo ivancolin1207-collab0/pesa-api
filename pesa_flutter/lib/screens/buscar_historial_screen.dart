@@ -302,14 +302,14 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                                           if (cca.isNotEmpty)
                                             _pill(
                                               cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca',
-                                              const Color(0xFF3730A3),
-                                              const Color(0xFFEEF2FF),
+                                              const Color(0xFF0F172A),
+                                              const Color(0xFFF8FAFC),
                                             ),
                                           if (dve.isNotEmpty)
                                             _pill(
                                               dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve',
-                                              const Color(0xFF065F46),
-                                              const Color(0xFFECFDF5),
+                                              const Color(0xFF0F172A),
+                                              const Color(0xFFF8FAFC),
                                             ),
                                         ],
                                       ),
@@ -322,7 +322,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                                         maxLines: 3,
                                         style: const TextStyle(
                                           fontSize: 12,
-                                          color: Color(0xFF4B5563),
+                                          color: Color(0xFF475569),
                                           height: 1.35,
                                         ),
                                       ),
@@ -336,17 +336,21 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                                       ].join(' • '),
                                       softWrap: true,
                                       maxLines: 3,
-                                      style: const TextStyle(fontSize: 12, color: Color(0xFF374151), height: 1.3),
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFF334155), height: 1.3),
                                     ),
                                     if (formatearInfoEnvioCorreo(os).isNotEmpty) ...[
                                       const SizedBox(height: 6),
                                       Container(
                                         width: double.infinity,
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFECFDF5),
-                                          borderRadius: BorderRadius.circular(5),
-                                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                                        decoration: const BoxDecoration(
+                                          color: Color(0xFFF8FAFC),
+                                          border: Border(
+                                            left: BorderSide(color: Color(0xFF0F172A), width: 3),
+                                            top: BorderSide(color: Color(0xFFE2E8F0)),
+                                            right: BorderSide(color: Color(0xFFE2E8F0)),
+                                            bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                                          ),
                                         ),
                                         child: Text(
                                           formatearInfoEnvioCorreo(os),
@@ -354,7 +358,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                                           style: const TextStyle(
                                             fontSize: 10.5,
                                             fontWeight: FontWeight.w600,
-                                            color: Color(0xFF065F46),
+                                            color: Color(0xFF334155),
                                             height: 1.3,
                                           ),
                                         ),

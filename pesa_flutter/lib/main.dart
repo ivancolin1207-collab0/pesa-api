@@ -91,15 +91,16 @@ class PesaTabletApp extends StatelessWidget {
             brightness: Brightness.light,
           ),
           useMaterial3: true,
-          scaffoldBackgroundColor: Colors.white,
+          scaffoldBackgroundColor: const Color(0xFFFFFFFF),
+          cardColor: const Color(0xFFFFFFFF),
           dividerColor: const Color(0xFFE2E8F0),
           cardTheme: CardThemeData(
-            color: Colors.white,
+            color: const Color(0xFFFFFFFF),
             surfaceTintColor: Colors.transparent,
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
-              side: const BorderSide(color: Color(0xFFE2E8F0)),
+              side: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
             ),
           ),
           inputDecorationTheme: InputDecorationTheme(

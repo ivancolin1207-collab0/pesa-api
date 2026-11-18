@@ -10,7 +10,7 @@ import '../services/sync_service.dart';
 
 // ── Tokens corporativos minimalistas Básculas PESA ──────────────────────────
 const _red         = Color(0xFFC8102E);
-const _redLight    = Color(0xFFFFF1F2); // fondo ítem activo
+const _redLight    = Color(0xFFF8FAFC); // fondo ítem activo neutro (sin tintes rosados)
 const _sidebarBg   = Colors.white;
 const _sidebarW    = 240.0;
 const _textActive  = Color(0xFFC8102E);

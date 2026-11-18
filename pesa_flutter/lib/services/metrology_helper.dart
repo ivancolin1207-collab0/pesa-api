@@ -686,8 +686,8 @@ int _compararFolioNaturalCorreo(String a, String b) {
   const tdBase =
       'border: 1px solid #E2E8F0; padding: 8px 12px; font-size: 12.5px; color: #0F172A; vertical-align: middle;';
 
-  final thCcaHtml = tieneCca ? '<th style="$thStyle text-align: center;">CCA</th>' : '';
-  final thDveHtml = tieneDve ? '<th style="$thStyle text-align: center;">DVE</th>' : '';
+  final thCcaHtml = tieneCca ? '<th style="$thStyle">CCA</th>' : '';
+  final thDveHtml = tieneDve ? '<th style="$thStyle">DVE</th>' : '';
 
   final trBuf = StringBuffer();
   for (int i = 0; i < filas.length; i++) {
@@ -700,10 +700,10 @@ int _compararFolioNaturalCorreo(String a, String b) {
     final idEsc = (f['id_indicador'] ?? '').isNotEmpty ? _escapeHtml(f['id_indicador']!) : '';
 
     final tdCcaHtml = tieneCca
-        ? '<td style="$tdBase text-align: center;">${(f['cca'] ?? '').isNotEmpty ? '<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; border:1px solid #C7D2FE; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">${_escapeHtml(f['cca']!)}</span>' : ''}</td>'
+        ? '<td style="$tdBase">${(f['cca'] ?? '').isNotEmpty ? '<span style="color: #0F172A; font-weight: 600; font-size: 12px;">${_escapeHtml(f['cca']!)}</span>' : ''}</td>'
         : '';
     final tdDveHtml = tieneDve
-        ? '<td style="$tdBase text-align: center;">${(f['dve'] ?? '').isNotEmpty ? '<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">${_escapeHtml(f['dve']!)}</span>' : ''}</td>'
+        ? '<td style="$tdBase">${(f['dve'] ?? '').isNotEmpty ? '<span style="color: #0F172A; font-weight: 600; font-size: 12px;">${_escapeHtml(f['dve']!)}</span>' : ''}</td>'
         : '';
 
     trBuf.writeln(

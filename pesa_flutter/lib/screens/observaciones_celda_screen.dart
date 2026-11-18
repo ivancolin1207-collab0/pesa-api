@@ -1236,8 +1236,8 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
       elevation: 0,
       color: Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Color(0xFFBAE6FD), width: 1.4),
+        borderRadius: BorderRadius.circular(10),
+        side: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1249,14 +1249,14 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE0F2FE),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF7DD3FC)),
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
                   ),
                   child: Text(
                     'FOLIO: $folio',
                     style: const TextStyle(
-                      color: _osoccBlue,
+                      color: Color(0xFF0F172A),
                       fontWeight: FontWeight.w800,
                       fontSize: 13.5,
                     ),
@@ -1266,27 +1266,29 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF3F4F6),
-                    borderRadius: BorderRadius.circular(8),
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
                   child: Text(
                     'Fecha: $fecha',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
                   ),
                 ),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE0F2FE),
-                    borderRadius: BorderRadius.circular(6),
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
                   ),
                   child: const Text(
                     'OSOCC DIGITAL (1 CELDA)',
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.bold,
-                      color: _osoccBlue,
+                      color: Color(0xFF0F172A),
                     ),
                   ),
                 ),
@@ -1320,11 +1322,12 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                           ChoiceChip(
                             label: const Text('Stock / Laboratorio Interno'),
                             selected: _destinoTipo == 'Stock',
-                            selectedColor: const Color(0xFFE0F2FE),
+                            selectedColor: const Color(0xFFC8102E),
+                            backgroundColor: const Color(0xFFF8FAFC),
                             labelStyle: TextStyle(
                               fontSize: 12,
                               fontWeight: _destinoTipo == 'Stock' ? FontWeight.bold : FontWeight.normal,
-                              color: _destinoTipo == 'Stock' ? _osoccBlue : Colors.black87,
+                              color: _destinoTipo == 'Stock' ? Colors.white : const Color(0xFF0F172A),
                             ),
                             onSelected: (_) {
                               setState(() {
@@ -1339,11 +1342,12 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                           ChoiceChip(
                             label: const Text('Cliente'),
                             selected: _destinoTipo == 'Cliente',
-                            selectedColor: const Color(0xFFE0F2FE),
+                            selectedColor: const Color(0xFFC8102E),
+                            backgroundColor: const Color(0xFFF8FAFC),
                             labelStyle: TextStyle(
                               fontSize: 12,
                               fontWeight: _destinoTipo == 'Cliente' ? FontWeight.bold : FontWeight.normal,
-                              color: _destinoTipo == 'Cliente' ? _osoccBlue : Colors.black87,
+                              color: _destinoTipo == 'Cliente' ? Colors.white : const Color(0xFF0F172A),
                             ),
                             onSelected: (_) {
                               setState(() {

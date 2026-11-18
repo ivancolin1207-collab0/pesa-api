@@ -20,8 +20,8 @@ COLORS: dict[str, str] = {
     "accent_primary":   "#C8102E",   # Rojo Corporativo Básculas PESA
     "accent_hover":     "#A50D26",   # Rojo hover
     "accent_pressed":   "#880B20",   # Rojo pressed
-    "accent_muted":     "#FFF1F2",   # Rojo suave (fondos activos)
-    "accent_border":    "#FECDD3",   # Borde rojo sutil
+    "accent_muted":     "#F8FAFC",   # Superficie neutra activa (cero fondos rosados)
+    "accent_border":    "#CBD5E1",   # Borde neutro corporativo
     "navy":             "#0F172A",   # Negro carbón corporativo
     "focus_blue":       "#C8102E",   # Foco corporativo
 
@@ -37,25 +37,25 @@ COLORS: dict[str, str] = {
     "border_strong":    "#CBD5E1",   # Borde marcado
     "border_focus":     "#C8102E",   # Foco en rojo corporativo
 
-    # Estados semánticos
-    "success":          "#16A34A",
-    "success_bg":       "#DCFCE7",
-    "warning":          "#D97706",
-    "warning_bg":       "#FEF3C7",
+    # Estados semánticos sobrios (sin pasteles IA)
+    "success":          "#0F172A",
+    "success_bg":       "#F8FAFC",
+    "warning":          "#334155",
+    "warning_bg":       "#F8FAFC",
     "error":            "#C8102E",
-    "error_bg":         "#FEF2F2",
-    "info":             "#2563EB",
-    "info_bg":          "#DBEAFE",
+    "error_bg":         "#FFFFFF",
+    "info":             "#0F172A",
+    "info_bg":          "#F8FAFC",
 
-    # Badges de estado OS
-    "estado_proceso":       "#92400E",
-    "estado_proceso_bg":    "#FEF3C7",
-    "estado_cancelada":     "#991B1B",
-    "estado_cancelada_bg":  "#FEE2E2",
-    "estado_escaneada":     "#166534",
-    "estado_escaneada_bg":  "#DCFCE7",
-    "estado_fisico":        "#475569",
-    "estado_fisico_bg":     "#F1F5F9",
+    # Badges de estado OS monocromáticos corporativos
+    "estado_proceso":       "#334155",
+    "estado_proceso_bg":    "#F8FAFC",
+    "estado_cancelada":     "#C8102E",
+    "estado_cancelada_bg":  "#FFFFFF",
+    "estado_escaneada":     "#0F172A",
+    "estado_escaneada_bg":  "#F8FAFC",
+    "estado_fisico":        "#0F172A",
+    "estado_fisico_bg":     "#F8FAFC",
 }
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -512,23 +512,15 @@ QToolBar QToolButton:hover { background: #F1F5F9; color: #0F172A; }
 
 
 def get_badge_style(estado: str) -> str:
-    """Retorna el estilo CSS inline para un badge de estado OS — macOS Technical Pills."""
-    styles = {
-        "PROCESO":            "background: #FFF3E0; color: #E65100; border: 1px solid #FFE0B2;",
-        "CANCELADA":          "background: #FEE2E2; color: #991B1B; border: 1px solid #FCA5A5;",
-        "ESCANEADA":          "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
-        "COMPLETADA":         "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
-        "COMPLETADA_DIGITAL": "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
-        "CERRADO":            "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
-        "CERRADA":            "background: #E8F5E9; color: #1B5E20; border: 1px solid #C8E6C9;",
-        "FISICO":             "background: #EDE7F6; color: #4A148C; border: 1px solid #D1C4E9;",
-        "DIGITAL":            "background: #E3F2FD; color: #0D47A1; border: 1px solid #BBDEFB;",
-        "PENDING":            "background: #FFF3E0; color: #E65100; border: 1px solid #FFE0B2;",
-        "SYNCED":             "background: #E8F5E9; color: #2E7D32; border: 1px solid #C8E6C9;",
-    }
+    """Retorna el estilo CSS inline monocromático corporativo Básculas PESA."""
+    est = estado.upper()
     base = (
-        "border-radius: 6px; padding: 3px 8px; "
-        "font-size: 11px; font-weight: 600; letter-spacing: 0.2px; "
+        "border-radius: 4px; padding: 2px 7px; "
+        "font-size: 11px; font-weight: 600; "
     )
-    return base + styles.get(estado.upper(), "background: #F5F5F7; color: #1D1D1F; border: 1px solid #E5E5EA;")
+    if est in ("PROCESO", "PENDING", "PENDIENTE"):
+        return base + "background-color: #F8FAFC; color: #334155; border: 1px solid #94A3B8;"
+    if est == "CANCELADA":
+        return base + "background-color: #FFFFFF; color: #C8102E; border: 1px solid #C8102E;"
+    return base + "background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1;"
 

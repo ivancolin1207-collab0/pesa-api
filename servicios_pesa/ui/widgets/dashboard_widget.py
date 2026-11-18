@@ -318,18 +318,18 @@ _BORDER   = "#E2E8F0"   # Borde fino 1px
 _SEP      = "#F1F5F9"   # Separador ultra fino
 _SEG_BG   = "#F8FAFC"   # Superficie secundaria ultra clara
 
-# Diccionario de colores de tipos de servicio con fallback defensivo .get()
+# Diccionario monocromático sobrio para tipos de servicio (cero colores pastel/IA)
 COLOR_TIPO_SERVICIO = {
-    'Observaciones Celda': '#0284C7',  # Azul Cobalto Técnico (OSOCC)
-    'OSOCC': '#0284C7',
-    'Observaciones Celda (OSOCC)': '#0284C7',
-    'Formato de Diagnóstico y Revisión de Celda de Carga': '#0284C7',
-    'Observaciones': '#7C3AED',  # Violeta / Púrpura distintivo
-    'Inspección': '#7C3AED',
-    'OSOB': '#7C3AED',
-    'Observaciones (OSOB)': '#7C3AED',
-    'Inspección y Revisión de Básculas (OSOB)': '#7C3AED',
-    'Formato de Inspección y Revisión de Básculas': '#7C3AED',
+    'Observaciones Celda': '#0F172A',
+    'OSOCC': '#0F172A',
+    'Observaciones Celda (OSOCC)': '#0F172A',
+    'Formato de Diagnóstico y Revisión de Celda de Carga': '#0F172A',
+    'Observaciones': '#0F172A',
+    'Inspección': '#0F172A',
+    'OSOB': '#0F172A',
+    'Observaciones (OSOB)': '#0F172A',
+    'Inspección y Revisión de Básculas (OSOB)': '#0F172A',
+    'Formato de Inspección y Revisión de Básculas': '#0F172A',
 }
 
 
@@ -359,12 +359,12 @@ class FolioInstrumentoDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        if is_batch and not (option.state & QStyle.StateFlag.State_Selected):
-            painter.fillRect(option.rect, QColor("#F0F4FF"))
-        elif option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor("#F2F2F7"))
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, QColor("#F8FAFC"))
         elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor("#F9F9FB"))
+            painter.fillRect(option.rect, QColor("#F8FAFC"))
+        else:
+            painter.fillRect(option.rect, QColor("#FFFFFF"))
 
         # Si la celda contiene el QWidget estructurado de 2 niveles, no pintar DisplayRole debajo
         if has_widget:
@@ -378,7 +378,7 @@ class FolioInstrumentoDelegate(QStyledItemDelegate):
             title_font.setPointSizeF(9.2)
             title_font.setWeight(QFont.Weight.DemiBold)
             painter.setFont(title_font)
-            painter.setPen(QColor("#1D1D1F" if is_batch else _RED))
+            painter.setPen(QColor("#0F172A"))
             painter.drawText(
                 rect,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
@@ -419,19 +419,19 @@ class WordWrapTextDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        if is_batch and not (option.state & QStyle.StateFlag.State_Selected):
-            painter.fillRect(option.rect, QColor("#F0F4FF"))
-        elif option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor("#F2F2F7"))
+        if option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, QColor("#F8FAFC"))
         elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor("#F9F9FB"))
+            painter.fillRect(option.rect, QColor("#F8FAFC"))
+        else:
+            painter.fillRect(option.rect, QColor("#FFFFFF"))
 
         if text:
             rect = option.rect.adjusted(10, 5, -8, -5)
             font = QFont(option.font)
             font.setPixelSize(12)
             painter.setFont(font)
-            painter.setPen(QColor("#1D1D1F"))
+            painter.setPen(QColor("#0F172A"))
             painter.drawText(
                 rect,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
@@ -459,72 +459,20 @@ class WordWrapTextDelegate(QStyledItemDelegate):
 # Delegate para badges de estado (pintado directo con QPainter)
 # =============================================================================
 class StatusBadgeDelegate(QStyledItemDelegate):
-    """Pinta badges tipo 'pill' redondeados para columnas de estado."""
+    """Pinta etiquetas monocromáticas sobrias Básculas PESA (#F8FAFC / #CBD5E1 / #0F172A)."""
 
-    # Tabla de colores por valor de texto (bg, fg, border)
-    _BADGE_MAP = {
-        # Modalidad
-        "fisico":    ("#EDE7F6", "#4A148C", "#D1C4E9"),
-        "digital":   ("#E3F2FD", "#0D47A1", "#BBDEFB"),
-        # Estado
-        "proceso":   ("#FFF3E0", "#E65100", "#FFE0B2"),
-        "cerrado":   ("#E8F5E9", "#1B5E20", "#C8E6C9"),
-        "cerrada":   ("#E8F5E9", "#1B5E20", "#C8E6C9"),
-        "firmada":   ("#E8F5E9", "#1B5E20", "#C8E6C9"),
-        "escaneada": ("#E8F5E9", "#1B5E20", "#C8E6C9"),
-        "completada":("#E8F5E9", "#1B5E20", "#C8E6C9"),
-        "completada_digital": ("#E8F5E9", "#1B5E20", "#C8E6C9"),
-        "cancelada": ("#FEE2E2", "#991B1B", "#FCA5A5"),
-        "pendiente de formato": ("#FFFBEB", "#B45309", "#FDE68A"),
-        "en proceso": ("#FFF3E0", "#E65100", "#FFE0B2"),
-        # Sync
-        "sincronizado": ("#E8F5E9", "#2E7D32", "#C8E6C9"),
-        "pendiente":    ("#FFF3E0", "#E65100", "#FFE0B2"),
-        "synced":       ("#E8F5E9", "#2E7D32", "#C8E6C9"),
-        "pending":      ("#FFF3E0", "#E65100", "#FFE0B2"),
-        # Tipos de servicio — etiquetas homologadas con la tablet (match exacto)
-        "calibración + ajuste + inspección": ("#EEF2FF", "#3730A3", "#C7D2FE"),
-        "calibración + inspección":          ("#EEF2FF", "#3730A3", "#C7D2FE"),
-        "calibración + ajuste":              ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
-        "calibración":                       ("#EFF6FF", "#1D4ED8", "#BFDBFE"),
-        "ajuste + inspección":               ("#F0FDFA", "#0F766E", "#99F6E4"),
-        "inspección":                        ("#F3E8FF", "#7C3AED", "#DDD6FE"),
-        "sin tipo":     ("#FFFBEB", "#B45309", "#FDE68A"),
-        "remisión":     ("#F5F5F7", "#48484A", "#E5E5EA"),
-        "revisión":     ("#F5F5F7", "#48484A", "#E5E5EA"),
-        # Tipos de servicio (texto libre heredado)
-        "calibracion":  ("#E8F5E9", "#1B5E20", "#C8E6C9"),
-        "ajuste":       ("#F3F4F6", "#4B5563", "#E5E7EB"),
-        "inspeccion":   ("#F3E8FF", "#7C3AED", "#DDD6FE"),
-        "revision":     ("#F5F5F7", "#48484A", "#E5E5EA"),
-        "refacciones":  ("#F5F5F7", "#48484A", "#E5E5EA"),
-        "levantamiento":("#EDE7F6", "#4A148C", "#D1C4E9"),
-        "observaciones celda": ("#E0F2FE", "#0284C7", "#BAE6FD"),
-        "observaciones celda (osocc)": ("#E0F2FE", "#0284C7", "#BAE6FD"),
-        "osocc":        ("#E0F2FE", "#0284C7", "#BAE6FD"),
-        "formato de diagnóstico": ("#E0F2FE", "#0284C7", "#BAE6FD"),
-        "observaciones":("#F3E8FF", "#7C3AED", "#DDD6FE"),
-        "observaciones (osob)": ("#F3E8FF", "#7C3AED", "#DDD6FE"),
-        "osob":         ("#F3E8FF", "#7C3AED", "#DDD6FE"),
-        "formato de inspección": ("#F3E8FF", "#7C3AED", "#DDD6FE"),
-    }
+    _ACTIVE_TOKENS = ("proceso", "pend", "sin tipo", "pending")
 
-    def _resolve_colors(self, text: str):
-        clean_txt = str(text or "").strip()
-        lower = clean_txt.lower()
-        if lower in self._BADGE_MAP:
-            return self._BADGE_MAP.get(lower, ("#F3F4F6", "#4B5563", "#E5E7EB"))
-        if clean_txt in COLOR_TIPO_SERVICIO:
-            fg = COLOR_TIPO_SERVICIO.get(clean_txt, "#4B5563")
-            return ("#F3F4F6", fg, "#DDD6FE")
-        for key, colors in self._BADGE_MAP.items():
-            if key in lower:
-                return colors
-        fg_fallback = COLOR_TIPO_SERVICIO.get(clean_txt, "#4B5563")
-        return ("#F3F4F6", fg_fallback, "#E5E7EB")
+    def _resolve_colors(self, text: str) -> tuple[str, str, str, bool]:
+        lower = str(text or "").strip().lower()
+        if "cancel" in lower:
+            return ("#FFFFFF", "#C8102E", "#C8102E", True)
+        if any(tok in lower for tok in self._ACTIVE_TOKENS):
+            return ("#F8FAFC", "#334155", "#94A3B8", True)
+        return ("#F8FAFC", "#0F172A", "#CBD5E1", False)
 
     def _abbreviate(self, text: str) -> str:
-        """Mantiene textos legibles y sin truncamiento dentro de la píldora."""
+        """Mantiene textos legibles y sin truncamiento dentro de la etiqueta."""
         abbr = {
             "Pendiente de Formato": "Pend. Formato",
             "Entrega Refacciones": "Refacciones",
@@ -552,7 +500,7 @@ class StatusBadgeDelegate(QStyledItemDelegate):
             return
 
         display = self._abbreviate(str(text))
-        bg_hex, fg_hex, brd_hex = self._resolve_colors(display)
+        bg_hex, fg_hex, brd_hex, has_dot = self._resolve_colors(display)
         bg_color = QColor(bg_hex)
         fg_color = QColor(fg_hex)
         brd_color = QColor(brd_hex)
@@ -560,26 +508,27 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Fondo de la celda (hover / selected)
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor(184, 29, 36, 12))
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor(0, 0, 0, 5))
+        # Fondo limpio de la celda (blanco puro / gris ultra sutil en hover; cero tintes rosados)
+        if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
+            painter.fillRect(option.rect, QColor("#F8FAFC"))
+        else:
+            painter.fillRect(option.rect, QColor("#FFFFFF"))
 
-        padding_h = 10
-        padding_v = 4
+        padding_h = 8
+        padding_v = 3
         margin    = 4
+        dot_space = 10 if has_dot else 0
 
         font = QFont(option.font)
         font.setWeight(QFont.Weight.DemiBold)
-        font.setPointSizeF(8.5)
+        font.setPixelSize(11)
         painter.setFont(font)
 
         fm = QFontMetrics(font)
         text_w = fm.horizontalAdvance(display)
         text_h = fm.height()
 
-        badge_w = int(min(text_w + padding_h * 2, option.rect.width() - margin * 2))
+        badge_w = int(min(text_w + padding_h * 2 + dot_space, option.rect.width() - margin * 2))
         badge_h = int(text_h + padding_v * 2)
         badge_x = int(option.rect.x() + margin)
         badge_y = int(option.rect.y() + (option.rect.height() - badge_h) // 2)
@@ -590,15 +539,23 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         path.addRoundedRect(
             float(badge_rect.x()), float(badge_rect.y()),
             float(badge_rect.width()), float(badge_rect.height()),
-            12.0, 12.0
+            4.0, 4.0
         )
         painter.fillPath(path, QBrush(bg_color))
         painter.setPen(QPen(brd_color, 1.0))
         painter.drawPath(path)
 
+        if has_dot:
+            from PyQt6.QtCore import QRectF as _QRectF
+            dot_x = float(badge_rect.x() + padding_h)
+            dot_y = float(badge_rect.y()) + (float(badge_rect.height()) - 5.0) / 2.0
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#C8102E"))
+            painter.drawEllipse(_QRectF(dot_x, dot_y, 5.0, 5.0))
+
         painter.setPen(fg_color)
-        draw_rect = badge_rect.adjusted(padding_h, 0, -padding_h, 0)
-        painter.drawText(draw_rect, Qt.AlignmentFlag.AlignCenter, display)
+        draw_rect = badge_rect.adjusted(padding_h + dot_space, 0, -padding_h, 0)
+        painter.drawText(draw_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, display)
 
         painter.restore()
 
@@ -628,42 +585,42 @@ class SyncCheckDelegate(QStyledItemDelegate):
         "ASIGNADA": {
             "symbol": "✓",
             "text": "Asignada",
-            "fg": "#616161",
-            "bg": "#F5F5F5",
-            "border": "#E0E0E0",
-            "tooltip": "✓ Gris — Asignada en Servidor (Pendiente de descarga en tablet)",
+            "fg": "#334155",
+            "bg": "#F8FAFC",
+            "border": "#CBD5E1",
+            "tooltip": "Asignada en Servidor (Pendiente de descarga en tablet)",
         },
         "RECIBIDA_TABLET": {
             "symbol": "✓✓",
             "text": "En tablet",
-            "fg": "#616161",
-            "bg": "#F5F5F5",
-            "border": "#E0E0E0",
-            "tooltip": "✓✓ Gris — Recibida en Tablet / Tomada en campo offline",
+            "fg": "#334155",
+            "bg": "#F8FAFC",
+            "border": "#CBD5E1",
+            "tooltip": "Recibida en Tablet / Tomada en campo offline",
         },
         "SUBIDA_SERVIDOR": {
             "symbol": "✓✓",
             "text": "Recibida",
-            "fg": "#1565C0",
-            "bg": "#E3F2FD",
-            "border": "#90CAF9",
-            "tooltip": "✓✓ Azul — Recibida en Servidor / Concluida con PDF",
+            "fg": "#0F172A",
+            "bg": "#F8FAFC",
+            "border": "#CBD5E1",
+            "tooltip": "Recibida en Servidor / Concluida con PDF",
         },
         "RECIBIDA_SERVIDOR": {
             "symbol": "✓✓",
             "text": "Recibida",
-            "fg": "#1565C0",
-            "bg": "#E3F2FD",
-            "border": "#90CAF9",
-            "tooltip": "✓✓ Azul — Recibida en Servidor / Concluida con PDF",
+            "fg": "#0F172A",
+            "bg": "#F8FAFC",
+            "border": "#CBD5E1",
+            "tooltip": "Recibida en Servidor / Concluida con PDF",
         },
         "AUDITADA_ADMIN": {
             "symbol": "✓✓",
             "text": "Abierto",
-            "fg": "#2E7D32",
-            "bg": "#E8F5E9",
-            "border": "#A5D6A7",
-            "tooltip": "✓✓ Verde — Abierto por Administración / Oficina en Windows",
+            "fg": "#0F172A",
+            "bg": "#F8FAFC",
+            "border": "#CBD5E1",
+            "tooltip": "Abierto por Administración / Oficina en Windows",
         },
     }
 
@@ -684,10 +641,10 @@ class SyncCheckDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor(184, 29, 36, 12))
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor(0, 0, 0, 5))
+        if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
+            painter.fillRect(option.rect, QColor("#F8FAFC"))
+        else:
+            painter.fillRect(option.rect, QColor("#FFFFFF"))
 
         symbol = cfg["symbol"]
         text   = cfg["text"]
@@ -696,7 +653,7 @@ class SyncCheckDelegate(QStyledItemDelegate):
         brd_col= QColor(cfg["border"])
 
         font = QFont(option.font)
-        font.setPointSizeF(8.5)
+        font.setPixelSize(11)
         font.setWeight(QFont.Weight.DemiBold)
         painter.setFont(font)
         fm = QFontMetrics(font)
@@ -705,8 +662,8 @@ class SyncCheckDelegate(QStyledItemDelegate):
         tw = fm.horizontalAdvance(label_full)
         th = fm.height()
 
-        padding_h = 8
-        padding_v = 4
+        padding_h = 7
+        padding_v = 3
         margin    = 4
 
         badge_w = int(min(tw + padding_h * 2, option.rect.width() - margin * 2))
@@ -720,7 +677,7 @@ class SyncCheckDelegate(QStyledItemDelegate):
         path.addRoundedRect(
             float(badge_rect.x()), float(badge_rect.y()),
             float(badge_rect.width()), float(badge_rect.height()),
-            12.0, 12.0
+            4.0, 4.0
         )
         painter.fillPath(path, QBrush(bg_col))
         painter.setPen(QPen(brd_col, 1.0))
@@ -1836,9 +1793,9 @@ class DashboardWidget(QWidget):
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(16)
         self._card_total   = KPICard("Total Periodo",    "--", subtitle="del periodo seleccionado", value_color="#0F172A", accent_color="#C8102E")
-        self._card_proceso = KPICard("En Proceso",       "--", subtitle="activos actualmente",      value_color="#B45309", accent_color="#D97706")
-        self._card_cerrados= KPICard("Cerrados",         "--", subtitle="finalizados",              value_color="#15803D", accent_color="#16A34A")
-        self._card_fisicos = KPICard("Formatos Físicos", "--", subtitle="pendientes de escanear",   value_color="#334155", accent_color="#475569")
+        self._card_proceso = KPICard("En Proceso",       "--", subtitle="activos actualmente",      value_color="#0F172A", accent_color="#334155")
+        self._card_cerrados= KPICard("Cerrados",         "--", subtitle="finalizados",              value_color="#0F172A", accent_color="#0F172A")
+        self._card_fisicos = KPICard("Formatos Físicos", "--", subtitle="pendientes de escanear",   value_color="#0F172A", accent_color="#94A3B8")
         for card in [self._card_total, self._card_proceso,
                      self._card_cerrados, self._card_fisicos]:
             kpi_row.addWidget(card)
@@ -2195,15 +2152,15 @@ class DashboardWidget(QWidget):
         self._search_global.setStyleSheet("""
             QLineEdit {
                 background: #FFFFFF;
-                border: 1px solid #D1D1D6;
-                border-radius: 8px;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
                 padding: 0 12px;
                 font-size: 13px;
-                color: #1D1D1F;
+                color: #0F172A;
             }
             QLineEdit:focus {
                 background: #FFFFFF;
-                border: 1px solid #007AFF;
+                border: 1.5px solid #C8102E;
             }
         """)
         self._search_global.textChanged.connect(self._on_search_changed)
@@ -2305,26 +2262,22 @@ class DashboardWidget(QWidget):
         self._btn_descargar_zip.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_descargar_zip.setStyleSheet("""
             QPushButton {
-                background: #F2F2F7;
-                color: #8E8E93;
-                border: 1px solid #D1D1D6;
+                background: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
                 border-radius: 6px;
                 font-size: 9pt;
                 font-weight: 600;
                 padding: 0 12px;
             }
-            QPushButton:enabled {
-                background: #007AFF;
-                color: #FFFFFF;
-                border: none;
-            }
             QPushButton:enabled:hover {
-                background: #0062CC;
+                background: #F1F5F9;
+                border-color: #94A3B8;
             }
             QPushButton:disabled {
-                background: #F2F2F7;
-                color: #8E8E93;
-                border: 1px solid #D1D1D6;
+                background: #F8FAFC;
+                color: #94A3B8;
+                border: 1px solid #E2E8F0;
             }
         """)
         self._btn_descargar_zip.clicked.connect(self._on_descargar_seleccion_zip)
@@ -2646,14 +2599,14 @@ class DashboardWidget(QWidget):
         if not hasattr(self, "_lbl_conn_mode"):
             return
         if _HAS_SYNC and _sync_manager and _sync_manager.is_online():
-            self._lbl_conn_mode.setText("  Conectado -- PostgreSQL")
+            self._lbl_conn_mode.setText("  Conectado · PostgreSQL")
             self._lbl_conn_mode.setStyleSheet(
-                "font-size: 9pt; font-weight: 500; color: #16A34A; background: transparent;"
+                "font-size: 9pt; font-weight: 600; color: #0F172A; background: transparent;"
             )
         else:
-            self._lbl_conn_mode.setText("  Offline -- SQLite Local")
+            self._lbl_conn_mode.setText("  Offline · SQLite Local")
             self._lbl_conn_mode.setStyleSheet(
-                "font-size: 9pt; font-weight: 500; color: #92400E; background: transparent;"
+                "font-size: 9pt; font-weight: 600; color: #475569; background: transparent;"
             )
 
     def _refresh_pending_count(self) -> None:
@@ -3645,19 +3598,21 @@ class DashboardWidget(QWidget):
         top_lay.setContentsMargins(0, 0, 0, 0)
         top_lay.setSpacing(5)
 
+        _SOBER_BADGE_STYLE = (
+            "background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1; "
+            "border-radius: 4px; padding: 2px 7px; font-size: 11px; font-weight: 600;"
+        )
+
         lbl_folio = QLabel(folio_base)
         lbl_folio.setStyleSheet(
-            "font-weight: 700; font-size: 12px; color: #111827; background: transparent; border: none;"
+            "font-weight: 700; font-size: 12px; color: #0F172A; background: transparent; border: none;"
         )
         lbl_folio.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         top_lay.addWidget(lbl_folio)
 
         if is_batch_parent and total_lote > 1:
             lbl_cnt = QLabel(f"{total_lote} OS")
-            lbl_cnt.setStyleSheet(
-                "background-color: #DBEAFE; color: #1E40AF; border: 1px solid #BFDBFE; "
-                "border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px;"
-            )
+            lbl_cnt.setStyleSheet(_SOBER_BADGE_STYLE)
             lbl_cnt.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             top_lay.addWidget(lbl_cnt)
 
@@ -3665,10 +3620,7 @@ class DashboardWidget(QWidget):
         if numero_cca:
             cca_txt = numero_cca if numero_cca.upper().startswith("CCA") else f"CCA {numero_cca}"
             lbl_cca = QLabel(cca_txt)
-            lbl_cca.setStyleSheet(
-                "background-color: #EEF2FF; color: #3730A3; border: 1px solid #C7D2FE; "
-                "border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px;"
-            )
+            lbl_cca.setStyleSheet(_SOBER_BADGE_STYLE)
             lbl_cca.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             top_lay.addWidget(lbl_cca)
 
@@ -3676,10 +3628,7 @@ class DashboardWidget(QWidget):
         if numero_dve:
             dve_txt = numero_dve if numero_dve.upper().startswith("DVE") else f"DVE {numero_dve}"
             lbl_dve = QLabel(dve_txt)
-            lbl_dve.setStyleSheet(
-                "background-color: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; "
-                "border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px;"
-            )
+            lbl_dve.setStyleSheet(_SOBER_BADGE_STYLE)
             lbl_dve.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             top_lay.addWidget(lbl_dve)
 
@@ -3693,20 +3642,21 @@ class DashboardWidget(QWidget):
             lbl_datos.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             lbl_datos.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             lbl_datos.setStyleSheet(
-                "color: #4B5563; font-size: 11px; background: transparent; border: none;"
+                "color: #475569; font-size: 11px; background: transparent; border: none;"
             )
             lbl_datos.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             v_lay.addWidget(lbl_datos)
 
-        # 3. Fila inferior: auditoría y trazabilidad exacta de envío de correo
+        # 3. Fila inferior: auditoría y trazabilidad exacta de envío de correo (contenedor neutro minimalista)
         if info_correo:
             lbl_correo = QLabel(info_correo)
             lbl_correo.setWordWrap(True)
             lbl_correo.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             lbl_correo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             lbl_correo.setStyleSheet(
-                "background-color: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; "
-                "border-radius: 4px; padding: 2px 6px; font-size: 10.5px; font-weight: 600;"
+                "background-color: #F8FAFC; color: #334155; border: 1px solid #E2E8F0; "
+                "border-left: 3px solid #0F172A; border-radius: 3px; padding: 3px 8px; "
+                "font-size: 10.5px; font-weight: 600;"
             )
             lbl_correo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             v_lay.addWidget(lbl_correo)
@@ -3991,11 +3941,10 @@ class DashboardWidget(QWidget):
         item.setData(self._COL_SYNC, Qt.ItemDataRole.DisplayRole, check_val)
         item.setToolTip(self._COL_SYNC, self._get_sync_check_tooltip(check_val))
 
-        # Fondo diferenciado para filas padre de lote (solo las 10 columnas de datos)
-        if is_batch_parent:
-            bg = QBrush(QColor("#F0F4FF"))
-            for col in range(self._table.columnCount()):
-                item.setBackground(col, bg)
+        # Fondo blanco puro en todas las filas (cero tintes pastel en filas padre/hija)
+        bg = QBrush(QColor("#FFFFFF"))
+        for col in range(self._table.columnCount()):
+            item.setBackground(col, bg)
 
     @staticmethod
     def _extraer_consecutivo(folio: str) -> int | None:
@@ -4386,59 +4335,35 @@ class DashboardWidget(QWidget):
         lay.setContentsMargins(6, 0, 4, 0)
         lay.setSpacing(4)
 
-        _btn_lote_style = """
+        _btn_sec_lote = """
             QPushButton {
-                background: #E8EDFF;
-                color: #1D3A8A;
-                border: 1px solid #B8C8FF;
-                border-radius: 4px;
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 5px;
                 font-size: 8.5pt;
                 font-weight: 600;
-                padding: 0 4px;
+                padding: 0 6px;
                 min-height: 26px;
             }
-            QPushButton:hover { background: #D0DAFF; }
-        """
-        _btn_modal_fisico_style = """
-            QPushButton {
-                background: #F2F2F7;
-                color: #3A3A3C;
-                border: 1px solid #D1D1D6;
-                border-radius: 4px;
-                font-size: 8pt;
-                font-weight: 500;
-                padding: 0 4px;
-                min-height: 26px;
-            }
-            QPushButton:hover { background: #E5E5EA; }
+            QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
             QPushButton::menu-indicator { image: none; width: 0; }
         """
-        _btn_modal_digital_style = """
-            QPushButton {
-                background: #E8F4FF;
-                color: #0A5C9E;
-                border: 1px solid #B3D8FF;
-                border-radius: 4px;
-                font-size: 8pt;
-                font-weight: 600;
-                padding: 0 4px;
-                min-height: 26px;
-            }
-            QPushButton:hover { background: #CCE9FF; }
-            QPushButton::menu-indicator { image: none; width: 0; }
-        """
+        _btn_lote_style = _btn_sec_lote
+        _btn_modal_fisico_style = _btn_sec_lote
+        _btn_modal_digital_style = _btn_sec_lote
         _btn_del_style = """
             QPushButton {
-                background: #FFF0F0;
+                background-color: #FFFFFF;
                 color: #C8102E;
-                border: 1px solid #FFB3B3;
-                border-radius: 4px;
+                border: 1px solid #C8102E;
+                border-radius: 5px;
                 font-size: 8.5pt;
                 font-weight: 600;
-                padding: 0 4px;
+                padding: 0 6px;
                 min-height: 26px;
             }
-            QPushButton:hover { background: #FFE0E0; }
+            QPushButton:hover { background-color: #F8FAFC; color: #A50D26; border-color: #A50D26; }
         """
 
         # ── Botón PDF Lote ────────────────────────────────────────────────────
@@ -4513,41 +4438,17 @@ class DashboardWidget(QWidget):
         info_lote_tt = self._extraer_info_correo_lote(grupo_ord or [])
 
         if lote_email_enviado:
-            btn_mail_lote = QPushButton("✓ Lote Enviado")
+            btn_mail_lote = QPushButton("Lote Enviado")
             btn_mail_lote.setFixedSize(100, 28)
             btn_mail_lote.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_mail_lote.setStyleSheet("""
-                QPushButton {
-                    background-color: #E8F5E9;
-                    color: #2E7D32;
-                    border: 1px solid #A5D6A7;
-                    border-radius: 4px;
-                    font-size: 8.5pt;
-                    font-weight: 600;
-                    padding: 0 4px;
-                    min-height: 26px;
-                }
-                QPushButton:hover { background-color: #C8E6C9; }
-            """)
-            tt_lote = f"{info_lote_tt}\n(Clic para reenviar lote)" if info_lote_tt else f"Correo de lote enviado a: {correo_lote or 'Cliente'}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar lote)"
+            btn_mail_lote.setStyleSheet(_btn_sec_lote)
+            tt_lote = f"{info_lote_tt}\n(Clic para reenviar lote)" if info_lote_tt else f"Correo de lote enviado a: {correo_lote or 'Destinatario'}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar lote)"
             btn_mail_lote.setToolTip(tt_lote)
         else:
-            btn_mail_lote = QPushButton("✉ Lote Pendiente")
+            btn_mail_lote = QPushButton("Lote Pendiente")
             btn_mail_lote.setFixedSize(110, 28)
             btn_mail_lote.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_mail_lote.setStyleSheet("""
-                QPushButton {
-                    background-color: #FFF8E1;
-                    color: #E65100;
-                    border: 1px solid #FFE082;
-                    border-radius: 4px;
-                    font-size: 8.5pt;
-                    font-weight: 600;
-                    padding: 0 4px;
-                    min-height: 26px;
-                }
-                QPushButton:hover { background-color: #FFECB3; }
-            """)
+            btn_mail_lote.setStyleSheet(_btn_sec_lote)
             btn_mail_lote.setToolTip(f"Envío de lote pendiente\nDestinatario: {correo_lote or 'Sin registrar'}\n(Clic para enviar lote vía servidor)")
 
         btn_mail_lote.clicked.connect(
@@ -4609,21 +4510,12 @@ class DashboardWidget(QWidget):
         new_label  = "Digital (Lote)" if is_digital else "Fisico (Lote)"
         new_style  = """
             QPushButton {
-                background: #E8F4FF; color: #0A5C9E;
-                border: 1px solid #B3D8FF; border-radius: 4px;
-                font-size: 8pt; font-weight: 600;
-                padding: 0 7px; min-height: 26px;
+                background: #FFFFFF; color: #0F172A;
+                border: 1px solid #CBD5E1; border-radius: 5px;
+                font-size: 8.5pt; font-weight: 600;
+                padding: 0 8px; min-height: 26px;
             }
-            QPushButton:hover { background: #CCE9FF; }
-            QPushButton::menu-indicator { image: none; width: 0; }
-        """ if is_digital else """
-            QPushButton {
-                background: #F2F2F7; color: #3A3A3C;
-                border: 1px solid #D1D1D6; border-radius: 4px;
-                font-size: 8pt; font-weight: 500;
-                padding: 0 7px; min-height: 26px;
-            }
-            QPushButton:hover { background: #E5E5EA; }
+            QPushButton:hover { background: #F1F5F9; border-color: #94A3B8; }
             QPushButton::menu-indicator { image: none; width: 0; }
         """
         if btn_modal:
@@ -4643,12 +4535,12 @@ class DashboardWidget(QWidget):
 
         # Notificar éxito brevemente
         lbl = QLabel(
-            f"  ✅ Modalidad → {'Digital' if is_digital else 'Físico'} guardada  ",
+            f"  Modalidad → {'Digital' if is_digital else 'Físico'} guardada  ",
             self
         )
         lbl.setStyleSheet(
-            "background: #D1FAE5; color: #065F46; border-radius: 6px; "
-            "font-size: 9pt; font-weight: 600; padding: 6px 10px;"
+            "background: #0F172A; color: #FFFFFF; border-radius: 5px; "
+            "font-size: 9pt; font-weight: 600; padding: 6px 12px;"
         )
         lbl.setWindowFlags(Qt.WindowType.ToolTip)
         lbl.move(self.mapToGlobal(self.rect().center()))
@@ -4855,69 +4747,60 @@ class DashboardWidget(QWidget):
 
         is_proceso = estatus in ('en proceso', 'proceso', 'pendiente de formato') or (not has_real_pdf and not has_med)
 
+        _BTN_SEC_STYLE = """
+            QPushButton {
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 5px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 2px 4px;
+            }
+            QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
+        """
+        _BTN_DISABLED_STYLE = """
+            QPushButton {
+                background-color: #F8FAFC;
+                color: #94A3B8;
+                border: 1px solid #E2E8F0;
+                border-radius: 5px;
+                font-size: 11px;
+                font-weight: 500;
+                padding: 2px 4px;
+            }
+        """
+
         # ── CONDICIÓN ESTRICTA: Solo si el archivo PDF existe realmente ───────
         if has_real_pdf:
-            # 1. [ 👁 PDF ] — Azul suave, 54px de ancho para texto completo
+            # 1. [ PDF ] — Botón secundario corporativo blanco (#FFFFFF / #CBD5E1)
             btn_pdf = QPushButton("PDF")
             btn_pdf.setObjectName("btn_action_pdf")
             btn_pdf.setFixedSize(54, 28)
             btn_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_pdf.setStyleSheet("""
-                QPushButton {
-                    background-color: #E3F2FD;
-                    color: #1976D2;
-                    border: 1px solid #BBDEFB;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 2px 3px;
-                }
-                QPushButton:hover { background-color: #BBDEFB; }
-            """)
+            btn_pdf.setStyleSheet(_BTN_SEC_STYLE)
             btn_pdf.setToolTip(f"Visualizar PDF de {folio}")
             btn_pdf.clicked.connect(lambda _, fl=str(folio): self._open_pdf(fl))
             lay.addWidget(btn_pdf)
 
-            # 2. [ 📥 Descargar ] — Verde suave, 80px de ancho para texto completo
+            # 2. [ Descargar ] — Botón secundario corporativo blanco
             btn_dl = QPushButton("Descargar")
             btn_dl.setObjectName("btn_action_download")
             btn_dl.setFixedSize(80, 28)
             btn_dl.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_dl.setStyleSheet("""
-                QPushButton {
-                    background-color: #E8F5E9;
-                    color: #2E7D32;
-                    border: 1px solid #C8E6C9;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 2px 3px;
-                }
-                QPushButton:hover { background-color: #C8E6C9; }
-            """)
+            btn_dl.setStyleSheet(_BTN_SEC_STYLE)
             btn_dl.setToolTip(f"Descargar PDF de {folio} al disco")
             btn_dl.clicked.connect(
                 lambda _, fid=os_id, fl=folio, rd=row_data: self._descargar_pdf_os(fid, fl, row_data=rd)
             )
             lay.addWidget(btn_dl)
 
-            # 3. [ 🔄 Rehacer ] — Naranja suave, 68px de ancho para texto completo
+            # 3. [ Rehacer ] — Botón secundario corporativo blanco
             btn_rehacer = QPushButton("Rehacer")
             btn_rehacer.setObjectName("btn_action_rehacer")
             btn_rehacer.setFixedSize(68, 28)
             btn_rehacer.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_rehacer.setStyleSheet("""
-                QPushButton {
-                    background-color: #FFF3E0;
-                    color: #E65100;
-                    border: 1px solid #FFE0B2;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 2px 3px;
-                }
-                QPushButton:hover { background-color: #FFE0B2; }
-            """)
+            btn_rehacer.setStyleSheet(_BTN_SEC_STYLE)
             btn_rehacer.setToolTip(f"Rehacer toma metrológica de {folio} (corregir y reemitir PDF)")
             btn_rehacer.clicked.connect(
                 lambda _, fid=os_id, fl=folio, rd=row_data: self._abrir_captura_digital(fid, fl, rd)
@@ -4925,8 +4808,6 @@ class DashboardWidget(QWidget):
             lay.addWidget(btn_rehacer)
 
         else:
-            # Si has_pdf es False:
-            # Los botones [ 👁 PDF ] y [ 📥 Descargar ] NO deben mostrarse habilitados como si ya existieran.
             is_osob_folio = str(folio or "").strip().upper().startswith(("OSOB-", "OSOCC-"))
             btn_pdf = QPushButton("PDF")
             btn_pdf.setFixedSize(54, 28)
@@ -4934,34 +4815,13 @@ class DashboardWidget(QWidget):
                 btn_pdf.setObjectName("btn_action_pdf")
                 btn_pdf.setEnabled(True)
                 btn_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn_pdf.setStyleSheet("""
-                    QPushButton {
-                        background-color: #E3F2FD;
-                        color: #1976D2;
-                        border: 1px solid #BBDEFB;
-                        border-radius: 6px;
-                        font-size: 11px;
-                        font-weight: 600;
-                        padding: 2px 3px;
-                    }
-                    QPushButton:hover { background-color: #BBDEFB; }
-                """)
+                btn_pdf.setStyleSheet(_BTN_SEC_STYLE)
                 btn_pdf.setToolTip(f"Visualizar Formato PDF ({folio})")
                 btn_pdf.clicked.connect(lambda _, fl=str(folio): self._open_pdf(fl))
             else:
                 btn_pdf.setObjectName("btn_action_pdf_disabled")
                 btn_pdf.setEnabled(False)
-                btn_pdf.setStyleSheet("""
-                    QPushButton {
-                        background-color: #F5F5F7;
-                        color: #8E8E93;
-                        border: 1px solid #E5E5EA;
-                        border-radius: 6px;
-                        font-size: 11px;
-                        font-weight: 500;
-                        padding: 2px 3px;
-                    }
-                """)
+                btn_pdf.setStyleSheet(_BTN_DISABLED_STYLE)
                 btn_pdf.setToolTip(f"PDF no disponible para {folio}")
             lay.addWidget(btn_pdf)
 
@@ -4971,18 +4831,7 @@ class DashboardWidget(QWidget):
                 btn_dl.setObjectName("btn_action_download")
                 btn_dl.setEnabled(True)
                 btn_dl.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn_dl.setStyleSheet("""
-                    QPushButton {
-                        background-color: #E8F5E9;
-                        color: #2E7D32;
-                        border: 1px solid #C8E6C9;
-                        border-radius: 6px;
-                        font-size: 11px;
-                        font-weight: 600;
-                        padding: 2px 3px;
-                    }
-                    QPushButton:hover { background-color: #C8E6C9; }
-                """)
+                btn_dl.setStyleSheet(_BTN_SEC_STYLE)
                 btn_dl.setToolTip(f"Descargar PDF de {folio} al disco")
                 btn_dl.clicked.connect(
                     lambda _, fid=os_id, fl=folio, rd=row_data: self._descargar_pdf_os(fid, fl, row_data=rd)
@@ -4990,36 +4839,26 @@ class DashboardWidget(QWidget):
             else:
                 btn_dl.setObjectName("btn_action_download_disabled")
                 btn_dl.setEnabled(False)
-                btn_dl.setStyleSheet("""
-                    QPushButton {
-                        background-color: #F5F5F7;
-                        color: #8E8E93;
-                        border: 1px solid #E5E5EA;
-                        border-radius: 6px;
-                        font-size: 11px;
-                        font-weight: 500;
-                        padding: 2px 3px;
-                    }
-                """)
+                btn_dl.setStyleSheet(_BTN_DISABLED_STYLE)
                 btn_dl.setToolTip(f"PDF no disponible para {folio}")
             lay.addWidget(btn_dl)
 
-            # Botón Capturar para permitir captura metrológica
+            # Botón Capturar — ÚNICO botón con relleno rojo corporativo #C8102E en tabla
             btn_cap = QPushButton("Capturar")
             btn_cap.setObjectName("btn_action_capturar")
             btn_cap.setFixedSize(76, 28)
             btn_cap.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_cap.setStyleSheet("""
                 QPushButton {
-                    background-color: #B81D24;
+                    background-color: #C8102E;
                     color: #FFFFFF;
-                    border: none;
-                    border-radius: 6px;
+                    border: 1px solid #C8102E;
+                    border-radius: 5px;
                     font-size: 11px;
                     font-weight: 600;
-                    padding: 2px 3px;
+                    padding: 2px 4px;
                 }
-                QPushButton:hover { background-color: #9E161C; }
+                QPushButton:hover { background-color: #A50D26; border-color: #A50D26; }
             """)
             btn_cap.setToolTip(f"Capturar datos metrológicos de {folio}")
             btn_cap.clicked.connect(
@@ -5047,44 +4886,22 @@ class DashboardWidget(QWidget):
         })
 
         if email_enviado:
-            btn_mail = QPushButton("✓ Correo Enviado")
+            btn_mail = QPushButton("Correo Enviado")
             btn_mail.setObjectName("btn_action_mail_sent")
-            btn_mail.setFixedSize(115, 28)
+            btn_mail.setFixedSize(112, 28)
             btn_mail.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_mail.setStyleSheet("""
-                QPushButton {
-                    background-color: #E8F5E9;
-                    color: #2E7D32;
-                    border: 1px solid #A5D6A7;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 2px 4px;
-                }
-                QPushButton:hover { background-color: #C8E6C9; }
-            """)
+            btn_mail.setStyleSheet(_BTN_SEC_STYLE)
             btn_mail.setToolTip(
                 f"{info_mail_btn}\n(Clic para reenviar)"
                 if info_mail_btn
-                else f"Correo enviado a: {correo_cliente or 'Cliente'}\nCC: {cc_env_row}\n(Clic para reenviar)"
+                else f"Correo enviado a: {correo_cliente or 'Destinatario'}\nCC: {cc_env_row}\n(Clic para reenviar)"
             )
         else:
-            btn_mail = QPushButton("✉ Correo Pendiente")
+            btn_mail = QPushButton("Correo Pendiente")
             btn_mail.setObjectName("btn_action_mail_pending")
-            btn_mail.setFixedSize(125, 28)
+            btn_mail.setFixedSize(120, 28)
             btn_mail.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_mail.setStyleSheet("""
-                QPushButton {
-                    background-color: #FFF8E1;
-                    color: #E65100;
-                    border: 1px solid #FFE082;
-                    border-radius: 6px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 2px 4px;
-                }
-                QPushButton:hover { background-color: #FFECB3; }
-            """)
+            btn_mail.setStyleSheet(_BTN_SEC_STYLE)
             btn_mail.setToolTip(f"Envío de correo pendiente\nDestinatario: {correo_cliente or 'Sin registrar'}\n(Clic para enviar vía servidor)")
 
         btn_mail.clicked.connect(
@@ -5115,18 +4932,18 @@ class DashboardWidget(QWidget):
             })
             if btn_widget:
                 btn_widget.setEnabled(True)
-                btn_widget.setText("✓ Correo Enviado")
+                btn_widget.setText("Correo Enviado")
                 btn_widget.setStyleSheet("""
                     QPushButton {
-                        background-color: #E8F5E9;
-                        color: #2E7D32;
-                        border: 1px solid #A5D6A7;
-                        border-radius: 6px;
+                        background-color: #FFFFFF;
+                        color: #0F172A;
+                        border: 1px solid #CBD5E1;
+                        border-radius: 5px;
                         font-size: 11px;
                         font-weight: 600;
                         padding: 2px 4px;
                     }
-                    QPushButton:hover { background-color: #C8E6C9; }
+                    QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
                 """)
                 btn_widget.setToolTip(f"{info_vivo}\n(Clic para reenviar)")
 
@@ -5173,18 +4990,18 @@ class DashboardWidget(QWidget):
         else:
             if btn_widget:
                 btn_widget.setEnabled(True)
-                btn_widget.setText("✉ Reintentar")
+                btn_widget.setText("Reintentar")
                 btn_widget.setStyleSheet("""
                     QPushButton {
-                        background-color: #FFF0F0;
+                        background-color: #FFFFFF;
                         color: #C8102E;
-                        border: 1px solid #FFB3B3;
-                        border-radius: 6px;
+                        border: 1px solid #C8102E;
+                        border-radius: 5px;
                         font-size: 11px;
                         font-weight: 600;
                         padding: 2px 4px;
                     }
-                    QPushButton:hover { background-color: #FFE0E0; }
+                    QPushButton:hover { background-color: #F8FAFC; color: #A50D26; border-color: #A50D26; }
                 """)
                 btn_widget.setToolTip(f"Error al enviar orden: {err_msg}\nClic para reintentar envío")
             QMessageBox.critical(
@@ -5207,19 +5024,19 @@ class DashboardWidget(QWidget):
             })
             if btn_widget:
                 btn_widget.setEnabled(True)
-                btn_widget.setText("✓ Lote Enviado")
+                btn_widget.setText("Lote Enviado")
                 btn_widget.setStyleSheet("""
                     QPushButton {
-                        background-color: #E8F5E9;
-                        color: #2E7D32;
-                        border: 1px solid #A5D6A7;
-                        border-radius: 4px;
+                        background-color: #FFFFFF;
+                        color: #0F172A;
+                        border: 1px solid #CBD5E1;
+                        border-radius: 5px;
                         font-size: 8.5pt;
                         font-weight: 600;
-                        padding: 0 4px;
+                        padding: 0 6px;
                         min-height: 26px;
                     }
-                    QPushButton:hover { background-color: #C8E6C9; }
+                    QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
                 """)
                 btn_widget.setToolTip(f"{info_vivo}\n(Clic para reenviar lote)")
 
@@ -5235,18 +5052,18 @@ class DashboardWidget(QWidget):
                         for btn in w_act.findChildren(QPushButton):
                             if "mail" in btn.objectName() or "Correo" in btn.text():
                                 btn.setEnabled(True)
-                                btn.setText("✓ Correo Enviado")
+                                btn.setText("Correo Enviado")
                                 btn.setStyleSheet("""
                                     QPushButton {
-                                        background-color: #E8F5E9;
-                                        color: #2E7D32;
-                                        border: 1px solid #A5D6A7;
-                                        border-radius: 6px;
+                                        background-color: #FFFFFF;
+                                        color: #0F172A;
+                                        border: 1px solid #CBD5E1;
+                                        border-radius: 5px;
                                         font-size: 11px;
                                         font-weight: 600;
                                         padding: 2px 4px;
                                     }
-                                    QPushButton:hover { background-color: #C8E6C9; }
+                                    QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
                                 """)
                                 btn.setToolTip(f"{info_vivo}\n(Clic para reenviar)")
                 self._recalcular_alturas_filas()
@@ -5258,19 +5075,19 @@ class DashboardWidget(QWidget):
         else:
             if btn_widget:
                 btn_widget.setEnabled(True)
-                btn_widget.setText("✉ Reintentar")
+                btn_widget.setText("Reintentar")
                 btn_widget.setStyleSheet("""
                     QPushButton {
-                        background-color: #FFF0F0;
+                        background-color: #FFFFFF;
                         color: #C8102E;
-                        border: 1px solid #FFB3B3;
-                        border-radius: 4px;
+                        border: 1px solid #C8102E;
+                        border-radius: 5px;
                         font-size: 8.5pt;
                         font-weight: 600;
-                        padding: 0 4px;
+                        padding: 0 6px;
                         min-height: 26px;
                     }
-                    QPushButton:hover { background-color: #FFE0E0; }
+                    QPushButton:hover { background-color: #F8FAFC; color: #A50D26; border-color: #A50D26; }
                 """)
                 btn_widget.setToolTip(f"Error al enviar lote: {err_msg}\nClic para reintentar envío")
             QMessageBox.critical(

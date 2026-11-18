@@ -45,15 +45,15 @@ except ImportError:
     _HAS_SESSION = False
     session = None
 
-# ─── Paleta ───────────────────────────────────────────────────────────────────
-_BG    = "#F5F5F7"
+# ─── Paleta Corporativa Minimalista Básculas PESA ────────────────────────────
+_BG    = "#FFFFFF"
 _WHITE = "#FFFFFF"
-_DARK  = "#1D1D1F"
-_GRAY  = "#86868B"
-_RED   = "#E63946"
-_BLUE  = "#007AFF"
-_GREEN = "#34C759"
-_AMBER = "#FF9F0A"
+_DARK  = "#0F172A"
+_GRAY  = "#475569"
+_RED   = "#C8102E"
+_BLUE  = "#0F172A"
+_GREEN = "#0F172A"
+_AMBER = "#334155"
 
 # (Sin datos hardcoded — los catálogos se cargan exclusivamente desde PostgreSQL)
 
@@ -63,19 +63,19 @@ _AMBER = "#FF9F0A"
 # ══════════════════════════════════════════════════════════════════════════════
 _EQUIPO_FIELD_STYLE = """
     QLineEdit {
-        background: #F8FAFC;
-        border: 1.5px solid #D1D5DB;
-        border-radius: 8px;
+        background: #FFFFFF;
+        border: 1px solid #CBD5E1;
+        border-radius: 6px;
         padding: 7px 12px;
         font-size: 13px;
-        color: #1D1D1F;
+        color: #0F172A;
         min-height: 36px;
     }
     QLineEdit:focus {
-        border-color: #007AFF;
+        border: 1.5px solid #C8102E;
         background: #FFFFFF;
     }
-    QLineEdit::placeholder { color: #A0ADB8; }
+    QLineEdit::placeholder { color: #94A3B8; }
 """
 
 class EquipoCard(QFrame):
@@ -1986,10 +1986,10 @@ class BatchGeneratorWidget(QWidget):
         _re_vlay.addLayout(_ub_row)
 
         # ── Sub-bloque 2: Indicador e Instrumento ────────────────────────────────
-        _lbl_sep2 = QLabel("📡  Indicador e Instrumento")
+        _lbl_sep2 = QLabel("Indicador e Instrumento")
         _lbl_sep2.setStyleSheet(
-            "font-size: 11px; font-weight: 600; color: #7C3AED; "
-            "border-top: 1px solid rgba(139,92,246,0.25); "
+            "font-size: 11px; font-weight: 700; color: #0F172A; "
+            "border-top: 1px solid #E2E8F0; "
             "padding-top: 6px; background: transparent;"
         )
         _re_vlay.addWidget(_lbl_sep2)
@@ -2023,10 +2023,10 @@ class BatchGeneratorWidget(QWidget):
         _re_vlay.addLayout(_ind_row2)
 
         # ── Sub-bloque 3: Configuración de Celdas de Carga ─────────────────────
-        _lbl_sep3 = QLabel("🔋  Celdas de Carga")
+        _lbl_sep3 = QLabel("Celdas de Carga")
         _lbl_sep3.setStyleSheet(
-            "font-size: 11px; font-weight: 600; color: #7C3AED; "
-            "border-top: 1px solid rgba(139,92,246,0.25); "
+            "font-size: 11px; font-weight: 700; color: #0F172A; "
+            "border-top: 1px solid #E2E8F0; "
             "padding-top: 6px; background: transparent;"
         )
         _re_vlay.addWidget(_lbl_sep3)
@@ -2619,16 +2619,16 @@ class BatchGeneratorWidget(QWidget):
         self.btn_llenar_digital.setVisible(False)
         self.btn_llenar_digital.setStyleSheet("""
             QPushButton {
-                background-color: #8B5CF6;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 9px;
+                background-color: #FFFFFF;
+                color: #0F172A;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
                 font-size: 13px;
-                font-weight: 700;
+                font-weight: 600;
                 padding: 0 20px;
             }
-            QPushButton:hover   { background-color: #7C3AED; }
-            QPushButton:pressed { background-color: #6D28D9; }
+            QPushButton:hover   { background-color: #F1F5F9; border-color: #94A3B8; }
+            QPushButton:pressed { background-color: #E2E8F0; }
         """)
         self.btn_llenar_digital.clicked.connect(self._abrir_formulario_digital)
         lay.addWidget(self.btn_llenar_digital)
