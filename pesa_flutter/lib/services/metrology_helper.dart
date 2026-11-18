@@ -398,6 +398,50 @@ String construirEtiquetaInstrumento(Map<String, dynamic> orden) {
   return partes.join(' - ');
 }
 
+/// Construye la línea estructurada de especificaciones del instrumento sin el folio:
+///   `Marca · Modelo · SN: {serie} · ID: {idEquipo} · Ubic: {ubicacion}`
+/// omitiendo vacíos o placeholders ('sin id', 'sin modelo', 'sin serie', etc.).
+String construirEspecificacionesInstrumento(Map<String, dynamic> orden) {
+  final dt = _extraerMapaDatosTecnicos(orden);
+
+  String pickField(List<String> keys) {
+    for (final k in keys) {
+      final v = orden[k];
+      if (v != null) {
+        final s = v.toString().trim();
+        if (s.isNotEmpty && !_kValoresOmitirEtiqueta.contains(s.toLowerCase())) {
+          return s;
+        }
+      }
+    }
+    for (final k in keys) {
+      final v = dt[k];
+      if (v != null) {
+        final s = v.toString().trim();
+        if (s.isNotEmpty && !_kValoresOmitirEtiqueta.contains(s.toLowerCase())) {
+          return s;
+        }
+      }
+    }
+    return '';
+  }
+
+  final marca = pickField(['marca', 'equipo_marca', 'indicador_marca']);
+  final modelo = pickField(['modelo', 'equipo_modelo', 'indicador_modelo']);
+  final serie = pickField(['serie', 'ns', 'numero_serie']);
+  final idEquipo = pickField(['id_indicador', 'id_equipo', 'indicador_id', 'id_interno', 'tag']);
+  final ubicacion = pickField(['ubicacion', 'ubicacion_equipo', 'area']);
+
+  final partes = <String>[];
+  if (marca.isNotEmpty) partes.add(marca);
+  if (modelo.isNotEmpty) partes.add(modelo);
+  if (serie.isNotEmpty) partes.add('SN: $serie');
+  if (idEquipo.isNotEmpty) partes.add('ID: $idEquipo');
+  if (ubicacion.isNotEmpty) partes.add('Ubic: $ubicacion');
+
+  return partes.join(' · ');
+}
+
 /// Extrae los metadatos limpios de equipo y folios regulatorios de una orden
 /// para garantizar que el servidor tenga los datos actualizados antes del correo.
 Map<String, dynamic> extraerMetaCorreoOrden(Map<String, dynamic> orden) {

@@ -2855,49 +2855,69 @@ class _MobileOsCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Fila Superior: Identificador Dinámico Compuesto + Chips CCA/DVE + Badge Estatus
+          // Fila Superior: Folio + Chips CCA/DVE en Wrap + Especificaciones multilínea sin truncar
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      construirEtiquetaInstrumento(os).isNotEmpty
-                          ? construirEtiquetaInstrumento(os)
-                          : (folioStr.isNotEmpty ? folioStr : '—'),
-                      style: const TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w800,
-                        color: _kCarmineRed,
-                        height: 1.25,
-                      ),
-                    ),
-                    if (extraerNumeroCca(os).isNotEmpty || extraerNumeroDve(os).isNotEmpty) ...[
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          if (extraerNumeroCca(os).isNotEmpty)
-                            _RegPillChip(
-                              prefix: 'CCA',
-                              value: extraerNumeroCca(os),
-                              fg: const Color(0xFF1D4ED8),
-                              bg: const Color(0xFFDBEAFE),
-                            ),
-                          if (extraerNumeroDve(os).isNotEmpty)
-                            _RegPillChip(
-                              prefix: 'DVE',
-                              value: extraerNumeroDve(os),
-                              fg: const Color(0xFF6D28D9),
-                              bg: const Color(0xFFEDE9FE),
-                            ),
+                child: Builder(
+                  builder: (context) {
+                    final ccaVal = extraerNumeroCca(os);
+                    final dveVal = extraerNumeroDve(os);
+                    final specsStr = construirEspecificacionesInstrumento(os);
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          folioStr.isNotEmpty ? folioStr : '—',
+                          style: const TextStyle(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF111827),
+                            height: 1.25,
+                          ),
+                        ),
+                        if (ccaVal.isNotEmpty || dveVal.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            children: [
+                              if (ccaVal.isNotEmpty)
+                                _RegPillChip(
+                                  prefix: 'CCA',
+                                  value: ccaVal,
+                                  fg: const Color(0xFF3730A3),
+                                  bg: const Color(0xFFEEF2FF),
+                                  border: const Color(0xFFC7D2FE),
+                                ),
+                              if (dveVal.isNotEmpty)
+                                _RegPillChip(
+                                  prefix: 'DVE',
+                                  value: dveVal,
+                                  fg: const Color(0xFF065F46),
+                                  bg: const Color(0xFFECFDF5),
+                                  border: const Color(0xFFA7F3D0),
+                                ),
+                            ],
+                          ),
                         ],
-                      ),
-                    ],
-                  ],
+                        if (specsStr.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            specsStr,
+                            softWrap: true,
+                            maxLines: 3,
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: Color(0xFF4B5563),
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
+                      ],
+                    );
+                  },
                 ),
               ),
               const SizedBox(width: 8),
@@ -2920,27 +2940,28 @@ class _MobileOsCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          // Fila Media: Cliente (14px semi-bold) + Sucursal (12px #86868B)
+          // Fila Media: Cliente (14px semi-bold) + Sucursal multilínea sin cortar (#86868B)
           Text(
             os['cliente'] as String? ?? 'Sin cliente',
+            softWrap: true,
+            maxLines: 2,
             style: const TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
               color: _kTextPrim,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
           if ((os['sucursal'] ?? '').toString().isNotEmpty) ...[
             const SizedBox(height: 2),
             Text(
               os['sucursal'].toString(),
+              softWrap: true,
+              maxLines: 3,
               style: const TextStyle(
                 fontSize: 12,
                 color: _kTextSec,
+                height: 1.3,
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ],
           const SizedBox(height: 4),
@@ -4093,7 +4114,7 @@ class _TableHeader extends StatelessWidget {
       ),
       child: Row(
         children: [
-          SizedBox(width: 260, child: _TH('FOLIO / INSTRUMENTO')),
+          SizedBox(width: 335, child: _TH('FOLIO / INSTRUMENTO')),
           SizedBox(width: 85, child: _TH('FECHA')),
           Expanded(
             flex: 3,
@@ -4265,52 +4286,68 @@ class _OsRow extends StatelessWidget {
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // [FOLIO / INSTRUMENTO COMPUESTO + CCA/DVE] (260px)
+              // [FOLIO / INSTRUMENTO MULTILÍNEA + CCA/DVE] (335px)
               SizedBox(
-                width: 260,
+                width: 335,
                 child: Padding(
                   padding: const EdgeInsets.only(right: 8.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        construirEtiquetaInstrumento(os).isNotEmpty
-                            ? construirEtiquetaInstrumento(os)
-                            : (folioStr.isNotEmpty ? folioStr : '—'),
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 11.5,
-                          color: _kCarmineRed,
-                          height: 1.25,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (extraerNumeroCca(os).isNotEmpty || extraerNumeroDve(os).isNotEmpty) ...[
-                        const SizedBox(height: 3),
-                        Wrap(
-                          spacing: 4,
-                          runSpacing: 3,
-                          children: [
-                            if (extraerNumeroCca(os).isNotEmpty)
-                              _RegPillChip(
-                                prefix: 'CCA',
-                                value: extraerNumeroCca(os),
-                                fg: const Color(0xFF1D4ED8),
-                                bg: const Color(0xFFDBEAFE),
+                  child: Builder(
+                    builder: (context) {
+                      final ccaVal = extraerNumeroCca(os);
+                      final dveVal = extraerNumeroDve(os);
+                      final specsStr = construirEspecificacionesInstrumento(os);
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                folioStr.isNotEmpty ? folioStr : '—',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                  color: Color(0xFF111827),
+                                  height: 1.25,
+                                ),
                               ),
-                            if (extraerNumeroDve(os).isNotEmpty)
-                              _RegPillChip(
-                                prefix: 'DVE',
-                                value: extraerNumeroDve(os),
-                                fg: const Color(0xFF6D28D9),
-                                bg: const Color(0xFFEDE9FE),
+                              if (ccaVal.isNotEmpty)
+                                _RegPillChip(
+                                  prefix: 'CCA',
+                                  value: ccaVal,
+                                  fg: const Color(0xFF3730A3),
+                                  bg: const Color(0xFFEEF2FF),
+                                  border: const Color(0xFFC7D2FE),
+                                ),
+                              if (dveVal.isNotEmpty)
+                                _RegPillChip(
+                                  prefix: 'DVE',
+                                  value: dveVal,
+                                  fg: const Color(0xFF065F46),
+                                  bg: const Color(0xFFECFDF5),
+                                  border: const Color(0xFFA7F3D0),
+                                ),
+                            ],
+                          ),
+                          if (specsStr.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              specsStr,
+                              softWrap: true,
+                              maxLines: 3,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Color(0xFF4B5563),
+                                height: 1.32,
                               ),
+                            ),
                           ],
-                        ),
-                      ],
-                    ],
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -4320,10 +4357,9 @@ class _OsRow extends StatelessWidget {
                 child: Text(
                   fechaStr,
                   style: const TextStyle(fontSize: 11, color: _kTextPrim),
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-              // [CLIENTE / SUCURSAL] (Expanded, flex: 3 con minWidth garantizado)
+              // [CLIENTE / SUCURSAL] (Expanded, flex: 3 con word-wrap en 2-3 líneas)
               Expanded(
                 flex: 3,
                 child: ConstrainedBox(
@@ -4336,17 +4372,15 @@ class _OsRow extends StatelessWidget {
                       Text(
                         os['cliente'] ?? '—',
                         style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _kTextPrim),
-                        overflow: TextOverflow.ellipsis,
-                        softWrap: false,
-                        maxLines: 1,
+                        softWrap: true,
+                        maxLines: 2,
                       ),
                       if ((os['sucursal'] ?? '').toString().trim().isNotEmpty)
                         Text(
                           os['sucursal'].toString().trim(),
-                          style: const TextStyle(fontSize: 9.5, color: _kTextSec),
-                          overflow: TextOverflow.ellipsis,
-                          softWrap: false,
-                          maxLines: 1,
+                          style: const TextStyle(fontSize: 10.5, color: _kTextSec, height: 1.3),
+                          softWrap: true,
+                          maxLines: 3,
                         ),
                       if (tecnicoNombre.isNotEmpty)
                         Padding(
@@ -4611,7 +4645,7 @@ class _LoteRowState extends State<_LoteRow> {
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
                     SizedBox(
-                      width: 260,
+                      width: 335,
                       child: Row(
                         children: [
                           Icon(_expanded ? Icons.keyboard_arrow_down : Icons.chevron_right, size: 18, color: _kCarmineRed),
@@ -4881,26 +4915,30 @@ class _RegPillChip extends StatelessWidget {
   final String value;
   final Color fg;
   final Color bg;
+  final Color? border;
 
   const _RegPillChip({
     required this.prefix,
     required this.value,
     required this.fg,
     required this.bg,
+    this.border,
   });
 
   @override
   Widget build(BuildContext context) {
+    final bool hasPref = value.toUpperCase().startsWith(prefix.toUpperCase());
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(5),
+        border: border != null ? Border.all(color: border!) : null,
       ),
       child: Text(
-        '$prefix: $value',
+        hasPref ? value : '$prefix: $value',
         style: TextStyle(
-          fontSize: 9.5,
+          fontSize: 10,
           fontWeight: FontWeight.w800,
           color: fg,
         ),

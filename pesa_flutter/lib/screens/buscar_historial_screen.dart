@@ -252,7 +252,8 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                             separatorBuilder: (_, __) => const SizedBox(height: 8),
                             itemBuilder: (ctx, i) {
                               final os = rows[i];
-                              final etiq = construirEtiquetaInstrumento(os);
+                              final folioTxt = (os['folio_os'] ?? os['folio'] ?? '—').toString().trim();
+                              final specs = construirEspecificacionesInstrumento(os);
                               final cca = extraerNumeroCca(os);
                               final dve = extraerNumeroDve(os);
                               final fecha = (os['fecha'] ?? '').toString().split('T').first;
@@ -277,11 +278,11 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                                       children: [
                                         Expanded(
                                           child: Text(
-                                            etiq,
+                                            folioTxt.isNotEmpty ? folioTxt : '—',
                                             style: const TextStyle(
                                               fontSize: 13.5,
                                               fontWeight: FontWeight.w800,
-                                              color: _red,
+                                              color: Color(0xFF111827),
                                             ),
                                           ),
                                         ),
@@ -299,10 +300,31 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                                         runSpacing: 4,
                                         children: [
                                           if (cca.isNotEmpty)
-                                            _pill('CCA: $cca', const Color(0xFF1D4ED8), const Color(0xFFDBEAFE)),
+                                            _pill(
+                                              cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca',
+                                              const Color(0xFF3730A3),
+                                              const Color(0xFFEEF2FF),
+                                            ),
                                           if (dve.isNotEmpty)
-                                            _pill('DVE: $dve', const Color(0xFF6D28D9), const Color(0xFFEDE9FE)),
+                                            _pill(
+                                              dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve',
+                                              const Color(0xFF065F46),
+                                              const Color(0xFFECFDF5),
+                                            ),
                                         ],
+                                      ),
+                                    ],
+                                    if (specs.isNotEmpty) ...[
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        specs,
+                                        softWrap: true,
+                                        maxLines: 3,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          color: Color(0xFF4B5563),
+                                          height: 1.35,
+                                        ),
                                       ),
                                     ],
                                     const SizedBox(height: 5),
@@ -312,7 +334,9 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                                         if ((os['sucursal'] ?? '').toString().isNotEmpty) os['sucursal'],
                                         if ((os['tecnico'] ?? '').toString().isNotEmpty) 'Téc: ${os['tecnico']}',
                                       ].join(' • '),
-                                      style: const TextStyle(fontSize: 12, color: Color(0xFF374151)),
+                                      softWrap: true,
+                                      maxLines: 3,
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFF374151), height: 1.3),
                                     ),
                                     const SizedBox(height: 8),
                                     Row(

@@ -170,28 +170,25 @@ COLOR_TIPO_SERVICIO = {
 
 
 # =============================================================================
-# Delegate para FOLIO OS compuesto + Badges CCA / DVE
+# Delegate para FOLIO OS compuesto + Badges CCA / DVE (con soporte QWidget 2 niveles)
 # =============================================================================
 class FolioInstrumentoDelegate(QStyledItemDelegate):
     """
-    Pinta en la columna FOLIO OS:
-      - Línea superior: identificador dinámico compuesto (FOLIO - MARCA - MODELO - SN - ID - UBICACIÓN)
-      - Línea inferior (cuando existan): badges compactos redondeados para CCA y/o DVE.
+    Gestiona el fondo, selección y alto dinámico de la celda FOLIO OS cuando aloja
+    el QWidget estructurado en 2 niveles (Folio + badges CCA/DVE arriba, y
+    especificaciones con word-wrap abajo), evitando texto fantasma detrás del widget.
     """
-    ROLE_RAW_FOLIO = Qt.ItemDataRole.UserRole + 3
-    ROLE_CCA       = Qt.ItemDataRole.UserRole + 4
-    ROLE_DVE       = Qt.ItemDataRole.UserRole + 5
-    ROLE_IS_BATCH  = Qt.ItemDataRole.UserRole + 6
+    ROLE_RAW_FOLIO  = Qt.ItemDataRole.UserRole + 3
+    ROLE_CCA        = Qt.ItemDataRole.UserRole + 4
+    ROLE_DVE        = Qt.ItemDataRole.UserRole + 5
+    ROLE_IS_BATCH   = Qt.ItemDataRole.UserRole + 6
+    ROLE_HAS_WIDGET = Qt.ItemDataRole.UserRole + 7
+    ROLE_SPECS_TEXT = Qt.ItemDataRole.UserRole + 8
+    ROLE_ROW_HEIGHT = Qt.ItemDataRole.UserRole + 9
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
-        title = str(index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
-        if not title:
-            super().paint(painter, option, index)
-            return
-
-        cca = str(index.data(self.ROLE_CCA) or "").strip()
-        dve = str(index.data(self.ROLE_DVE) or "").strip()
         is_batch = bool(index.data(self.ROLE_IS_BATCH))
+        has_widget = bool(index.data(self.ROLE_HAS_WIDGET))
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -203,69 +200,84 @@ class FolioInstrumentoDelegate(QStyledItemDelegate):
         elif option.state & QStyle.StateFlag.State_MouseOver:
             painter.fillRect(option.rect, QColor("#F9F9FB"))
 
-        rect = option.rect.adjusted(10, 4, -8, -4)
-        has_badges = bool(cca or dve)
-
-        title_font = QFont(option.font)
-        title_font.setPointSizeF(9.2)
-        title_font.setWeight(QFont.Weight.DemiBold)
-        painter.setFont(title_font)
-        painter.setPen(QColor("#1D1D1F" if is_batch else _RED))
-
-        fm_title = QFontMetrics(title_font)
-        elided_title = fm_title.elidedText(title, Qt.TextElideMode.ElideRight, max(40, rect.width()))
-
-        if not has_badges:
-            painter.drawText(rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_title)
+        # Si la celda contiene el QWidget estructurado de 2 niveles, no pintar DisplayRole debajo
+        if has_widget:
             painter.restore()
             return
 
-        # Con badges CCA y/o DVE: título arriba, píldoras abajo
-        top_rect = QRect(rect.x(), rect.y() + 1, rect.width(), fm_title.height() + 2)
-        painter.drawText(top_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, elided_title)
-
-        badge_font = QFont(option.font)
-        badge_font.setPointSizeF(7.6)
-        badge_font.setWeight(QFont.Weight.Bold)
-        painter.setFont(badge_font)
-        fm_b = QFontMetrics(badge_font)
-
-        bx = rect.x()
-        by = top_rect.bottom() + 3
-        bh = fm_b.height() + 5
-
-        for label_txt, bg_hex, fg_hex, brd_hex in (
-            (f"CCA: {cca}" if cca else "", "#EFF6FF", "#1D4ED8", "#BFDBFE"),
-            (f"DVE: {dve}" if dve else "", "#F3E8FF", "#6D28D9", "#DDD6FE"),
-        ):
-            if not label_txt:
-                continue
-            max_bw = rect.right() - bx
-            if max_bw < 36:
-                break
-            tw = fm_b.horizontalAdvance(label_txt)
-            bw = min(tw + 12, max_bw)
-            brect = QRect(bx, by, bw, bh)
-            path = QPainterPath()
-            path.addRoundedRect(
-                float(brect.x()), float(brect.y()),
-                float(brect.width()), float(brect.height()),
-                5.0, 5.0,
+        title = str(index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        if title:
+            rect = option.rect.adjusted(10, 4, -8, -4)
+            title_font = QFont(option.font)
+            title_font.setPointSizeF(9.2)
+            title_font.setWeight(QFont.Weight.DemiBold)
+            painter.setFont(title_font)
+            painter.setPen(QColor("#1D1D1F" if is_batch else _RED))
+            painter.drawText(
+                rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
+                title,
             )
-            painter.fillPath(path, QBrush(QColor(bg_hex)))
-            painter.setPen(QPen(QColor(brd_hex), 1.0))
-            painter.drawPath(path)
-            painter.setPen(QColor(fg_hex))
-            elided_b = fm_b.elidedText(label_txt, Qt.TextElideMode.ElideRight, max(16, bw - 10))
-            painter.drawText(brect.adjusted(5, 0, -5, 0), Qt.AlignmentFlag.AlignCenter, elided_b)
-            bx += bw + 5
 
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
+        dyn_h = index.data(self.ROLE_ROW_HEIGHT)
+        if dyn_h and int(dyn_h) > 0:
+            return QSize(350, int(dyn_h))
+        specs = str(index.data(self.ROLE_SPECS_TEXT) or "").strip()
         cca = str(index.data(self.ROLE_CCA) or "").strip()
         dve = str(index.data(self.ROLE_DVE) or "").strip()
-        return QSize(280, 56 if (cca or dve) else 50)
+        return QSize(350, 68 if (specs or cca or dve) else 50)
+
+
+class WordWrapTextDelegate(QStyledItemDelegate):
+    """
+    Pinta celdas de texto multilínea real (CLIENTE, SUCURSAL / PLANTA, TÉCNICO)
+    con salto de línea automático sin recortar con '...' y respetando el fondo de fila.
+    """
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        folio_idx = index.siblingAtColumn(1)
+        is_batch = bool(folio_idx.data(FolioInstrumentoDelegate.ROLE_IS_BATCH)) if folio_idx.isValid() else False
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        if is_batch and not (option.state & QStyle.StateFlag.State_Selected):
+            painter.fillRect(option.rect, QColor("#F0F4FF"))
+        elif option.state & QStyle.StateFlag.State_Selected:
+            painter.fillRect(option.rect, QColor("#F2F2F7"))
+        elif option.state & QStyle.StateFlag.State_MouseOver:
+            painter.fillRect(option.rect, QColor("#F9F9FB"))
+
+        if text:
+            rect = option.rect.adjusted(10, 5, -8, -5)
+            font = QFont(option.font)
+            font.setPixelSize(12)
+            painter.setFont(font)
+            painter.setPen(QColor("#1D1D1F"))
+            painter.drawText(
+                rect,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
+                text,
+            )
+
+        painter.restore()
+
+    def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
+        text = str(index.data(Qt.ItemDataRole.DisplayRole) or "").strip()
+        folio_idx = index.siblingAtColumn(1)
+        dyn_h = folio_idx.data(FolioInstrumentoDelegate.ROLE_ROW_HEIGHT) if folio_idx.isValid() else None
+        base_h = int(dyn_h) if (dyn_h and int(dyn_h) > 0) else 50
+        if not text:
+            return QSize(180, base_h)
+        avail_w = max(120, option.rect.width() - 18) if option.rect.width() > 40 else 220
+        font = QFont(option.font)
+        font.setPixelSize(12)
+        fm = QFontMetrics(font)
+        br = fm.boundingRect(QRect(0, 0, avail_w, 1000), Qt.TextFlag.TextWordWrap, text)
+        return QSize(avail_w + 18, max(base_h, br.height() + 16))
 
 
 # =============================================================================
@@ -1578,10 +1590,10 @@ class DashboardWidget(QWidget):
     _COL_MODAL    = 7
     _COL_ESTADO   = 8
     _COL_SYNC     = 9
-    _COL_ACCIONES = 10  # columna dedicada de botones de acción (430px)
-    _W_SYNC       = 100
-    _W_ACCIONES   = 430   # ancho útil para botones sin recortar "Cambiar a Digital"
-    _ITEM_PAD_H   = 14    # = padding horizontal de QTreeWidget::item en el QSS
+    _COL_ACCIONES = 10  # columna dedicada de botones de acción (375px)
+    _W_SYNC       = 94
+    _W_ACCIONES   = 375   # ancho compacto para los 4 botones dejando amplio espacio a FOLIO OS y SUCURSAL
+    _ITEM_PAD_H   = 10    # padding horizontal limpio de celda
 
     _sig_lote_email_result = pyqtSignal(bool, str, str, str, object, object)
     _sig_os_email_result   = pyqtSignal(bool, str, str, str, object)
@@ -2224,6 +2236,8 @@ class DashboardWidget(QWidget):
         table.setRootIsDecorated(True)
         table.setIndentation(20)
         table.setUniformRowHeights(False)
+        table.setWordWrap(True)
+        table.setTextElideMode(Qt.TextElideMode.ElideNone)
         table.setAnimated(True)
         table.setExpandsOnDoubleClick(False)
 
@@ -2233,30 +2247,36 @@ class DashboardWidget(QWidget):
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
         )
 
-        # ── BLOQUEO DEFINITIVO de scroll horizontal: 100% ancho sin columna extra ──
-        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # ── Anchos balanceados: FOLIO OS amplio (350px) + SUCURSAL / PLANTA flexible con word-wrap ──
+        table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         table.setSizeAdjustPolicy(QAbstractScrollArea.SizeAdjustPolicy.AdjustToContents)
         header = table.header()
+        header.setMinimumSectionSize(32)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(self._COL_CLIENTE, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(self._COL_CHK, QHeaderView.ResizeMode.Fixed)
         header.setSectionResizeMode(self._COL_SUCURSAL, QHeaderView.ResizeMode.Stretch)
         header.setStretchLastSection(False)
 
         table.setColumnWidth(self._COL_CHK, 32)
-        table.setColumnWidth(self._COL_FOLIO, 285)
-        table.setColumnWidth(self._COL_FECHA, 100)
-        table.setColumnWidth(self._COL_CLIENTE, 220)
+        table.setColumnWidth(self._COL_FOLIO, 355)
+        table.setColumnWidth(self._COL_FECHA, 86)
+        table.setColumnWidth(self._COL_CLIENTE, 175)
         table.setColumnWidth(self._COL_SUCURSAL, 260)
-        table.setColumnWidth(self._COL_TECNICO, 150)
-        table.setColumnWidth(self._COL_SERVICIO, 200)
-        table.setColumnWidth(self._COL_MODAL, 100)
-        table.setColumnWidth(self._COL_ESTADO, 100)
-        table.setColumnWidth(self._COL_SYNC, 100)
-        table.setColumnWidth(self._COL_ACCIONES, 430)
+        table.setColumnWidth(self._COL_TECNICO, 132)
+        table.setColumnWidth(self._COL_SERVICIO, 172)
+        table.setColumnWidth(self._COL_MODAL, 96)
+        table.setColumnWidth(self._COL_ESTADO, 94)
+        table.setColumnWidth(self._COL_SYNC, self._W_SYNC)
+        table.setColumnWidth(self._COL_ACCIONES, self._W_ACCIONES)
 
-        # Delegates para columnas de folio compuesto, estado, modalidad, servicio y sync
+        # Delegates para columnas de folio compuesto, texto word-wrap, estado, modalidad, servicio y sync
         self._folio_delegate = FolioInstrumentoDelegate(table)
         table.setItemDelegateForColumn(self._COL_FOLIO,    self._folio_delegate)
+
+        self._wrap_delegate = WordWrapTextDelegate(table)
+        table.setItemDelegateForColumn(self._COL_CLIENTE,  self._wrap_delegate)
+        table.setItemDelegateForColumn(self._COL_SUCURSAL, self._wrap_delegate)
+        table.setItemDelegateForColumn(self._COL_TECNICO,  self._wrap_delegate)
 
         self._status_delegate = StatusBadgeDelegate(table)
         table.setItemDelegateForColumn(self._COL_ESTADO,   self._status_delegate)
@@ -2268,11 +2288,13 @@ class DashboardWidget(QWidget):
 
         table.customContextMenuRequested.connect(self._on_table_context_menu)
         table.itemDoubleClicked.connect(self._on_tree_item_double_click_full)
+        table.itemExpanded.connect(lambda _it: QTimer.singleShot(0, self._recalcular_alturas_filas))
+        header.sectionResized.connect(lambda *_: QTimer.singleShot(0, self._recalcular_alturas_filas))
 
         # Colocar el checkbox maestro dentro de la cabecera col 0
         QTimer.singleShot(0, lambda: self._place_header_checkbox(table))
 
-        # Estilo del QTreeWidget (macOS UI HIG)
+        # Estilo del QTreeWidget (macOS UI HIG — sin height fijo para permitir altura dinámica multilínea)
         table.setStyleSheet("""
             QTreeWidget {
                 background: #FFFFFF;
@@ -2285,11 +2307,10 @@ class DashboardWidget(QWidget):
                 selection-color: #1D1D1F;
             }
             QTreeWidget::item {
-                padding: 0px 14px;
+                padding: 4px 10px;
                 border-bottom: 1px solid #E5E5EA;
-                min-height: 52px;
-                height: 52px;
-                font-size: 13px;
+                min-height: 48px;
+                font-size: 12.5px;
                 font-weight: 400;
                 color: #1D1D1F;
             }
@@ -2307,7 +2328,7 @@ class DashboardWidget(QWidget):
                 font-weight: 600;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
-                padding: 0 14px;
+                padding: 0 10px;
                 border: none;
                 border-bottom: 1px solid #E5E5EA;
                 height: 40px;
@@ -3251,12 +3272,13 @@ class DashboardWidget(QWidget):
         return "✓ Gris — Asignada en Servidor (Pendiente descarga en tablet)"
 
     @staticmethod
-    def _extraer_orden_meta_de_row(row) -> tuple[str, str, str]:
+    def _extraer_orden_meta_de_row(row) -> tuple[str, str, str, str]:
         """
-        Retorna (etiqueta_compuesta, cca_limpio, dve_limpio) a partir de una tupla row del Dashboard.
+        Retorna (etiqueta_compuesta, specs_instrumento, cca_limpio, dve_limpio)
+        a partir de una tupla row del Dashboard, omitiendo valores vacíos o placeholders.
         """
         if not row:
-            return ("", "", "")
+            return ("", "", "", "")
         folio_raw = str(row[0] or "").strip()
         dt_raw = row[17] if len(row) > 17 else None
         dt_map = {}
@@ -3270,11 +3292,27 @@ class DashboardWidget(QWidget):
             except Exception:
                 dt_map = {}
 
-        marca = str(row[20] or "") if len(row) > 20 else ""
-        modelo = str(row[21] or "") if len(row) > 21 else ""
-        ns = str(row[25] or "") if len(row) > 25 else ""
-        id_eq = str(row[26] or "") if len(row) > 26 else ""
-        ubic_eq = str(row[27] or "") if len(row) > 27 else ""
+        invalidos = {
+            "", "-", "--", "none", "null", "n/a", "na", "s/n", "sn",
+            "sin id", "sin modelo", "sin serie", "sin marca",
+            "sin ubicacion", "sin ubicación", "por definir", "s-id", "s/id",
+        }
+
+        def _val_limpio(col_val: str, *dt_keys: str) -> str:
+            cand = str(col_val or "").strip()
+            if cand and cand.lower() not in invalidos:
+                return cand
+            for k in dt_keys:
+                v = str(dt_map.get(k) or "").strip()
+                if v and v.lower() not in invalidos:
+                    return v
+            return ""
+
+        marca = _val_limpio(str(row[20] or "") if len(row) > 20 else "", "marca", "equipo_marca", "indicador_marca")
+        modelo = _val_limpio(str(row[21] or "") if len(row) > 21 else "", "modelo", "equipo_modelo", "indicador_modelo")
+        ns = _val_limpio(str(row[25] or "") if len(row) > 25 else "", "ns", "serie", "numero_serie")
+        id_eq = _val_limpio(str(row[26] or "") if len(row) > 26 else "", "id_indicador", "id_equipo", "indicador_id", "id_interno")
+        ubic_eq = _val_limpio(str(row[27] or "") if len(row) > 27 else "", "ubicacion", "ubicacion_equipo", "area")
         cca_col = str(row[28] or "") if len(row) > 28 else ""
         dve_col = str(row[29] or "") if len(row) > 29 else ""
 
@@ -3288,9 +3326,186 @@ class DashboardWidget(QWidget):
             "datos_tecnicos_json": dt_map,
         }
         etiqueta = construir_etiqueta_instrumento(orden_dict) or folio_raw
+
+        partes_specs: list[str] = []
+        if marca:
+            partes_specs.append(marca)
+        if modelo:
+            partes_specs.append(modelo)
+        if ns:
+            partes_specs.append(f"SN: {ns}")
+        if id_eq:
+            partes_specs.append(f"ID: {id_eq}")
+        if ubic_eq:
+            partes_specs.append(f"Ubic: {ubic_eq}")
+        specs_str = " · ".join(partes_specs)
+
         cca = limpiar_numero_regulatorio(cca_col or dt_map.get("numero_cca") or dt_map.get("cca"))
         dve = limpiar_numero_regulatorio(dve_col or dt_map.get("numero_dve") or dt_map.get("folio_dve"))
-        return (etiqueta, cca, dve)
+        return (etiqueta, specs_str, cca, dve)
+
+    def _build_folio_cell_widget(
+        self,
+        folio_base: str,
+        specs_str: str = "",
+        numero_cca: str = "",
+        numero_dve: str = "",
+        is_batch_parent: bool = False,
+        total_lote: int = 0,
+    ) -> tuple[QWidget, str]:
+        """
+        Construye el QWidget estructurado en 2 niveles para la celda FOLIO OS:
+          1) Fila superior (QHBoxLayout): Folio en negrita (#111827) + píldoras CCA y/o DVE + addStretch()
+          2) Fila inferior (QLabel con setWordWrap(True)): Marca · Modelo · SN · ID · Ubicación sin truncar.
+        """
+        cell_widget = QWidget()
+        cell_widget.setStyleSheet("background: transparent; border: none;")
+        v_lay = QVBoxLayout(cell_widget)
+        v_lay.setContentsMargins(6, 4, 6, 4)
+        v_lay.setSpacing(2)
+
+        # 1. Fila superior: Folio + Badges CCA / DVE
+        top_lay = QHBoxLayout()
+        top_lay.setContentsMargins(0, 0, 0, 0)
+        top_lay.setSpacing(5)
+
+        lbl_folio = QLabel(folio_base)
+        lbl_folio.setStyleSheet(
+            "font-weight: 700; font-size: 12px; color: #111827; background: transparent; border: none;"
+        )
+        lbl_folio.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        top_lay.addWidget(lbl_folio)
+
+        if is_batch_parent and total_lote > 1:
+            lbl_cnt = QLabel(f"{total_lote} OS")
+            lbl_cnt.setStyleSheet(
+                "background-color: #DBEAFE; color: #1E40AF; border: 1px solid #BFDBFE; "
+                "border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px;"
+            )
+            lbl_cnt.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            top_lay.addWidget(lbl_cnt)
+
+        cca_txt = ""
+        if numero_cca:
+            cca_txt = numero_cca if numero_cca.upper().startswith("CCA") else f"CCA {numero_cca}"
+            lbl_cca = QLabel(cca_txt)
+            lbl_cca.setStyleSheet(
+                "background-color: #EEF2FF; color: #3730A3; border: 1px solid #C7D2FE; "
+                "border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px;"
+            )
+            lbl_cca.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            top_lay.addWidget(lbl_cca)
+
+        dve_txt = ""
+        if numero_dve:
+            dve_txt = numero_dve if numero_dve.upper().startswith("DVE") else f"DVE {numero_dve}"
+            lbl_dve = QLabel(dve_txt)
+            lbl_dve.setStyleSheet(
+                "background-color: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; "
+                "border-radius: 4px; font-size: 10px; font-weight: 700; padding: 1px 5px;"
+            )
+            lbl_dve.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            top_lay.addWidget(lbl_dve)
+
+        top_lay.addStretch()
+        v_lay.addLayout(top_lay)
+
+        # 2. Fila inferior: especificaciones completas del instrumento con word-wrap real
+        if specs_str:
+            lbl_datos = QLabel(specs_str)
+            lbl_datos.setWordWrap(True)
+            lbl_datos.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+            lbl_datos.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            lbl_datos.setStyleSheet(
+                "color: #4B5563; font-size: 11px; background: transparent; border: none;"
+            )
+            lbl_datos.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            v_lay.addWidget(lbl_datos)
+
+        partes_tt = [folio_base]
+        if specs_str:
+            partes_tt.append(specs_str)
+        if cca_txt:
+            partes_tt.append(cca_txt)
+        if dve_txt:
+            partes_tt.append(dve_txt)
+        texto_completo = "\n".join(partes_tt)
+        cell_widget.setToolTip(texto_completo)
+        return cell_widget, texto_completo
+
+    def _calcular_y_aplicar_altura_item(self, item: QTreeWidgetItem, is_child: bool = False) -> None:
+        """Calcula dinámicamente la altura necesaria para FOLIO OS, CLIENTE y SUCURSAL sin recortar texto."""
+        if not item or not hasattr(self, "_table") or self._table is None:
+            return
+        specs = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_SPECS_TEXT) or "").strip()
+        cca = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_CCA) or "").strip()
+        dve = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_DVE) or "").strip()
+        suc = str(item.text(self._COL_SUCURSAL) or "").strip()
+        cli = str(item.text(self._COL_CLIENTE) or "").strip()
+        tec = str(item.text(self._COL_TECNICO) or "").strip()
+
+        indent_px = self._table.indentation() if is_child else 0
+        w_folio_col = max(320, self._table.columnWidth(self._COL_FOLIO))
+        w_folio_text = max(180, w_folio_col - indent_px - 20)
+
+        h_folio = 32  # fila superior (Folio + badges CCA/DVE) + márgenes
+        if specs:
+            f_specs = QFont(self._table.font())
+            f_specs.setPixelSize(11)
+            fm_specs = QFontMetrics(f_specs)
+            br_specs = fm_specs.boundingRect(QRect(0, 0, w_folio_text, 1000), Qt.TextFlag.TextWordWrap, specs)
+            h_folio = max(66, 26 + br_specs.height() + 16)
+        elif cca or dve:
+            h_folio = max(56, h_folio + 14)
+        else:
+            h_folio = 50
+
+        f_cell = QFont(self._table.font())
+        f_cell.setPixelSize(12)
+        fm_cell = QFontMetrics(f_cell)
+
+        def _h_col(txt: str, col_idx: int, min_w: int) -> int:
+            if not txt:
+                return 48
+            cw = max(min_w, self._table.columnWidth(col_idx) - 20)
+            br = fm_cell.boundingRect(QRect(0, 0, cw, 1000), Qt.TextFlag.TextWordWrap, txt)
+            return br.height() + 18
+
+        h_suc = _h_col(suc, self._COL_SUCURSAL, 150)
+        h_cli = _h_col(cli, self._COL_CLIENTE, 130)
+        h_tec = _h_col(tec, self._COL_TECNICO, 100)
+
+        min_base = 64 if (specs or cca or dve) else 50
+        altura_final = max(min_base, h_folio, h_suc, h_cli, h_tec)
+
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_ROW_HEIGHT, altura_final)
+        item.setSizeHint(self._COL_FOLIO, QSize(w_folio_col, altura_final))
+        item.setSizeHint(self._COL_SUCURSAL, QSize(max(180, self._table.columnWidth(self._COL_SUCURSAL)), altura_final))
+
+        w_cell = self._table.itemWidget(item, self._COL_FOLIO)
+        if w_cell is not None:
+            w_cell.setMinimumHeight(altura_final - 4)
+
+    def _recalcular_alturas_filas(self) -> None:
+        """Recalcula alturas dinámicas de todas las filas padres e hijas al redimensionar o expandir."""
+        if not hasattr(self, "_table") or self._table is None:
+            return
+        for i in range(self._table.topLevelItemCount()):
+            p_item = self._table.topLevelItem(i)
+            if not p_item:
+                continue
+            self._calcular_y_aplicar_altura_item(p_item, is_child=False)
+            if p_item.isExpanded():
+                for j in range(p_item.childCount()):
+                    c_item = p_item.child(j)
+                    if c_item:
+                        self._calcular_y_aplicar_altura_item(c_item, is_child=True)
+        self._table.doItemsLayout()
+        self._table.viewport().update()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        QTimer.singleShot(0, self._recalcular_alturas_filas)
 
     def _populate_tree_item(
         self,
@@ -3308,35 +3523,44 @@ class DashboardWidget(QWidget):
         is_batch_parent: bool = False,
         sync_check_status: str = "ASIGNADA",
         raw_folio: str = "",
+        specs_str: str = "",
         numero_cca: str = "",
         numero_dve: str = "",
+        total_lote: int = 0,
+        is_child: bool = False,
     ) -> None:
-        """Rellena las columnas de texto de un QTreeWidgetItem."""
+        """Rellena las columnas de un QTreeWidgetItem e inserta el QWidget multilínea en FOLIO OS."""
         folio_base = (raw_folio or folio_text.split(" - ")[0]).strip()
-        # Col 1: Folio dinámico compuesto + badges CCA / DVE
+        # Col 1: texto interno completo conservado para findItems/búsqueda + QWidget visual en 2 niveles
         item.setText(self._COL_FOLIO, folio_text)
-        font = item.font(self._COL_FOLIO)
-        font.setWeight(QFont.Weight.DemiBold if is_batch_parent else QFont.Weight.Medium)
-        item.setFont(self._COL_FOLIO, font)
-        item.setForeground(self._COL_FOLIO, QBrush(QColor(_RED if not is_batch_parent else "#1D1D1F")))
         item.setData(self._COL_FOLIO, Qt.ItemDataRole.UserRole, os_id)
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO, folio_base)
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_SPECS_TEXT, specs_str)
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_CCA, numero_cca)
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_DVE, numero_dve)
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_IS_BATCH, is_batch_parent)
-        tooltip_lines = [folio_text]
-        if numero_cca:
-            tooltip_lines.append(f"CCA: {numero_cca}")
-        if numero_dve:
-            tooltip_lines.append(f"DVE: {numero_dve}")
-        item.setToolTip(self._COL_FOLIO, "\n".join(tooltip_lines))
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_HAS_WIDGET, True)
 
-        # Col 2-5: datos comunes
+        cell_w, texto_completo = self._build_folio_cell_widget(
+            folio_base=folio_base,
+            specs_str=specs_str,
+            numero_cca=numero_cca,
+            numero_dve=numero_dve,
+            is_batch_parent=is_batch_parent,
+            total_lote=total_lote,
+        )
+        self._table.setItemWidget(item, self._COL_FOLIO, cell_w)
+        item.setToolTip(self._COL_FOLIO, texto_completo)
+
+        # Col 2-5: datos comunes + tooltips completos
         item.setText(self._COL_FECHA,    fecha_str)
         item.setForeground(self._COL_FECHA, QBrush(QColor("#636366")))
         item.setText(self._COL_CLIENTE,  cliente)
+        item.setToolTip(self._COL_CLIENTE, cliente)
         item.setText(self._COL_SUCURSAL, sucursal)
+        item.setToolTip(self._COL_SUCURSAL, sucursal)
         item.setText(self._COL_TECNICO,  tecnico)
+        item.setToolTip(self._COL_TECNICO, tecnico)
 
         # Col 6-9: badges (texto para el delegate)
         # Col 6: TIPO SERVICIO homologado (CCA + DVE / DVE + Ajuste / CCA + Ajuste / Ajuste)
@@ -3544,8 +3768,12 @@ class DashboardWidget(QWidget):
                     self._populate_tree_item(
                         parent_item, texto_folio, fecha_str, cliente, sucursal,
                         tecnico, servicio, modal_label, estado_label, sync_label, os_id,
-                        is_batch_parent=True, sync_check_status=sync_check
+                        is_batch_parent=True, sync_check_status=sync_check,
+                        raw_folio=texto_folio,
+                        total_lote=total_os,
+                        is_child=False,
                     )
+                    self._calcular_y_aplicar_altura_item(parent_item, is_child=False)
                     
                     # Checkbox del lote con flags de PDF de sus integrantes
                     folios_lote = [str(r[0]) for r in grupo_ord if r[0]]
@@ -3593,7 +3821,7 @@ class DashboardWidget(QWidget):
                             c_est_label = self._estado_label(c_est)
 
                         c_sync_label = self._get_sync_label(c_est, c_sync)
-                        c_etiqueta, c_cca, c_dve = self._extraer_orden_meta_de_row(row)
+                        c_etiqueta, c_specs, c_cca, c_dve = self._extraer_orden_meta_de_row(row)
 
                         child = QTreeWidgetItem(parent_item)
                         self._populate_tree_item(
@@ -3601,9 +3829,12 @@ class DashboardWidget(QWidget):
                             str(row[4] or ""), str(row[5] or ""), str(row[6] or "").capitalize(), c_est_label, c_sync_label, c_oid,
                             sync_check_status=c_sync_check,
                             raw_folio=c_folio,
+                            specs_str=c_specs,
                             numero_cca=c_cca,
                             numero_dve=c_dve,
+                            is_child=True,
                         )
+                        self._calcular_y_aplicar_altura_item(child, is_child=True)
                         
                         chk_c, _ = _make_chk([c_folio], [c_oid], is_batch=False, pdf_flags=[c_has_real_pdf])
                         self._table.setItemWidget(child, self._COL_CHK, chk_c)
@@ -3651,7 +3882,7 @@ class DashboardWidget(QWidget):
                         estado_label = self._estado_label(estado)
 
                     sync_label   = self._get_sync_label(estado, sync_status)
-                    etiqueta_comp, num_cca, num_dve = self._extraer_orden_meta_de_row(row)
+                    etiqueta_comp, specs_ind, num_cca, num_dve = self._extraer_orden_meta_de_row(row)
 
                     item = QTreeWidgetItem(self._table)
                     self._populate_tree_item(
@@ -3659,9 +3890,12 @@ class DashboardWidget(QWidget):
                         tecnico, servicio, modal_label, estado_label, sync_label, os_id,
                         sync_check_status=sync_check,
                         raw_folio=folio,
+                        specs_str=specs_ind,
                         numero_cca=num_cca,
                         numero_dve=num_dve,
+                        is_child=False,
                     )
+                    self._calcular_y_aplicar_altura_item(item, is_child=False)
                     chk_w, _ = _make_chk([folio], [os_id], is_batch=False, pdf_flags=[has_real_pdf])
                     self._table.setItemWidget(item, self._COL_CHK, chk_w)
 
@@ -3680,8 +3914,9 @@ class DashboardWidget(QWidget):
             traceback.print_exc()
         finally:
             self._table.blockSignals(False)
-            # ── Reactivar redraws y forzar repaint limpio ────────────────────────
+            # ── Reactivar redraws y recalcular alturas dinámicas multilínea ─────
             self._table.setUpdatesEnabled(True)
+            QTimer.singleShot(0, self._recalcular_alturas_filas)
             self._table.viewport().update()
             self._place_header_checkbox(self._table)
             self._update_download_zip_btn()

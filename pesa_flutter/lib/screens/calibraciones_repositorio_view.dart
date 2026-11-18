@@ -425,7 +425,6 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   Widget _filaTabla(Map<String, dynamic> r) {
     const cell = TextStyle(fontSize: 12.5, color: _kTextPrim);
     final folio = (r['folio_os'] ?? '').toString();
-    final etiq = construirEtiquetaInstrumento(r);
     final cca = extraerNumeroCca(r);
     final dve = extraerNumeroDve(r);
     return Container(
@@ -433,31 +432,41 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       child: Row(children: [
         Expanded(
-          flex: 4,
+          flex: 5,
           child: Padding(
             padding: const EdgeInsets.only(right: 8.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(
-                  etiq.isNotEmpty ? etiq : folio,
-                  style: cell.copyWith(fontWeight: FontWeight.w700, fontSize: 11.5),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                if (cca.isNotEmpty || dve.isNotEmpty) ...[
-                  const SizedBox(height: 3),
-                  Wrap(
-                    spacing: 4,
-                    runSpacing: 3,
-                    children: [
-                      if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF1D4ED8), const Color(0xFFDBEAFE)),
-                      if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF6D28D9), const Color(0xFFEDE9FE)),
+            child: Builder(
+              builder: (context) {
+                final specs = construirEspecificacionesInstrumento(r);
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          folio,
+                          style: cell.copyWith(fontWeight: FontWeight.w800, fontSize: 12, color: const Color(0xFF111827)),
+                        ),
+                        if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF3730A3), const Color(0xFFEEF2FF)),
+                        if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF065F46), const Color(0xFFECFDF5)),
+                      ],
+                    ),
+                    if (specs.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(
+                        specs,
+                        softWrap: true,
+                        maxLines: 3,
+                        style: cell.copyWith(fontSize: 11, color: const Color(0xFF4B5563), height: 1.3),
+                      ),
                     ],
-                  ),
-                ],
-              ],
+                  ],
+                );
+              },
             ),
           ),
         ),
@@ -501,7 +510,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
         decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
         child: Text(
-          '$pfx: $val',
+          val.toUpperCase().startsWith(pfx.toUpperCase()) ? val : '$pfx: $val',
           style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: fg),
         ),
       );
@@ -516,7 +525,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         separatorBuilder: (_, __) => const SizedBox(height: 8),
         itemBuilder: (_, i) {
           final r = rows[i];
-          final etiq = construirEtiquetaInstrumento(r);
+          final folioCard = (r['folio_os'] ?? r['folio'] ?? '—').toString().trim();
+          final specsCard = construirEspecificacionesInstrumento(r);
           final cca = extraerNumeroCca(r);
           final dve = extraerNumeroDve(r);
           return Container(
@@ -533,8 +543,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
                   child: Text(
-                    etiq.isNotEmpty ? etiq : (r['folio_os'] ?? '').toString(),
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5),
+                    folioCard.isNotEmpty ? folioCard : '—',
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF111827)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -546,9 +556,18 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   spacing: 6,
                   runSpacing: 4,
                   children: [
-                    if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF1D4ED8), const Color(0xFFDBEAFE)),
-                    if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF6D28D9), const Color(0xFFEDE9FE)),
+                    if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF3730A3), const Color(0xFFEEF2FF)),
+                    if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF065F46), const Color(0xFFECFDF5)),
                   ],
+                ),
+              ],
+              if (specsCard.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  specsCard,
+                  softWrap: true,
+                  maxLines: 3,
+                  style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563), height: 1.35),
                 ),
               ],
               const SizedBox(height: 4),
