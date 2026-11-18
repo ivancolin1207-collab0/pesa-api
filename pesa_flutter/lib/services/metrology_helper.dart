@@ -516,6 +516,171 @@ String formatearLineaCorreoOrden(Map<String, dynamic> orden) {
   return partes.join('-');
 }
 
+/// Convierte cualquier valor de fecha/hora (ISO UTC de Render, ISO con offset o DateTime)
+/// a hora local de México/Querétaro (`UTC-6`, `America/Mexico_City`) en formato `DD/MM/YYYY HH:mm`.
+String formatearFechaHoraMexico(dynamic rawVal) {
+  if (rawVal == null) return '';
+  if (rawVal is DateTime) {
+    final mx = rawVal.toUtc().subtract(const Duration(hours: 6));
+    final dd = mx.day.toString().padLeft(2, '0');
+    final mm = mx.month.toString().padLeft(2, '0');
+    final yyyy = mx.year.toString().padLeft(4, '0');
+    final hh = mx.hour.toString().padLeft(2, '0');
+    final min = mx.minute.toString().padLeft(2, '0');
+    return '$dd/$mm/$yyyy $hh:$min';
+  }
+  final s = rawVal.toString().trim();
+  if (s.isEmpty || s.toLowerCase() == 'null' || s.toLowerCase() == 'none') {
+    return '';
+  }
+  if (RegExp(r'^\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}$').hasMatch(s)) {
+    return s;
+  }
+  try {
+    final norm = s.contains(' ') && !s.contains('T') ? s.replaceFirst(' ', 'T') : s;
+    final hasExplicitTz = norm.endsWith('Z') ||
+        norm.endsWith('z') ||
+        RegExp(r'[+-]\d{2}:?\d{2}$').hasMatch(norm);
+    if (hasExplicitTz) {
+      final dt = DateTime.tryParse(norm);
+      if (dt != null) {
+        final mx = dt.toUtc().subtract(const Duration(hours: 6));
+        final dd = mx.day.toString().padLeft(2, '0');
+        final mm = mx.month.toString().padLeft(2, '0');
+        final yyyy = mx.year.toString().padLeft(4, '0');
+        final hh = mx.hour.toString().padLeft(2, '0');
+        final min = mx.minute.toString().padLeft(2, '0');
+        return '$dd/$mm/$yyyy $hh:$min';
+      }
+    } else {
+      final dtLocal = DateTime.tryParse(norm);
+      if (dtLocal != null) {
+        final dd = dtLocal.day.toString().padLeft(2, '0');
+        final mm = dtLocal.month.toString().padLeft(2, '0');
+        final yyyy = dtLocal.year.toString().padLeft(4, '0');
+        final hh = dtLocal.hour.toString().padLeft(2, '0');
+        final min = dtLocal.minute.toString().padLeft(2, '0');
+        return '$dd/$mm/$yyyy $hh:$min';
+      }
+    }
+  } catch (_) {}
+  return s;
+}
+
+/// Retorna `true` si la orden registra envío de correo confirmado.
+bool esCorreoEnviadoOrden(Map<String, dynamic> orden) {
+  for (final k in ['correo_enviado', 'email_enviado']) {
+    final v = orden[k];
+    if (v == 1 || v == true || v == '1' || v == 'true' || v == 'TRUE') {
+      return true;
+    }
+  }
+  for (final fk in ['fecha_envio_correo', 'fecha_envio_email']) {
+    final fv = (orden[fk] ?? '').toString().trim();
+    if (fv.isNotEmpty && fv.toLowerCase() != 'null' && fv.toLowerCase() != 'none') {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Construye la etiqueta institucional de trazabilidad de envío de correo:
+///   `✉ Enviado el DD/MM/YYYY HH:mm a: correo@cliente.com (CC: recepcion@basculaspesa.com.mx)`
+String formatearInfoEnvioCorreo(Map<String, dynamic> orden) {
+  if (!esCorreoEnviadoOrden(orden)) return '';
+
+  String destino = '';
+  for (final k in ['correo_destino', 'correo_cliente']) {
+    final cand = (orden[k] ?? '').toString().trim();
+    if (cand.isNotEmpty &&
+        cand.toLowerCase() != 'null' &&
+        cand.toLowerCase() != 'none' &&
+        cand.toLowerCase() != 'sin registrar') {
+      destino = cand;
+      break;
+    }
+  }
+  if (destino.isEmpty) {
+    destino = 'Destinatario registrado';
+  }
+
+  String cc = (orden['correo_cc'] ?? '').toString().trim();
+  if (cc.isEmpty || cc.toLowerCase() == 'null' || cc.toLowerCase() == 'none') {
+    cc = 'recepcion@basculaspesa.com.mx';
+  }
+
+  final fechaTxt = formatearFechaHoraMexico(
+    orden['fecha_envio_correo'] ?? orden['fecha_envio_email'],
+  );
+
+  if (fechaTxt.isNotEmpty) {
+    return '✉ Enviado el $fechaTxt a: $destino (CC: $cc)';
+  }
+  return '✉ Enviado a: $destino (CC: $cc)';
+}
+
+/// Construye la etiqueta de trazabilidad de correo para la cabecera de un lote.
+String formatearInfoEnvioCorreoLote(List<Map<String, dynamic>> items) {
+  if (items.isEmpty) return '';
+  final enviados = items.where(esCorreoEnviadoOrden).toList();
+  if (enviados.isEmpty) return '';
+
+  String destino = '';
+  dynamic fechaRaw;
+  String cc = 'recepcion@basculaspesa.com.mx';
+
+  for (final o in enviados) {
+    if (destino.isEmpty) {
+      for (final k in ['correo_destino', 'correo_cliente']) {
+        final cand = (o[k] ?? '').toString().trim();
+        if (cand.isNotEmpty &&
+            cand.toLowerCase() != 'null' &&
+            cand.toLowerCase() != 'none' &&
+            cand.toLowerCase() != 'sin registrar') {
+          destino = cand;
+          break;
+        }
+      }
+    }
+    final candFecha = o['fecha_envio_correo'] ?? o['fecha_envio_email'];
+    if (candFecha != null && candFecha.toString().trim().isNotEmpty) {
+      fechaRaw = candFecha;
+    }
+    final candCc = (o['correo_cc'] ?? '').toString().trim();
+    if (candCc.isNotEmpty && candCc.toLowerCase() != 'null' && candCc.toLowerCase() != 'none') {
+      cc = candCc;
+    }
+  }
+
+  if (destino.isEmpty) {
+    for (final o in items) {
+      for (final k in ['correo_destino', 'correo_cliente']) {
+        final cand = (o[k] ?? '').toString().trim();
+        if (cand.isNotEmpty &&
+            cand.toLowerCase() != 'null' &&
+            cand.toLowerCase() != 'none' &&
+            cand.toLowerCase() != 'sin registrar') {
+          destino = cand;
+          break;
+        }
+      }
+      if (destino.isNotEmpty) break;
+    }
+  }
+
+  final base = formatearInfoEnvioCorreo({
+    'correo_enviado': 1,
+    'correo_destino': destino,
+    'correo_cc': cc,
+    'fecha_envio_correo': fechaRaw,
+  });
+  if (base.isEmpty) return '';
+  if (enviados.length < items.length) {
+    return base.replaceFirst('✉ Enviado', '✉ Enviado (${enviados.length}/${items.length} OS)');
+  }
+  return base;
+}
+
 
 
 

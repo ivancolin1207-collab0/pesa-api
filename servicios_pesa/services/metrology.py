@@ -456,6 +456,81 @@ recepcion@basculaspesa.com.mx
     return subject, cuerpo_html, cuerpo_texto, etiquetas
 
 
+def obtener_tz_mexico():
+    """Retorna la zona horaria oficial America/Mexico_City (UTC-6 permanente)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/Mexico_City")
+    except Exception:
+        from datetime import timezone, timedelta
+        return timezone(timedelta(hours=-6))
+
+
+def formatear_fecha_hora_mexico(raw_val) -> str:
+    """Convierte cualquier timestamp ISO / datetime (UTC o con offset) a DD/MM/YYYY HH:mm en hora de México."""
+    from datetime import datetime, timezone
+    import re as _re
+
+    if raw_val is None:
+        return ""
+    if isinstance(raw_val, datetime):
+        dt = raw_val
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(obtener_tz_mexico()).strftime("%d/%m/%Y %H:%M")
+
+    s = str(raw_val).strip()
+    if not s or s.lower() in ("none", "null"):
+        return ""
+    if _re.match(r"^\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}", s):
+        return s[:16]
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(obtener_tz_mexico()).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return s
+
+
+def formatear_info_envio_correo(orden: dict) -> str:
+    """
+    Construye la línea institucional de auditoría de correo:
+      ✉ Enviado el DD/MM/YYYY HH:mm a: correo@cliente.com (CC: recepcion@basculaspesa.com.mx)
+    """
+    if not isinstance(orden, dict):
+        orden = dict(orden) if orden else {}
+
+    enviado = (
+        bool(orden.get("correo_enviado"))
+        or bool(orden.get("email_enviado"))
+        or bool(orden.get("fecha_envio_correo"))
+        or bool(orden.get("fecha_envio_email"))
+    )
+    if not enviado:
+        return ""
+
+    raw_fecha = orden.get("fecha_envio_correo") or orden.get("fecha_envio_email")
+    fecha_str = formatear_fecha_hora_mexico(raw_fecha)
+    destino_raw = (
+        orden.get("correo_destino")
+        or orden.get("correo_cliente")
+        or orden.get("email_cliente")
+        or ""
+    )
+    destino = str(destino_raw or "").strip()
+    if not destino or destino.lower() in ("none", "null", "sin registrar"):
+        destino = "Cliente"
+
+    cc_raw = orden.get("correo_cc") or ""
+    cc = str(cc_raw or "").strip()
+    if not cc or cc.lower() in ("none", "null"):
+        cc = "recepcion@basculaspesa.com.mx"
+
+    partes_fecha = f"el {fecha_str} " if fecha_str else ""
+    return f"✉ Enviado {partes_fecha}a: {destino} (CC: {cc})"
+
+
 
 def fmt(value: float | None, d: float, *, zero_as_empty: bool = False) -> str:
     """

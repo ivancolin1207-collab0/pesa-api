@@ -1330,8 +1330,18 @@ class SyncService extends ChangeNotifier {
       final manejados = <String>{};
 
       void marcarUi(List<String> folios, String correo) {
+        final nowMx = formatearFechaHoraMexico(DateTime.now().toUtc());
         for (final f in folios) {
-          updateLocalOrder(f, {'email_enviado': 1, 'email_status': 'enviado', 'correo_cliente': correo});
+          updateLocalOrder(f, {
+            'email_enviado': 1,
+            'correo_enviado': 1,
+            'email_status': 'enviado',
+            'correo_cliente': correo,
+            'correo_destino': correo,
+            'correo_cc': 'recepcion@basculaspesa.com.mx',
+            'fecha_envio_email': nowMx,
+            'fecha_envio_correo': nowMx,
+          });
           manejados.add(f);
         }
       }
@@ -1704,6 +1714,15 @@ class SyncService extends ChangeNotifier {
           debugPrint('[Sync PULL rawUpdate ordenes] Error: $e');
         }
 
+        final int srvCorreoEnv = (remota['correo_enviado'] == true || remota['correo_enviado'] == 1 || remota['correo_enviado'] == '1' || remota['email_enviado'] == true || remota['email_enviado'] == 1 || remota['email_enviado'] == '1') ? 1 : 0;
+        final String? srvCorreoDest = (remota['correo_destino'] ?? remota['correo_cliente'])?.toString().trim();
+        final String srvCorreoCc = (remota['correo_cc']?.toString().trim().isNotEmpty == true)
+            ? remota['correo_cc'].toString().trim()
+            : 'recepcion@basculaspesa.com.mx';
+        final String srvFechaCorreo = formatearFechaHoraMexico(
+          remota['fecha_envio_correo'] ?? remota['fecha_envio_email'],
+        );
+
         // 2. UPDATE directo en ordenes_servicio
         final updatedCount = await sqldb.rawUpdate('''
           UPDATE ordenes_servicio 
@@ -1721,7 +1740,14 @@ class SyncService extends ChangeNotifier {
               needs_push = 0,
               partidas = COALESCE(?, partidas),
               tipo_documento = COALESCE(?, tipo_documento),
-              datos_tecnicos_json = CASE WHEN ? = 1 THEN datos_tecnicos_json ELSE COALESCE(?, datos_tecnicos_json) END
+              datos_tecnicos_json = CASE WHEN ? = 1 THEN datos_tecnicos_json ELSE COALESCE(?, datos_tecnicos_json) END,
+              correo_enviado = CASE WHEN ? = 1 THEN 1 ELSE COALESCE(correo_enviado, 0) END,
+              email_enviado = CASE WHEN ? = 1 THEN 1 ELSE COALESCE(email_enviado, 0) END,
+              correo_destino = COALESCE(NULLIF(?, ''), correo_destino, correo_cliente),
+              correo_cliente = COALESCE(NULLIF(?, ''), correo_cliente, correo_destino),
+              correo_cc = COALESCE(NULLIF(?, ''), correo_cc, 'recepcion@basculaspesa.com.mx'),
+              fecha_envio_correo = COALESCE(NULLIF(?, ''), fecha_envio_correo, fecha_envio_email),
+              fecha_envio_email = COALESCE(NULLIF(?, ''), fecha_envio_email, fecha_envio_correo)
           WHERE folio_os = ? OR folio = ?
         ''', [
           estatusFinal,
@@ -1737,6 +1763,13 @@ class SyncService extends ChangeNotifier {
           tipoDocVal,
           tieneParcialPendiente ? 1 : 0,
           dtVal,
+          srvCorreoEnv,
+          srvCorreoEnv,
+          srvCorreoDest ?? '',
+          srvCorreoDest ?? '',
+          srvCorreoCc,
+          srvFechaCorreo,
+          srvFechaCorreo,
           folio,
           folio,
         ]);

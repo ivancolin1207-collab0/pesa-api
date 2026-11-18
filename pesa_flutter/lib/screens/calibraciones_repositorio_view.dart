@@ -464,6 +464,28 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                         style: cell.copyWith(fontSize: 11, color: const Color(0xFF4B5563), height: 1.3),
                       ),
                     ],
+                    if (formatearInfoEnvioCorreo(r).isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                        ),
+                        child: Text(
+                          formatearInfoEnvioCorreo(r),
+                          softWrap: true,
+                          style: const TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF065F46),
+                            height: 1.25,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 );
               },
@@ -577,6 +599,28 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   style: const TextStyle(fontSize: 12, color: _kMetroBlue)),
               Text((r['tipo_servicio'] ?? '—').toString(),
                   style: const TextStyle(fontSize: 12, color: _kTextSec)),
+              if (formatearInfoEnvioCorreo(r).isNotEmpty) ...[
+                const SizedBox(height: 6),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFECFDF5),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: const Color(0xFFA7F3D0)),
+                  ),
+                  child: Text(
+                    formatearInfoEnvioCorreo(r),
+                    softWrap: true,
+                    style: const TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF065F46),
+                      height: 1.3,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 8),
               _acciones(r, compact: true),
             ]),

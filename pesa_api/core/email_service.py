@@ -4,7 +4,7 @@ vía SMTP Gmail con adjuntos de Órdenes de Servicio individuales y en Lotes.
 """
 import asyncio
 import base64
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import email
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -26,16 +26,83 @@ _folios_lock = asyncio.Lock()
 _email_cols_checked: bool = False
 
 
+def _obtener_tz_mexico():
+    """Retorna la zona horaria oficial de México / Querétaro (America/Mexico_City, UTC-6 permanente)."""
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("America/Mexico_City")
+    except Exception:
+        return timezone(timedelta(hours=-6))
+
+
+def formatear_fecha_hora_mexico(raw_val: Any) -> str:
+    """Convierte cualquier timestamp ISO / datetime a DD/MM/YYYY HH:mm en hora America/Mexico_City."""
+    if raw_val is None:
+        return ""
+    if isinstance(raw_val, datetime):
+        dt = raw_val
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_obtener_tz_mexico()).strftime("%d/%m/%Y %H:%M")
+    s = str(raw_val).strip()
+    if not s or s.lower() in ("none", "null"):
+        return ""
+    if re.match(r"^\d{2}/\d{2}/\d{4}\s+\d{2}:\d{2}", s):
+        return s[:16]
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(_obtener_tz_mexico()).strftime("%d/%m/%Y %H:%M")
+    except Exception:
+        return s
+
+
+def normalizar_cc_correo(cc: Optional[str] = None) -> str:
+    """Garantiza que recepcion@basculaspesa.com.mx esté siempre presente en la lista CC."""
+    cc_parts = [c.strip() for c in (cc or "").split(",") if c.strip()]
+    if "recepcion@basculaspesa.com.mx" not in [c.lower() for c in cc_parts]:
+        cc_parts.append("recepcion@basculaspesa.com.mx")
+    return ", ".join(cc_parts)
+
+
 async def _ensure_email_columns(conn) -> None:
-    """Garantiza de forma idempotente que existan las columnas marca/modelo/CCA/DVE antes de consultar."""
+    """
+    Garantiza de forma idempotente las columnas de equipo y trazabilidad de correo
+    (correo_enviado, correo_destino, correo_cc, fecha_envio_correo) y retroalimenta históricos.
+    """
     global _email_cols_checked
     if _email_cols_checked or conn is None:
         return
-    for col in ("marca", "modelo", "numero_cca", "numero_dve"):
+    ddl_statements = (
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS marca TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS modelo TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_cca TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_dve TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_enviado BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_destino TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ",
+    )
+    for stmt in ddl_statements:
         try:
-            await conn.execute(f"ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS {col} TEXT")
+            await conn.execute(stmt)
         except Exception:
             pass
+    try:
+        await conn.execute(
+            """
+            UPDATE ordenes_servicio
+            SET correo_enviado     = TRUE,
+                correo_destino     = COALESCE(NULLIF(correo_destino, ''), NULLIF(correo_cliente, '')),
+                correo_cc          = COALESCE(NULLIF(correo_cc, ''), 'recepcion@basculaspesa.com.mx'),
+                fecha_envio_correo = COALESCE(fecha_envio_correo, fecha_envio_email)
+            WHERE email_enviado = TRUE
+              AND (correo_enviado IS NOT TRUE OR correo_destino IS NULL OR fecha_envio_correo IS NULL)
+            """
+        )
+    except Exception:
+        pass
     _email_cols_checked = True
 
 
@@ -940,12 +1007,13 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 es_lote=True,
             )
 
+            cc_efectivo = normalizar_cc_correo(settings.EMAIL_CC)
             loop = asyncio.get_running_loop()
             ok = await loop.run_in_executor(
                 None,
                 _enviar_smtp_sync,
                 destinatario,
-                settings.EMAIL_CC,
+                cc_efectivo,
                 asunto,
                 cuerpo_html,
                 cuerpo_texto,
@@ -953,14 +1021,25 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
             )
 
             if ok:
+                now_mx = datetime.now(_obtener_tz_mexico())
+                fecha_mx_str = now_mx.strftime("%d/%m/%Y %H:%M")
                 await conn.execute(
                     """
                     UPDATE ordenes_servicio
-                    SET email_enviado = TRUE,
-                        fecha_envio_email = NOW()
+                    SET email_enviado      = TRUE,
+                        correo_enviado     = TRUE,
+                        correo_cliente     = $2,
+                        correo_destino     = $2,
+                        correo_cc          = $3,
+                        fecha_envio_email  = $4,
+                        fecha_envio_correo = $4,
+                        updated_at         = NOW()
                     WHERE folio_os = ANY($1::text[])
                     """,
                     folios_lote,
+                    destinatario,
+                    cc_efectivo,
+                    now_mx,
                 )
                 return {
                     "ok": True,
@@ -970,6 +1049,10 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     "etiquetas": etiquetas,
                     "omitidas": no_listas,
                     "destinatario": destinatario,
+                    "correo_enviado": True,
+                    "correo_destino": destinatario,
+                    "correo_cc": cc_efectivo,
+                    "fecha_envio_correo": fecha_mx_str,
                     "asunto": asunto,
                 }
             return {"ok": False, "motivo": "Fallo el envío por SMTP"}
@@ -1033,12 +1116,13 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
             es_lote=False,
         )
 
+        cc_efectivo = normalizar_cc_correo(settings.EMAIL_CC)
         loop = asyncio.get_running_loop()
         ok = await loop.run_in_executor(
             None,
             _enviar_smtp_sync,
             destinatario,
-            settings.EMAIL_CC,
+            cc_efectivo,
             asunto,
             cuerpo_html,
             cuerpo_texto,
@@ -1046,20 +1130,35 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
         )
 
         if ok:
+            now_mx = datetime.now(_obtener_tz_mexico())
+            fecha_mx_str = now_mx.strftime("%d/%m/%Y %H:%M")
             await conn.execute(
                 """
                 UPDATE ordenes_servicio
-                SET email_enviado = TRUE,
-                    fecha_envio_email = NOW()
+                SET email_enviado      = TRUE,
+                    correo_enviado     = TRUE,
+                    correo_cliente     = $2,
+                    correo_destino     = $2,
+                    correo_cc          = $3,
+                    fecha_envio_email  = $4,
+                    fecha_envio_correo = $4,
+                    updated_at         = NOW()
                 WHERE id = $1
                 """,
                 actual_id,
+                destinatario,
+                cc_efectivo,
+                now_mx,
             )
             return {
                 "ok": True,
                 "folio": folio,
                 "etiquetas": etiquetas,
                 "destinatario": destinatario,
+                "correo_enviado": True,
+                "correo_destino": destinatario,
+                "correo_cc": cc_efectivo,
+                "fecha_envio_correo": fecha_mx_str,
                 "asunto": asunto,
             }
 

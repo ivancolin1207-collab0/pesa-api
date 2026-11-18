@@ -143,7 +143,11 @@ class OSCompleta(BaseModel):
     dictamen:              Optional[str]   = None
     correo_cliente:        Optional[str]   = None
     email_enviado:         Optional[bool]  = False
-    fecha_envio_email:     Optional[datetime] = None
+    fecha_envio_email:     Optional[Union[datetime, str]] = None
+    correo_enviado:        Optional[bool]  = False
+    correo_destino:        Optional[str]   = None
+    correo_cc:             Optional[str]   = None
+    fecha_envio_correo:    Optional[str]   = None
     sync_version:          Optional[int]   = 1
     updated_at:            Optional[datetime] = None
 
@@ -231,7 +235,11 @@ class PushPayload(BaseModel):
     dictamen:             Optional[str] = None
     correo_cliente:       Optional[str] = None
     email_enviado:        Optional[bool] = None
-    fecha_envio_email:    Optional[datetime] = None
+    fecha_envio_email:    Optional[Union[datetime, str]] = None
+    correo_enviado:       Optional[bool] = None
+    correo_destino:       Optional[str] = None
+    correo_cc:            Optional[str] = None
+    fecha_envio_correo:   Optional[Union[datetime, str]] = None
 
 
 class PushResponse(BaseModel):
@@ -304,6 +312,8 @@ async def calibraciones_consulta(
     Solo metadatos de consulta: no incluye mediciones, firmas ni PDF en Base64.
     """
     import unicodedata
+    from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
+    await _ensure_email_columns(db)
     role = "".join(
         c for c in unicodedata.normalize("NFKD", str(current_user.get("role", "")))
         if not unicodedata.combining(c)
@@ -349,6 +359,10 @@ async def calibraciones_consulta(
                 COALESCE(os.ubicacion, '')                       AS ubicacion,
                 COALESCE(os.numero_cca, '')                      AS numero_cca,
                 COALESCE(os.numero_dve, '')                      AS numero_dve,
+                COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS correo_enviado,
+                COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_destino,
+                COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
+                COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
                 (COALESCE(os.pdf_generado, FALSE)
                    OR COALESCE(os.pdf_url, '') <> ''
                    OR COALESCE(os.pdf_path, '') <> '')           AS tiene_pdf,
@@ -368,7 +382,11 @@ async def calibraciones_consulta(
             ORDER BY os.folio_os, os.updated_at DESC NULLS LAST
             """.replace("%%", "%"),
         )
-        data = [dict(r) for r in rows]
+        data = []
+        for r in rows:
+            dr = dict(r)
+            dr["fecha_envio_correo"] = formatear_fecha_hora_mexico(dr.get("fecha_envio_email")) or None
+            data.append(dr)
         data.sort(key=lambda r: (r.get("fecha") or "", r.get("folio_os") or ""), reverse=True)
         logger.info("[CALIBRACIONES CONSULTA] user=%s id_tec=%s → %d registros", username, id_tec, len(data))
         return data
@@ -412,6 +430,8 @@ async def sync_pull(
     Acepta parámetros opcionales tecnico_id, tecnico_nombre, updated_after sin romper con 422.
     """
     import unicodedata
+    from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
+    await _ensure_email_columns(db)
 
     def _norm_role(r: str) -> str:
         if not r:
@@ -539,9 +559,13 @@ async def sync_pull(
                 THEN true 
                 ELSE false 
              END) AS has_pdf_db,
-            COALESCE(os.correo_cliente, '')         AS correo_cliente,
-            COALESCE(os.email_enviado, FALSE)       AS email_enviado,
-            os.fecha_envio_email,
+            COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_cliente,
+            COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_destino,
+            COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
+            COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
+            COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS correo_enviado,
+            COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
+            COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_correo_raw,
             CASE
                 WHEN COALESCE(os.pdf_b64,  '') <> ''
                   OR COALESCE(os.pdf_base64, '') <> ''
@@ -843,6 +867,12 @@ async def sync_pull(
                 d["partidas"] = partidas_list
                 d["refacciones"] = partidas_list
 
+                raw_fec_mail = d.pop("fecha_envio_correo_raw", None) or d.get("fecha_envio_email")
+                fec_mail_local = formatear_fecha_hora_mexico(raw_fec_mail)
+                d["fecha_envio_correo"] = fec_mail_local or None
+                if fec_mail_local and not d.get("fecha_envio_email"):
+                    d["fecha_envio_email"] = fec_mail_local
+
                 resultado.append(OSCompleta(**d))
             except Exception as e_row:
                 logger.warning("[SYNC PULL] Error serializando OS %s: %s", r.get("folio_os"), e_row)
@@ -906,6 +936,8 @@ async def sync_push(
             )
 
         import unicodedata
+        from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
+        await _ensure_email_columns(db)
         role = "".join(
             c for c in unicodedata.normalize("NFKD", str(current_user.get("role", "")))
             if not unicodedata.combining(c)
@@ -1376,6 +1408,8 @@ async def upload_firmas(
             raise HTTPException(status_code=404, detail=f"OS {folio_os!r} no encontrada")
 
         import unicodedata
+        from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
+        await _ensure_email_columns(db)
         role = "".join(
             c for c in unicodedata.normalize("NFKD", str(current_user.get("role", "")))
             if not unicodedata.combining(c)

@@ -31,19 +31,35 @@ import 'observaciones_celda_screen.dart';
 import 'levantamiento_proyecto_screen.dart';
 import 'levantamiento_metrologico_screen.dart';
 
-/// Formatea fecha y hora de entrega por correo (dd/MM/yyyy HH:mm)
+/// Formatea fecha y hora de entrega por correo (dd/MM/yyyy HH:mm) en hora local de México/Querétaro
 String formatearFechaHoraEnvio(dynamic val) {
-  if (val == null) return 'Reciente';
-  final s = val.toString().trim();
-  if (s.isEmpty) return 'Reciente';
-  if (s.contains('/') && s.contains(':')) return s;
-  try {
-    final dt = DateTime.tryParse(s);
-    if (dt != null) {
-      return DateFormat('dd/MM/yyyy HH:mm').format(dt.toLocal());
-    }
-  } catch (_) {}
-  return s;
+  final fmt = formatearFechaHoraMexico(val);
+  return fmt.isNotEmpty ? fmt : 'Reciente';
+}
+
+/// Banner institucional de trazabilidad de envío de correo (verde suave, multilínea sin truncar).
+Widget buildEmailAuditBanner(String infoCorreo, {EdgeInsetsGeometry? margin}) {
+  if (infoCorreo.trim().isEmpty) return const SizedBox.shrink();
+  return Container(
+    width: double.infinity,
+    margin: margin ?? const EdgeInsets.only(top: 6),
+    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+    decoration: BoxDecoration(
+      color: const Color(0xFFECFDF5),
+      borderRadius: BorderRadius.circular(5),
+      border: Border.all(color: const Color(0xFFA7F3D0)),
+    ),
+    child: Text(
+      infoCorreo,
+      softWrap: true,
+      style: const TextStyle(
+        fontSize: 10.5,
+        fontWeight: FontWeight.w600,
+        color: Color(0xFF065F46),
+        height: 1.3,
+      ),
+    ),
+  );
 }
 
 /// Función auxiliar de normalización de cadenas (remover diacríticos/acentos y minúsculas)
@@ -1884,21 +1900,32 @@ class _OsListScreenState extends State<OsListScreen> {
                                 ? (res['folios'] as List).map((e) => e.toString()).toSet().toList()
                                 : foliosEnvio.toSet().toList();
 
-                            final nowStr = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+                            final nowStr = (res['fecha_envio_correo']?.toString().trim().isNotEmpty == true)
+                                ? formatearFechaHoraMexico(res['fecha_envio_correo'])
+                                : formatearFechaHoraMexico(DateTime.now().toUtc());
+                            final String ccResp = (res['correo_cc']?.toString().trim().isNotEmpty == true)
+                                ? res['correo_cc'].toString().trim()
+                                : 'recepcion@basculaspesa.com.mx';
 
                             for (final f in confirmados) {
-                              await LocalDbService.instance.actualizarEnvioCorreo(
-                                folio: f,
-                                enviado: 1,
+                              await LocalDbService.instance.updateEmailStatus(
+                                f,
+                                enviado: true,
+                                status: 'enviado',
+                                correo: destino,
                                 fechaEnvio: nowStr,
-                                correos: destino,
+                                cc: ccResp,
                               );
                               if (mounted) {
                                 context.read<SyncService>().updateLocalOrder(f, {
                                   'email_enviado': 1,
+                                  'correo_enviado': 1,
                                   'email_status': 'enviado',
                                   'fecha_envio_email': nowStr,
+                                  'fecha_envio_correo': nowStr,
                                   'correo_cliente': destino,
+                                  'correo_destino': destino,
+                                  'correo_cc': ccResp,
                                 });
                               }
                             }
@@ -1909,14 +1936,34 @@ class _OsListScreenState extends State<OsListScreen> {
                                 _all = _all.map((m) {
                                   final f = folioDe(m);
                                   if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
-                                    return {...m, 'email_enviado': 1, 'email_status': 'enviado', 'fecha_envio_email': nowStr, 'correo_cliente': destino};
+                                    return {
+                                      ...m,
+                                      'email_enviado': 1,
+                                      'correo_enviado': 1,
+                                      'email_status': 'enviado',
+                                      'fecha_envio_email': nowStr,
+                                      'fecha_envio_correo': nowStr,
+                                      'correo_cliente': destino,
+                                      'correo_destino': destino,
+                                      'correo_cc': ccResp,
+                                    };
                                   }
                                   return m;
                                 }).toList();
                                 _filtered = _filtered.map((m) {
                                   final f = folioDe(m);
                                   if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
-                                    return {...m, 'email_enviado': 1, 'email_status': 'enviado', 'fecha_envio_email': nowStr, 'correo_cliente': destino};
+                                    return {
+                                      ...m,
+                                      'email_enviado': 1,
+                                      'correo_enviado': 1,
+                                      'email_status': 'enviado',
+                                      'fecha_envio_email': nowStr,
+                                      'fecha_envio_correo': nowStr,
+                                      'correo_cliente': destino,
+                                      'correo_destino': destino,
+                                      'correo_cc': ccResp,
+                                    };
                                   }
                                   return m;
                                 }).toList();
@@ -3295,24 +3342,10 @@ class _MobileOsCard extends StatelessWidget {
               ],
             ),
           ],
-          if ((os['email_enviado'] == 1 || os['email_enviado'] == '1' || os['email_enviado'] == true || (os['fecha_envio_email'] != null && os['fecha_envio_email'].toString().trim().isNotEmpty)) &&
-              (os['correo_cliente'] != null && os['correo_cliente'].toString().trim().isNotEmpty && os['correo_cliente'].toString().trim().toLowerCase() != 'sin registrar'))
-            Padding(
-              padding: const EdgeInsets.only(top: 8.0, left: 4.0),
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle, size: 13, color: Color(0xFF2E7D32)),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      "Enviado el ${formatearFechaHoraEnvio(os['fecha_envio_email'])} a: ${os['correo_cliente']} (CC: recepcion@basculaspesa.com.mx)",
-                      style: const TextStyle(fontSize: 10.5, color: Color(0xFF37474F), fontStyle: FontStyle.italic),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          buildEmailAuditBanner(
+            formatearInfoEnvioCorreo(os),
+            margin: const EdgeInsets.only(top: 8.0),
+          ),
         ],
       ),
     );
@@ -3429,34 +3462,11 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
           ),
           Builder(
             builder: (context) {
-              final first = widget.group.items.first;
-              final bool anyEnviado = widget.group.items.any((o) =>
-                  o['email_enviado'] == 1 ||
-                  o['email_enviado'] == '1' ||
-                  o['email_enviado'] == true ||
-                  (o['fecha_envio_email'] != null && o['fecha_envio_email'].toString().trim().isNotEmpty));
-              final String fechaEnvio = widget.group.items
-                  .map((o) => o['fecha_envio_email'])
-                  .firstWhere((f) => f != null && f.toString().trim().isNotEmpty, orElse: () => null)?.toString() ?? '';
-              final String correoLote = (first['correo_cliente'] ?? '').toString().trim();
-              if (!anyEnviado || correoLote.isEmpty || correoLote.toLowerCase() == 'sin registrar') {
-                return const SizedBox.shrink();
-              }
-              return Padding(
-                padding: const EdgeInsets.only(left: 12.0, right: 12.0, bottom: 8.0),
-                child: Row(
-                  children: [
-                    const Icon(Icons.check_circle, size: 13, color: Color(0xFF2E7D32)),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        "Enviado el ${formatearFechaHoraEnvio(fechaEnvio)} a: $correoLote (CC: recepcion@basculaspesa.com.mx)",
-                        style: const TextStyle(fontSize: 10.5, color: Color(0xFF37474F), fontStyle: FontStyle.italic),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
+              final infoLote = formatearInfoEnvioCorreoLote(widget.group.items);
+              if (infoLote.isEmpty) return const SizedBox.shrink();
+              return buildEmailAuditBanner(
+                infoLote,
+                margin: const EdgeInsets.only(left: 12.0, right: 12.0, bottom: 8.0),
               );
             },
           ),
@@ -4573,24 +4583,10 @@ class _OsRow extends StatelessWidget {
               ),
             ),
           ),
-          if ((os['email_enviado'] == 1 || os['email_enviado'] == '1' || os['email_enviado'] == true || (os['fecha_envio_email'] != null && os['fecha_envio_email'].toString().trim().isNotEmpty)) &&
-              (os['correo_cliente'] != null && os['correo_cliente'].toString().trim().isNotEmpty && os['correo_cliente'].toString().trim().toLowerCase() != 'sin registrar'))
-            Padding(
-              padding: const EdgeInsets.only(top: 2.0, bottom: 4.0, left: 16.0, right: 8.0),
-              child: Row(
-                children: [
-                  const Icon(Icons.check_circle, size: 13, color: Color(0xFF2E7D32)),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      "Enviado el ${formatearFechaHoraEnvio(os['fecha_envio_email'])} a: ${os['correo_cliente']} (CC: recepcion@basculaspesa.com.mx)",
-                      style: const TextStyle(fontSize: 10.5, color: Color(0xFF37474F), fontStyle: FontStyle.italic),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-            ),
+          buildEmailAuditBanner(
+            formatearInfoEnvioCorreo(os),
+            margin: const EdgeInsets.only(top: 2.0, bottom: 6.0, left: 16.0, right: 16.0),
+          ),
         ],
       ),
     );
@@ -4813,34 +4809,11 @@ class _LoteRowState extends State<_LoteRow> {
                 ),
                 Builder(
                   builder: (context) {
-                    final first = widget.group.items.first;
-                    final bool anyEnviado = widget.group.items.any((o) =>
-                        o['email_enviado'] == 1 ||
-                        o['email_enviado'] == '1' ||
-                        o['email_enviado'] == true ||
-                        (o['fecha_envio_email'] != null && o['fecha_envio_email'].toString().trim().isNotEmpty));
-                    final String fechaEnvio = widget.group.items
-                        .map((o) => o['fecha_envio_email'])
-                        .firstWhere((f) => f != null && f.toString().trim().isNotEmpty, orElse: () => null)?.toString() ?? '';
-                    final String correoLote = (first['correo_cliente'] ?? '').toString().trim();
-                    if (!anyEnviado || correoLote.isEmpty || correoLote.toLowerCase() == 'sin registrar') {
-                      return const SizedBox.shrink();
-                    }
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 2.0, bottom: 4.0, left: 4.0, right: 8.0),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.check_circle, size: 13, color: Color(0xFF2E7D32)),
-                          const SizedBox(width: 4),
-                          Expanded(
-                            child: Text(
-                              "Enviado el ${formatearFechaHoraEnvio(fechaEnvio)} a: $correoLote (CC: recepcion@basculaspesa.com.mx)",
-                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF37474F), fontStyle: FontStyle.italic),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                        ],
-                      ),
+                    final infoLote = formatearInfoEnvioCorreoLote(widget.group.items);
+                    if (infoLote.isEmpty) return const SizedBox.shrink();
+                    return buildEmailAuditBanner(
+                      infoLote,
+                      margin: const EdgeInsets.only(top: 4.0, bottom: 4.0, right: 8.0),
                     );
                   },
                 ),
@@ -5092,8 +5065,7 @@ class _OsGroup {
 // ── Estado visual del correo (✓ Enviado / ⏳ En cola (Offline) / ✉ Enviar) ──
 /// 'enviado' | 'cola' | 'ninguno'
 String estadoCorreoOs(Map<String, dynamic> o) {
-  final env = o['email_enviado'];
-  if (env == 1 || env == true || env == '1' || env == 'true') return 'enviado';
+  if (esCorreoEnviadoOrden(o)) return 'enviado';
   final st = (o['email_status'] ?? '').toString().trim().toLowerCase();
   if (st == 'cola' || st == 'pendiente') return 'cola';
   return 'ninguno';

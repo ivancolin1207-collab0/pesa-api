@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as p;
+import 'metrology_helper.dart';
 
 class LocalDbService {
   static final LocalDbService instance = LocalDbService._();
@@ -101,8 +102,12 @@ class LocalDbService {
       firma_cliente_nombre   TEXT,
       pdf_subido             INTEGER DEFAULT 0,
       correo_cliente         TEXT,
+      correo_destino         TEXT,
+      correo_cc              TEXT DEFAULT 'recepcion@basculaspesa.com.mx',
       email_enviado          INTEGER DEFAULT 0,
+      correo_enviado         INTEGER DEFAULT 0,
       fecha_envio_email      TEXT,
+      fecha_envio_correo     TEXT,
       sync_check_status      TEXT DEFAULT 'ASIGNADA',
       fecha_descarga_tablet  TEXT,
       fecha_subida_servidor  TEXT,
@@ -394,8 +399,12 @@ class LocalDbService {
             'cca_aplica': 'INTEGER DEFAULT 0',
             'pdf_subido': 'INTEGER DEFAULT 0',
             'correo_cliente': 'TEXT',
+            'correo_destino': 'TEXT',
+            'correo_cc': "TEXT DEFAULT 'recepcion@basculaspesa.com.mx'",
             'email_enviado': 'INTEGER DEFAULT 0',
+            'correo_enviado': 'INTEGER DEFAULT 0',
             'fecha_envio_email': 'TEXT',
+            'fecha_envio_correo': 'TEXT',
             'sync_check_status': "TEXT DEFAULT 'ASIGNADA'",
             'fecha_descarga_tablet': 'TEXT',
             'fecha_subida_servidor': 'TEXT',
@@ -922,6 +931,17 @@ class LocalDbService {
                               : (raw['items'] != null ? jsonEncode(raw['items']) : null))))),
           'sync_check_status': esCerrada ? 'SUBIDA_SERVIDOR' : (raw['sync_check_status']?.toString() ?? 'ASIGNADA'),
           'sync_status':       raw['sync_status']?.toString() ?? 'SINCRONIZADO',
+          'correo_enviado':    (raw['correo_enviado'] == true || raw['correo_enviado'] == 1 || raw['correo_enviado'] == '1' || raw['email_enviado'] == true || raw['email_enviado'] == 1 || raw['email_enviado'] == '1') ? 1 : 0,
+          'email_enviado':     (raw['correo_enviado'] == true || raw['correo_enviado'] == 1 || raw['correo_enviado'] == '1' || raw['email_enviado'] == true || raw['email_enviado'] == 1 || raw['email_enviado'] == '1') ? 1 : 0,
+          if ((raw['correo_destino'] ?? raw['correo_cliente']) != null && (raw['correo_destino'] ?? raw['correo_cliente']).toString().trim().isNotEmpty)
+            'correo_destino':  (raw['correo_destino'] ?? raw['correo_cliente']).toString().trim(),
+          if ((raw['correo_cliente'] ?? raw['correo_destino']) != null && (raw['correo_cliente'] ?? raw['correo_destino']).toString().trim().isNotEmpty)
+            'correo_cliente':  (raw['correo_cliente'] ?? raw['correo_destino']).toString().trim(),
+          'correo_cc':         (raw['correo_cc']?.toString().trim().isNotEmpty == true) ? raw['correo_cc'].toString().trim() : 'recepcion@basculaspesa.com.mx',
+          if ((raw['fecha_envio_correo'] ?? raw['fecha_envio_email']) != null && (raw['fecha_envio_correo'] ?? raw['fecha_envio_email']).toString().trim().isNotEmpty)
+            'fecha_envio_correo': formatearFechaHoraMexico(raw['fecha_envio_correo'] ?? raw['fecha_envio_email']),
+          if ((raw['fecha_envio_email'] ?? raw['fecha_envio_correo']) != null && (raw['fecha_envio_email'] ?? raw['fecha_envio_correo']).toString().trim().isNotEmpty)
+            'fecha_envio_email':  formatearFechaHoraMexico(raw['fecha_envio_email'] ?? raw['fecha_envio_correo']),
           'is_synced':         1,
           'is_dirty':          0,
           'updated_at':        raw['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
@@ -1339,6 +1359,21 @@ class LocalDbService {
         'fecha_apertura_admin': data['fecha_apertura_admin']?.toString(),
       'sync_version':      _toInt(data['sync_version'], 0),
       'sync_status':       'SINCRONIZADO',
+      if (data['correo_enviado'] == true || data['correo_enviado'] == 1 || data['correo_enviado'] == '1' || data['email_enviado'] == true || data['email_enviado'] == 1 || data['email_enviado'] == '1') ...{
+        'correo_enviado': 1,
+        'email_enviado': 1,
+        'email_status': 'enviado',
+      },
+      if ((data['correo_destino'] ?? data['correo_cliente']) != null && (data['correo_destino'] ?? data['correo_cliente']).toString().trim().isNotEmpty) ...{
+        'correo_destino': (data['correo_destino'] ?? data['correo_cliente']).toString().trim(),
+        'correo_cliente': (data['correo_cliente'] ?? data['correo_destino']).toString().trim(),
+      },
+      if (data['correo_cc'] != null && data['correo_cc'].toString().trim().isNotEmpty)
+        'correo_cc': data['correo_cc'].toString().trim(),
+      if ((data['fecha_envio_correo'] ?? data['fecha_envio_email']) != null && (data['fecha_envio_correo'] ?? data['fecha_envio_email']).toString().trim().isNotEmpty) ...{
+        'fecha_envio_correo': formatearFechaHoraMexico(data['fecha_envio_correo'] ?? data['fecha_envio_email']),
+        'fecha_envio_email': formatearFechaHoraMexico(data['fecha_envio_email'] ?? data['fecha_envio_correo']),
+      },
       'is_synced':         (data['is_synced'] == 1 || data['is_synced'] == true || data['sync_status'] == 'SINCRONIZADO' || data['sync_check_status'] == 'SUBIDA_SERVIDOR' || data['sync_check_status'] == 'AUDITADA_ADMIN' || data['sync_check_status'] == 'ABIERTO') ? 1 : 0,
       'updated_at':        data['updated_at']?.toString(),
     };
@@ -1426,6 +1461,22 @@ class LocalDbService {
             safeUpdate['sync_check_status'] = srvSt == 'AUDITADA_ADMIN' ? 'AUDITADA_ADMIN' : 'SUBIDA_SERVIDOR';
             safeUpdate['is_synced'] = 1;
             safeUpdate['sync_status'] = 'SINCRONIZADO';
+          }
+
+          // Sincronizar trazabilidad de envío de correo si el servidor reporta correo enviado
+          if (row['correo_enviado'] == 1 || row['email_enviado'] == 1) {
+            safeUpdate['correo_enviado'] = 1;
+            safeUpdate['email_enviado'] = 1;
+            safeUpdate['email_status'] = 'enviado';
+            if (row['correo_destino'] != null && row['correo_destino'].toString().trim().isNotEmpty) {
+              safeUpdate['correo_destino'] = row['correo_destino'];
+              safeUpdate['correo_cliente'] = row['correo_cliente'] ?? row['correo_destino'];
+            }
+            safeUpdate['correo_cc'] = row['correo_cc'] ?? 'recepcion@basculaspesa.com.mx';
+            if (row['fecha_envio_correo'] != null && row['fecha_envio_correo'].toString().trim().isNotEmpty) {
+              safeUpdate['fecha_envio_correo'] = row['fecha_envio_correo'];
+              safeUpdate['fecha_envio_email'] = row['fecha_envio_email'] ?? row['fecha_envio_correo'];
+            }
           }
 
           // AUTO-REPARACIÓN DE DESFASE: la tablet la tiene Cerrada (con PDF) pero
@@ -2632,17 +2683,36 @@ class LocalDbService {
   }
 
   /// Actualiza el estado de envío de correo en la base de datos SQLite local
-  Future<void> updateEmailStatus(String folio, {required bool enviado, String? status, String? correo, String? fechaEnvio}) async {
+  Future<void> updateEmailStatus(
+    String folio, {
+    required bool enviado,
+    String? status,
+    String? correo,
+    String? fechaEnvio,
+    String? cc,
+  }) async {
     final db = await _ensureInit();
     await _ensureColaCorreos(db);
     final String emailSt = status ?? (enviado ? 'enviado' : 'cola');
+    final String fechaMx = enviado
+        ? formatearFechaHoraMexico(fechaEnvio ?? DateTime.now().toUtc())
+        : '';
+    final String ccVal = (cc != null && cc.trim().isNotEmpty)
+        ? cc.trim()
+        : 'recepcion@basculaspesa.com.mx';
     final Map<String, dynamic> data = {
       'email_enviado': enviado ? 1 : 0,
+      'correo_enviado': enviado ? 1 : 0,
       'email_status': emailSt,
-      if (enviado) 'fecha_envio_email': fechaEnvio ?? DateTime.now().toIso8601String(),
+      'correo_cc': ccVal,
+      if (enviado && fechaMx.isNotEmpty) ...{
+        'fecha_envio_email': fechaMx,
+        'fecha_envio_correo': fechaMx,
+      },
     };
     if (correo != null && correo.trim().isNotEmpty) {
       data['correo_cliente'] = correo.trim();
+      data['correo_destino'] = correo.trim();
     }
     await db.update(
       'ordenes_servicio',
@@ -2808,17 +2878,27 @@ class LocalDbService {
     return _toInt(r.first['c'], 0);
   }
 
-  /// Marca el envío como despachado y las órdenes como enviadas (email_enviado = 1).
+  /// Marca el envío como despachado y las órdenes como enviadas (email_enviado = 1, correo_enviado = 1).
   Future<void> marcarCorreoEnviado(int id, List<String> folios, String correo) async {
     final db = await _ensureInit();
     await _ensureColaCorreos(db);
-    final now = DateTime.now().toIso8601String();
-    await db.update('cola_correos', {'email_status': 'enviado', 'ultimo_error': null, 'updated_at': now},
+    final nowIso = DateTime.now().toIso8601String();
+    final nowMx = formatearFechaHoraMexico(DateTime.now().toUtc());
+    await db.update('cola_correos', {'email_status': 'enviado', 'ultimo_error': null, 'updated_at': nowIso},
         where: 'id = ?', whereArgs: [id]);
     for (final f in folios) {
       await db.update(
         'ordenes_servicio',
-        {'email_enviado': 1, 'email_status': 'enviado', 'fecha_envio_email': now, 'correo_cliente': correo},
+        {
+          'email_enviado': 1,
+          'correo_enviado': 1,
+          'email_status': 'enviado',
+          'fecha_envio_email': nowMx,
+          'fecha_envio_correo': nowMx,
+          'correo_cliente': correo,
+          'correo_destino': correo,
+          'correo_cc': 'recepcion@basculaspesa.com.mx',
+        },
         where: 'folio_os = ? OR folio = ?',
         whereArgs: [f, f],
       );

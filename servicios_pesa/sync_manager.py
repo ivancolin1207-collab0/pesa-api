@@ -128,6 +128,13 @@ CREATE TABLE IF NOT EXISTS ordenes_servicio (
     estado                  TEXT DEFAULT 'PROCESO',
     modalidad               TEXT DEFAULT 'DIGITAL',
     pdf_path                TEXT,
+    correo_enviado          INTEGER DEFAULT 0,
+    email_enviado           INTEGER DEFAULT 0,
+    correo_destino          TEXT,
+    correo_cliente          TEXT,
+    correo_cc               TEXT DEFAULT 'recepcion@basculaspesa.com.mx',
+    fecha_envio_correo      TEXT,
+    fecha_envio_email       TEXT,
     sync_status             TEXT NOT NULL DEFAULT 'PENDING',
     updated_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
     created_at              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
@@ -210,6 +217,13 @@ class SyncManager:
                 ("numero_cca", "TEXT"),
                 ("numero_dve", "TEXT"),
                 ("motivo_no_excentricidad", "TEXT"),
+                ("correo_enviado", "INTEGER DEFAULT 0"),
+                ("email_enviado", "INTEGER DEFAULT 0"),
+                ("correo_destino", "TEXT"),
+                ("correo_cliente", "TEXT"),
+                ("correo_cc", "TEXT DEFAULT 'recepcion@basculaspesa.com.mx'"),
+                ("fecha_envio_correo", "TEXT"),
+                ("fecha_envio_email", "TEXT"),
             ):
                 if col_name not in existing_cols:
                     try:
@@ -322,7 +336,14 @@ class SyncManager:
                             COALESCE(os.pdf_path, '') AS pdf_path,
                             COALESCE(os.sync_status, 'SYNCED') AS sync_status,
                             COALESCE(os.updated_at::text, NOW()::text),
-                            COALESCE(os.firma_tecnico_b64, tc.firma_digital, '') AS firma_tecnico_b64
+                            COALESCE(os.firma_tecnico_b64, tc.firma_digital, '') AS firma_tecnico_b64,
+                            COALESCE(os.id_equipo, os.indicador_id, '') AS id_equipo,
+                            COALESCE(os.numero_cca, '') AS numero_cca,
+                            COALESCE(os.numero_dve, '') AS numero_dve,
+                            CASE WHEN COALESCE(os.correo_enviado, os.email_enviado, FALSE) THEN 1 ELSE 0 END AS correo_enviado,
+                            COALESCE(NULLIF(TRIM(os.correo_destino), ''), NULLIF(TRIM(os.correo_cliente), ''), '') AS correo_destino,
+                            COALESCE(NULLIF(TRIM(os.correo_cc), ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
+                            COALESCE(os.fecha_envio_correo::text, os.fecha_envio_email::text, '') AS fecha_envio_correo
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes      cl  ON os.id_cliente       = cl.id
                         LEFT JOIN cat_tecnicos      tc  ON os.id_tecnico       = tc.id
@@ -347,8 +368,10 @@ class SyncManager:
                                 id_tecnico, tecnico_nombre, marca, modelo, ns, ubicacion,
                                 alcance_max, div_minima, div_verificacion, observaciones,
                                 firma_cliente_nombre, estado, modalidad, pdf_path,
-                                sync_status, updated_at, firma_tecnico_b64
-                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                sync_status, updated_at, firma_tecnico_b64,
+                                id_equipo, numero_cca, numero_dve,
+                                correo_enviado, correo_destino, correo_cc, fecha_envio_correo
+                            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                             ON CONFLICT(folio_os) DO UPDATE SET
                                 fecha                = excluded.fecha,
                                 estado               = excluded.estado,
@@ -358,6 +381,16 @@ class SyncManager:
                                 sucursal_nombre      = excluded.sucursal_nombre,
                                 observaciones        = excluded.observaciones,
                                 pdf_path             = excluded.pdf_path,
+                                id_equipo            = COALESCE(NULLIF(excluded.id_equipo, ''), ordenes_servicio.id_equipo),
+                                numero_cca           = COALESCE(NULLIF(excluded.numero_cca, ''), ordenes_servicio.numero_cca),
+                                numero_dve           = COALESCE(NULLIF(excluded.numero_dve, ''), ordenes_servicio.numero_dve),
+                                correo_enviado       = excluded.correo_enviado,
+                                email_enviado        = excluded.correo_enviado,
+                                correo_destino       = excluded.correo_destino,
+                                correo_cliente       = excluded.correo_destino,
+                                correo_cc            = excluded.correo_cc,
+                                fecha_envio_correo   = excluded.fecha_envio_correo,
+                                fecha_envio_email    = excluded.fecha_envio_correo,
                                 firma_tecnico_b64    = COALESCE(excluded.firma_tecnico_b64,
                                                                ordenes_servicio.firma_tecnico_b64),
                                 sync_status          = CASE

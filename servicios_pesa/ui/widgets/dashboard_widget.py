@@ -59,7 +59,66 @@ except ImportError:
 
 import re
 import json
-from services.metrology import construir_etiqueta_instrumento, limpiar_numero_regulatorio
+from services.metrology import (
+    construir_etiqueta_instrumento,
+    limpiar_numero_regulatorio,
+    formatear_info_envio_correo,
+    formatear_fecha_hora_mexico,
+    obtener_tz_mexico,
+)
+
+_EMAIL_DB_COLS_MIGRATED = False
+
+
+def _asegurar_columnas_correo_bd_sync(conn) -> None:
+    """
+    Garantiza en PostgreSQL las columnas de auditoría de correo
+    (correo_enviado, correo_destino, correo_cc, fecha_envio_correo)
+    y retroalimenta órdenes ya enviadas (p. ej. OS-26-829) de forma idempotente.
+    """
+    global _EMAIL_DB_COLS_MIGRATED
+    if _EMAIL_DB_COLS_MIGRATED or conn is None:
+        return
+    ddl = (
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS marca TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS modelo TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_cca TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_dve TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_enviado BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_destino TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ",
+    )
+    for stmt in ddl:
+        try:
+            with conn.cursor() as cur:
+                cur.execute(stmt)
+            conn.commit()
+        except Exception:
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE ordenes_servicio
+                SET correo_enviado     = TRUE,
+                    correo_destino     = COALESCE(NULLIF(correo_destino, ''), NULLIF(correo_cliente, '')),
+                    correo_cc          = COALESCE(NULLIF(correo_cc, ''), 'recepcion@basculaspesa.com.mx'),
+                    fecha_envio_correo = COALESCE(fecha_envio_correo, fecha_envio_email)
+                WHERE email_enviado = TRUE
+                  AND (correo_enviado IS NOT TRUE OR correo_destino IS NULL OR fecha_envio_correo IS NULL)
+                """
+            )
+        conn.commit()
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    _EMAIL_DB_COLS_MIGRATED = True
 
 def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", ruta_pdf_disco=None):
     """
@@ -185,6 +244,8 @@ class FolioInstrumentoDelegate(QStyledItemDelegate):
     ROLE_HAS_WIDGET = Qt.ItemDataRole.UserRole + 7
     ROLE_SPECS_TEXT = Qt.ItemDataRole.UserRole + 8
     ROLE_ROW_HEIGHT = Qt.ItemDataRole.UserRole + 9
+    ROLE_EMAIL_INFO = Qt.ItemDataRole.UserRole + 10
+    ROLE_TOTAL_LOTE = Qt.ItemDataRole.UserRole + 11
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
         is_batch = bool(index.data(self.ROLE_IS_BATCH))
@@ -224,11 +285,20 @@ class FolioInstrumentoDelegate(QStyledItemDelegate):
     def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
         dyn_h = index.data(self.ROLE_ROW_HEIGHT)
         if dyn_h and int(dyn_h) > 0:
-            return QSize(350, int(dyn_h))
+            return QSize(355, int(dyn_h))
         specs = str(index.data(self.ROLE_SPECS_TEXT) or "").strip()
         cca = str(index.data(self.ROLE_CCA) or "").strip()
         dve = str(index.data(self.ROLE_DVE) or "").strip()
-        return QSize(350, 68 if (specs or cca or dve) else 50)
+        email_info = str(index.data(self.ROLE_EMAIL_INFO) or "").strip()
+        if specs and email_info:
+            base_h = 92
+        elif email_info:
+            base_h = 74
+        elif specs or cca or dve:
+            base_h = 68
+        else:
+            base_h = 50
+        return QSize(355, base_h)
 
 
 class WordWrapTextDelegate(QStyledItemDelegate):
@@ -626,6 +696,7 @@ class QuickEditOSDialog(QDialog):
     def _load_data(self):
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             with conn.cursor() as cur:
                 cur.execute("SELECT id, nombre FROM cat_tipo_servicio ORDER BY nombre")
                 for sid, sname in cur.fetchall():
@@ -667,6 +738,7 @@ class QuickEditOSDialog(QDialog):
         estado = self.combo_estado.currentData()
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             with conn.cursor() as cur:
                 cur.execute(
                     """
@@ -844,7 +916,9 @@ class _DashboardLoader(QThread):
             return
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             try:
+                _asegurar_columnas_correo_bd_sync(conn)
                 self._run_kpis(conn)
                 if self._load_filters:
                     self._run_filters(conn)
@@ -899,14 +973,15 @@ class _DashboardLoader(QThread):
                     d.get("tipo_instrumento", ""),
                     d.get("marca", ""),
                     d.get("modelo", ""),
-                    bool(d.get("email_enviado", False)),
-                    d.get("correo_cliente", ""),
-                    d.get("fecha_envio_email"),
+                    bool(d.get("correo_enviado") or d.get("email_enviado", False)),
+                    d.get("correo_destino") or d.get("correo_cliente", ""),
+                    d.get("fecha_envio_correo") or d.get("fecha_envio_email"),
                     d.get("ns", ""),
                     d.get("id_equipo", ""),
                     d.get("ubicacion", ""),
                     d.get("numero_cca", ""),
                     d.get("numero_dve", ""),
+                    d.get("correo_cc", "recepcion@basculaspesa.com.mx"),
                 )
                 for d in rows_dicts
             ]
@@ -1053,7 +1128,8 @@ class _DashboardLoader(QThread):
                 id_equipo,
                 ubicacion_equipo,
                 numero_cca,
-                numero_dve
+                numero_dve,
+                correo_cc
             FROM (
                 -- Clave DISTINCT tolerante a id NULL: con DISTINCT ON (os.id) todas
                 -- las órdenes sin id se fusionaban en UNA sola fila.
@@ -1098,14 +1174,15 @@ class _DashboardLoader(QThread):
                     COALESCE(ti.nombre, '')                               AS tipo_instrumento,
                     COALESCE(os.marca, '')                                AS marca,
                     COALESCE(os.modelo, '')                               AS modelo,
-                    COALESCE(os.email_enviado, FALSE)                     AS email_enviado,
-                    COALESCE(os.correo_cliente, '')                       AS correo_cliente,
-                    os.fecha_envio_email,
+                    COALESCE(os.correo_enviado, os.email_enviado, FALSE)  AS email_enviado,
+                    COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_cliente,
+                    COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
                     COALESCE(os.ns, '')                                   AS ns,
                     COALESCE(os.id_equipo::text, '')                      AS id_equipo,
                     COALESCE(os.ubicacion, '')                            AS ubicacion_equipo,
                     COALESCE(os.numero_cca, '')                           AS numero_cca,
                     COALESCE(os.numero_dve, '')                           AS numero_dve,
+                    COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
                     os.fecha
                 FROM ordenes_servicio os
                 LEFT JOIN cat_clientes       cl  ON os.id_cliente       = cl.id
@@ -1163,14 +1240,15 @@ class _DashboardLoader(QThread):
                     COALESCE(ti.nombre, '') AS tipo_instrumento,
                     COALESCE(os.marca, '') AS marca,
                     COALESCE(os.modelo, '') AS modelo,
-                    COALESCE(os.email_enviado, FALSE) AS email_enviado,
-                    COALESCE(os.correo_cliente, '') AS correo_cliente,
-                    os.fecha_envio_email,
+                    COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
+                    COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_cliente,
+                    COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
                     COALESCE(os.ns, '') AS ns,
                     COALESCE(os.id_equipo::text, '') AS id_equipo,
                     COALESCE(os.ubicacion, '') AS ubicacion_equipo,
                     COALESCE(os.numero_cca, '') AS numero_cca,
-                    COALESCE(os.numero_dve, '') AS numero_dve
+                    COALESCE(os.numero_dve, '') AS numero_dve,
+                    COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc
                 FROM ordenes_servicio os
                 LEFT JOIN cat_clientes          cl  ON os.id_cliente       = cl.id
                 LEFT JOIN cat_tecnicos          tc  ON os.id_tecnico       = tc.id
@@ -1322,6 +1400,7 @@ class EditarActividadDialog(QDialog):
             return
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             try:
                 with conn.cursor() as cur:
                     # Técnicos activos
@@ -1390,6 +1469,7 @@ class EditarActividadDialog(QDialog):
 
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             try:
                 with conn.cursor() as cur:
                     # Actualiza sólo los campos de actividad. Se hace un UPDATE parcial
@@ -1444,6 +1524,7 @@ class _SearchWorker(QThread):
     def run(self):
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             like_val = f"%{self.search_text}%"
             tec_clause = "AND os.id_tecnico = %s" if self.tec_id_filter is not None else ""
             params_list = [like_val, like_val, like_val, like_val, like_val, like_val, like_val]
@@ -1479,14 +1560,15 @@ class _SearchWorker(QThread):
                         '' AS tipo_instrumento,
                         COALESCE(os.marca, '') AS marca,
                         COALESCE(os.modelo, '') AS modelo,
-                        COALESCE(os.email_enviado, FALSE) AS email_enviado,
-                        COALESCE(os.correo_cliente, '') AS correo_cliente,
-                        os.fecha_envio_email,
+                        COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
+                        COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_cliente,
+                        COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
                         COALESCE(os.ns, '') AS ns,
                         COALESCE(os.id_equipo::text, '') AS id_equipo,
                         COALESCE(os.ubicacion, '') AS ubicacion_equipo,
                         COALESCE(os.numero_cca, '') AS numero_cca,
-                        COALESCE(os.numero_dve, '') AS numero_dve
+                        COALESCE(os.numero_dve, '') AS numero_dve,
+                        COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc
                     FROM ordenes_servicio os
                     LEFT JOIN cat_clientes       cl  ON os.id_cliente       = cl.id
                     LEFT JOIN cat_tecnicos       tc  ON os.id_tecnico       = tc.id
@@ -2902,14 +2984,15 @@ class DashboardWidget(QWidget):
                             d.get("tipo_instrumento", ""),
                             d.get("marca", ""),
                             d.get("modelo", ""),
-                            bool(d.get("email_enviado", False)),
-                            d.get("correo_cliente", ""),
-                            d.get("fecha_envio_email"),
+                            bool(d.get("correo_enviado") or d.get("email_enviado", False)),
+                            d.get("correo_destino") or d.get("correo_cliente", ""),
+                            d.get("fecha_envio_correo") or d.get("fecha_envio_email"),
                             d.get("ns", ""),
                             d.get("id_equipo", ""),
                             d.get("ubicacion", ""),
                             d.get("numero_cca", ""),
                             d.get("numero_dve", ""),
+                            d.get("correo_cc", "recepcion@basculaspesa.com.mx"),
                         )
                         for d in rows_dicts
                     ]
@@ -2922,6 +3005,7 @@ class DashboardWidget(QWidget):
 
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
 
             conditions: list = []
             params: list = []
@@ -3016,14 +3100,15 @@ class DashboardWidget(QWidget):
                             '' AS tipo_instrumento,
                             COALESCE(os.marca, '') AS marca,
                             COALESCE(os.modelo, '') AS modelo,
-                            COALESCE(os.email_enviado, FALSE) AS email_enviado,
-                            COALESCE(os.correo_cliente, '') AS correo_cliente,
-                            os.fecha_envio_email,
+                            COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
+                            COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_cliente,
+                            COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
                             COALESCE(os.ns, '') AS ns,
                             COALESCE(os.id_equipo::text, '') AS id_equipo,
                             COALESCE(os.ubicacion, '') AS ubicacion_equipo,
                             COALESCE(os.numero_cca, '') AS numero_cca,
-                            COALESCE(os.numero_dve, '') AS numero_dve
+                            COALESCE(os.numero_dve, '') AS numero_dve,
+                            COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes       cl    ON os.id_cliente       = cl.id
                         LEFT JOIN cat_tecnicos       tc    ON os.id_tecnico       = tc.id
@@ -3070,14 +3155,15 @@ class DashboardWidget(QWidget):
                             '' AS tipo_instrumento,
                             COALESCE(os.marca, '') AS marca,
                             COALESCE(os.modelo, '') AS modelo,
-                            COALESCE(os.email_enviado, FALSE) AS email_enviado,
-                            COALESCE(os.correo_cliente, '') AS correo_cliente,
-                            os.fecha_envio_email,
+                            COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
+                            COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_cliente,
+                            COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
                             COALESCE(os.ns, '') AS ns,
                             COALESCE(os.id_equipo::text, '') AS id_equipo,
                             COALESCE(os.ubicacion, '') AS ubicacion_equipo,
                             COALESCE(os.numero_cca, '') AS numero_cca,
-                            COALESCE(os.numero_dve, '') AS numero_dve
+                            COALESCE(os.numero_dve, '') AS numero_dve,
+                            COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes      cl ON os.id_cliente       = cl.id
                         LEFT JOIN cat_tecnicos      tc ON os.id_tecnico       = tc.id
@@ -3272,13 +3358,13 @@ class DashboardWidget(QWidget):
         return "✓ Gris — Asignada en Servidor (Pendiente descarga en tablet)"
 
     @staticmethod
-    def _extraer_orden_meta_de_row(row) -> tuple[str, str, str, str]:
+    def _extraer_orden_meta_de_row(row) -> tuple[str, str, str, str, str]:
         """
-        Retorna (etiqueta_compuesta, specs_instrumento, cca_limpio, dve_limpio)
+        Retorna (etiqueta_compuesta, specs_instrumento, cca_limpio, dve_limpio, info_correo)
         a partir de una tupla row del Dashboard, omitiendo valores vacíos o placeholders.
         """
         if not row:
-            return ("", "", "", "")
+            return ("", "", "", "", "")
         folio_raw = str(row[0] or "").strip()
         dt_raw = row[17] if len(row) > 17 else None
         dt_map = {}
@@ -3342,7 +3428,67 @@ class DashboardWidget(QWidget):
 
         cca = limpiar_numero_regulatorio(cca_col or dt_map.get("numero_cca") or dt_map.get("cca"))
         dve = limpiar_numero_regulatorio(dve_col or dt_map.get("numero_dve") or dt_map.get("folio_dve"))
-        return (etiqueta, specs_str, cca, dve)
+
+        enviado_flag = bool(row[22]) if len(row) > 22 and row[22] is not None else False
+        dest_mail = str(row[23] or "").strip() if len(row) > 23 and row[23] is not None else ""
+        fecha_mail = row[24] if len(row) > 24 else None
+        cc_mail = (
+            str(row[30] or "").strip()
+            if len(row) > 30 and row[30] is not None and str(row[30]).strip()
+            else "recepcion@basculaspesa.com.mx"
+        )
+        info_correo = formatear_info_envio_correo({
+            "correo_enviado": enviado_flag,
+            "correo_destino": dest_mail,
+            "fecha_envio_correo": fecha_mail,
+            "correo_cc": cc_mail,
+        })
+        return (etiqueta, specs_str, cca, dve, info_correo)
+
+    @staticmethod
+    def _extraer_info_correo_lote(grupo_ord: list) -> str:
+        """
+        Construye la etiqueta de trazabilidad de envío de correo para la cabecera de un lote
+        cuando sus documentos ya fueron enviados (o parcialmente enviados).
+        """
+        if not grupo_ord:
+            return ""
+        enviados = [
+            r for r in grupo_ord
+            if (len(r) > 22 and bool(r[22])) or (len(r) > 24 and r[24] is not None and str(r[24]).strip())
+        ]
+        if not enviados:
+            return ""
+
+        dest_mail = ""
+        fecha_mail = None
+        cc_mail = "recepcion@basculaspesa.com.mx"
+
+        for r in enviados:
+            if not dest_mail and len(r) > 23 and r[23] and str(r[23]).strip():
+                dest_mail = str(r[23]).strip()
+            if len(r) > 24 and r[24] is not None and str(r[24]).strip():
+                fecha_mail = r[24]
+            if len(r) > 30 and r[30] and str(r[30]).strip():
+                cc_mail = str(r[30]).strip()
+
+        if not dest_mail:
+            for r in grupo_ord:
+                if len(r) > 23 and r[23] and str(r[23]).strip():
+                    dest_mail = str(r[23]).strip()
+                    break
+
+        base_txt = formatear_info_envio_correo({
+            "correo_enviado": True,
+            "correo_destino": dest_mail,
+            "fecha_envio_correo": fecha_mail,
+            "correo_cc": cc_mail,
+        })
+        if not base_txt:
+            return ""
+        if len(enviados) < len(grupo_ord):
+            return base_txt.replace("✉ Enviado", f"✉ Enviado ({len(enviados)}/{len(grupo_ord)} OS)", 1)
+        return base_txt
 
     def _build_folio_cell_widget(
         self,
@@ -3352,17 +3498,20 @@ class DashboardWidget(QWidget):
         numero_dve: str = "",
         is_batch_parent: bool = False,
         total_lote: int = 0,
+        info_correo: str = "",
     ) -> tuple[QWidget, str]:
         """
-        Construye el QWidget estructurado en 2 niveles para la celda FOLIO OS:
+        Construye el QWidget estructurado en hasta 3 niveles para la celda FOLIO OS:
           1) Fila superior (QHBoxLayout): Folio en negrita (#111827) + píldoras CCA y/o DVE + addStretch()
-          2) Fila inferior (QLabel con setWordWrap(True)): Marca · Modelo · SN · ID · Ubicación sin truncar.
+          2) Fila media (QLabel con setWordWrap(True)): Marca · Modelo · SN · ID · Ubicación sin truncar.
+          3) Fila inferior (QLabel verde suave con setWordWrap(True)):
+             '✉ Enviado el DD/MM/YYYY HH:mm a: correo@cliente.com (CC: recepcion@basculaspesa.com.mx)'
         """
         cell_widget = QWidget()
         cell_widget.setStyleSheet("background: transparent; border: none;")
         v_lay = QVBoxLayout(cell_widget)
         v_lay.setContentsMargins(6, 4, 6, 4)
-        v_lay.setSpacing(2)
+        v_lay.setSpacing(3)
 
         # 1. Fila superior: Folio + Badges CCA / DVE
         top_lay = QHBoxLayout()
@@ -3410,7 +3559,7 @@ class DashboardWidget(QWidget):
         top_lay.addStretch()
         v_lay.addLayout(top_lay)
 
-        # 2. Fila inferior: especificaciones completas del instrumento con word-wrap real
+        # 2. Fila media: especificaciones completas del instrumento con word-wrap real
         if specs_str:
             lbl_datos = QLabel(specs_str)
             lbl_datos.setWordWrap(True)
@@ -3422,6 +3571,19 @@ class DashboardWidget(QWidget):
             lbl_datos.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             v_lay.addWidget(lbl_datos)
 
+        # 3. Fila inferior: auditoría y trazabilidad exacta de envío de correo
+        if info_correo:
+            lbl_correo = QLabel(info_correo)
+            lbl_correo.setWordWrap(True)
+            lbl_correo.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            lbl_correo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            lbl_correo.setStyleSheet(
+                "background-color: #ECFDF5; color: #065F46; border: 1px solid #A7F3D0; "
+                "border-radius: 4px; padding: 2px 6px; font-size: 10.5px; font-weight: 600;"
+            )
+            lbl_correo.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            v_lay.addWidget(lbl_correo)
+
         partes_tt = [folio_base]
         if specs_str:
             partes_tt.append(specs_str)
@@ -3429,34 +3591,50 @@ class DashboardWidget(QWidget):
             partes_tt.append(cca_txt)
         if dve_txt:
             partes_tt.append(dve_txt)
+        if info_correo:
+            partes_tt.append(info_correo)
         texto_completo = "\n".join(partes_tt)
         cell_widget.setToolTip(texto_completo)
         return cell_widget, texto_completo
 
     def _calcular_y_aplicar_altura_item(self, item: QTreeWidgetItem, is_child: bool = False) -> None:
-        """Calcula dinámicamente la altura necesaria para FOLIO OS, CLIENTE y SUCURSAL sin recortar texto."""
+        """Calcula dinámicamente la altura necesaria para FOLIO OS (hasta 3 niveles), CLIENTE y SUCURSAL sin recortar texto."""
         if not item or not hasattr(self, "_table") or self._table is None:
             return
         specs = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_SPECS_TEXT) or "").strip()
         cca = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_CCA) or "").strip()
         dve = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_DVE) or "").strip()
+        info_mail = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_EMAIL_INFO) or "").strip()
         suc = str(item.text(self._COL_SUCURSAL) or "").strip()
         cli = str(item.text(self._COL_CLIENTE) or "").strip()
         tec = str(item.text(self._COL_TECNICO) or "").strip()
 
         indent_px = self._table.indentation() if is_child else 0
-        w_folio_col = max(320, self._table.columnWidth(self._COL_FOLIO))
+        w_folio_col = max(335, self._table.columnWidth(self._COL_FOLIO))
         w_folio_text = max(180, w_folio_col - indent_px - 20)
 
-        h_folio = 32  # fila superior (Folio + badges CCA/DVE) + márgenes
+        h_specs_part = 0
         if specs:
             f_specs = QFont(self._table.font())
             f_specs.setPixelSize(11)
             fm_specs = QFontMetrics(f_specs)
             br_specs = fm_specs.boundingRect(QRect(0, 0, w_folio_text, 1000), Qt.TextFlag.TextWordWrap, specs)
-            h_folio = max(66, 26 + br_specs.height() + 16)
+            h_specs_part = br_specs.height() + 8
+
+        h_mail_part = 0
+        if info_mail:
+            f_mail = QFont(self._table.font())
+            f_mail.setPixelSize(11)
+            f_mail.setBold(True)
+            fm_mail = QFontMetrics(f_mail)
+            w_mail_inner = max(150, w_folio_text - 16)
+            br_mail = fm_mail.boundingRect(QRect(0, 0, w_mail_inner, 1000), Qt.TextFlag.TextWordWrap, info_mail)
+            h_mail_part = br_mail.height() + 14
+
+        if specs or info_mail:
+            h_folio = 32 + h_specs_part + h_mail_part + 6
         elif cca or dve:
-            h_folio = max(56, h_folio + 14)
+            h_folio = 56
         else:
             h_folio = 50
 
@@ -3475,7 +3653,14 @@ class DashboardWidget(QWidget):
         h_cli = _h_col(cli, self._COL_CLIENTE, 130)
         h_tec = _h_col(tec, self._COL_TECNICO, 100)
 
-        min_base = 64 if (specs or cca or dve) else 50
+        if specs and info_mail:
+            min_base = 88
+        elif info_mail:
+            min_base = 72
+        elif specs or cca or dve:
+            min_base = 64
+        else:
+            min_base = 50
         altura_final = max(min_base, h_folio, h_suc, h_cli, h_tec)
 
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_ROW_HEIGHT, altura_final)
@@ -3485,6 +3670,39 @@ class DashboardWidget(QWidget):
         w_cell = self._table.itemWidget(item, self._COL_FOLIO)
         if w_cell is not None:
             w_cell.setMinimumHeight(altura_final - 4)
+
+    def _refrescar_celda_folio_correo_vivo(
+        self,
+        item: QTreeWidgetItem,
+        info_correo: str,
+        is_child: bool = False,
+    ) -> None:
+        """Actualiza en vivo el Nivel 3 (etiqueta verde de envío de correo) en una fila del QTreeWidget."""
+        if not item or not hasattr(self, "_table") or self._table is None:
+            return
+        folio_base = str(
+            item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO)
+            or item.text(self._COL_FOLIO).split(" - ")[0]
+        ).strip()
+        specs_str = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_SPECS_TEXT) or "").strip()
+        numero_cca = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_CCA) or "").strip()
+        numero_dve = str(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_DVE) or "").strip()
+        is_batch_parent = bool(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_IS_BATCH))
+        total_lote = int(item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_TOTAL_LOTE) or 0)
+
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_EMAIL_INFO, info_correo)
+        cell_w, texto_completo = self._build_folio_cell_widget(
+            folio_base=folio_base,
+            specs_str=specs_str,
+            numero_cca=numero_cca,
+            numero_dve=numero_dve,
+            is_batch_parent=is_batch_parent,
+            total_lote=total_lote,
+            info_correo=info_correo,
+        )
+        self._table.setItemWidget(item, self._COL_FOLIO, cell_w)
+        item.setToolTip(self._COL_FOLIO, texto_completo)
+        self._calcular_y_aplicar_altura_item(item, is_child=is_child)
 
     def _recalcular_alturas_filas(self) -> None:
         """Recalcula alturas dinámicas de todas las filas padres e hijas al redimensionar o expandir."""
@@ -3528,10 +3746,11 @@ class DashboardWidget(QWidget):
         numero_dve: str = "",
         total_lote: int = 0,
         is_child: bool = False,
+        info_correo: str = "",
     ) -> None:
-        """Rellena las columnas de un QTreeWidgetItem e inserta el QWidget multilínea en FOLIO OS."""
+        """Rellena las columnas de un QTreeWidgetItem e inserta el QWidget multilínea (hasta 3 niveles) en FOLIO OS."""
         folio_base = (raw_folio or folio_text.split(" - ")[0]).strip()
-        # Col 1: texto interno completo conservado para findItems/búsqueda + QWidget visual en 2 niveles
+        # Col 1: texto interno completo conservado para findItems/búsqueda + QWidget visual en hasta 3 niveles
         item.setText(self._COL_FOLIO, folio_text)
         item.setData(self._COL_FOLIO, Qt.ItemDataRole.UserRole, os_id)
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO, folio_base)
@@ -3540,6 +3759,8 @@ class DashboardWidget(QWidget):
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_DVE, numero_dve)
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_IS_BATCH, is_batch_parent)
         item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_HAS_WIDGET, True)
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_EMAIL_INFO, info_correo)
+        item.setData(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_TOTAL_LOTE, total_lote)
 
         cell_w, texto_completo = self._build_folio_cell_widget(
             folio_base=folio_base,
@@ -3548,6 +3769,7 @@ class DashboardWidget(QWidget):
             numero_dve=numero_dve,
             is_batch_parent=is_batch_parent,
             total_lote=total_lote,
+            info_correo=info_correo,
         )
         self._table.setItemWidget(item, self._COL_FOLIO, cell_w)
         item.setToolTip(self._COL_FOLIO, texto_completo)
@@ -3764,6 +3986,7 @@ class DashboardWidget(QWidget):
                     sync_label   = self._get_sync_label(estado, sync_status)
 
                     # Crear item padre
+                    lote_info_mail = self._extraer_info_correo_lote(grupo_ord)
                     parent_item = QTreeWidgetItem(self._table)
                     self._populate_tree_item(
                         parent_item, texto_folio, fecha_str, cliente, sucursal,
@@ -3772,6 +3995,7 @@ class DashboardWidget(QWidget):
                         raw_folio=texto_folio,
                         total_lote=total_os,
                         is_child=False,
+                        info_correo=lote_info_mail,
                     )
                     self._calcular_y_aplicar_altura_item(parent_item, is_child=False)
                     
@@ -3821,7 +4045,7 @@ class DashboardWidget(QWidget):
                             c_est_label = self._estado_label(c_est)
 
                         c_sync_label = self._get_sync_label(c_est, c_sync)
-                        c_etiqueta, c_specs, c_cca, c_dve = self._extraer_orden_meta_de_row(row)
+                        c_etiqueta, c_specs, c_cca, c_dve, c_info_mail = self._extraer_orden_meta_de_row(row)
 
                         child = QTreeWidgetItem(parent_item)
                         self._populate_tree_item(
@@ -3833,6 +4057,7 @@ class DashboardWidget(QWidget):
                             numero_cca=c_cca,
                             numero_dve=c_dve,
                             is_child=True,
+                            info_correo=c_info_mail,
                         )
                         self._calcular_y_aplicar_altura_item(child, is_child=True)
                         
@@ -3882,7 +4107,7 @@ class DashboardWidget(QWidget):
                         estado_label = self._estado_label(estado)
 
                     sync_label   = self._get_sync_label(estado, sync_status)
-                    etiqueta_comp, specs_ind, num_cca, num_dve = self._extraer_orden_meta_de_row(row)
+                    etiqueta_comp, specs_ind, num_cca, num_dve, info_mail_ind = self._extraer_orden_meta_de_row(row)
 
                     item = QTreeWidgetItem(self._table)
                     self._populate_tree_item(
@@ -3894,6 +4119,7 @@ class DashboardWidget(QWidget):
                         numero_cca=num_cca,
                         numero_dve=num_dve,
                         is_child=False,
+                        info_correo=info_mail_ind,
                     )
                     self._calcular_y_aplicar_altura_item(item, is_child=False)
                     chk_w, _ = _make_chk([folio], [os_id], is_batch=False, pdf_flags=[has_real_pdf])
@@ -4120,7 +4346,8 @@ class DashboardWidget(QWidget):
 
         # ── Botón Estado de Correo del Lote ───────────────────────────────────
         lote_email_enviado = bool(grupo_ord) and all(
-            bool(r[22]) if len(r) > 22 and r[22] is not None else False
+            (bool(r[22]) if len(r) > 22 and r[22] is not None else False)
+            or (len(r) > 24 and r[24] is not None and str(r[24]).strip())
             for r in grupo_ord
         )
         correo_lote = ""
@@ -4129,6 +4356,7 @@ class DashboardWidget(QWidget):
                 if len(r) > 23 and r[23] and str(r[23]).strip():
                     correo_lote = str(r[23]).strip()
                     break
+        info_lote_tt = self._extraer_info_correo_lote(grupo_ord or [])
 
         if lote_email_enviado:
             btn_mail_lote = QPushButton("✓ Lote Enviado")
@@ -4147,7 +4375,8 @@ class DashboardWidget(QWidget):
                 }
                 QPushButton:hover { background-color: #C8E6C9; }
             """)
-            btn_mail_lote.setToolTip(f"Correo de lote enviado a: {correo_lote or 'Cliente'}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar lote)")
+            tt_lote = f"{info_lote_tt}\n(Clic para reenviar lote)" if info_lote_tt else f"Correo de lote enviado a: {correo_lote or 'Cliente'}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar lote)"
+            btn_mail_lote.setToolTip(tt_lote)
         else:
             btn_mail_lote = QPushButton("✉ Lote Pendiente")
             btn_mail_lote.setFixedSize(110, 28)
@@ -4200,6 +4429,7 @@ class DashboardWidget(QWidget):
             return
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             with conn.cursor() as cur:
                 cur.execute(
                     "UPDATE ordenes_servicio SET modalidad = %s WHERE id = ANY(%s)",
@@ -4340,6 +4570,7 @@ class DashboardWidget(QWidget):
         conn = None
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             with conn.cursor() as cur:
 
                 if valid_ids:
@@ -4643,8 +4874,23 @@ class DashboardWidget(QWidget):
             lay.addWidget(btn_cap)
 
         # ── Botón de Estado de Correo y Reenvío ───────────────────────────────
-        email_enviado = bool(row_data[22]) if len(row_data) > 22 and row_data[22] is not None else False
+        email_enviado = bool(
+            (len(row_data) > 22 and bool(row_data[22]))
+            or (len(row_data) > 24 and row_data[24] is not None and str(row_data[24]).strip())
+        )
         correo_cliente = str(row_data[23] or "").strip() if len(row_data) > 23 and row_data[23] is not None else ""
+        fecha_env_row = row_data[24] if len(row_data) > 24 else None
+        cc_env_row = (
+            str(row_data[30] or "").strip()
+            if len(row_data) > 30 and row_data[30] is not None and str(row_data[30]).strip()
+            else "recepcion@basculaspesa.com.mx"
+        )
+        info_mail_btn = formatear_info_envio_correo({
+            "correo_enviado": email_enviado,
+            "correo_destino": correo_cliente,
+            "fecha_envio_correo": fecha_env_row,
+            "correo_cc": cc_env_row,
+        })
 
         if email_enviado:
             btn_mail = QPushButton("✓ Correo Enviado")
@@ -4663,7 +4909,11 @@ class DashboardWidget(QWidget):
                 }
                 QPushButton:hover { background-color: #C8E6C9; }
             """)
-            btn_mail.setToolTip(f"Correo enviado a: {correo_cliente or 'Cliente'}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar)")
+            btn_mail.setToolTip(
+                f"{info_mail_btn}\n(Clic para reenviar)"
+                if info_mail_btn
+                else f"Correo enviado a: {correo_cliente or 'Cliente'}\nCC: {cc_env_row}\n(Clic para reenviar)"
+            )
         else:
             btn_mail = QPushButton("✉ Correo Pendiente")
             btn_mail.setObjectName("btn_action_mail_pending")
@@ -4698,8 +4948,17 @@ class DashboardWidget(QWidget):
 
     def _on_os_email_finished(self, exito: bool, err_msg: str, folio: str, correo_dest: str, btn_widget: "QPushButton | None"):
         """Slot ejecutado en el hilo principal de la GUI al finalizar el envío de una orden individual."""
+        from datetime import datetime
         from PyQt6.QtWidgets import QMessageBox
         if exito:
+            now_mx = datetime.now(obtener_tz_mexico())
+            cc_default = "recepcion@basculaspesa.com.mx"
+            info_vivo = formatear_info_envio_correo({
+                "correo_enviado": True,
+                "correo_destino": correo_dest,
+                "correo_cc": cc_default,
+                "fecha_envio_correo": now_mx,
+            })
             if btn_widget:
                 btn_widget.setEnabled(True)
                 btn_widget.setText("✓ Correo Enviado")
@@ -4715,10 +4974,47 @@ class DashboardWidget(QWidget):
                     }
                     QPushButton:hover { background-color: #C8E6C9; }
                 """)
-                btn_widget.setToolTip(f"Correo enviado a: {correo_dest}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar)")
+                btn_widget.setToolTip(f"{info_vivo}\n(Clic para reenviar)")
+
+            # Actualizar en vivo el Nivel 3 de la celda FOLIO OS (orden individual o hija de lote)
+            folio_norm = str(folio or "").strip().upper()
+            if hasattr(self, "_table") and self._table is not None:
+                for i in range(self._table.topLevelItemCount()):
+                    p_item = self._table.topLevelItem(i)
+                    if not p_item:
+                        continue
+                    p_raw = str(p_item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO) or "").strip().upper()
+                    if p_raw == folio_norm and not bool(p_item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_IS_BATCH)):
+                        self._refrescar_celda_folio_correo_vivo(p_item, info_vivo, is_child=False)
+                        break
+                    if bool(p_item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_IS_BATCH)):
+                        matched_child = False
+                        sent_children = 0
+                        for j in range(p_item.childCount()):
+                            c_item = p_item.child(j)
+                            if not c_item:
+                                continue
+                            c_raw = str(c_item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO) or "").strip().upper()
+                            if c_raw == folio_norm:
+                                self._refrescar_celda_folio_correo_vivo(c_item, info_vivo, is_child=True)
+                                matched_child = True
+                            if str(c_item.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_EMAIL_INFO) or "").strip():
+                                sent_children += 1
+                        if matched_child and sent_children > 0:
+                            tot_c = p_item.childCount()
+                            p_info = (
+                                info_vivo
+                                if sent_children >= tot_c
+                                else info_vivo.replace("✉ Enviado", f"✉ Enviado ({sent_children}/{tot_c} OS)", 1)
+                            )
+                            self._refrescar_celda_folio_correo_vivo(p_item, p_info, is_child=False)
+                        if matched_child:
+                            break
+                self._recalcular_alturas_filas()
+
             QMessageBox.information(
                 self, "Correo Enviado",
-                f"La orden {folio} fue enviada con éxito a:\n{correo_dest}\nCC: recepcion@basculaspesa.com.mx"
+                f"La orden {folio} fue enviada con éxito.\n\n{info_vivo}"
             )
         else:
             if btn_widget:
@@ -4744,8 +5040,17 @@ class DashboardWidget(QWidget):
 
     def _on_lote_email_finished(self, exito: bool, err_msg: str, lote_id: str, correo_dest: str, btn_widget: "QPushButton | None", parent_item: "QTreeWidgetItem | None"):
         """Slot ejecutado en el hilo principal de la GUI al finalizar el envío de un lote."""
+        from datetime import datetime
         from PyQt6.QtWidgets import QMessageBox
         if exito:
+            now_mx = datetime.now(obtener_tz_mexico())
+            cc_default = "recepcion@basculaspesa.com.mx"
+            info_vivo = formatear_info_envio_correo({
+                "correo_enviado": True,
+                "correo_destino": correo_dest,
+                "correo_cc": cc_default,
+                "fecha_envio_correo": now_mx,
+            })
             if btn_widget:
                 btn_widget.setEnabled(True)
                 btn_widget.setText("✓ Lote Enviado")
@@ -4762,12 +5067,15 @@ class DashboardWidget(QWidget):
                     }
                     QPushButton:hover { background-color: #C8E6C9; }
                 """)
-                btn_widget.setToolTip(f"Correo de lote enviado a: {correo_dest}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar lote)")
+                btn_widget.setToolTip(f"{info_vivo}\n(Clic para reenviar lote)")
 
-            # Actualizar visualmente los botones de las órdenes hijas
+            # Actualizar visualmente la cabecera del lote y las órdenes hijas
             if parent_item:
+                self._refrescar_celda_folio_correo_vivo(parent_item, info_vivo, is_child=False)
                 for j in range(parent_item.childCount()):
                     c_item = parent_item.child(j)
+                    if c_item:
+                        self._refrescar_celda_folio_correo_vivo(c_item, info_vivo, is_child=True)
                     w_act = self._table.itemWidget(c_item, self._COL_ACCIONES)
                     if w_act:
                         for btn in w_act.findChildren(QPushButton):
@@ -4786,11 +5094,12 @@ class DashboardWidget(QWidget):
                                     }
                                     QPushButton:hover { background-color: #C8E6C9; }
                                 """)
-                                btn.setToolTip(f"Correo enviado a: {correo_dest}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar)")
+                                btn.setToolTip(f"{info_vivo}\n(Clic para reenviar)")
+                self._recalcular_alturas_filas()
 
             QMessageBox.information(
                 self, "Lote Enviado con Éxito",
-                f"El lote {lote_id} fue enviado por correo correctamente a:\n{correo_dest}\nCC: recepcion@basculaspesa.com.mx"
+                f"El lote {lote_id} fue enviado por correo correctamente.\n\n{info_vivo}"
             )
         else:
             if btn_widget:
@@ -5321,42 +5630,60 @@ class DashboardWidget(QWidget):
         except Exception as exc:
             return False, str(exc)
 
-    def _actualizar_email_db_local_os(self, folio: str, correo: str, enviado: bool):
+    def _actualizar_email_db_local_os(self, folio: str, correo: str, enviado: bool, cc: str = "recepcion@basculaspesa.com.mx"):
         if not _DEPS_OK or not _db_pool:
             return
         try:
+            from datetime import datetime
+            now_mx = datetime.now(obtener_tz_mexico())
+            cc_val = str(cc or "").strip() or "recepcion@basculaspesa.com.mx"
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     UPDATE ordenes_servicio SET
                         correo_cliente = %s,
+                        correo_destino = %s,
+                        correo_cc = %s,
                         email_enviado = %s,
-                        fecha_envio_email = NOW()
+                        correo_enviado = %s,
+                        fecha_envio_email = %s,
+                        fecha_envio_correo = %s,
+                        updated_at = NOW()
                     WHERE folio_os = %s
                     """,
-                    (correo, enviado, folio)
+                    (correo, correo, cc_val, enviado, enviado, now_mx, now_mx, folio)
                 )
             conn.commit()
             _db_pool.release_connection(conn)
         except Exception as e:
             logger.warning("Error actualizando email en BD: %s", e)
 
-    def _actualizar_email_db_local_lote(self, lote_id: str, all_folios: list, correo: str, enviado: bool):
+    def _actualizar_email_db_local_lote(self, lote_id: str, all_folios: list, correo: str, enviado: bool, cc: str = "recepcion@basculaspesa.com.mx"):
         if not _DEPS_OK or not _db_pool:
             return
         try:
+            from datetime import datetime
+            now_mx = datetime.now(obtener_tz_mexico())
+            cc_val = str(cc or "").strip() or "recepcion@basculaspesa.com.mx"
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             with conn.cursor() as cur:
                 cur.execute(
                     """
                     UPDATE ordenes_servicio SET
                         correo_cliente = %s,
+                        correo_destino = %s,
+                        correo_cc = %s,
                         email_enviado = %s,
-                        fecha_envio_email = NOW()
+                        correo_enviado = %s,
+                        fecha_envio_email = %s,
+                        fecha_envio_correo = %s,
+                        updated_at = NOW()
                     WHERE folio_os = ANY(%s) OR id_lote = %s
                     """,
-                    (correo, enviado, all_folios, lote_id)
+                    (correo, correo, cc_val, enviado, enviado, now_mx, now_mx, all_folios, lote_id)
                 )
             conn.commit()
             _db_pool.release_connection(conn)
@@ -5550,6 +5877,7 @@ class DashboardWidget(QWidget):
             return ""
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             id_ind = ""
             with conn.cursor() as cur:
                 cur.execute(
@@ -6534,7 +6862,8 @@ class DashboardWidget(QWidget):
         ]
         conn = None
         try:
-            conn = _db_pool.get_connection()   # API correcta del DatabasePool
+            conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)   # API correcta del DatabasePool
             with conn.cursor() as cur:
                 # Si no tenemos id, buscarlo por folio
                 if _resolved_id is None:
@@ -6909,6 +7238,7 @@ class DashboardWidget(QWidget):
         # 1. Estrategia: Base de datos PostgreSQL central (pdf_b64)
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             try:
                 with conn.cursor() as cur:
                     cur.execute(
@@ -6960,6 +7290,7 @@ class DashboardWidget(QWidget):
         # 3. Estrategia: Adjunto escaneado en BD
         try:
             conn = _db_pool.get_connection()
+            _asegurar_columnas_correo_bd_sync(conn)
             try:
                 with conn.cursor() as cur:
                     cur.execute(

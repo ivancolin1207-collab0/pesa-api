@@ -360,6 +360,9 @@ async def get_ordenes(
     Retorna órdenes de servicio con filtros opcionales tolerantes.
     Filtro flexible y tolerante a mayúsculas/minúsculas y espacios.
     """
+    from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
+    await _ensure_email_columns(db)
+
     query = """
         SELECT DISTINCT ON (os.folio_os)
             os.folio_os,
@@ -418,6 +421,12 @@ async def get_ordenes(
             COALESCE(cs.nombre_sucursal, '') AS sucursal_nombre,
             COALESCE(os.estatus, '') AS estatus,
             COALESCE(os.sync_check_status, 'ASIGNADA') AS sync_check_status,
+            COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS correo_enviado,
+            COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
+            COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_destino,
+            COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_cliente,
+            COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
+            COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
             CASE
                 WHEN os.has_pdf IS TRUE
                   OR UPPER(os.modalidad) = 'FISICO'
@@ -511,6 +520,7 @@ async def get_ordenes(
             d["numero_cca"] = _limpiar_num_reg(d.get("numero_cca"))
             d["numero_dve"] = _limpiar_num_reg(d.get("numero_dve"))
             d["etiqueta_instrumento"] = _construir_etiqueta_instrumento_dict(d)
+            d["fecha_envio_correo"] = formatear_fecha_hora_mexico(d.get("fecha_envio_email")) or None
             d["partidas"] = partidas_list
             d["refacciones"] = partidas_list
             resultado.append(d)

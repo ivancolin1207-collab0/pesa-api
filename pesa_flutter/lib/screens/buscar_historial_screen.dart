@@ -338,6 +338,28 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                                       maxLines: 3,
                                       style: const TextStyle(fontSize: 12, color: Color(0xFF374151), height: 1.3),
                                     ),
+                                    if (formatearInfoEnvioCorreo(os).isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFECFDF5),
+                                          borderRadius: BorderRadius.circular(5),
+                                          border: Border.all(color: const Color(0xFFA7F3D0)),
+                                        ),
+                                        child: Text(
+                                          formatearInfoEnvioCorreo(os),
+                                          softWrap: true,
+                                          style: const TextStyle(
+                                            fontSize: 10.5,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF065F46),
+                                            height: 1.3,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                     const SizedBox(height: 8),
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.end,
