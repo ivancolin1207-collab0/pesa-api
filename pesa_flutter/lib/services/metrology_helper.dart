@@ -289,10 +289,17 @@ const Set<String> _kValoresOmitirEtiqueta = {
   'sin ubicacion',
   'sin ubicación',
   'por definir',
+  'sin cca',
+  'sin dve',
+  'pendiente',
+  'cca.26.xxxx',
+  'dve.26.xxxx',
+  'cca.26.xxxxx',
+  'dve.26.xxxxx',
 };
 
-/// Limpia un número regulatorio (CCA o DVE), descartando valores nulos o prefijos vacíos
-/// como 'CCA.26.' o 'DVE.26.' sin dígitos finales.
+/// Limpia un número regulatorio (CCA o DVE), descartando valores nulos, prefijos vacíos
+/// como 'CCA.26.' / 'DVE.26.' o máscaras placeholder como 'CCA.26.XXXXX'.
 String limpiarNumeroRegulatorio(dynamic rawVal) {
   if (rawVal == null) return '';
   final s = rawVal.toString().trim();
@@ -301,55 +308,102 @@ String limpiarNumeroRegulatorio(dynamic rawVal) {
   if (RegExp(r'^(CCA|DVE)\.\d{2}\.?$', caseSensitive: false).hasMatch(s)) {
     return '';
   }
+  if (RegExp(r'(?:^|[.\-\s])x{2,}(?:$|[.\-\s])', caseSensitive: false).hasMatch(s) ||
+      RegExp(r'\.x+$', caseSensitive: false).hasMatch(s)) {
+    return '';
+  }
   return s;
 }
 
 Map<String, dynamic> _extraerMapaDatosTecnicos(Map<String, dynamic> orden) {
-  final rawDt = orden['datos_tecnicos_json'] ?? orden['datos_captura'];
-  if (rawDt is Map<String, dynamic>) return rawDt;
-  if (rawDt is Map) return Map<String, dynamic>.from(rawDt);
-  if (rawDt is String && rawDt.trim().isNotEmpty) {
-    try {
-      final dec = jsonDecode(rawDt);
-      if (dec is Map) return Map<String, dynamic>.from(dec);
-    } catch (_) {}
+  final extra = <String, dynamic>{};
+  for (final jkey in const [
+    'datos_json',
+    'datos_tecnicos_json',
+    'datos_captura',
+    'payload_json',
+    'mediciones_json',
+    'metrologia_data',
+    'detalle_json',
+    'raw_data',
+  ]) {
+    final rawDt = orden[jkey];
+    if (rawDt is Map<String, dynamic>) {
+      extra.addAll(rawDt);
+    } else if (rawDt is Map) {
+      extra.addAll(Map<String, dynamic>.from(rawDt));
+    } else if (rawDt is String && rawDt.trim().startsWith('{')) {
+      try {
+        final dec = jsonDecode(rawDt);
+        if (dec is Map) {
+          extra.addAll(Map<String, dynamic>.from(dec));
+        }
+      } catch (_) {}
+    }
   }
-  return const {};
+  return extra;
 }
 
-/// Extrae el Número CCA limpio desde la orden o su datos_tecnicos_json.
-String extraerNumeroCca(Map<String, dynamic> orden) {
-  for (final key in ['numero_cca', 'cca', 'folio_cca']) {
-    final clean = limpiarNumeroRegulatorio(orden[key]);
-    if (clean.isNotEmpty) return clean;
+/// Extractor universal de CCA y DVE desde todas las llaves posibles de BD y JSONs anidados:
+/// `(numero_cca, num_cca, cca, no_cca, certificado_cca, folio_cca)` y
+/// `(numero_dve, num_dve, dve, no_dve, dictamen_dve, folio_dve)`.
+(String, String) extraerCcaDve(Map<String, dynamic> orden) {
+  final extra = _extraerMapaDatosTecnicos(orden);
+  final fuente = <String, dynamic>{...extra};
+  orden.forEach((k, v) {
+    if (v != null && v.toString().trim().isNotEmpty) {
+      fuente[k] = v;
+    } else if (!fuente.containsKey(k)) {
+      fuente[k] = v;
+    }
+  });
+
+  String cca = '';
+  for (final key in const [
+    'numero_cca',
+    'num_cca',
+    'cca',
+    'no_cca',
+    'certificado_cca',
+    'folio_cca',
+  ]) {
+    final clean = limpiarNumeroRegulatorio(fuente[key]);
+    if (clean.isNotEmpty) {
+      cca = clean;
+      break;
+    }
   }
-  final dt = _extraerMapaDatosTecnicos(orden);
-  for (final key in ['numero_cca', 'cca', 'folio_cca']) {
-    final clean = limpiarNumeroRegulatorio(dt[key]);
-    if (clean.isNotEmpty) return clean;
+
+  String dve = '';
+  for (final key in const [
+    'numero_dve',
+    'num_dve',
+    'dve',
+    'no_dve',
+    'dictamen_dve',
+    'folio_dve',
+  ]) {
+    final clean = limpiarNumeroRegulatorio(fuente[key]);
+    if (clean.isNotEmpty) {
+      dve = clean;
+      break;
+    }
   }
-  return '';
+  if (dve.isEmpty) {
+    final rawDivVer = fuente['div_verificacion']?.toString().trim() ?? '';
+    if (rawDivVer.toUpperCase().startsWith('DVE')) {
+      dve = limpiarNumeroRegulatorio(rawDivVer);
+    }
+  }
+
+  return (cca, dve);
 }
 
-/// Extrae el Número DVE (Dictamen de Verificación) limpio desde la orden o su datos_tecnicos_json.
-String extraerNumeroDve(Map<String, dynamic> orden) {
-  for (final key in ['numero_dve', 'folio_dve']) {
-    final clean = limpiarNumeroRegulatorio(orden[key]);
-    if (clean.isNotEmpty) return clean;
-  }
-  // Compatibilidad con registros donde folio DVE alfanumérico quedó en div_verificacion
-  final rawDivVer = orden['div_verificacion']?.toString().trim() ?? '';
-  if (rawDivVer.toUpperCase().startsWith('DVE')) {
-    final clean = limpiarNumeroRegulatorio(rawDivVer);
-    if (clean.isNotEmpty) return clean;
-  }
-  final dt = _extraerMapaDatosTecnicos(orden);
-  for (final key in ['numero_dve', 'folio_dve']) {
-    final clean = limpiarNumeroRegulatorio(dt[key]);
-    if (clean.isNotEmpty) return clean;
-  }
-  return '';
-}
+/// Extrae el Número CCA limpio desde la orden o cualquiera de sus JSONs anidados.
+String extraerNumeroCca(Map<String, dynamic> orden) => extraerCcaDve(orden).$1;
+
+/// Extrae el Número DVE (Dictamen de Verificación) limpio desde la orden o cualquiera de sus JSONs anidados.
+String extraerNumeroDve(Map<String, dynamic> orden) => extraerCcaDve(orden).$2;
 
 /// Construye dinámicamente el identificador compuesto del instrumento:
 /// `FOLIO - MARCA - MODELO - SN - ID - UBICACIÓN`
@@ -505,15 +559,160 @@ String formatearLineaCorreoOrden(Map<String, dynamic> orden) {
 
   final cca = (meta['numero_cca'] ?? '').toString().trim();
   if (cca.isNotEmpty && !invalidos.contains(cca.toLowerCase())) {
-    partes.add(cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca');
+    partes.add(cca.toUpperCase().startsWith('CCA') ? cca : 'CCA.$cca');
   }
 
   final dve = (meta['numero_dve'] ?? '').toString().trim();
   if (dve.isNotEmpty && !invalidos.contains(dve.toLowerCase())) {
-    partes.add(dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve');
+    partes.add(dve.toUpperCase().startsWith('DVE') ? dve : 'DVE.$dve');
   }
 
   return partes.join('-');
+}
+
+String _escapeHtml(String s) => s
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+
+/// Construye `(asunto, cuerpoHtml)` con la Tabla HTML Institucional oficial de 7 columnas
+/// (`#`, `Identificador Completo`, `Marca`, `Modelo`, `ID / Equipo`, `CCA`, `DVE`).
+(String, String) armarCorreoInstitucional(
+  List<Map<String, dynamic>> ordenes,
+  String cliente, {
+  bool? esLote,
+}) {
+  final porFolio = <String, Map<String, String>>{};
+  final sinFolio = <Map<String, String>>[];
+
+  for (final o in ordenes) {
+    final meta = extraerMetaCorreoOrden(o);
+    final codigo = formatearLineaCorreoOrden(o);
+    if (codigo.isEmpty) continue;
+    final folio = (meta['folio'] ?? '').toString().trim();
+    final (ccaRaw, dveRaw) = extraerCcaDve(o);
+    final ccaFmt = ccaRaw.isNotEmpty
+        ? (ccaRaw.toUpperCase().startsWith('CCA') ? ccaRaw : 'CCA.$ccaRaw')
+        : '';
+    final dveFmt = dveRaw.isNotEmpty
+        ? (dveRaw.toUpperCase().startsWith('DVE') ? dveRaw : 'DVE.$dveRaw')
+        : '';
+    final item = <String, String>{
+      'folio': folio,
+      'codigo': codigo,
+      'marca': (meta['marca'] ?? '').toString().trim(),
+      'modelo': (meta['modelo'] ?? '').toString().trim(),
+      'id_indicador': (meta['id_indicador'] ?? '').toString().trim(),
+      'cca': ccaFmt,
+      'dve': dveFmt,
+    };
+    if (folio.isEmpty) {
+      sinFolio.add(item);
+    } else {
+      final fk = folio.toUpperCase();
+      if (!porFolio.containsKey(fk) || codigo.length > (porFolio[fk]!['codigo']?.length ?? 0)) {
+        porFolio[fk] = item;
+      }
+    }
+  }
+
+  final filas = <Map<String, String>>[...porFolio.values, ...sinFolio];
+  final codigos = filas.map((f) => f['codigo']!).toList();
+  final clienteLimpio = cliente.replaceAll(RegExp(r'[\r\n]+'), ' ').trim().isEmpty
+      ? 'Cliente'
+      : cliente.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
+  final clienteEsc = _escapeHtml(clienteLimpio);
+  final n = filas.length;
+  final loteFlag = esLote ?? (n > 1);
+
+  final asunto = n == 1
+      ? 'Reporte de Servicio - ${codigos.first} - $clienteLimpio | Básculas PESA'
+      : 'Reporte de Servicio - Lote ($n documentos): ${codigos.join(", ")} - $clienteLimpio | Básculas PESA';
+
+  final introHtml = (n > 1 || loteFlag)
+      ? 'Hacemos entrega de los reportes digitales correspondientes al <strong>Lote de Servicios ($n ${n == 1 ? "orden" : "órdenes"})</strong>:'
+      : 'Hacemos entrega del reporte digital correspondiente al servicio realizado:';
+  final cierreHtml = (n > 1 || loteFlag)
+      ? 'Adjunto a este correo encontrará cada uno de los certificados y reportes en formato PDF con sus respectivas firmas digitales.'
+      : 'Adjunto a este correo encontrará el certificado y reporte en formato PDF con sus respectivas firmas digitales.';
+
+  const thStyle =
+      'border: 1px solid #CBD5E1; padding: 9px 10px; background-color: #F1F5F9; color: #0F172A; font-weight: 700; font-size: 12px; text-align: left;';
+  const tdBase =
+      'border: 1px solid #CBD5E1; padding: 8px 10px; font-size: 12.5px; color: #1E293B; vertical-align: middle;';
+
+  final trBuf = StringBuffer();
+  for (int i = 0; i < filas.length; i++) {
+    final f = filas[i];
+    final idx = i + 1;
+    final bg = idx.isOdd ? '#FFFFFF' : '#F8FAFC';
+    final codEsc = _escapeHtml(f['codigo'] ?? '');
+    final marcaEsc = (f['marca'] ?? '').isNotEmpty ? _escapeHtml(f['marca']!) : '—';
+    final modeloEsc = (f['modelo'] ?? '').isNotEmpty ? _escapeHtml(f['modelo']!) : '—';
+    final idEsc = (f['id_indicador'] ?? '').isNotEmpty ? _escapeHtml(f['id_indicador']!) : '—';
+    final ccaCell = (f['cca'] ?? '').isNotEmpty
+        ? '<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; border:1px solid #C7D2FE; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">${_escapeHtml(f['cca']!)}</span>'
+        : '—';
+    final dveCell = (f['dve'] ?? '').isNotEmpty
+        ? '<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">${_escapeHtml(f['dve']!)}</span>'
+        : '—';
+
+    trBuf.writeln(
+      '<tr style="background-color: $bg;">'
+      '<td style="$tdBase text-align: center; font-weight: 700; width: 36px;">$idx</td>'
+      '<td style="$tdBase font-weight: 700; color: #0B57D0;">$codEsc</td>'
+      '<td style="$tdBase">$marcaEsc</td>'
+      '<td style="$tdBase">$modeloEsc</td>'
+      '<td style="$tdBase">$idEsc</td>'
+      '<td style="$tdBase text-align: center;">$ccaCell</td>'
+      '<td style="$tdBase text-align: center;">$dveCell</td>'
+      '</tr>',
+    );
+  }
+
+  final html = '''
+<html>
+<body style="font-family: Arial, Helvetica, sans-serif; color: #1D1D1F; line-height: 1.5; margin: 0; padding: 12px; background-color: #F8FAFC;">
+  <div style="max-width: 880px; margin: 0 auto; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; border: 1px solid #E2E8F0;">
+    <div style="background-color: #B91C1C; padding: 20px 24px; text-align: left;">
+      <h1 style="color: #FFFFFF; margin: 0; font-size: 23px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
+    </div>
+    <div style="padding: 24px; background-color: #FFFFFF;">
+      <p style="margin-top: 0; font-size: 14.5px;">Estimado cliente <strong>$clienteEsc</strong>,</p>
+      <p style="font-size: 14px; color: #334155;">$introHtml</p>
+      <div style="overflow-x: auto; margin: 18px 0;">
+        <table style="border-collapse: collapse; width: 100%; border: 1px solid #CBD5E1;">
+          <thead>
+            <tr>
+              <th style="$thStyle text-align: center; width: 36px;">#</th>
+              <th style="$thStyle">Identificador Completo</th>
+              <th style="$thStyle">Marca</th>
+              <th style="$thStyle">Modelo</th>
+              <th style="$thStyle">ID / Equipo</th>
+              <th style="$thStyle text-align: center;">CCA</th>
+              <th style="$thStyle text-align: center;">DVE</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${trBuf.toString()}
+          </tbody>
+        </table>
+      </div>
+      <p style="font-size: 14px; color: #334155;">$cierreHtml</p>
+      <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 24px 0;">
+      <p style="font-size: 12px; color: #64748B; margin: 0;">
+        Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
+        Para cualquier aclaración o seguimiento, favor de responder con copia a
+        <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #B91C1C; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+''';
+  return (asunto, html);
 }
 
 /// Convierte cualquier valor de fecha/hora (ISO UTC de Render, ISO con offset o DateTime)

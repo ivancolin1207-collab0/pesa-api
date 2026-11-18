@@ -53,6 +53,7 @@ all_hidden = sorted(list(set(
         'auth',
         'auth.session_context',
         'sync_manager',
+        'utils_metrologia',
         'psycopg2',
         'psycopg2_binary',
         'bcrypt',

@@ -842,8 +842,14 @@ class SyncService extends ChangeNotifier {
         if ((os['ns']                   as String?)?.isNotEmpty == true) 'serie': os['ns'],
         if ((os['ubicacion']            as String?)?.isNotEmpty == true) 'ubicacion': os['ubicacion'],
         if ((os['tipo_instrumento']     as String?)?.isNotEmpty == true) 'tipo_instrumento': os['tipo_instrumento'],
-        if ((os['numero_cca']           as String?)?.isNotEmpty == true) 'numero_cca': os['numero_cca'],
-        if ((os['numero_dve']           as String?)?.isNotEmpty == true) 'numero_dve': os['numero_dve'],
+        if (extraerCcaDve(os).$1.isNotEmpty) ...{
+          'numero_cca': extraerCcaDve(os).$1,
+          'cca': extraerCcaDve(os).$1,
+        },
+        if (extraerCcaDve(os).$2.isNotEmpty) ...{
+          'numero_dve': extraerCcaDve(os).$2,
+          'folio_dve': extraerCcaDve(os).$2,
+        },
         if ((os['motivo_no_excentricidad'] as String?)?.isNotEmpty == true)
           'motivo_no_excentricidad': os['motivo_no_excentricidad'],
         if (os['aplica_excentricidad'] != null)

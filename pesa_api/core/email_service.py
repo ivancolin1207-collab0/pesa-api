@@ -83,6 +83,7 @@ async def _ensure_email_columns(conn) -> None:
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_destino TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cca_dve_pdf_checked BOOLEAN DEFAULT FALSE",
     )
     for stmt in ddl_statements:
         try:
@@ -103,13 +104,77 @@ async def _ensure_email_columns(conn) -> None:
         )
     except Exception:
         pass
+    try:
+        cand_rows = await conn.fetch(
+            """
+            SELECT id, folio_os, datos_tecnicos_json, COALESCE(NULLIF(pdf_b64, ''), NULLIF(pdf_base64, '')) AS b64
+            FROM ordenes_servicio
+            WHERE cca_dve_pdf_checked IS NOT TRUE
+              AND COALESCE(NULLIF(TRIM(numero_cca), ''), '') = ''
+              AND COALESCE(NULLIF(TRIM(numero_dve), ''), '') = ''
+              AND (COALESCE(NULLIF(pdf_b64, ''), NULLIF(pdf_base64, '')) IS NOT NULL)
+            ORDER BY id DESC
+            LIMIT 50
+            """
+        )
+        for cr in cand_rows:
+            cid = cr["id"]
+            b64_raw = cr["b64"]
+            cca_found = ""
+            dve_found = ""
+            try:
+                cca_dt, dve_dt = extraer_cca_dve({"datos_tecnicos_json": cr["datos_tecnicos_json"]})
+                cca_found = cca_dt
+                dve_found = dve_dt
+            except Exception:
+                pass
+            if b64_raw and (not cca_found and not dve_found):
+                try:
+                    pdf_b = base64.b64decode(str(b64_raw).strip())
+                    meta_p = extraer_metadatos_equipo_de_pdf_bytes(pdf_b)
+                    cca_p, dve_p = extraer_cca_dve(meta_p)
+                    cca_found = cca_p or cca_found
+                    dve_found = dve_p or dve_found
+                except Exception:
+                    pass
+            try:
+                await conn.execute(
+                    """
+                    UPDATE ordenes_servicio
+                    SET numero_cca = COALESCE(NULLIF(TRIM(numero_cca), ''), NULLIF($1, '')),
+                        numero_dve = COALESCE(NULLIF(TRIM(numero_dve), ''), NULLIF($2, '')),
+                        cca_dve_pdf_checked = TRUE
+                    WHERE id = $3
+                    """,
+                    cca_found,
+                    dve_found,
+                    cid,
+                )
+            except Exception:
+                pass
+    except Exception:
+        pass
     _email_cols_checked = True
 
 
 _INVALIDOS_CORREO = {
     "", "none", "null", "sin id", "sin modelo", "sin serie", "sin marca",
     "n/a", "na", "--", "-", "s-id", "s/id", "por definir", "sin ubicacion", "sin ubicación",
+    "sin cca", "sin dve", "cca.26.xxxx", "dve.26.xxxx", "cca.26.xxxxx", "dve.26.xxxxx",
 }
+
+
+def _es_placeholder_regulatorio(raw_val: Any) -> bool:
+    s = str(raw_val or "").strip()
+    if not s:
+        return True
+    if s.lower() in _INVALIDOS_CORREO or s.lower() == "pendiente":
+        return True
+    if re.match(r"^(CCA|DVE)\.\d{2}\.?$", s, re.IGNORECASE):
+        return True
+    if re.search(r"(?:^|[.\-\s])x{2,}(?:$|[.\-\s])", s, re.IGNORECASE) or re.search(r"\.x+$", s, re.IGNORECASE):
+        return True
+    return False
 
 
 def _limpiar_val_correo(raw_val: Any, es_regulatorio: bool = False) -> str:
@@ -118,79 +183,118 @@ def _limpiar_val_correo(raw_val: Any, es_regulatorio: bool = False) -> str:
     s = re.sub(r"[\r\n\t]+", " ", str(raw_val)).strip()
     if not s or s.lower() in _INVALIDOS_CORREO:
         return ""
-    if es_regulatorio and re.match(r"^(CCA|DVE)\.\d{2}\.?$", s, re.IGNORECASE):
+    if es_regulatorio and _es_placeholder_regulatorio(s):
         return ""
     return s
 
 
 def _extraer_dt_dict(orden: Dict[str, Any]) -> Dict[str, Any]:
-    raw_dt = orden.get("datos_tecnicos_json") or orden.get("datos_captura")
-    if isinstance(raw_dt, dict):
-        return raw_dt
-    if isinstance(raw_dt, str) and raw_dt.strip():
-        try:
-            parsed = json.loads(raw_dt)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception:
-            pass
-    return {}
+    extra: Dict[str, Any] = {}
+    for jkey in (
+        "datos_json",
+        "datos_tecnicos_json",
+        "datos_captura",
+        "payload_json",
+        "mediciones_json",
+        "metrologia_data",
+        "detalle_json",
+        "raw_data",
+    ):
+        raw_dt = orden.get(jkey)
+        if isinstance(raw_dt, dict):
+            extra.update(raw_dt)
+        elif isinstance(raw_dt, str) and raw_dt.strip().startswith("{"):
+            try:
+                parsed = json.loads(raw_dt)
+                if isinstance(parsed, dict):
+                    extra.update(parsed)
+            except Exception:
+                pass
+    return extra
+
+
+def extraer_cca_dve(orden: dict) -> tuple[str, str]:
+    """
+    Extractor universal de CCA y DVE desde todas las llaves posibles de BD/JSON:
+      numero_cca, num_cca, cca, no_cca, certificado_cca, folio_cca
+      numero_dve, num_dve, dve, no_dve, dictamen_dve, folio_dve
+    incluyendo JSONs anidados (datos_json, datos_tecnicos_json, payload_json, etc.).
+    """
+    if not isinstance(orden, dict):
+        orden = dict(orden) if orden else {}
+    extra = _extraer_dt_dict(orden)
+    fuente = dict(extra)
+    for k_ord, v_ord in orden.items():
+        if v_ord is not None and str(v_ord).strip() != "":
+            fuente[k_ord] = v_ord
+        elif k_ord not in fuente:
+            fuente[k_ord] = v_ord
+
+    cca = ""
+    for k in ("numero_cca", "num_cca", "cca", "no_cca", "certificado_cca", "folio_cca"):
+        val = str(fuente.get(k) or "").strip()
+        if val and not _es_placeholder_regulatorio(val):
+            cca = val
+            break
+
+    dve = ""
+    for k in ("numero_dve", "num_dve", "dve", "no_dve", "dictamen_dve", "folio_dve"):
+        val = str(fuente.get(k) or "").strip()
+        if val and not _es_placeholder_regulatorio(val):
+            dve = val
+            break
+
+    if not dve:
+        div_ver = str(fuente.get("div_verificacion") or "").strip()
+        if div_ver and div_ver.upper().startswith("DVE") and not _es_placeholder_regulatorio(div_ver):
+            dve = div_ver
+
+    return cca, dve
+
+
+def _extraer_campos_tabla_correo(orden: dict) -> Dict[str, str]:
+    if not isinstance(orden, dict):
+        orden = dict(orden) if orden else {}
+    dt = _extraer_dt_dict(orden)
+
+    def _obtener(claves: tuple[str, ...]) -> str:
+        for k in claves:
+            v = _limpiar_val_correo(orden.get(k))
+            if v:
+                return v
+        for k in claves:
+            v = _limpiar_val_correo(dt.get(k))
+            if v:
+                return v
+        return ""
+
+    folio = _limpiar_val_correo(orden.get("folio") or orden.get("folio_os") or dt.get("folio_os") or dt.get("folio"))
+    marca = _obtener(("marca", "equipo_marca", "indicador_marca"))
+    modelo = _obtener(("modelo", "equipo_modelo", "indicador_modelo"))
+    id_ind = _obtener(("id_indicador", "id_equipo", "indicador_id", "no_identificacion", "id_interno", "tag"))
+
+    cca_raw, dve_raw = extraer_cca_dve(orden)
+    cca_fmt = (cca_raw if cca_raw.upper().startswith("CCA") else f"CCA.{cca_raw}") if cca_raw else ""
+    dve_fmt = (dve_raw if dve_raw.upper().startswith("DVE") else f"DVE.{dve_raw}") if dve_raw else ""
+
+    partes = [p for p in (folio, marca, modelo, id_ind, cca_fmt, dve_fmt) if p]
+    return {
+        "folio": folio,
+        "marca": marca,
+        "modelo": modelo,
+        "id_indicador": id_ind,
+        "cca": cca_fmt,
+        "dve": dve_fmt,
+        "codigo": "-".join(partes),
+    }
 
 
 def formatear_linea_correo_orden(orden: dict) -> str:
     """
-    Construye la etiqueta dinámica de equipo para Asunto y Cuerpo de correo:
+    Construye el identificador dinámico de equipo para Asunto y Tabla HTML:
       FOLIO-MARCA-MODELO-ID-CCA-DVE
-    Omitiendo cualquier campo vacío o placeholder ('sin id', 'sin modelo', etc.).
     """
-    if not isinstance(orden, dict):
-        orden = dict(orden) if orden else {}
-
-    invalidos = {'', 'none', 'null', 'sin id', 'sin modelo', 'sin serie', 'sin marca', 'n/a', 'na'}
-    dt = _extraer_dt_dict(orden)
-
-    def _obtener(claves: tuple[str, ...], es_reg: bool = False) -> str:
-        for k in claves:
-            v = _limpiar_val_correo(orden.get(k), es_regulatorio=es_reg)
-            if v and v.lower() not in invalidos:
-                return v
-        for k in claves:
-            v = _limpiar_val_correo(dt.get(k), es_regulatorio=es_reg)
-            if v and v.lower() not in invalidos:
-                return v
-        return ""
-
-    partes: List[str] = []
-
-    folio = _limpiar_val_correo(orden.get("folio") or orden.get("folio_os"))
-    if folio:
-        partes.append(folio)
-
-    marca = _obtener(("marca", "equipo_marca", "indicador_marca"))
-    if marca:
-        partes.append(marca)
-
-    modelo = _obtener(("modelo", "equipo_modelo", "indicador_modelo"))
-    if modelo:
-        partes.append(modelo)
-
-    id_ind = _obtener(("id_indicador", "id_equipo", "indicador_id", "no_identificacion", "id_interno", "tag"))
-    if id_ind:
-        partes.append(id_ind)
-
-    cca = _obtener(("numero_cca", "cca", "folio_cca"), es_reg=True)
-    if cca:
-        partes.append(cca if cca.upper().startswith("CCA") else f"CCA {cca}")
-
-    dve = _obtener(("numero_dve", "folio_dve"), es_reg=True)
-    if not dve:
-        div_ver = _limpiar_val_correo(orden.get("div_verificacion") or dt.get("div_verificacion"), es_regulatorio=True)
-        if div_ver and div_ver.upper().startswith("DVE"):
-            dve = div_ver
-    if dve:
-        partes.append(dve if dve.upper().startswith("DVE") else f"DVE {dve}")
-
-    return "-".join(partes)
+    return _extraer_campos_tabla_correo(orden)["codigo"]
 
 
 def _clave_orden_folio(folio_str: str):
@@ -199,20 +303,51 @@ def _clave_orden_folio(folio_str: str):
     return [int(p) if p.isdigit() else p for p in partes]
 
 
+def armar_correo_institucional(
+    ordenes: List[Dict[str, Any]],
+    cliente: str,
+    es_lote: Optional[bool] = None,
+) -> tuple[str, str]:
+    """
+    Constructor único institucional de Asunto y Cuerpo HTML con Tabla Oficial (1 a N órdenes).
+    """
+    asunto, cuerpo_html, _, _ = construir_asunto_y_cuerpo_correo(
+        ordenes,
+        cliente,
+        es_lote=bool(es_lote) if es_lote is not None else (len(ordenes or []) > 1),
+    )
+    return asunto, cuerpo_html
+
+
 def construir_asunto_y_cuerpo_correo(
     ordenes_lote: List[Dict[str, Any]],
     cliente: str,
     es_lote: bool = False,
 ) -> tuple[str, str, str, List[str]]:
     """
-    Genera de forma homologada (asunto, cuerpo_html, cuerpo_texto, etiquetas)
-    tanto para órdenes individuales (1 documento) como para lotes de 1..N documentos.
+    Genera de forma homologada (asunto, cuerpo_html, cuerpo_texto, etiquetas) con la
+    Tabla HTML Institucional oficial de 7 columnas (#, Identificador Completo, Marca,
+    Modelo, ID / Equipo, CCA, DVE) para 1 hasta N órdenes.
     """
-    etiquetas = [formatear_linea_correo_orden(o) for o in ordenes_lote if o]
-    etiquetas = [e for e in etiquetas if e]
+    import html as _html
+
+    filas_raw = [_extraer_campos_tabla_correo(o) for o in (ordenes_lote or []) if o]
+    filas_por_folio: Dict[str, Dict[str, str]] = {}
+    filas_sin_folio: List[Dict[str, str]] = []
+    for f in filas_raw:
+        if not f["codigo"]:
+            continue
+        fk = f["folio"].upper() if f["folio"] else ""
+        if not fk:
+            filas_sin_folio.append(f)
+        elif fk not in filas_por_folio or len(f["codigo"]) > len(filas_por_folio[fk]["codigo"]):
+            filas_por_folio[fk] = f
+    filas_datos = list(filas_por_folio.values()) + filas_sin_folio
+    etiquetas = [f["codigo"] for f in filas_datos]
 
     cliente_limpio = re.sub(r"[\r\n]+", " ", str(cliente or "Cliente")).strip() or "Cliente"
-    n = len(etiquetas)
+    cliente_esc = _html.escape(cliente_limpio)
+    n = len(filas_datos)
 
     if n == 1:
         asunto = f"Reporte de Servicio - {etiquetas[0]} - {cliente_limpio} | Básculas PESA"
@@ -237,14 +372,63 @@ def construir_asunto_y_cuerpo_correo(
             "con sus respectivas firmas digitales."
         )
 
-    lineas_html = "<br>\n                                ".join(etiquetas)
-    lineas_txt = "\n".join(etiquetas)
+    th_style = (
+        "border: 1px solid #CBD5E1; padding: 9px 10px; background-color: #F1F5F9; "
+        "color: #0F172A; font-weight: 700; font-size: 12px; text-align: left;"
+    )
+    td_base = "border: 1px solid #CBD5E1; padding: 8px 10px; font-size: 12.5px; color: #1E293B; vertical-align: middle;"
+
+    tr_html_list: List[str] = []
+    lineas_txt_list: List[str] = []
+    for idx, f in enumerate(filas_datos, start=1):
+        bg = "#FFFFFF" if idx % 2 == 1 else "#F8FAFC"
+        cod_esc = _html.escape(f["codigo"])
+        marca_esc = _html.escape(f["marca"]) if f["marca"] else "—"
+        modelo_esc = _html.escape(f["modelo"]) if f["modelo"] else "—"
+        id_esc = _html.escape(f["id_indicador"]) if f["id_indicador"] else "—"
+
+        if f["cca"]:
+            cca_cell = (
+                f'<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; '
+                f'border:1px solid #C7D2FE; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">'
+                f'{_html.escape(f["cca"])}</span>'
+            )
+        else:
+            cca_cell = "—"
+
+        if f["dve"]:
+            dve_cell = (
+                f'<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; '
+                f'border:1px solid #A7F3D0; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">'
+                f'{_html.escape(f["dve"])}</span>'
+            )
+        else:
+            dve_cell = "—"
+
+        tr_html_list.append(
+            f'<tr style="background-color: {bg};">'
+            f'<td style="{td_base} text-align: center; font-weight: 700; width: 36px;">{idx}</td>'
+            f'<td style="{td_base} font-weight: 700; color: #0B57D0;">{cod_esc}</td>'
+            f'<td style="{td_base}">{marca_esc}</td>'
+            f'<td style="{td_base}">{modelo_esc}</td>'
+            f'<td style="{td_base}">{id_esc}</td>'
+            f'<td style="{td_base} text-align: center;">{cca_cell}</td>'
+            f'<td style="{td_base} text-align: center;">{dve_cell}</td>'
+            f'</tr>'
+        )
+        lineas_txt_list.append(
+            f"{idx}. {f['codigo']} | Marca: {f['marca'] or '—'} | Modelo: {f['modelo'] or '—'} "
+            f"| ID: {f['id_indicador'] or '—'} | CCA: {f['cca'] or '—'} | DVE: {f['dve'] or '—'}"
+        )
+
+    filas_tabla_html = "\n                                    ".join(tr_html_list)
+    lineas_txt = "\n".join(lineas_txt_list)
 
     cuerpo_texto = f"""Estimado cliente ({cliente_limpio}):
 
 Hacemos entrega de los reportes digitales correspondientes ({n} {'documento' if n == 1 else 'documentos'}):
 
-Folios procesados:
+Documentos procesados:
 {lineas_txt}
 
 Los documentos se encuentran certificados con sus respectivas firmas digitales.
@@ -256,25 +440,40 @@ recepcion@basculaspesa.com.mx
 
     cuerpo_html = f"""
                 <html>
-                <body style="font-family: Arial, sans-serif; color: #1D1D1F; line-height: 1.5;">
-                    <div style="background-color: #B71C1C; padding: 20px; text-align: left; border-radius: 8px 8px 0 0;">
-                        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Básculas PESA</h1>
-                    </div>
-                    <div style="padding: 24px; border: 1px solid #E5E5EA; border-top: none; border-radius: 0 0 8px 8px; background-color: #FFFFFF;">
-                        <p>Estimado cliente <strong>{cliente_limpio}</strong>,</p>
-                        <p>{intro_html}</p>
-                        <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px 16px; border-radius: 6px; margin: 16px 0;">
-                            <strong>Folios procesados:</strong>
-                            <div style="font-weight:bold; color:#0B57D0; line-height:1.6;">
-                                {lineas_html}
-                            </div>
+                <body style="font-family: Arial, Helvetica, sans-serif; color: #1D1D1F; line-height: 1.5; margin: 0; padding: 12px; background-color: #F8FAFC;">
+                    <div style="max-width: 880px; margin: 0 auto; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; border: 1px solid #E2E8F0;">
+                        <div style="background-color: #B91C1C; padding: 20px 24px; text-align: left;">
+                            <h1 style="color: #FFFFFF; margin: 0; font-size: 23px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
                         </div>
-                        <p>{cierre_html}</p>
-                        <hr style="border: none; border-top: 1px solid #E5E5EA; margin: 24px 0;">
-                        <p style="font-size: 12px; color: #64748B; margin: 0;">
-                            Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
-                            Para cualquier aclaración o seguimiento, favor de responder con copia a <a href="mailto:recepcion@basculaspesa.com.mx">recepcion@basculaspesa.com.mx</a>.
-                        </p>
+                        <div style="padding: 24px; background-color: #FFFFFF;">
+                            <p style="margin-top: 0; font-size: 14.5px;">Estimado cliente <strong>{cliente_esc}</strong>,</p>
+                            <p style="font-size: 14px; color: #334155;">{intro_html}</p>
+                            <div style="overflow-x: auto; margin: 18px 0;">
+                                <table style="border-collapse: collapse; width: 100%; border: 1px solid #CBD5E1;">
+                                    <thead>
+                                        <tr>
+                                            <th style="{th_style} text-align: center; width: 36px;">#</th>
+                                            <th style="{th_style}">Identificador Completo</th>
+                                            <th style="{th_style}">Marca</th>
+                                            <th style="{th_style}">Modelo</th>
+                                            <th style="{th_style}">ID / Equipo</th>
+                                            <th style="{th_style} text-align: center;">CCA</th>
+                                            <th style="{th_style} text-align: center;">DVE</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filas_tabla_html}
+                                    </tbody>
+                                </table>
+                            </div>
+                            <p style="font-size: 14px; color: #334155;">{cierre_html}</p>
+                            <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 24px 0;">
+                            <p style="font-size: 12px; color: #64748B; margin: 0;">
+                                Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
+                                Para cualquier aclaración o seguimiento, favor de responder con copia a
+                                <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #B91C1C; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.
+                            </p>
+                        </div>
                     </div>
                 </body>
                 </html>
@@ -363,10 +562,14 @@ def _cargar_pdf_bytes(r, folio: str) -> Optional[bytes]:
         except Exception:
             content_pdf = None
     if not content_pdf:
-        try:
-            b64 = r["pdf_b64"]
-        except Exception:
-            b64 = None
+        b64 = None
+        for bkey in ("pdf_b64", "pdf_base64"):
+            try:
+                if r[bkey]:
+                    b64 = r[bkey]
+                    break
+            except Exception:
+                pass
         if b64:
             try:
                 content_pdf = base64.b64decode(b64.strip())
@@ -581,14 +784,16 @@ def _consolidar_orden_correo(orden_row: Dict[str, Any], content_pdf: Optional[by
         return ""
 
     folio_real = _limpiar_val_correo(base.get("folio_os") or base.get("folio") or folio_fallback)
+    cca_bd, dve_bd = extraer_cca_dve(base)
+    cca_pdf, dve_pdf = extraer_cca_dve(meta_pdf)
     return {
         "folio": folio_real,
         "folio_os": folio_real,
         "marca": _pick(("marca", "equipo_marca", "indicador_marca"), "marca"),
         "modelo": _pick(("modelo", "equipo_modelo", "indicador_modelo"), "modelo"),
         "id_indicador": _pick(("id_indicador", "id_equipo", "indicador_id", "no_identificacion", "id_interno", "tag"), "id_indicador"),
-        "numero_cca": _pick(("numero_cca", "cca", "folio_cca"), "numero_cca", es_reg=True),
-        "numero_dve": _pick(("numero_dve", "folio_dve"), "numero_dve", es_reg=True),
+        "numero_cca": cca_pdf or cca_bd,
+        "numero_dve": dve_pdf or dve_bd,
         "datos_tecnicos_json": dt,
     }
 
