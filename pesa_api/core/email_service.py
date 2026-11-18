@@ -84,6 +84,7 @@ async def _ensure_email_columns(conn) -> None:
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cca_dve_pdf_checked BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE cliente_sucursales ADD COLUMN IF NOT EXISTS email TEXT",
     )
     for stmt in ddl_statements:
         try:
@@ -91,15 +92,66 @@ async def _ensure_email_columns(conn) -> None:
         except Exception:
             pass
     try:
+        # 1. Limpiar valores genéricos inválidos ('Cliente', 'Sin registrar')
         await conn.execute(
             """
             UPDATE ordenes_servicio
+            SET correo_destino = NULL
+            WHERE LOWER(TRIM(COALESCE(correo_destino, ''))) IN ('cliente', 'sin registrar', 'destinatario registrado', 'none', 'null')
+            """
+        )
+        await conn.execute(
+            """
+            UPDATE ordenes_servicio
+            SET correo_cliente = NULL
+            WHERE LOWER(TRIM(COALESCE(correo_cliente, ''))) IN ('cliente', 'sin registrar', 'destinatario registrado', 'none', 'null')
+            """
+        )
+        # 2. Propagar correos reales ya registrados en órdenes hacia cat_clientes.email si está vacío
+        await conn.execute(
+            """
+            UPDATE cat_clientes cl
+            SET email = sub.correo_real
+            FROM (
+                SELECT DISTINCT ON (id_cliente)
+                    id_cliente,
+                    COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) AS correo_real
+                FROM ordenes_servicio
+                WHERE id_cliente IS NOT NULL
+                  AND COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+                ORDER BY id_cliente, fecha_envio_correo DESC NULLS LAST, updated_at DESC NULLS LAST
+            ) sub
+            WHERE cl.id = sub.id_cliente
+              AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
+            """
+        )
+        # 3. Rellenar correo_destino y correo_cliente reales en órdenes enviadas cruzando con sucursal / cliente / hermanas
+        await conn.execute(
+            """
+            UPDATE ordenes_servicio os
             SET correo_enviado     = TRUE,
-                correo_destino     = COALESCE(NULLIF(correo_destino, ''), NULLIF(correo_cliente, '')),
-                correo_cc          = COALESCE(NULLIF(correo_cc, ''), 'recepcion@basculaspesa.com.mx'),
-                fecha_envio_correo = COALESCE(fecha_envio_correo, fecha_envio_email)
-            WHERE email_enviado = TRUE
-              AND (correo_enviado IS NOT TRUE OR correo_destino IS NULL OR fecha_envio_correo IS NULL)
+                correo_destino     = COALESCE(
+                    NULLIF(TRIM(os.correo_destino), ''),
+                    NULLIF(TRIM(os.correo_cliente), ''),
+                    (SELECT NULLIF(TRIM(s.email), '') FROM cliente_sucursales s WHERE s.id = os.sucursal_id AND s.email LIKE '%@%' LIMIT 1),
+                    (SELECT NULLIF(TRIM(c.email), '') FROM cat_clientes c WHERE c.id = os.id_cliente AND c.email LIKE '%@%' LIMIT 1),
+                    (SELECT COALESCE(NULLIF(TRIM(o2.correo_destino), ''), NULLIF(TRIM(o2.correo_cliente), ''))
+                     FROM ordenes_servicio o2
+                     WHERE o2.id_cliente = os.id_cliente
+                       AND COALESCE(NULLIF(TRIM(o2.correo_destino), ''), NULLIF(TRIM(o2.correo_cliente), '')) LIKE '%@%'
+                     ORDER BY o2.fecha_envio_correo DESC NULLS LAST, o2.updated_at DESC NULLS LAST LIMIT 1)
+                ),
+                correo_cc          = COALESCE(NULLIF(TRIM(os.correo_cc), ''), 'recepcion@basculaspesa.com.mx'),
+                fecha_envio_correo = COALESCE(os.fecha_envio_correo, os.fecha_envio_email)
+            WHERE COALESCE(os.correo_enviado, os.email_enviado, FALSE) = TRUE
+            """
+        )
+        await conn.execute(
+            """
+            UPDATE ordenes_servicio
+            SET correo_cliente = correo_destino
+            WHERE correo_destino IS NOT NULL AND correo_destino LIKE '%@%'
+              AND (correo_cliente IS NULL OR TRIM(correo_cliente) = '')
             """
         )
     except Exception:
@@ -319,15 +371,35 @@ def armar_correo_institucional(
     return asunto, cuerpo_html
 
 
+def _nombre_tipo_documento_correo(folios: List[str]) -> str:
+    f0 = (folios[0] if folios else "").strip().upper()
+    if f0.startswith("OSOCC-"):
+        return "Diagnóstico de Celda de Carga"
+    if f0.startswith("OSOB-"):
+        return "Inspección de Báscula"
+    if f0.startswith("RMA-"):
+        return "Remisión de Material"
+    if f0.startswith("RE-"):
+        return "Revisión de Báscula"
+    if f0.startswith("LP-"):
+        return "Levantamiento de Proyecto"
+    if f0.startswith("LV-"):
+        return "Levantamiento Metrológico"
+    return "Orden de Servicio"
+
+
 def construir_asunto_y_cuerpo_correo(
     ordenes_lote: List[Dict[str, Any]],
     cliente: str,
     es_lote: bool = False,
 ) -> tuple[str, str, str, List[str]]:
     """
-    Genera de forma homologada (asunto, cuerpo_html, cuerpo_texto, etiquetas) con la
-    Tabla HTML Institucional oficial de 7 columnas (#, Identificador Completo, Marca,
-    Modelo, ID / Equipo, CCA, DVE) para 1 hasta N órdenes.
+    Genera (asunto, cuerpo_html, cuerpo_texto, folios) con:
+      - Asunto:
+          * 1 doc: '{Tipo} {folios[0]} - {cliente} | Básculas PESA'
+          * Lote:  '{Tipo} {folios[0]} a {folios[-1]} - {cliente} | Básculas PESA'
+      - Tabla HTML dinámica (#, ID [solo folio], Marca, Modelo, ID / Equipo, y CCA/DVE solo si existen;
+        celdas vacías '' sin guiones '-' ni '—').
     """
     import html as _html
 
@@ -335,28 +407,34 @@ def construir_asunto_y_cuerpo_correo(
     filas_por_folio: Dict[str, Dict[str, str]] = {}
     filas_sin_folio: List[Dict[str, str]] = []
     for f in filas_raw:
-        if not f["codigo"]:
+        if not f["folio"] and not f["codigo"]:
             continue
         fk = f["folio"].upper() if f["folio"] else ""
         if not fk:
             filas_sin_folio.append(f)
         elif fk not in filas_por_folio or len(f["codigo"]) > len(filas_por_folio[fk]["codigo"]):
             filas_por_folio[fk] = f
-    filas_datos = list(filas_por_folio.values()) + filas_sin_folio
-    etiquetas = [f["codigo"] for f in filas_datos]
+
+    filas_ordenadas = sorted(filas_por_folio.values(), key=lambda d: _clave_orden_folio(d.get("folio") or "")) + filas_sin_folio
+    folios = [f["folio"] for f in filas_ordenadas if f["folio"]]
 
     cliente_limpio = re.sub(r"[\r\n]+", " ", str(cliente or "Cliente")).strip() or "Cliente"
     cliente_esc = _html.escape(cliente_limpio)
-    n = len(filas_datos)
+    n = len(filas_ordenadas)
+    tipo_titulo = _nombre_tipo_documento_correo(folios)
 
-    if n == 1:
-        asunto = f"Reporte de Servicio - {etiquetas[0]} - {cliente_limpio} | Básculas PESA"
+    if len(folios) == 1:
+        asunto = f"{tipo_titulo} {folios[0]} - {cliente_limpio} | Básculas PESA"
+    elif len(folios) >= 2:
+        asunto = f"{tipo_titulo} {folios[0]} a {folios[-1]} - {cliente_limpio} | Básculas PESA"
     else:
-        lista_asunto = ", ".join(etiquetas)
-        asunto = f"Reporte de Servicio - Lote ({n} documentos): {lista_asunto} - {cliente_limpio} | Básculas PESA"
+        asunto = f"{tipo_titulo} - {cliente_limpio} | Básculas PESA"
+
+    tiene_cca = any(bool(f["cca"]) for f in filas_ordenadas)
+    tiene_dve = any(bool(f["dve"]) for f in filas_ordenadas)
 
     if n > 1 or es_lote:
-        txt_ordenes = "orden" if n == 1 else "órdenes"
+        txt_ordenes = "documento" if n == 1 else "documentos"
         intro_html = (
             f"Hacemos entrega de los reportes digitales correspondientes al "
             f"<strong>Lote de Servicios ({n} {txt_ordenes})</strong>:"
@@ -373,62 +451,84 @@ def construir_asunto_y_cuerpo_correo(
         )
 
     th_style = (
-        "border: 1px solid #CBD5E1; padding: 9px 10px; background-color: #F1F5F9; "
+        "border: 1px solid #E2E8F0; padding: 10px 12px; background-color: #F8FAFC; "
         "color: #0F172A; font-weight: 700; font-size: 12px; text-align: left;"
     )
-    td_base = "border: 1px solid #CBD5E1; padding: 8px 10px; font-size: 12.5px; color: #1E293B; vertical-align: middle;"
+    td_base = "border: 1px solid #E2E8F0; padding: 9px 12px; font-size: 13px; color: #0F172A; vertical-align: middle;"
+
+    headers_html = [
+        f'<th style="{th_style} text-align: center; width: 38px;">#</th>',
+        f'<th style="{th_style}">ID</th>',
+        f'<th style="{th_style}">Marca</th>',
+        f'<th style="{th_style}">Modelo</th>',
+        f'<th style="{th_style}">ID / Equipo</th>',
+    ]
+    if tiene_cca:
+        headers_html.append(f'<th style="{th_style} text-align: center;">CCA</th>')
+    if tiene_dve:
+        headers_html.append(f'<th style="{th_style} text-align: center;">DVE</th>')
+    thead_cols_str = "\n                                            ".join(headers_html)
 
     tr_html_list: List[str] = []
     lineas_txt_list: List[str] = []
-    for idx, f in enumerate(filas_datos, start=1):
+    for idx, f in enumerate(filas_ordenadas, start=1):
         bg = "#FFFFFF" if idx % 2 == 1 else "#F8FAFC"
-        cod_esc = _html.escape(f["codigo"])
-        marca_esc = _html.escape(f["marca"]) if f["marca"] else "—"
-        modelo_esc = _html.escape(f["modelo"]) if f["modelo"] else "—"
-        id_esc = _html.escape(f["id_indicador"]) if f["id_indicador"] else "—"
+        folio_esc = _html.escape(f["folio"]) if f["folio"] else ""
+        marca_esc = _html.escape(f["marca"]) if f["marca"] else ""
+        modelo_esc = _html.escape(f["modelo"]) if f["modelo"] else ""
+        id_esc = _html.escape(f["id_indicador"]) if f["id_indicador"] else ""
 
-        if f["cca"]:
-            cca_cell = (
-                f'<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; '
-                f'border:1px solid #C7D2FE; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">'
-                f'{_html.escape(f["cca"])}</span>'
-            )
-        else:
-            cca_cell = "—"
+        celdas_fila = [
+            f'<td style="{td_base} text-align: center; font-weight: 600; color: #475569; width: 38px;">{idx}</td>',
+            f'<td style="{td_base} font-weight: 700; color: #C8102E; white-space: nowrap;">{folio_esc}</td>',
+            f'<td style="{td_base}">{marca_esc}</td>',
+            f'<td style="{td_base}">{modelo_esc}</td>',
+            f'<td style="{td_base}">{id_esc}</td>',
+        ]
+        if tiene_cca:
+            if f["cca"]:
+                cca_cell = (
+                    f'<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; '
+                    f'border:1px solid #C7D2FE; border-radius:4px; padding:2px 7px; font-weight:700; font-size:11.5px;">'
+                    f'{_html.escape(f["cca"])}</span>'
+                )
+            else:
+                cca_cell = ""
+            celdas_fila.append(f'<td style="{td_base} text-align: center;">{cca_cell}</td>')
 
-        if f["dve"]:
-            dve_cell = (
-                f'<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; '
-                f'border:1px solid #A7F3D0; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">'
-                f'{_html.escape(f["dve"])}</span>'
-            )
-        else:
-            dve_cell = "—"
+        if tiene_dve:
+            if f["dve"]:
+                dve_cell = (
+                    f'<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; '
+                    f'border:1px solid #A7F3D0; border-radius:4px; padding:2px 7px; font-weight:700; font-size:11.5px;">'
+                    f'{_html.escape(f["dve"])}</span>'
+                )
+            else:
+                dve_cell = ""
+            celdas_fila.append(f'<td style="{td_base} text-align: center;">{dve_cell}</td>')
 
-        tr_html_list.append(
-            f'<tr style="background-color: {bg};">'
-            f'<td style="{td_base} text-align: center; font-weight: 700; width: 36px;">{idx}</td>'
-            f'<td style="{td_base} font-weight: 700; color: #0B57D0;">{cod_esc}</td>'
-            f'<td style="{td_base}">{marca_esc}</td>'
-            f'<td style="{td_base}">{modelo_esc}</td>'
-            f'<td style="{td_base}">{id_esc}</td>'
-            f'<td style="{td_base} text-align: center;">{cca_cell}</td>'
-            f'<td style="{td_base} text-align: center;">{dve_cell}</td>'
-            f'</tr>'
-        )
-        lineas_txt_list.append(
-            f"{idx}. {f['codigo']} | Marca: {f['marca'] or '—'} | Modelo: {f['modelo'] or '—'} "
-            f"| ID: {f['id_indicador'] or '—'} | CCA: {f['cca'] or '—'} | DVE: {f['dve'] or '—'}"
-        )
+        tr_html_list.append(f'<tr style="background-color: {bg};">' + "".join(celdas_fila) + "</tr>")
 
-    filas_tabla_html = "\n                                    ".join(tr_html_list)
+        partes_txt = [f"{idx}. {f['folio']}"]
+        if f["marca"]:
+            partes_txt.append(f"Marca: {f['marca']}")
+        if f["modelo"]:
+            partes_txt.append(f"Modelo: {f['modelo']}")
+        if f["id_indicador"]:
+            partes_txt.append(f"ID / Equipo: {f['id_indicador']}")
+        if tiene_cca and f["cca"]:
+            partes_txt.append(f"CCA: {f['cca']}")
+        if tiene_dve and f["dve"]:
+            partes_txt.append(f"DVE: {f['dve']}")
+        lineas_txt_list.append(" | ".join(partes_txt))
+
+    filas_tabla_html = "\n                                        ".join(tr_html_list)
     lineas_txt = "\n".join(lineas_txt_list)
 
     cuerpo_texto = f"""Estimado cliente ({cliente_limpio}):
 
 Hacemos entrega de los reportes digitales correspondientes ({n} {'documento' if n == 1 else 'documentos'}):
 
-Documentos procesados:
 {lineas_txt}
 
 Los documentos se encuentran certificados con sus respectivas firmas digitales.
@@ -440,25 +540,19 @@ recepcion@basculaspesa.com.mx
 
     cuerpo_html = f"""
                 <html>
-                <body style="font-family: Arial, Helvetica, sans-serif; color: #1D1D1F; line-height: 1.5; margin: 0; padding: 12px; background-color: #F8FAFC;">
+                <body style="font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #0F172A; line-height: 1.55; margin: 0; padding: 16px; background-color: #F8FAFC;">
                     <div style="max-width: 880px; margin: 0 auto; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; border: 1px solid #E2E8F0;">
-                        <div style="background-color: #B91C1C; padding: 20px 24px; text-align: left;">
-                            <h1 style="color: #FFFFFF; margin: 0; font-size: 23px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
+                        <div style="background-color: #C8102E; padding: 20px 24px; text-align: left;">
+                            <h1 style="color: #FFFFFF; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
                         </div>
                         <div style="padding: 24px; background-color: #FFFFFF;">
-                            <p style="margin-top: 0; font-size: 14.5px;">Estimado cliente <strong>{cliente_esc}</strong>,</p>
-                            <p style="font-size: 14px; color: #334155;">{intro_html}</p>
+                            <p style="margin-top: 0; font-size: 14.5px; color: #0F172A;">Estimado cliente <strong>{cliente_esc}</strong>,</p>
+                            <p style="font-size: 14px; color: #475569;">{intro_html}</p>
                             <div style="overflow-x: auto; margin: 18px 0;">
-                                <table style="border-collapse: collapse; width: 100%; border: 1px solid #CBD5E1;">
+                                <table style="border-collapse: collapse; width: 100%; border: 1px solid #E2E8F0;">
                                     <thead>
                                         <tr>
-                                            <th style="{th_style} text-align: center; width: 36px;">#</th>
-                                            <th style="{th_style}">Identificador Completo</th>
-                                            <th style="{th_style}">Marca</th>
-                                            <th style="{th_style}">Modelo</th>
-                                            <th style="{th_style}">ID / Equipo</th>
-                                            <th style="{th_style} text-align: center;">CCA</th>
-                                            <th style="{th_style} text-align: center;">DVE</th>
+                                            {thead_cols_str}
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -466,19 +560,19 @@ recepcion@basculaspesa.com.mx
                                     </tbody>
                                 </table>
                             </div>
-                            <p style="font-size: 14px; color: #334155;">{cierre_html}</p>
+                            <p style="font-size: 14px; color: #475569;">{cierre_html}</p>
                             <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 24px 0;">
-                            <p style="font-size: 12px; color: #64748B; margin: 0;">
+                            <p style="font-size: 12px; color: #475569; margin: 0;">
                                 Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
                                 Para cualquier aclaración o seguimiento, favor de responder con copia a
-                                <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #B91C1C; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.
+                                <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #C8102E; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.
                             </p>
                         </div>
                     </div>
                 </body>
                 </html>
                 """
-    return asunto, cuerpo_html, cuerpo_texto, etiquetas
+    return asunto, cuerpo_html, cuerpo_texto, folios
 
 
 _ESTATUS_FINALIZADOS = {
@@ -1118,13 +1212,37 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     "omitidas": no_listas,
                 }
 
-            # Destinatario para el lote
-            destinatario = correo_override
+            # Destinatario para el lote (nunca 'Cliente' ni 'Sin registrar')
+            invalidos_dest = {"", "cliente", "sin registrar", "destinatario registrado", "none", "null"}
+            destinatario = str(correo_override or "").strip()
+            if destinatario.lower() in invalidos_dest or "@" not in destinatario:
+                destinatario = ""
             if not destinatario:
                 for r in lote_rows:
-                    if r["correo_cliente"] and str(r["correo_cliente"]).strip():
-                        destinatario = str(r["correo_cliente"]).strip()
+                    cand = str(r["correo_cliente"] or "").strip()
+                    if cand and cand.lower() not in invalidos_dest and "@" in cand:
+                        destinatario = cand
                         break
+            if not destinatario and lote_rows:
+                try:
+                    r_cli = await conn.fetchrow(
+                        """
+                        SELECT COALESCE(
+                            NULLIF(TRIM(s.email), ''),
+                            NULLIF(TRIM(c.email), '')
+                        ) AS correo_cat
+                        FROM ordenes_servicio os
+                        LEFT JOIN cliente_sucursales s ON os.sucursal_id = s.id
+                        LEFT JOIN cat_clientes c ON os.id_cliente = c.id
+                        WHERE os.folio_os = $1
+                        LIMIT 1
+                        """,
+                        str(lote_rows[0]["folio_os"]),
+                    )
+                    if r_cli and r_cli["correo_cat"] and "@" in str(r_cli["correo_cat"]):
+                        destinatario = str(r_cli["correo_cat"]).strip()
+                except Exception:
+                    pass
 
             if not destinatario:
                 logger.warning("[EMAIL] No se encontró correo de cliente para el lote %s", id_lote)
@@ -1246,6 +1364,21 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     cc_efectivo,
                     now_mx,
                 )
+                try:
+                    await conn.execute(
+                        """
+                        UPDATE cat_clientes cl
+                        SET email = $1
+                        FROM ordenes_servicio os
+                        WHERE os.folio_os = ANY($2::text[])
+                          AND os.id_cliente = cl.id
+                          AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
+                        """,
+                        destinatario,
+                        folios_lote,
+                    )
+                except Exception:
+                    pass
                 return {
                     "ok": True,
                     "lote": True,
@@ -1263,7 +1396,28 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
             return {"ok": False, "motivo": "Fallo el envío por SMTP"}
 
         # ── Orden individual ──────────────────────────────────────────────────
-        destinatario = correo_override or (row["correo_cliente"] and str(row["correo_cliente"]).strip())
+        invalidos_dest = {"", "cliente", "sin registrar", "destinatario registrado", "none", "null"}
+        destinatario = str(correo_override or "").strip()
+        if destinatario.lower() in invalidos_dest or "@" not in destinatario:
+            cand_row = str(row["correo_cliente"] or "").strip()
+            destinatario = cand_row if (cand_row.lower() not in invalidos_dest and "@" in cand_row) else ""
+        if not destinatario:
+            try:
+                r_cli = await conn.fetchrow(
+                    """
+                    SELECT COALESCE(NULLIF(TRIM(s.email), ''), NULLIF(TRIM(c.email), '')) AS correo_cat
+                    FROM ordenes_servicio os
+                    LEFT JOIN cliente_sucursales s ON os.sucursal_id = s.id
+                    LEFT JOIN cat_clientes c ON os.id_cliente = c.id
+                    WHERE os.id = $1
+                    LIMIT 1
+                    """,
+                    actual_id,
+                )
+                if r_cli and r_cli["correo_cat"] and "@" in str(r_cli["correo_cat"]):
+                    destinatario = str(r_cli["correo_cat"]).strip()
+            except Exception:
+                pass
         if not destinatario:
             logger.info("[EMAIL] Orden %s no tiene correo_cliente definido. Envío omitido.", folio)
             return {"ok": False, "motivo": "Sin correo de cliente especificado"}
@@ -1355,6 +1509,21 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 cc_efectivo,
                 now_mx,
             )
+            try:
+                await conn.execute(
+                    """
+                    UPDATE cat_clientes cl
+                    SET email = $1
+                    FROM ordenes_servicio os
+                    WHERE os.id = $2
+                      AND os.id_cliente = cl.id
+                      AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
+                    """,
+                    destinatario,
+                    actual_id,
+                )
+            except Exception:
+                pass
             return {
                 "ok": True,
                 "folio": folio,

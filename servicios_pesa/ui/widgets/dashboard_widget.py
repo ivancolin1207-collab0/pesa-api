@@ -95,6 +95,7 @@ def _asegurar_columnas_correo_bd_sync(conn) -> None:
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cca_dve_pdf_checked BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE cliente_sucursales ADD COLUMN IF NOT EXISTS email TEXT",
     )
     for stmt in ddl:
         try:
@@ -111,12 +112,60 @@ def _asegurar_columnas_correo_bd_sync(conn) -> None:
             cur.execute(
                 """
                 UPDATE ordenes_servicio
+                SET correo_destino = NULL
+                WHERE LOWER(TRIM(COALESCE(correo_destino, ''))) IN ('cliente', 'sin registrar', 'destinatario registrado', 'none', 'null')
+                """
+            )
+            cur.execute(
+                """
+                UPDATE ordenes_servicio
+                SET correo_cliente = NULL
+                WHERE LOWER(TRIM(COALESCE(correo_cliente, ''))) IN ('cliente', 'sin registrar', 'destinatario registrado', 'none', 'null')
+                """
+            )
+            cur.execute(
+                """
+                UPDATE cat_clientes cl
+                SET email = sub.correo_real
+                FROM (
+                    SELECT DISTINCT ON (id_cliente)
+                        id_cliente,
+                        COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) AS correo_real
+                    FROM ordenes_servicio
+                    WHERE id_cliente IS NOT NULL
+                      AND COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+                    ORDER BY id_cliente, fecha_envio_correo DESC NULLS LAST, updated_at DESC NULLS LAST
+                ) sub
+                WHERE cl.id = sub.id_cliente
+                  AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
+                """
+            )
+            cur.execute(
+                """
+                UPDATE ordenes_servicio os
                 SET correo_enviado     = TRUE,
-                    correo_destino     = COALESCE(NULLIF(correo_destino, ''), NULLIF(correo_cliente, '')),
-                    correo_cc          = COALESCE(NULLIF(correo_cc, ''), 'recepcion@basculaspesa.com.mx'),
-                    fecha_envio_correo = COALESCE(fecha_envio_correo, fecha_envio_email)
-                WHERE email_enviado = TRUE
-                  AND (correo_enviado IS NOT TRUE OR correo_destino IS NULL OR fecha_envio_correo IS NULL)
+                    correo_destino     = COALESCE(
+                        NULLIF(TRIM(os.correo_destino), ''),
+                        NULLIF(TRIM(os.correo_cliente), ''),
+                        (SELECT NULLIF(TRIM(s.email), '') FROM cliente_sucursales s WHERE s.id = os.sucursal_id AND s.email LIKE '%@%' LIMIT 1),
+                        (SELECT NULLIF(TRIM(c.email), '') FROM cat_clientes c WHERE c.id = os.id_cliente AND c.email LIKE '%@%' LIMIT 1),
+                        (SELECT COALESCE(NULLIF(TRIM(o2.correo_destino), ''), NULLIF(TRIM(o2.correo_cliente), ''))
+                         FROM ordenes_servicio o2
+                         WHERE o2.id_cliente = os.id_cliente
+                           AND COALESCE(NULLIF(TRIM(o2.correo_destino), ''), NULLIF(TRIM(o2.correo_cliente), '')) LIKE '%@%'
+                         ORDER BY o2.fecha_envio_correo DESC NULLS LAST, o2.updated_at DESC NULLS LAST LIMIT 1)
+                    ),
+                    correo_cc          = COALESCE(NULLIF(TRIM(os.correo_cc), ''), 'recepcion@basculaspesa.com.mx'),
+                    fecha_envio_correo = COALESCE(os.fecha_envio_correo, os.fecha_envio_email)
+                WHERE COALESCE(os.correo_enviado, os.email_enviado, FALSE) = TRUE
+                """
+            )
+            cur.execute(
+                """
+                UPDATE ordenes_servicio
+                SET correo_cliente = correo_destino
+                WHERE correo_destino IS NOT NULL AND correo_destino LIKE '%@%'
+                  AND (correo_cliente IS NULL OR TRIM(correo_cliente) = '')
                 """
             )
         conn.commit()
@@ -257,17 +306,17 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
 
     return f"{'-'.join(partes)}.pdf"
 
-# -- Paleta de colores macOS Pro (PESA) ----------------------------------------
-_BG       = "#F5F5F7"   # Fondo canvas gris macOS
+# -- Paleta Corporativa Minimalista Básculas PESA -----------------------------
+_BG       = "#FFFFFF"   # Fondo principal blanco puro
 _WHITE    = "#FFFFFF"
-_DARK     = "#1D1D1F"   # Texto primario Apple Anthracite
-_GRAY     = "#86868B"   # Texto secundario / metadatos
-_LGRAY    = "#C7C7CC"   # Placeholder / hint
-_RED      = "#B81D24"   # Rojo carmín técnico PESA
-_RED2     = "#9E161C"   # Rojo hover
-_BORDER   = "#E5E5EA"   # Borde por defecto
-_SEP      = "#F2F2F7"   # Separador ultra fino
-_SEG_BG   = "#EBEBED"   # Fondo segmented control
+_DARK     = "#0F172A"   # Texto primario negro carbón
+_GRAY     = "#475569"   # Texto secundario pizarra
+_LGRAY    = "#94A3B8"   # Placeholder / hint
+_RED      = "#C8102E"   # Rojo Corporativo Básculas PESA
+_RED2     = "#A50D26"   # Rojo hover
+_BORDER   = "#E2E8F0"   # Borde fino 1px
+_SEP      = "#F1F5F9"   # Separador ultra fino
+_SEG_BG   = "#F8FAFC"   # Superficie secundaria ultra clara
 
 # Diccionario de colores de tipos de servicio con fallback defensivo .get()
 COLOR_TIPO_SERVICIO = {
@@ -475,8 +524,9 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         return ("#F3F4F6", fg_fallback, "#E5E7EB")
 
     def _abbreviate(self, text: str) -> str:
-        """Mantiene textos legibles y sin truncamiento feo."""
+        """Mantiene textos legibles y sin truncamiento dentro de la píldora."""
         abbr = {
+            "Pendiente de Formato": "Pend. Formato",
             "Entrega Refacciones": "Refacciones",
             "Calibracion + Ajuste": "Calibración + Ajuste",
             "Inspeccion Visual":   "Inspección",
@@ -821,62 +871,52 @@ class QuickEditOSDialog(QDialog):
 # =============================================================================
 class KPICard(QFrame):
     """
-    Tarjeta KPI minimalista estilo Apple/macOS HIG.
-    Fondo blanco (#FFFFFF), border: 1px solid #E5E5EA, border-radius: 12px, padding: 18px 20px.
-    Cifra principal grande (28px bold) alineada a la izquierda.
-    Soporta value_color para colorear la cifra principal.
+    Tarjeta KPI Corporativa Minimalista Básculas PESA:
+    Fondo blanco puro (#FFFFFF), borde 1px solid #E2E8F0, línea de acento superior de 3px.
     """
 
     def __init__(self, title: str, value: str, subtitle: str = "",
-                 value_color: str = "#1D1D1F", parent=None):
+                 value_color: str = "#0F172A", accent_color: str = "#C8102E", parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
         self._value_color = value_color
         self.setObjectName("kpi_card")
-        self.setStyleSheet("""
-            QFrame#kpi_card {
+        self.setStyleSheet(f"""
+            QFrame#kpi_card {{
                 background: #FFFFFF;
-                border: 1px solid #E5E5EA;
-                border-radius: 12px;
-            }
+                border: 1px solid #E2E8F0;
+                border-top: 3px solid {accent_color};
+                border-radius: 10px;
+            }}
         """)
 
-        shadow = QGraphicsDropShadowEffect(self)
-        shadow.setBlurRadius(12)
-        shadow.setOffset(0, 2)
-        shadow.setColor(QColor(0, 0, 0, 12))
-        self.setGraphicsEffect(shadow)
-
-        self.setMinimumSize(140, 100)
+        self.setMinimumSize(140, 96)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(20, 18, 20, 18)
-        lay.setSpacing(6)
+        lay.setContentsMargins(18, 14, 18, 14)
+        lay.setSpacing(4)
 
-        # Etiqueta superior sutil (11px uppercase)
         lbl_title = QLabel(title.upper())
         lbl_title.setObjectName("kpi_title")
         lbl_title.setStyleSheet(
-            "font-size: 11px; font-weight: 600; color: #86868B; "
-            "letter-spacing: 0.5px; background: transparent;"
+            "font-size: 10.5px; font-weight: 700; color: #475569; "
+            "letter-spacing: 0.6px; background: transparent; border: none;"
         )
         lay.addWidget(lbl_title)
 
-        # Cifra principal grande (28px bold) — color según tipo de métrica
         self.lbl_value = QLabel(value)
         self.lbl_value.setObjectName("kpi_value")
         self.lbl_value.setStyleSheet(
-            f"font-size: 28px; font-weight: 700; color: {value_color}; "
-            "letter-spacing: -0.5px; background: transparent;"
+            f"font-size: 27px; font-weight: 700; color: {value_color}; "
+            "letter-spacing: -0.5px; background: transparent; border: none;"
         )
         lay.addWidget(self.lbl_value)
 
-        # Subtítulo inferior discreto
         if subtitle:
             lbl_sub = QLabel(subtitle)
             lbl_sub.setObjectName("kpi_subtitle")
             lbl_sub.setStyleSheet(
-                "font-size: 11px; color: #86868B; font-weight: 400; background: transparent;"
+                "font-size: 11px; color: #64748B; font-weight: 400; background: transparent; border: none;"
             )
             lay.addWidget(lbl_sub)
 
@@ -1795,10 +1835,10 @@ class DashboardWidget(QWidget):
         # 2. KPI Cards (4 tarjetas) — SIEMPRE ENCIMA DE LOS FILTROS
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(16)
-        self._card_total     = KPICard("Total Periodo",      "--", subtitle="del periodo seleccionado")
-        self._card_proceso   = KPICard("En Proceso",         "--", subtitle="activos actualmente",   value_color="#E65100")
-        self._card_cerrados  = KPICard("Cerrados",           "--", subtitle="finalizados",            value_color="#1B5E20")
-        self._card_fisicos   = KPICard("Formatos Fisicos",   "--", subtitle="pendientes de escanear", value_color="#4A148C")
+        self._card_total   = KPICard("Total Periodo",    "--", subtitle="del periodo seleccionado", value_color="#0F172A", accent_color="#C8102E")
+        self._card_proceso = KPICard("En Proceso",       "--", subtitle="activos actualmente",      value_color="#B45309", accent_color="#D97706")
+        self._card_cerrados= KPICard("Cerrados",         "--", subtitle="finalizados",              value_color="#15803D", accent_color="#16A34A")
+        self._card_fisicos = KPICard("Formatos Físicos", "--", subtitle="pendientes de escanear",   value_color="#334155", accent_color="#475569")
         for card in [self._card_total, self._card_proceso,
                      self._card_cerrados, self._card_fisicos]:
             kpi_row.addWidget(card)
@@ -1907,15 +1947,16 @@ class DashboardWidget(QWidget):
             self.btn_nueva_os.setCursor(Qt.CursorShape.PointingHandCursor)
             self.btn_nueva_os.setStyleSheet("""
                 QPushButton {
-                    background: #B81D24;
+                    background: #C8102E;
                     color: #FFFFFF;
                     border: none;
                     border-radius: 8px;
                     font-size: 13px;
-                    font-weight: 600;
-                    padding: 0 16px;
+                    font-weight: 700;
+                    padding: 0 18px;
                 }
-                QPushButton:hover { background: #9E161C; }
+                QPushButton:hover { background: #A50D26; }
+                QPushButton:pressed { background: #880B20; }
                 QPushButton::menu-indicator { image: none; width: 0px; }
             """)
             menu = QMenu(self.btn_nueva_os)
@@ -1977,15 +2018,15 @@ class DashboardWidget(QWidget):
         lay.setContentsMargins(12, 8, 12, 8)
         lay.setSpacing(10)
 
-        # -- Segmented Control de periodos ------------------------------------
+        # -- Segmented Control de periodos (Píldoras corporativas) ------------
         seg = QFrame()
         seg.setObjectName("segmented_control")
         seg.setStyleSheet(
-            "background: #EBEBED; border-radius: 8px; border: none; padding: 2px;"
+            "background: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0; padding: 2px;"
         )
         seg_lay = QHBoxLayout(seg)
         seg_lay.setContentsMargins(2, 2, 2, 2)
-        seg_lay.setSpacing(2)
+        seg_lay.setSpacing(3)
 
         self._btn_grp_preset = QButtonGroup(self)
         self._btn_grp_preset.setExclusive(True)
@@ -1996,20 +2037,20 @@ class DashboardWidget(QWidget):
         _seg_btn_style = """
             QPushButton {
                 background: transparent;
-                color: #6E6E73;
+                color: #475569;
                 border: none;
                 border-radius: 6px;
                 font-size: 12px;
-                font-weight: 500;
+                font-weight: 600;
                 padding: 0 12px;
                 min-height: 28px;
             }
             QPushButton:checked {
-                background: #FFFFFF;
-                color: #1D1D1F;
-                font-weight: 600;
+                background: #C8102E;
+                color: #FFFFFF;
+                font-weight: 700;
             }
-            QPushButton:hover:!checked { color: #1D1D1F; }
+            QPushButton:hover:!checked { background: #F1F5F9; color: #0F172A; }
         """
 
         for lbl_txt, key in _presets:
@@ -2309,19 +2350,39 @@ class DashboardWidget(QWidget):
         if self._is_admin():
             thead_lay.addWidget(self._btn_eliminar_sel)
 
-        btn_ver_todas = QPushButton("Ver todas  ->")
+        btn_ver_todas = QPushButton("Ver todas")
         btn_ver_todas.setStyleSheet("""
             QPushButton {
                 background: transparent;
-                color: #007AFF;
+                color: #C8102E;
                 border: none;
-                font-size: 9pt;
-                font-weight: 500;
-                padding: 0 6px;
+                font-size: 9.5pt;
+                font-weight: 600;
+                padding: 0 8px;
             }
-            QPushButton:hover { color: #0062CC; }
+            QPushButton:hover { color: #A50D26; }
         """)
         btn_ver_todas.clicked.connect(lambda: self._navigate_to("buscar_os"))
+
+        self._show_all_rows = False
+        self._btn_mostrar_todos = QPushButton("Mostrar todos")
+        self._btn_mostrar_todos.setVisible(False)
+        self._btn_mostrar_todos.setFixedHeight(28)
+        self._btn_mostrar_todos.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_mostrar_todos.setStyleSheet("""
+            QPushButton {
+                background: #F8FAFC;
+                color: #0F172A;
+                border: 1px solid #E2E8F0;
+                border-radius: 6px;
+                font-size: 9pt;
+                font-weight: 600;
+                padding: 0 12px;
+            }
+            QPushButton:hover { background: #F1F5F9; border-color: #CBD5E1; }
+        """)
+        self._btn_mostrar_todos.clicked.connect(self._on_mostrar_todos_clicked)
+        thead_lay.addWidget(self._btn_mostrar_todos)
         thead_lay.addWidget(btn_ver_todas)
 
         lay.addWidget(thead)
@@ -2401,9 +2462,9 @@ class DashboardWidget(QWidget):
         table.setColumnWidth(self._COL_CLIENTE, 175)
         table.setColumnWidth(self._COL_SUCURSAL, 260)
         table.setColumnWidth(self._COL_TECNICO, 132)
-        table.setColumnWidth(self._COL_SERVICIO, 172)
-        table.setColumnWidth(self._COL_MODAL, 96)
-        table.setColumnWidth(self._COL_ESTADO, 94)
+        table.setColumnWidth(self._COL_SERVICIO, 176)
+        table.setColumnWidth(self._COL_MODAL, 98)
+        table.setColumnWidth(self._COL_ESTADO, 114)
         table.setColumnWidth(self._COL_SYNC, self._W_SYNC)
         table.setColumnWidth(self._COL_ACCIONES, self._W_ACCIONES)
 
@@ -2432,48 +2493,49 @@ class DashboardWidget(QWidget):
         # Colocar el checkbox maestro dentro de la cabecera col 0
         QTimer.singleShot(0, lambda: self._place_header_checkbox(table))
 
-        # Estilo del QTreeWidget (macOS UI HIG — sin height fijo para permitir altura dinámica multilínea)
+        # Estilo corporativo minimalista Básculas PESA (blanco puro, bordes #E2E8F0, hover #F8FAFC)
         table.setStyleSheet("""
             QTreeWidget {
                 background: #FFFFFF;
                 border: none;
                 border-radius: 0 0 10px 10px;
                 font-size: 13px;
-                color: #1D1D1F;
+                color: #0F172A;
                 outline: none;
-                selection-background-color: #F2F2F7;
-                selection-color: #1D1D1F;
+                selection-background-color: #F8FAFC;
+                selection-color: #0F172A;
             }
             QTreeWidget::item {
                 padding: 4px 10px;
-                border-bottom: 1px solid #E5E5EA;
+                border-bottom: 1px solid #E2E8F0;
                 min-height: 48px;
                 font-size: 12.5px;
                 font-weight: 400;
-                color: #1D1D1F;
+                color: #0F172A;
             }
             QTreeWidget::item:hover {
-                background: #F9F9FB;
+                background: #F8FAFC;
             }
             QTreeWidget::item:selected {
-                background: #F2F2F7;
-                color: #1D1D1F;
+                background: #F1F5F9;
+                color: #0F172A;
             }
             QHeaderView::section {
-                background: #FAFAFC;
-                color: #6E6E73;
+                background: #F8FAFC;
+                color: #475569;
                 font-size: 11px;
-                font-weight: 600;
+                font-weight: 700;
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
                 padding: 0 10px;
                 border: none;
-                border-bottom: 1px solid #E5E5EA;
+                border-bottom: 1px solid #E2E8F0;
                 height: 40px;
                 min-height: 40px;
             }
             QHeaderView::section:hover {
-                background: #F5F5F7;
+                background: #F1F5F9;
+                color: #0F172A;
             }
         """)
 
@@ -2481,6 +2543,12 @@ class DashboardWidget(QWidget):
     # =========================================================================
     # Filtros y datos de periodo
     # =========================================================================
+    def _on_mostrar_todos_clicked(self) -> None:
+        self._show_all_rows = True
+        if hasattr(self, "_btn_mostrar_todos"):
+            self._btn_mostrar_todos.setVisible(False)
+        self._fill_table_rows(self._all_loaded_rows)
+
     def _get_date_range(self) -> tuple:
         """Retorna (fecha_desde, fecha_hasta) segun el preset activo."""
         today = date.today()
@@ -3546,7 +3614,7 @@ class DashboardWidget(QWidget):
         if not base_txt:
             return ""
         if len(enviados) < len(grupo_ord):
-            return base_txt.replace("✉ Enviado", f"✉ Enviado ({len(enviados)}/{len(grupo_ord)} OS)", 1)
+            return base_txt.replace("Enviado", f"Enviado ({len(enviados)}/{len(grupo_ord)} OS)", 1)
         return base_txt
 
     def _build_folio_cell_widget(
@@ -3764,21 +3832,25 @@ class DashboardWidget(QWidget):
         self._calcular_y_aplicar_altura_item(item, is_child=is_child)
 
     def _recalcular_alturas_filas(self) -> None:
-        """Recalcula alturas dinámicas de todas las filas padres e hijas al redimensionar o expandir."""
+        """Recalcula alturas dinámicas de todas las filas padres e hijas sin parpadeo visual."""
         if not hasattr(self, "_table") or self._table is None:
             return
-        for i in range(self._table.topLevelItemCount()):
-            p_item = self._table.topLevelItem(i)
-            if not p_item:
-                continue
-            self._calcular_y_aplicar_altura_item(p_item, is_child=False)
-            if p_item.isExpanded():
-                for j in range(p_item.childCount()):
-                    c_item = p_item.child(j)
-                    if c_item:
-                        self._calcular_y_aplicar_altura_item(c_item, is_child=True)
-        self._table.doItemsLayout()
-        self._table.viewport().update()
+        self._table.setUpdatesEnabled(False)
+        try:
+            for i in range(self._table.topLevelItemCount()):
+                p_item = self._table.topLevelItem(i)
+                if not p_item:
+                    continue
+                self._calcular_y_aplicar_altura_item(p_item, is_child=False)
+                if p_item.isExpanded():
+                    for j in range(p_item.childCount()):
+                        c_item = p_item.child(j)
+                        if c_item:
+                            self._calcular_y_aplicar_altura_item(c_item, is_child=True)
+            self._table.doItemsLayout()
+        finally:
+            self._table.setUpdatesEnabled(True)
+            self._table.viewport().update()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -3833,13 +3905,18 @@ class DashboardWidget(QWidget):
         self._table.setItemWidget(item, self._COL_FOLIO, cell_w)
         item.setToolTip(self._COL_FOLIO, texto_completo)
 
-        # Col 2-5: datos comunes + tooltips completos
+        # Col 2-5: datos comunes + deduplicación de sucursal repetida ("X — X" -> "X")
+        suc_clean = str(sucursal or "").strip()
+        if " — " in suc_clean:
+            p_suc = [s.strip() for s in suc_clean.split(" — ") if s.strip()]
+            if len(p_suc) == 2 and p_suc[0].lower() == p_suc[1].lower():
+                suc_clean = p_suc[0]
         item.setText(self._COL_FECHA,    fecha_str)
-        item.setForeground(self._COL_FECHA, QBrush(QColor("#636366")))
+        item.setForeground(self._COL_FECHA, QBrush(QColor("#475569")))
         item.setText(self._COL_CLIENTE,  cliente)
         item.setToolTip(self._COL_CLIENTE, cliente)
-        item.setText(self._COL_SUCURSAL, sucursal)
-        item.setToolTip(self._COL_SUCURSAL, sucursal)
+        item.setText(self._COL_SUCURSAL, suc_clean)
+        item.setToolTip(self._COL_SUCURSAL, suc_clean)
         item.setText(self._COL_TECNICO,  tecnico)
         item.setToolTip(self._COL_TECNICO, tecnico)
 
@@ -4007,10 +4084,25 @@ class DashboardWidget(QWidget):
                 hl.addWidget(c)
                 return w, c
 
+            # Limitar carga inicial de widgets pesados a 80 elementos de primer nivel (cuando no hay búsqueda activa)
+            _q_active = hasattr(self, "_search_global") and bool(self._search_global.text().strip())
+            _show_all = bool(getattr(self, "_show_all_rows", False)) or _q_active
+            _RENDER_CAP = 80
+            _top_rendered = 0
+            _total_top = len(all_groups) + len(singles)
+            if hasattr(self, "_btn_mostrar_todos"):
+                _ocultos = max(0, _total_top - _RENDER_CAP) if not _show_all else 0
+                self._btn_mostrar_todos.setVisible(_ocultos > 0)
+                if _ocultos > 0:
+                    self._btn_mostrar_todos.setText(f"Mostrar todos ({_total_top})")
+
             # ── 1. Lotes (filas padre + hijas) ────────────────────────────────────
             for lote_id, group in all_groups.items():
+                if not _show_all and _top_rendered >= _RENDER_CAP:
+                    break
                 if not group:
                     continue
+                _top_rendered += 1
 
                 try:
                     # Ordenar el grupo por folio para encontrar min y max
@@ -4138,6 +4230,9 @@ class DashboardWidget(QWidget):
 
             # ── 2. Registros individuales (sin lote) ──────────────────────────────
             for row in singles:
+                if not _show_all and _top_rendered >= _RENDER_CAP:
+                    break
+                _top_rendered += 1
                 try:
                     folio        = str(row[0] or "")
                     fecha_str    = self._fmt_fecha(str(row[1] or ""))
@@ -4386,8 +4481,8 @@ class DashboardWidget(QWidget):
             QMenu::item { padding: 8px 18px; border-radius: 4px; color: #1D1D1F; }
             QMenu::item:selected { background: #F5F5F7; }
         """)
-        act_fisico  = QAction("📄  Físico  — formato impreso / escaneo", btn_modal)
-        act_digital = QAction("📱  Digital — captura en tablet / app móvil", btn_modal)
+        act_fisico  = QAction("Físico  — formato impreso / escaneo", btn_modal)
+        act_digital = QAction("Digital — captura en tablet / app móvil", btn_modal)
         menu_modal.addAction(act_fisico)
         menu_modal.addAction(act_digital)
 
@@ -5064,7 +5159,7 @@ class DashboardWidget(QWidget):
                             p_info = (
                                 info_vivo
                                 if sent_children >= tot_c
-                                else info_vivo.replace("✉ Enviado", f"✉ Enviado ({sent_children}/{tot_c} OS)", 1)
+                                else info_vivo.replace("Enviado", f"Enviado ({sent_children}/{tot_c} OS)", 1)
                             )
                             self._refrescar_celda_folio_correo_vivo(p_item, p_info, is_child=False)
                         if matched_child:
@@ -5798,6 +5893,9 @@ class DashboardWidget(QWidget):
     def _actualizar_email_db_local_os(self, folio: str, correo: str, enviado: bool, cc: str = "recepcion@basculaspesa.com.mx"):
         if not _DEPS_OK or not _db_pool:
             return
+        correo_clean = str(correo or "").strip()
+        if correo_clean.lower() in ("cliente", "sin registrar", "destinatario registrado", "none", "null") or "@" not in correo_clean:
+            correo_clean = ""
         try:
             from datetime import datetime
             now_mx = datetime.now(obtener_tz_mexico())
@@ -5808,8 +5906,8 @@ class DashboardWidget(QWidget):
                 cur.execute(
                     """
                     UPDATE ordenes_servicio SET
-                        correo_cliente = %s,
-                        correo_destino = %s,
+                        correo_cliente = COALESCE(NULLIF(%s, ''), correo_cliente),
+                        correo_destino = COALESCE(NULLIF(%s, ''), correo_destino),
                         correo_cc = %s,
                         email_enviado = %s,
                         correo_enviado = %s,
@@ -5818,8 +5916,20 @@ class DashboardWidget(QWidget):
                         updated_at = NOW()
                     WHERE folio_os = %s
                     """,
-                    (correo, correo, cc_val, enviado, enviado, now_mx, now_mx, folio)
+                    (correo_clean, correo_clean, cc_val, enviado, enviado, now_mx, now_mx, folio)
                 )
+                if correo_clean:
+                    cur.execute(
+                        """
+                        UPDATE cat_clientes cl
+                        SET email = %s
+                        FROM ordenes_servicio os
+                        WHERE os.folio_os = %s
+                          AND os.id_cliente = cl.id
+                          AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
+                        """,
+                        (correo_clean, folio),
+                    )
             conn.commit()
             _db_pool.release_connection(conn)
         except Exception as e:
@@ -5828,6 +5938,9 @@ class DashboardWidget(QWidget):
     def _actualizar_email_db_local_lote(self, lote_id: str, all_folios: list, correo: str, enviado: bool, cc: str = "recepcion@basculaspesa.com.mx"):
         if not _DEPS_OK or not _db_pool:
             return
+        correo_clean = str(correo or "").strip()
+        if correo_clean.lower() in ("cliente", "sin registrar", "destinatario registrado", "none", "null") or "@" not in correo_clean:
+            correo_clean = ""
         try:
             from datetime import datetime
             now_mx = datetime.now(obtener_tz_mexico())
@@ -5838,8 +5951,8 @@ class DashboardWidget(QWidget):
                 cur.execute(
                     """
                     UPDATE ordenes_servicio SET
-                        correo_cliente = %s,
-                        correo_destino = %s,
+                        correo_cliente = COALESCE(NULLIF(%s, ''), correo_cliente),
+                        correo_destino = COALESCE(NULLIF(%s, ''), correo_destino),
                         correo_cc = %s,
                         email_enviado = %s,
                         correo_enviado = %s,
@@ -5848,8 +5961,20 @@ class DashboardWidget(QWidget):
                         updated_at = NOW()
                     WHERE folio_os = ANY(%s) OR id_lote = %s
                     """,
-                    (correo, correo, cc_val, enviado, enviado, now_mx, now_mx, all_folios, lote_id)
+                    (correo_clean, correo_clean, cc_val, enviado, enviado, now_mx, now_mx, all_folios, lote_id)
                 )
+                if correo_clean and all_folios:
+                    cur.execute(
+                        """
+                        UPDATE cat_clientes cl
+                        SET email = %s
+                        FROM ordenes_servicio os
+                        WHERE os.folio_os = ANY(%s)
+                          AND os.id_cliente = cl.id
+                          AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
+                        """,
+                        (correo_clean, all_folios),
+                    )
             conn.commit()
             _db_pool.release_connection(conn)
         except Exception as e:

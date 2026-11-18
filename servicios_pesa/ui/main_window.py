@@ -22,8 +22,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore    import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup
-from PyQt6.QtGui     import QFont, QColor
+from PyQt6.QtCore    import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QRectF
+from PyQt6.QtGui     import QFont, QColor, QPainter, QPen, QPainterPath
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
     QPushButton, QLabel, QStackedWidget, QStatusBar,
@@ -99,38 +99,112 @@ except Exception as _e_cfg:
     ConfiguracionWidget = None
 
 
-# ─── Definición del menú (6 ítems definitivos) ──────────────────────────────
-# (key, icon, label, tooltip, roles_permitidos)
+# ─── Definición del menú corporativo (iconos vectoriales QPainter, sin emojis) ─
 _NAV_ITEMS: list[tuple[str, str, str, str, list[str]]] = [
-    ("dashboard",    "⌂",  "Dashboard",       "Tablero y resumen de actividad",              ["admin", "logistica", "servicio", "recepcion"]),
-    ("mi_firma",     "✎",  "Mi Firma",        "Gestionar firma registrada en servidor",      ["admin", "servicio", "calibrador", "inspector"]),
-    ("lote",         "⬚",  "Generar Formatos", "Asistente de generación de OS, RMA y RE",    ["admin", "logistica"]),
-    ("buscar_os",    "⌕",  "Buscar / Historial","Buscar, editar y consultar órdenes",        ["admin", "logistica", "recepcion", "calibrador", "inspector"]),
-    ("recepcion_os", "📋", "Recepción / Entrega","Control de entrega semanal de OS por fecha", ["admin", "logistica", "recepcion"]),
-    ("escaneos",     "⎘",  "Adjuntar Escaneo", "Adjuntar formato físico escaneado",          ["admin", "logistica", "servicio"]),
-    ("catalogos",    "⊞",  "Catálogos",        "Clientes, técnicos e instrumentos",          ["admin"]),
-    ("configuracion","⚙",  "Configuración",    "Conexión a BD y ajustes del sistema",        ["admin"]),
+    ("dashboard",     "dashboard",     "Dashboard",          "Tablero y resumen de actividad",               ["admin", "logistica", "servicio", "recepcion"]),
+    ("mi_firma",      "mi_firma",      "Mi Firma",           "Gestionar firma registrada en servidor",       ["admin", "servicio", "calibrador", "inspector"]),
+    ("lote",          "lote",          "Generar Formatos",   "Asistente de generación de OS, RMA y RE",     ["admin", "logistica"]),
+    ("buscar_os",     "buscar_os",     "Buscar / Historial", "Buscar, editar y consultar órdenes",           ["admin", "logistica", "recepcion", "calibrador", "inspector"]),
+    ("recepcion_os",  "recepcion_os",  "Recepción / Entrega","Control de entrega semanal de OS por fecha",   ["admin", "logistica", "recepcion"]),
+    ("escaneos",      "escaneos",      "Adjuntar Escaneo",   "Adjuntar formato físico escaneado",            ["admin", "logistica", "servicio"]),
+    ("catalogos",     "catalogos",     "Catálogos",          "Clientes, técnicos e instrumentos",            ["admin"]),
+    ("configuracion", "configuracion", "Configuración",      "Conexión a BD y ajustes del sistema",          ["admin"]),
 ]
 
-_ICON_MAP: dict[str, str] = {
-    "dashboard":     "⌂",
-    "mi_firma":      "✎",
-    "lote":          "⬚",
-    "buscar_os":     "⌕",
-    "recepcion_os":  "📋",
-    "escaneos":      "⎘",
-    "catalogos":     "⊞",
-    "configuracion": "⚙",
-}
+_ICON_MAP: dict[str, str] = {k: k for k, *_ in _NAV_ITEMS}
+
+
+class VectorNavIcon(QWidget):
+    """Dibuja iconos vectoriales geométricos limpios (1.7px) para navegación corporativa."""
+
+    def __init__(self, icon_key: str, color: str = "#475569", parent=None):
+        super().__init__(parent if isinstance(parent, QWidget) else None)
+        self._key = icon_key
+        self._color = QColor(color)
+        self.setFixedSize(20, 20)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+    def set_color(self, hex_color: str) -> None:
+        self._color = QColor(hex_color)
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        pen = QPen(self._color, 1.65, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        p.setPen(pen)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        k = self._key
+
+        if k == "dashboard":
+            p.drawRoundedRect(QRectF(2.5, 2.5, 6.2, 6.2), 1.5, 1.5)
+            p.drawRoundedRect(QRectF(11.3, 2.5, 6.2, 6.2), 1.5, 1.5)
+            p.drawRoundedRect(QRectF(2.5, 11.3, 6.2, 6.2), 1.5, 1.5)
+            p.drawRoundedRect(QRectF(11.3, 11.3, 6.2, 6.2), 1.5, 1.5)
+        elif k == "mi_firma":
+            path = QPainterPath()
+            path.moveTo(3, 16.5)
+            path.lineTo(6.5, 15.5)
+            path.lineTo(15.8, 6.2)
+            path.lineTo(13.8, 4.2)
+            path.lineTo(4.5, 13.5)
+            path.closeSubpath()
+            p.drawPath(path)
+            p.drawLine(3, 17, 17, 17)
+        elif k == "lote":
+            p.drawRoundedRect(QRectF(4, 2.5, 11, 14), 1.8, 1.8)
+            p.drawLine(7, 7, 12, 7)
+            p.drawLine(7, 10, 12, 10)
+            p.drawLine(7, 13, 10, 13)
+        elif k == "buscar_os":
+            p.drawEllipse(QRectF(3, 3, 10.5, 10.5))
+            p.drawLine(12.2, 12.2, 16.8, 16.8)
+        elif k == "recepcion_os":
+            p.drawRoundedRect(QRectF(3, 3.5, 14, 13), 2.0, 2.0)
+            p.drawLine(3, 11.5, 7, 11.5)
+            p.drawLine(13, 11.5, 17, 11.5)
+            p.drawLine(7.2, 8.2, 9.5, 10.5)
+            p.drawLine(9.5, 10.5, 13.2, 6.5)
+        elif k == "escaneos":
+            p.drawLine(3, 6.5, 3, 3.5); p.drawLine(3, 3.5, 6, 3.5)
+            p.drawLine(14, 3.5, 17, 3.5); p.drawLine(17, 3.5, 17, 6.5)
+            p.drawLine(3, 13.5, 3, 16.5); p.drawLine(3, 16.5, 6, 16.5)
+            p.drawLine(14, 16.5, 17, 16.5); p.drawLine(17, 16.5, 17, 13.5)
+            p.drawLine(4.5, 10, 15.5, 10)
+        elif k == "catalogos":
+            p.drawEllipse(QRectF(3.5, 3, 13, 4.2))
+            p.drawLine(3.5, 5.1, 3.5, 14.8)
+            p.drawLine(16.5, 5.1, 16.5, 14.8)
+            p.drawArc(QRectF(3.5, 8.2, 13, 4.2), 180 * 16, 180 * 16)
+            p.drawArc(QRectF(3.5, 12.6, 13, 4.2), 180 * 16, 180 * 16)
+        elif k == "configuracion":
+            p.drawLine(3, 6, 17, 6)
+            p.drawLine(3, 10, 17, 10)
+            p.drawLine(3, 14, 17, 14)
+            p.setBrush(QColor("#FFFFFF"))
+            p.drawEllipse(QRectF(6, 4.2, 3.6, 3.6))
+            p.drawEllipse(QRectF(11.5, 8.2, 3.6, 3.6))
+            p.drawEllipse(QRectF(7.5, 12.2, 3.6, 3.6))
+        elif k == "brand":
+            # Balanza metrológica corporativa vectorial
+            p.drawLine(10, 3.5, 10, 15.5)
+            p.drawLine(5.5, 16.2, 14.5, 16.2)
+            p.drawLine(4, 6.5, 16, 6.5)
+            p.drawLine(4.5, 6.5, 3, 11.2); p.drawLine(4.5, 6.5, 6, 11.2)
+            p.drawArc(QRectF(2.5, 10, 4, 2.5), 180 * 16, 180 * 16)
+            p.drawLine(15.5, 6.5, 14, 11.2); p.drawLine(15.5, 6.5, 17, 11.2)
+            p.drawArc(QRectF(13.5, 10, 4, 2.5), 180 * 16, 180 * 16)
+        else:
+            p.drawRoundedRect(QRectF(4, 4, 12, 12), 2, 2)
+        p.end()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# SidebarNavButton — Botón de navegación Apple-style
+# SidebarNavButton — Botón de navegación corporativo Básculas PESA
 # ══════════════════════════════════════════════════════════════════════════════
 class SidebarNavButton(QPushButton):
     """
-    Botón de navegación con estilo técnico macOS HIG.
-    Estados: inactivo / hover / activo (#FCE8E9 + #B81D24) / colapsado (riel 54px)
+    Botón de navegación minimalista corporativo (#FFFFFF / #FFF1F2 + #C8102E).
     """
     def __init__(self, icon: str, label: str, tooltip: str, parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
@@ -139,7 +213,6 @@ class SidebarNavButton(QPushButton):
         self._active  = False
         self._collapsed = False
 
-        # Tooltip desactivado — evita cajas negras invasivas sobre los botones
         self.setToolTip("")
         self.setFixedHeight(40)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -151,31 +224,25 @@ class SidebarNavButton(QPushButton):
     def _build_layout(self):
         lay = QHBoxLayout(self)
         self._lay = lay
-        lay.setContentsMargins(10, 0, 10, 0)
-        lay.setSpacing(8)
+        lay.setContentsMargins(12, 0, 10, 0)
+        lay.setSpacing(10)
 
-        # Ícono
-        self._lbl_icon = QLabel(self._icon)
-        self._lbl_icon.setFixedWidth(22)
-        self._lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._lbl_icon.setStyleSheet("font-size: 15px; background: transparent;")
+        self._lbl_icon = VectorNavIcon(self._icon, "#475569", self)
         lay.addWidget(self._lbl_icon)
 
-        # Texto
         self._lbl_text = QLabel(self._label)
         self._lbl_text.setStyleSheet("font-size: 13px; font-weight: 500; background: transparent;")
+        self._lbl_text.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         lay.addWidget(self._lbl_text, stretch=1)
 
     def set_collapsed(self, collapsed: bool) -> None:
         self._collapsed = collapsed
         if collapsed:
             self._lbl_text.hide()
-            self._lay.setContentsMargins(0, 0, 0, 0)
-            self._lbl_icon.setFixedWidth(38)
+            self._lay.setContentsMargins(9, 0, 9, 0)
         else:
             self._lbl_text.show()
-            self._lay.setContentsMargins(10, 0, 10, 0)
-            self._lbl_icon.setFixedWidth(22)
+            self._lay.setContentsMargins(12, 0, 10, 0)
 
     def set_active(self, active: bool) -> None:
         self._active = active
@@ -187,17 +254,16 @@ class SidebarNavButton(QPushButton):
     def _apply_active(self):
         self.setStyleSheet("""
             QPushButton {
-                background-color: #FCE8E9;
+                background-color: #FFF1F2;
                 border: none;
-                border-radius: 8px;
+                border-left: 3px solid #C8102E;
+                border-radius: 6px;
                 margin: 2px 8px;
             }
         """)
-        self._lbl_icon.setStyleSheet(
-            "font-size: 15px; color: #B81D24; background: transparent; font-weight: 600;"
-        )
+        self._lbl_icon.set_color("#C8102E")
         self._lbl_text.setStyleSheet(
-            "font-size: 13px; font-weight: 600; color: #B81D24; background: transparent;"
+            "font-size: 13px; font-weight: 700; color: #C8102E; background: transparent;"
         )
 
     def _apply_inactive(self):
@@ -205,21 +271,20 @@ class SidebarNavButton(QPushButton):
             QPushButton {
                 background-color: transparent;
                 border: none;
-                border-radius: 8px;
+                border-left: 3px solid transparent;
+                border-radius: 6px;
                 margin: 2px 8px;
             }
             QPushButton:hover {
-                background-color: rgba(0, 0, 0, 0.04);
+                background-color: #F8FAFC;
             }
             QPushButton:pressed {
-                background-color: rgba(0, 0, 0, 0.08);
+                background-color: #F1F5F9;
             }
         """)
-        self._lbl_icon.setStyleSheet(
-            "font-size: 15px; color: #6E6E73; background: transparent;"
-        )
+        self._lbl_icon.set_color("#475569")
         self._lbl_text.setStyleSheet(
-            "font-size: 13px; font-weight: 500; color: #48484A; background: transparent;"
+            "font-size: 13px; font-weight: 500; color: #475569; background: transparent;"
         )
 
     def is_active(self) -> bool:
@@ -386,9 +451,17 @@ class MainWindow(QMainWindow):
         self._setup_statusbar()
         self._start_conn_monitor()
 
-        # Aplicar permisos de rol en el sidebar desde el primer instante
+        # Aplicar permisos de rol en el sidebar y precalentar catálogos en segundo plano
         QTimer.singleShot(0, self.aplicar_permisos_rol)
+        QTimer.singleShot(20, self._warmup_catalogs_async)
         QTimer.singleShot(80, lambda: self._navigate("dashboard"))
+
+    def _warmup_catalogs_async(self) -> None:
+        try:
+            from services.catalog_cache import catalog_cache
+            catalog_cache.warm_up_async()
+        except Exception as exc:
+            logger.debug("Warmup catalogos omitido: %s", exc)
 
     def _setup_window(self) -> None:
         self.setWindowTitle(f"{APP_NAME}  —  v{APP_VERSION}")
@@ -418,9 +491,9 @@ class MainWindow(QMainWindow):
         self._sidebar = self._build_sidebar()
         root.addWidget(self._sidebar)
 
-        # Área de contenido (header + stack)
+        # Área de contenido (header + stack) en blanco puro corporativo
         content_wrapper = QWidget()
-        content_wrapper.setStyleSheet("background-color: #F5F5F7;")
+        content_wrapper.setStyleSheet("background-color: #FFFFFF;")
         content_wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay = QVBoxLayout(content_wrapper)
         cw_lay.setContentsMargins(0, 0, 0, 0)
@@ -432,7 +505,7 @@ class MainWindow(QMainWindow):
 
         # Stack de páginas con tamaño expandible
         self._stack = QStackedWidget()
-        self._stack.setStyleSheet("background-color: #F5F5F7;")
+        self._stack.setStyleSheet("background-color: #FFFFFF;")
         self._stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay.addWidget(self._stack, stretch=1)
 
@@ -445,7 +518,7 @@ class MainWindow(QMainWindow):
         sb.setStyleSheet("""
             QWidget#sidebar {
                 background-color: #FFFFFF;
-                border-right: 1px solid #E5E5EA;
+                border-right: 1px solid #E2E8F0;
             }
         """)
 
@@ -461,30 +534,32 @@ class MainWindow(QMainWindow):
         bl.setContentsMargins(14, 18, 14, 8)
         bl.setSpacing(2)
 
-        # Ícono + nombre
         brand_row = QHBoxLayout()
-        brand_row.setSpacing(6)
+        brand_row.setSpacing(8)
 
-        icon_box = QLabel("⚖")
+        icon_box = QFrame()
         icon_box.setStyleSheet("""
-            font-size: 20px;
-            color: #B81D24;
-            background: rgba(184, 29, 36, 0.08);
-            border-radius: 8px;
-            padding: 2px 6px;
+            QFrame {
+                background: #FFF1F2;
+                border: 1px solid #FECDD3;
+                border-radius: 8px;
+            }
         """)
         icon_box.setFixedSize(34, 34)
-        icon_box.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ib_lay = QHBoxLayout(icon_box)
+        ib_lay.setContentsMargins(0, 0, 0, 0)
+        ib_lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        ib_lay.addWidget(VectorNavIcon("brand", "#C8102E", icon_box))
         brand_row.addWidget(icon_box)
 
         name_lay = QVBoxLayout()
         name_lay.setSpacing(0)
-        self._lbl_brand_name = QLabel("Servicios PESA")
+        self._lbl_brand_name = QLabel("Básculas PESA")
         self._lbl_brand_name.setStyleSheet(
-            "font-size: 14px; font-weight: 700; color: #1D1D1F; letter-spacing: -0.2px;"
+            "font-size: 14px; font-weight: 700; color: #0F172A; letter-spacing: -0.2px;"
         )
         self._lbl_brand_sub = QLabel("ERP Metrológico")
-        self._lbl_brand_sub.setStyleSheet("font-size: 9px; color: #86868B; letter-spacing: 0.5px; font-weight: 600;")
+        self._lbl_brand_sub.setStyleSheet("font-size: 10px; color: #475569; letter-spacing: 0.4px; font-weight: 600;")
         name_lay.addWidget(self._lbl_brand_name)
         name_lay.addWidget(self._lbl_brand_sub)
         brand_row.addLayout(name_lay, stretch=1)
@@ -532,28 +607,29 @@ class MainWindow(QMainWindow):
         lay.addWidget(chip_wrapper)
 
         # ── Botón Cerrar Sesión ────────────────────────────────────────────────
-        self._btn_logout = QPushButton("🚪  Cerrar Sesión")
+        self._btn_logout = QPushButton("Cerrar Sesión")
         self._btn_logout.setObjectName("btn_logout")
         self._btn_logout.setFixedHeight(32)
         self._btn_logout.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_logout.setToolTip("")  # Sin tooltip invasivo
+        self._btn_logout.setToolTip("")
         self._btn_logout.setStyleSheet("""
             QPushButton#btn_logout {
-                background: transparent;
-                color: #86868B;
-                border: 1px solid rgba(0,0,0,0.10);
+                background: #FFFFFF;
+                color: #475569;
+                border: 1px solid #E2E8F0;
                 border-radius: 7px;
                 font-size: 12px;
+                font-weight: 600;
                 margin: 2px 8px 4px 8px;
                 padding: 0 8px;
             }
             QPushButton#btn_logout:hover {
-                background: #FCE8E9;
-                color: #B81D24;
-                border-color: rgba(184, 29, 36, 0.3);
+                background: #FFF1F2;
+                color: #C8102E;
+                border-color: #FECDD3;
             }
             QPushButton#btn_logout:pressed {
-                background: rgba(184, 29, 36, 0.12);
+                background: #FFE4E6;
             }
         """)
         self._btn_logout.clicked.connect(self._on_cerrar_sesion)
@@ -625,7 +701,7 @@ class MainWindow(QMainWindow):
         if hasattr(self, "_ver_label"):
             self._ver_label.setVisible(not self._sidebar_collapsed)
         if hasattr(self, "_btn_logout"):
-            self._btn_logout.setText("🚪" if self._sidebar_collapsed else "🚪  Cerrar Sesión")
+            self._btn_logout.setText("Salir" if self._sidebar_collapsed else "Cerrar Sesión")
         if hasattr(self, "_user_chip"):
             self._user_chip.set_collapsed(self._sidebar_collapsed)
         if hasattr(self, "_conn_indicator"):
@@ -645,8 +721,8 @@ class MainWindow(QMainWindow):
         header.setFixedHeight(52)
         header.setStyleSheet("""
             QWidget#content_header {
-                background-color: #F5F5F7;
-                border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+                background-color: #FFFFFF;
+                border-bottom: 1px solid #E2E8F0;
             }
         """)
 

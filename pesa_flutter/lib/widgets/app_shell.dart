@@ -8,20 +8,20 @@ import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../services/sync_service.dart';
 
-// ── Tokens corporativos light ───────────────────────────────────────────────
-const _red         = Color(0xFFB81D24);
-const _redLight    = Color(0xFFFEE2E2); // fondo ítem activo
+// ── Tokens corporativos minimalistas Básculas PESA ──────────────────────────
+const _red         = Color(0xFFC8102E);
+const _redLight    = Color(0xFFFFF1F2); // fondo ítem activo
 const _sidebarBg   = Colors.white;
 const _sidebarW    = 240.0;
-const _textActive  = Color(0xFFB81D24);
-const _textInact   = Color(0xFF4B5563);
-const _divider     = Color(0xFFE5E7EB);
-const _bgGeneral   = Color(0xFFF9FAFB);
+const _textActive  = Color(0xFFC8102E);
+const _textInact   = Color(0xFF475569);
+const _divider     = Color(0xFFE2E8F0);
+const _bgGeneral   = Colors.white;
 
-/// Items del menú lateral — todos los roles
+/// Items del menú lateral — todos los roles (iconos vectoriales limpios, sin prefijos decorativos)
 const _navItemsAll = [
   _NavItem(icon: Icons.dashboard_outlined,        label: 'Dashboard General',   route: '/os'),
-  _NavItem(icon: Icons.add_circle_outline,        label: '+ Generar / Asignar', route: '/nuevo-doc'),
+  _NavItem(icon: Icons.add_circle_outline,        label: 'Generar / Asignar',   route: '/nuevo-doc'),
   _NavItem(icon: Icons.description_outlined,      label: 'Generar Formatos',    route: '/nuevo-doc'),
   _NavItem(icon: Icons.history_outlined,          label: 'Buscar / Historial',  route: '/historial'),
   _NavItem(icon: Icons.document_scanner_outlined, label: 'Adjuntar Escaneo',    route: '/escaneo'),
@@ -31,7 +31,7 @@ const _navItemsAll = [
 ];
 
 /// Labels de ítems exclusivos de administrador (nunca visibles para técnicos)
-const _adminOnlyLabels = {'Generar Formatos', '+ Generar / Asignar'};
+const _adminOnlyLabels = {'Generar Formatos', 'Generar / Asignar'};
 
 /// Rutas que solo admin puede ver
 const _adminOnlyRoutes = {'/catalogos', '/settings', '/nuevo-doc'};
@@ -296,11 +296,11 @@ class _SidebarContent extends StatelessWidget {
                 const SizedBox(width: 8),
                 const Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Servicios PESA',
-                        style: TextStyle(color: Color(0xFF111827),
+                    Text('Básculas PESA',
+                        style: TextStyle(color: Color(0xFF0F172A),
                             fontWeight: FontWeight.w800, fontSize: 13.5)),
-                    Text('ERP Metrológico',
-                        style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 9.5)),
+                    Text('Sistema Metrológico',
+                        style: TextStyle(color: Color(0xFF64748B), fontSize: 9.5)),
                   ]),
                 ),
               ],

@@ -10,30 +10,30 @@ Filosofía: Alto contraste, tipografía corporativa limpia, sin pasteles deslava
 # PALETA DE COLORES — Industrial Enterprise
 # ──────────────────────────────────────────────────────────────────────────────
 COLORS: dict[str, str] = {
-    # Fondos
-    "bg_primary":       "#F0F2F5",   # Fondo general de la aplicación
-    "bg_surface":       "#F8FAFC",   # Superficies secundarias
+    # Fondos corporativos minimalistas (Básculas PESA)
+    "bg_primary":       "#FFFFFF",   # Fondo principal blanco puro
+    "bg_surface":       "#F8FAFC",   # Superficies secundarias gris ultra claro
     "bg_card":          "#FFFFFF",   # Tarjetas / paneles
     "bg_input":         "#FFFFFF",   # Campos de entrada
 
     # Acentos corporativos
-    "accent_primary":   "#C8102E",   # Rojo PESA principal
-    "accent_hover":     "#A50D25",   # Rojo hover
-    "accent_pressed":   "#8A0B1E",   # Rojo pressed
-    "accent_muted":     "#FEF2F2",   # Rojo muy suave (fondos)
+    "accent_primary":   "#C8102E",   # Rojo Corporativo Básculas PESA
+    "accent_hover":     "#A50D26",   # Rojo hover
+    "accent_pressed":   "#880B20",   # Rojo pressed
+    "accent_muted":     "#FFF1F2",   # Rojo suave (fondos activos)
     "accent_border":    "#FECDD3",   # Borde rojo sutil
-    "navy":             "#1E293B",   # Azul marino industrial (textos principales)
-    "focus_blue":       "#2563EB",   # Azul foco
+    "navy":             "#0F172A",   # Negro carbón corporativo
+    "focus_blue":       "#C8102E",   # Foco corporativo
 
     # Texto
-    "text_primary":     "#0F172A",   # Negro pizarra (máximo contraste)
-    "text_secondary":   "#64748B",   # Gris medio
-    "text_muted":       "#94A3B8",   # Gris claro / hints
+    "text_primary":     "#0F172A",   # Negro carbón
+    "text_secondary":   "#475569",   # Gris pizarra corporativo
+    "text_muted":       "#64748B",   # Gris claro / hints
     "text_disabled":    "#CBD5E1",
     "text_on_red":      "#FFFFFF",
 
     # Bordes
-    "border_default":   "#E2E8F0",   # Borde estándar suave
+    "border_default":   "#E2E8F0",   # Borde fino 1px
     "border_strong":    "#CBD5E1",   # Borde marcado
     "border_focus":     "#C8102E",   # Foco en rojo corporativo
 
@@ -68,9 +68,9 @@ STYLESHEET = """
 
 /* ─── Raíz ──────────────────────────────────────────────────────────────── */
 QMainWindow, QDialog, QWidget {
-    background-color: #F0F2F5;
+    background-color: #FFFFFF;
     color: #0F172A;
-    font-family: 'Segoe UI', -apple-system, 'Helvetica Neue', sans-serif;
+    font-family: 'Segoe UI', 'Inter', -apple-system, 'Helvetica Neue', sans-serif;
     font-size: 13px;
 }
 
@@ -121,15 +121,18 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 QLineEdit, QTextEdit, QPlainTextEdit {
     background-color: #FFFFFF;
     color: #0F172A;
-    border: 1px solid #CBD5E1;
-    border-radius: 6px;
+    border: 1px solid #E2E8F0;
+    border-radius: 7px;
     padding: 7px 12px;
-    selection-background-color: #DBEAFE;
+    selection-background-color: #FFE4E6;
     selection-color: #0F172A;
     font-size: 13px;
 }
+QLineEdit:hover, QTextEdit:hover, QPlainTextEdit:hover {
+    border-color: #CBD5E1;
+}
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
-    border: 1px solid #007AFF;
+    border: 1.5px solid #C8102E;
     background-color: #FFFFFF;
     padding: 6px 11px;
 }

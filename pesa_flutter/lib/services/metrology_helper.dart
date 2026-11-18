@@ -577,8 +577,36 @@ String _escapeHtml(String s) => s
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 
-/// Construye `(asunto, cuerpoHtml)` con la Tabla HTML Institucional oficial de 7 columnas
-/// (`#`, `Identificador Completo`, `Marca`, `Modelo`, `ID / Equipo`, `CCA`, `DVE`).
+String _nombreTipoDocumentoCorreo(List<String> folios) {
+  final primero = folios.isNotEmpty ? folios.first.trim().toUpperCase() : '';
+  if (primero.startsWith('OSOCC-')) return 'Diagnóstico de Celda de Carga';
+  if (primero.startsWith('OSOB-')) return 'Inspección de Báscula';
+  if (primero.startsWith('RMA-')) return 'Remisión de Material';
+  if (primero.startsWith('RE-')) return 'Revisión de Báscula';
+  if (primero.startsWith('LP-')) return 'Levantamiento de Proyecto';
+  if (primero.startsWith('LV-')) return 'Levantamiento Metrológico';
+  return 'Orden de Servicio';
+}
+
+int _compararFolioNaturalCorreo(String a, String b) {
+  final reg = RegExp(r'(\d+|\D+)');
+  final pa = reg.allMatches(a.toUpperCase()).map((m) => m.group(0)!).toList();
+  final pb = reg.allMatches(b.toUpperCase()).map((m) => m.group(0)!).toList();
+  final len = pa.length < pb.length ? pa.length : pb.length;
+  for (int i = 0; i < len; i++) {
+    final na = int.tryParse(pa[i]);
+    final nb = int.tryParse(pb[i]);
+    final cmp = (na != null && nb != null) ? na.compareTo(nb) : pa[i].compareTo(pb[i]);
+    if (cmp != 0) return cmp;
+  }
+  return pa.length.compareTo(pb.length);
+}
+
+/// Construye `(asunto, cuerpoHtml)` con el formato institucional minimalista de Básculas PESA:
+/// - Asunto individual: `Orden de Servicio OS-26-810 - Sika Mexicana | Básculas PESA`
+/// - Asunto lote (2+):  `Orden de Servicio OS-26-810 a OS-26-811 - Sika Mexicana | Básculas PESA`
+/// - Tabla HTML dinámica: columnas fijas `#` | `ID` (solo folio) | `Marca` | `Modelo` | `ID / Equipo`,
+///   columnas `CCA` y `DVE` condicionales (ocultas si ninguna orden tiene dato) y celdas vacías en blanco `""`.
 (String, String) armarCorreoInstitucional(
   List<Map<String, dynamic>> ordenes,
   String cliente, {
@@ -590,8 +618,8 @@ String _escapeHtml(String s) => s
   for (final o in ordenes) {
     final meta = extraerMetaCorreoOrden(o);
     final codigo = formatearLineaCorreoOrden(o);
-    if (codigo.isEmpty) continue;
     final folio = (meta['folio'] ?? '').toString().trim();
+    if (codigo.isEmpty && folio.isEmpty) continue;
     final (ccaRaw, dveRaw) = extraerCcaDve(o);
     final ccaFmt = ccaRaw.isNotEmpty
         ? (ccaRaw.toUpperCase().startsWith('CCA') ? ccaRaw : 'CCA.$ccaRaw')
@@ -618,18 +646,30 @@ String _escapeHtml(String s) => s
     }
   }
 
-  final filas = <Map<String, String>>[...porFolio.values, ...sinFolio];
-  final codigos = filas.map((f) => f['codigo']!).toList();
+  final ordenadas = porFolio.values.toList()
+    ..sort((a, b) => _compararFolioNaturalCorreo(a['folio'] ?? '', b['folio'] ?? ''));
+  final filas = <Map<String, String>>[...ordenadas, ...sinFolio];
+  final folios = filas
+      .map((f) => (f['folio'] ?? '').trim())
+      .where((s) => s.isNotEmpty)
+      .toList();
+
   final clienteLimpio = cliente.replaceAll(RegExp(r'[\r\n]+'), ' ').trim().isEmpty
       ? 'Cliente'
       : cliente.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
   final clienteEsc = _escapeHtml(clienteLimpio);
   final n = filas.length;
   final loteFlag = esLote ?? (n > 1);
+  final tipoTitulo = _nombreTipoDocumentoCorreo(folios);
 
-  final asunto = n == 1
-      ? 'Reporte de Servicio - ${codigos.first} - $clienteLimpio | Básculas PESA'
-      : 'Reporte de Servicio - Lote ($n documentos): ${codigos.join(", ")} - $clienteLimpio | Básculas PESA';
+  final String asunto;
+  if (folios.length == 1) {
+    asunto = '$tipoTitulo ${folios.first} - $clienteLimpio | Básculas PESA';
+  } else if (folios.length >= 2) {
+    asunto = '$tipoTitulo ${folios.first} a ${folios.last} - $clienteLimpio | Básculas PESA';
+  } else {
+    asunto = '$tipoTitulo - $clienteLimpio | Básculas PESA';
+  }
 
   final introHtml = (n > 1 || loteFlag)
       ? 'Hacemos entrega de los reportes digitales correspondientes al <strong>Lote de Servicios ($n ${n == 1 ? "orden" : "órdenes"})</strong>:'
@@ -638,61 +678,68 @@ String _escapeHtml(String s) => s
       ? 'Adjunto a este correo encontrará cada uno de los certificados y reportes en formato PDF con sus respectivas firmas digitales.'
       : 'Adjunto a este correo encontrará el certificado y reporte en formato PDF con sus respectivas firmas digitales.';
 
+  final bool tieneCca = filas.any((f) => (f['cca'] ?? '').trim().isNotEmpty);
+  final bool tieneDve = filas.any((f) => (f['dve'] ?? '').trim().isNotEmpty);
+
   const thStyle =
-      'border: 1px solid #CBD5E1; padding: 9px 10px; background-color: #F1F5F9; color: #0F172A; font-weight: 700; font-size: 12px; text-align: left;';
+      'border: 1px solid #E2E8F0; padding: 9px 12px; background-color: #F8FAFC; color: #0F172A; font-weight: 700; font-size: 12px; text-align: left;';
   const tdBase =
-      'border: 1px solid #CBD5E1; padding: 8px 10px; font-size: 12.5px; color: #1E293B; vertical-align: middle;';
+      'border: 1px solid #E2E8F0; padding: 8px 12px; font-size: 12.5px; color: #0F172A; vertical-align: middle;';
+
+  final thCcaHtml = tieneCca ? '<th style="$thStyle text-align: center;">CCA</th>' : '';
+  final thDveHtml = tieneDve ? '<th style="$thStyle text-align: center;">DVE</th>' : '';
 
   final trBuf = StringBuffer();
   for (int i = 0; i < filas.length; i++) {
     final f = filas[i];
     final idx = i + 1;
     final bg = idx.isOdd ? '#FFFFFF' : '#F8FAFC';
-    final codEsc = _escapeHtml(f['codigo'] ?? '');
-    final marcaEsc = (f['marca'] ?? '').isNotEmpty ? _escapeHtml(f['marca']!) : '—';
-    final modeloEsc = (f['modelo'] ?? '').isNotEmpty ? _escapeHtml(f['modelo']!) : '—';
-    final idEsc = (f['id_indicador'] ?? '').isNotEmpty ? _escapeHtml(f['id_indicador']!) : '—';
-    final ccaCell = (f['cca'] ?? '').isNotEmpty
-        ? '<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; border:1px solid #C7D2FE; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">${_escapeHtml(f['cca']!)}</span>'
-        : '—';
-    final dveCell = (f['dve'] ?? '').isNotEmpty
-        ? '<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">${_escapeHtml(f['dve']!)}</span>'
-        : '—';
+    final folioEsc = _escapeHtml(f['folio'] ?? '');
+    final marcaEsc = (f['marca'] ?? '').isNotEmpty ? _escapeHtml(f['marca']!) : '';
+    final modeloEsc = (f['modelo'] ?? '').isNotEmpty ? _escapeHtml(f['modelo']!) : '';
+    final idEsc = (f['id_indicador'] ?? '').isNotEmpty ? _escapeHtml(f['id_indicador']!) : '';
+
+    final tdCcaHtml = tieneCca
+        ? '<td style="$tdBase text-align: center;">${(f['cca'] ?? '').isNotEmpty ? '<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; border:1px solid #C7D2FE; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">${_escapeHtml(f['cca']!)}</span>' : ''}</td>'
+        : '';
+    final tdDveHtml = tieneDve
+        ? '<td style="$tdBase text-align: center;">${(f['dve'] ?? '').isNotEmpty ? '<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; border:1px solid #A7F3D0; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">${_escapeHtml(f['dve']!)}</span>' : ''}</td>'
+        : '';
 
     trBuf.writeln(
       '<tr style="background-color: $bg;">'
-      '<td style="$tdBase text-align: center; font-weight: 700; width: 36px;">$idx</td>'
-      '<td style="$tdBase font-weight: 700; color: #0B57D0;">$codEsc</td>'
+      '<td style="$tdBase text-align: center; font-weight: 700; width: 36px; color: #475569;">$idx</td>'
+      '<td style="$tdBase font-weight: 700; color: #C8102E; white-space: nowrap;">$folioEsc</td>'
       '<td style="$tdBase">$marcaEsc</td>'
       '<td style="$tdBase">$modeloEsc</td>'
       '<td style="$tdBase">$idEsc</td>'
-      '<td style="$tdBase text-align: center;">$ccaCell</td>'
-      '<td style="$tdBase text-align: center;">$dveCell</td>'
+      '$tdCcaHtml'
+      '$tdDveHtml'
       '</tr>',
     );
   }
 
   final html = '''
 <html>
-<body style="font-family: Arial, Helvetica, sans-serif; color: #1D1D1F; line-height: 1.5; margin: 0; padding: 12px; background-color: #F8FAFC;">
+<body style="font-family: 'Segoe UI', Inter, Arial, sans-serif; color: #0F172A; line-height: 1.5; margin: 0; padding: 16px; background-color: #F8FAFC;">
   <div style="max-width: 880px; margin: 0 auto; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; border: 1px solid #E2E8F0;">
-    <div style="background-color: #B91C1C; padding: 20px 24px; text-align: left;">
-      <h1 style="color: #FFFFFF; margin: 0; font-size: 23px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
+    <div style="background-color: #C8102E; padding: 18px 24px; text-align: left;">
+      <h1 style="color: #FFFFFF; margin: 0; font-size: 21px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
     </div>
     <div style="padding: 24px; background-color: #FFFFFF;">
-      <p style="margin-top: 0; font-size: 14.5px;">Estimado cliente <strong>$clienteEsc</strong>,</p>
-      <p style="font-size: 14px; color: #334155;">$introHtml</p>
+      <p style="margin-top: 0; font-size: 14.5px; color: #0F172A;">Estimado cliente <strong>$clienteEsc</strong>,</p>
+      <p style="font-size: 14px; color: #475569;">$introHtml</p>
       <div style="overflow-x: auto; margin: 18px 0;">
-        <table style="border-collapse: collapse; width: 100%; border: 1px solid #CBD5E1;">
+        <table style="border-collapse: collapse; width: 100%; border: 1px solid #E2E8F0;">
           <thead>
             <tr>
               <th style="$thStyle text-align: center; width: 36px;">#</th>
-              <th style="$thStyle">Identificador Completo</th>
+              <th style="$thStyle">ID</th>
               <th style="$thStyle">Marca</th>
               <th style="$thStyle">Modelo</th>
               <th style="$thStyle">ID / Equipo</th>
-              <th style="$thStyle text-align: center;">CCA</th>
-              <th style="$thStyle text-align: center;">DVE</th>
+              $thCcaHtml
+              $thDveHtml
             </tr>
           </thead>
           <tbody>
@@ -700,12 +747,12 @@ String _escapeHtml(String s) => s
           </tbody>
         </table>
       </div>
-      <p style="font-size: 14px; color: #334155;">$cierreHtml</p>
+      <p style="font-size: 14px; color: #475569;">$cierreHtml</p>
       <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 24px 0;">
       <p style="font-size: 12px; color: #64748B; margin: 0;">
         Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
         Para cualquier aclaración o seguimiento, favor de responder con copia a
-        <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #B91C1C; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.
+        <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #C8102E; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.
       </p>
     </div>
   </div>
@@ -783,24 +830,34 @@ bool esCorreoEnviadoOrden(Map<String, dynamic> orden) {
   return false;
 }
 
+bool _esCorreoDestinoValido(String cand) {
+  final c = cand.trim();
+  if (c.isEmpty) return false;
+  final low = c.toLowerCase();
+  if (low == 'null' ||
+      low == 'none' ||
+      low == 'cliente' ||
+      low == 'sin registrar' ||
+      low == 'destinatario registrado' ||
+      low == '-' ||
+      low == '—') {
+    return false;
+  }
+  return c.contains('@');
+}
+
 /// Construye la etiqueta institucional de trazabilidad de envío de correo:
-///   `✉ Enviado el DD/MM/YYYY HH:mm a: correo@cliente.com (CC: recepcion@basculaspesa.com.mx)`
+///   `Enviado el DD/MM/YYYY HH:mm | Para: correo@cliente.com | CC: recepcion@basculaspesa.com.mx`
 String formatearInfoEnvioCorreo(Map<String, dynamic> orden) {
   if (!esCorreoEnviadoOrden(orden)) return '';
 
   String destino = '';
-  for (final k in ['correo_destino', 'correo_cliente']) {
+  for (final k in ['correo_destino', 'correo_cliente', 'email_cliente']) {
     final cand = (orden[k] ?? '').toString().trim();
-    if (cand.isNotEmpty &&
-        cand.toLowerCase() != 'null' &&
-        cand.toLowerCase() != 'none' &&
-        cand.toLowerCase() != 'sin registrar') {
+    if (_esCorreoDestinoValido(cand)) {
       destino = cand;
       break;
     }
-  }
-  if (destino.isEmpty) {
-    destino = 'Destinatario registrado';
   }
 
   String cc = (orden['correo_cc'] ?? '').toString().trim();
@@ -812,10 +869,16 @@ String formatearInfoEnvioCorreo(Map<String, dynamic> orden) {
     orden['fecha_envio_correo'] ?? orden['fecha_envio_email'],
   );
 
-  if (fechaTxt.isNotEmpty) {
-    return '✉ Enviado el $fechaTxt a: $destino (CC: $cc)';
+  if (fechaTxt.isNotEmpty && destino.isNotEmpty) {
+    return 'Enviado el $fechaTxt | Para: $destino | CC: $cc';
   }
-  return '✉ Enviado a: $destino (CC: $cc)';
+  if (fechaTxt.isNotEmpty) {
+    return 'Enviado el $fechaTxt | CC: $cc';
+  }
+  if (destino.isNotEmpty) {
+    return 'Enviado | Para: $destino | CC: $cc';
+  }
+  return 'Enviado | CC: $cc';
 }
 
 /// Construye la etiqueta de trazabilidad de correo para la cabecera de un lote.
@@ -830,12 +893,9 @@ String formatearInfoEnvioCorreoLote(List<Map<String, dynamic>> items) {
 
   for (final o in enviados) {
     if (destino.isEmpty) {
-      for (final k in ['correo_destino', 'correo_cliente']) {
+      for (final k in ['correo_destino', 'correo_cliente', 'email_cliente']) {
         final cand = (o[k] ?? '').toString().trim();
-        if (cand.isNotEmpty &&
-            cand.toLowerCase() != 'null' &&
-            cand.toLowerCase() != 'none' &&
-            cand.toLowerCase() != 'sin registrar') {
+        if (_esCorreoDestinoValido(cand)) {
           destino = cand;
           break;
         }
@@ -853,12 +913,9 @@ String formatearInfoEnvioCorreoLote(List<Map<String, dynamic>> items) {
 
   if (destino.isEmpty) {
     for (final o in items) {
-      for (final k in ['correo_destino', 'correo_cliente']) {
+      for (final k in ['correo_destino', 'correo_cliente', 'email_cliente']) {
         final cand = (o[k] ?? '').toString().trim();
-        if (cand.isNotEmpty &&
-            cand.toLowerCase() != 'null' &&
-            cand.toLowerCase() != 'none' &&
-            cand.toLowerCase() != 'sin registrar') {
+        if (_esCorreoDestinoValido(cand)) {
           destino = cand;
           break;
         }
@@ -875,7 +932,7 @@ String formatearInfoEnvioCorreoLote(List<Map<String, dynamic>> items) {
   });
   if (base.isEmpty) return '';
   if (enviados.length < items.length) {
-    return base.replaceFirst('✉ Enviado', '✉ Enviado (${enviados.length}/${items.length} OS)');
+    return base.replaceFirst('Enviado', 'Enviado (${enviados.length}/${items.length} OS)');
   }
   return base;
 }

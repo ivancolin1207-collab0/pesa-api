@@ -480,14 +480,38 @@ def armar_correo_institucional(
     return subject, cuerpo_html
 
 
+def _nombre_tipo_documento_correo(folios: list[str]) -> str:
+    """Determina el nombre institucional del formato según el prefijo del folio."""
+    f0 = (folios[0] if folios else "").strip().upper()
+    if f0.startswith("OSOCC-"):
+        return "Diagnóstico de Celda de Carga"
+    if f0.startswith("OSOB-"):
+        return "Inspección de Báscula"
+    if f0.startswith("RMA-"):
+        return "Remisión de Material"
+    if f0.startswith("RE-"):
+        return "Revisión de Báscula"
+    if f0.startswith("LP-"):
+        return "Levantamiento de Proyecto"
+    if f0.startswith("LV-"):
+        return "Levantamiento Metrológico"
+    return "Orden de Servicio"
+
+
 def construir_asunto_y_cuerpo_correo(
     ordenes_lote: list[dict],
     cliente: str,
     es_lote: bool = False,
 ) -> tuple[str, str, str, list[str]]:
     """
-    Construye (subject, cuerpo_html, cuerpo_texto, codigos) usando la tabla HTML institucional
-    oficial de 7 columnas (#, Identificador Completo, Marca, Modelo, ID / Equipo, CCA, DVE).
+    Construye (subject, cuerpo_html, cuerpo_texto, folios) con:
+      - Asunto:
+          * 1 doc:  '{Tipo} {folios[0]} - {cliente} | Básculas PESA'
+          * Lote:   '{Tipo} {folios[0]} a {folios[-1]} - {cliente} | Básculas PESA'
+      - Tabla HTML dinámica:
+          * Columnas fijas: # | ID | Marca | Modelo | ID / Equipo
+          * Columna CCA solo si tiene_cca es True; columna DVE solo si tiene_dve es True
+          * Celdas vacías completamente limpias ('') sin guiones '-' ni '—'.
     """
     import html as _html
     import re as _re
@@ -496,28 +520,37 @@ def construir_asunto_y_cuerpo_correo(
     filas_por_folio: dict[str, dict[str, str]] = {}
     filas_sin_folio: list[dict[str, str]] = []
     for f in filas_raw:
-        if not f["codigo"]:
+        if not f["folio"] and not f["codigo"]:
             continue
         fk = f["folio"].upper() if f["folio"] else ""
         if not fk:
             filas_sin_folio.append(f)
         elif fk not in filas_por_folio or len(f["codigo"]) > len(filas_por_folio[fk]["codigo"]):
             filas_por_folio[fk] = f
-    filas_datos = list(filas_por_folio.values()) + filas_sin_folio
-    etiquetas = [f["codigo"] for f in filas_datos]
+
+    def _nat_key(d: dict[str, str]):
+        return [int(p) if p.isdigit() else p for p in _re.split(r"(\d+)", str(d.get("folio") or "").upper())]
+
+    filas_ordenadas = sorted(filas_por_folio.values(), key=_nat_key) + filas_sin_folio
+    folios = [f["folio"] for f in filas_ordenadas if f["folio"]]
 
     cliente_limpio = _re.sub(r"[\r\n]+", " ", str(cliente or "Cliente")).strip() or "Cliente"
     cliente_esc = _html.escape(cliente_limpio)
-    n = len(filas_datos)
+    n = len(filas_ordenadas)
+    tipo_titulo = _nombre_tipo_documento_correo(folios)
 
-    if n == 1:
-        subject = f"Reporte de Servicio - {etiquetas[0]} - {cliente_limpio} | Básculas PESA"
+    if len(folios) == 1:
+        subject = f"{tipo_titulo} {folios[0]} - {cliente_limpio} | Básculas PESA"
+    elif len(folios) >= 2:
+        subject = f"{tipo_titulo} {folios[0]} a {folios[-1]} - {cliente_limpio} | Básculas PESA"
     else:
-        lista_asunto = ", ".join(etiquetas)
-        subject = f"Reporte de Servicio - Lote ({n} documentos): {lista_asunto} - {cliente_limpio} | Básculas PESA"
+        subject = f"{tipo_titulo} - {cliente_limpio} | Básculas PESA"
+
+    tiene_cca = any(bool(f["cca"]) for f in filas_ordenadas)
+    tiene_dve = any(bool(f["dve"]) for f in filas_ordenadas)
 
     if n > 1 or es_lote:
-        txt_ordenes = "orden" if n == 1 else "órdenes"
+        txt_ordenes = "documento" if n == 1 else "documentos"
         intro_html = (
             f"Hacemos entrega de los reportes digitales correspondientes al "
             f"<strong>Lote de Servicios ({n} {txt_ordenes})</strong>:"
@@ -534,62 +567,84 @@ def construir_asunto_y_cuerpo_correo(
         )
 
     th_style = (
-        "border: 1px solid #CBD5E1; padding: 9px 10px; background-color: #F1F5F9; "
+        "border: 1px solid #E2E8F0; padding: 10px 12px; background-color: #F8FAFC; "
         "color: #0F172A; font-weight: 700; font-size: 12px; text-align: left;"
     )
-    td_base = "border: 1px solid #CBD5E1; padding: 8px 10px; font-size: 12.5px; color: #1E293B; vertical-align: middle;"
+    td_base = "border: 1px solid #E2E8F0; padding: 9px 12px; font-size: 13px; color: #0F172A; vertical-align: middle;"
+
+    headers_html = [
+        f'<th style="{th_style} text-align: center; width: 38px;">#</th>',
+        f'<th style="{th_style}">ID</th>',
+        f'<th style="{th_style}">Marca</th>',
+        f'<th style="{th_style}">Modelo</th>',
+        f'<th style="{th_style}">ID / Equipo</th>',
+    ]
+    if tiene_cca:
+        headers_html.append(f'<th style="{th_style} text-align: center;">CCA</th>')
+    if tiene_dve:
+        headers_html.append(f'<th style="{th_style} text-align: center;">DVE</th>')
+    thead_cols_str = "\n                                        ".join(headers_html)
 
     tr_html_list: list[str] = []
     lineas_txt_list: list[str] = []
-    for idx, f in enumerate(filas_datos, start=1):
+    for idx, f in enumerate(filas_ordenadas, start=1):
         bg = "#FFFFFF" if idx % 2 == 1 else "#F8FAFC"
-        cod_esc = _html.escape(f["codigo"])
-        marca_esc = _html.escape(f["marca"]) if f["marca"] else "—"
-        modelo_esc = _html.escape(f["modelo"]) if f["modelo"] else "—"
-        id_esc = _html.escape(f["id_indicador"]) if f["id_indicador"] else "—"
+        folio_esc = _html.escape(f["folio"]) if f["folio"] else ""
+        marca_esc = _html.escape(f["marca"]) if f["marca"] else ""
+        modelo_esc = _html.escape(f["modelo"]) if f["modelo"] else ""
+        id_esc = _html.escape(f["id_indicador"]) if f["id_indicador"] else ""
 
-        if f["cca"]:
-            cca_cell = (
-                f'<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; '
-                f'border:1px solid #C7D2FE; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">'
-                f'{_html.escape(f["cca"])}</span>'
-            )
-        else:
-            cca_cell = "—"
+        celdas_fila = [
+            f'<td style="{td_base} text-align: center; font-weight: 600; color: #475569; width: 38px;">{idx}</td>',
+            f'<td style="{td_base} font-weight: 700; color: #C8102E; white-space: nowrap;">{folio_esc}</td>',
+            f'<td style="{td_base}">{marca_esc}</td>',
+            f'<td style="{td_base}">{modelo_esc}</td>',
+            f'<td style="{td_base}">{id_esc}</td>',
+        ]
+        if tiene_cca:
+            if f["cca"]:
+                cca_cell = (
+                    f'<span style="display:inline-block; background-color:#EEF2FF; color:#3730A3; '
+                    f'border:1px solid #C7D2FE; border-radius:4px; padding:2px 7px; font-weight:700; font-size:11.5px;">'
+                    f'{_html.escape(f["cca"])}</span>'
+                )
+            else:
+                cca_cell = ""
+            celdas_fila.append(f'<td style="{td_base} text-align: center;">{cca_cell}</td>')
 
-        if f["dve"]:
-            dve_cell = (
-                f'<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; '
-                f'border:1px solid #A7F3D0; border-radius:4px; padding:2px 6px; font-weight:700; font-size:11.5px;">'
-                f'{_html.escape(f["dve"])}</span>'
-            )
-        else:
-            dve_cell = "—"
+        if tiene_dve:
+            if f["dve"]:
+                dve_cell = (
+                    f'<span style="display:inline-block; background-color:#ECFDF5; color:#065F46; '
+                    f'border:1px solid #A7F3D0; border-radius:4px; padding:2px 7px; font-weight:700; font-size:11.5px;">'
+                    f'{_html.escape(f["dve"])}</span>'
+                )
+            else:
+                dve_cell = ""
+            celdas_fila.append(f'<td style="{td_base} text-align: center;">{dve_cell}</td>')
 
-        tr_html_list.append(
-            f'<tr style="background-color: {bg};">'
-            f'<td style="{td_base} text-align: center; font-weight: 700; width: 36px;">{idx}</td>'
-            f'<td style="{td_base} font-weight: 700; color: #0B57D0;">{cod_esc}</td>'
-            f'<td style="{td_base}">{marca_esc}</td>'
-            f'<td style="{td_base}">{modelo_esc}</td>'
-            f'<td style="{td_base}">{id_esc}</td>'
-            f'<td style="{td_base} text-align: center;">{cca_cell}</td>'
-            f'<td style="{td_base} text-align: center;">{dve_cell}</td>'
-            f'</tr>'
-        )
-        lineas_txt_list.append(
-            f"{idx}. {f['codigo']} | Marca: {f['marca'] or '—'} | Modelo: {f['modelo'] or '—'} "
-            f"| ID: {f['id_indicador'] or '—'} | CCA: {f['cca'] or '—'} | DVE: {f['dve'] or '—'}"
-        )
+        tr_html_list.append(f'<tr style="background-color: {bg};">' + "".join(celdas_fila) + "</tr>")
 
-    filas_tabla_html = "\n                            ".join(tr_html_list)
+        partes_txt = [f"{idx}. {f['folio']}"]
+        if f["marca"]:
+            partes_txt.append(f"Marca: {f['marca']}")
+        if f["modelo"]:
+            partes_txt.append(f"Modelo: {f['modelo']}")
+        if f["id_indicador"]:
+            partes_txt.append(f"ID / Equipo: {f['id_indicador']}")
+        if tiene_cca and f["cca"]:
+            partes_txt.append(f"CCA: {f['cca']}")
+        if tiene_dve and f["dve"]:
+            partes_txt.append(f"DVE: {f['dve']}")
+        lineas_txt_list.append(" | ".join(partes_txt))
+
+    filas_tabla_html = "\n                                    ".join(tr_html_list)
     lineas_txt = "\n".join(lineas_txt_list)
 
     cuerpo_texto = f"""Estimado cliente ({cliente_limpio}):
 
 Hacemos entrega de los reportes digitales correspondientes ({n} {'documento' if n == 1 else 'documentos'}):
 
-Documentos procesados:
 {lineas_txt}
 
 Los documentos se encuentran certificados con sus respectivas firmas digitales.
@@ -601,25 +656,19 @@ recepcion@basculaspesa.com.mx
 
     cuerpo_html = f"""
             <html>
-            <body style="font-family: Arial, Helvetica, sans-serif; color: #1D1D1F; line-height: 1.5; margin: 0; padding: 12px; background-color: #F8FAFC;">
+            <body style="font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #0F172A; line-height: 1.55; margin: 0; padding: 16px; background-color: #F8FAFC;">
                 <div style="max-width: 880px; margin: 0 auto; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; border: 1px solid #E2E8F0;">
-                    <div style="background-color: #B91C1C; padding: 20px 24px; text-align: left;">
-                        <h1 style="color: #FFFFFF; margin: 0; font-size: 23px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
+                    <div style="background-color: #C8102E; padding: 20px 24px; text-align: left;">
+                        <h1 style="color: #FFFFFF; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
                     </div>
                     <div style="padding: 24px; background-color: #FFFFFF;">
-                        <p style="margin-top: 0; font-size: 14.5px;">Estimado cliente <strong>{cliente_esc}</strong>,</p>
-                        <p style="font-size: 14px; color: #334155;">{intro_html}</p>
+                        <p style="margin-top: 0; font-size: 14.5px; color: #0F172A;">Estimado cliente <strong>{cliente_esc}</strong>,</p>
+                        <p style="font-size: 14px; color: #475569;">{intro_html}</p>
                         <div style="overflow-x: auto; margin: 18px 0;">
-                            <table style="border-collapse: collapse; width: 100%; border: 1px solid #CBD5E1;">
+                            <table style="border-collapse: collapse; width: 100%; border: 1px solid #E2E8F0;">
                                 <thead>
                                     <tr>
-                                        <th style="{th_style} text-align: center; width: 36px;">#</th>
-                                        <th style="{th_style}">Identificador Completo</th>
-                                        <th style="{th_style}">Marca</th>
-                                        <th style="{th_style}">Modelo</th>
-                                        <th style="{th_style}">ID / Equipo</th>
-                                        <th style="{th_style} text-align: center;">CCA</th>
-                                        <th style="{th_style} text-align: center;">DVE</th>
+                                        {thead_cols_str}
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -627,19 +676,19 @@ recepcion@basculaspesa.com.mx
                                 </tbody>
                             </table>
                         </div>
-                        <p style="font-size: 14px; color: #334155;">{cierre_html}</p>
+                        <p style="font-size: 14px; color: #475569;">{cierre_html}</p>
                         <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 24px 0;">
-                        <p style="font-size: 12px; color: #64748B; margin: 0;">
+                        <p style="font-size: 12px; color: #475569; margin: 0;">
                             Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
                             Para cualquier aclaración o seguimiento, favor de responder con copia a
-                            <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #B91C1C; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.
+                            <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #C8102E; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.
                         </p>
                     </div>
                 </div>
             </body>
             </html>
             """
-    return subject, cuerpo_html, cuerpo_texto, etiquetas
+    return subject, cuerpo_html, cuerpo_texto, folios
 
 
 def obtener_tz_mexico():
@@ -681,8 +730,9 @@ def formatear_fecha_hora_mexico(raw_val) -> str:
 
 def formatear_info_envio_correo(orden: dict) -> str:
     """
-    Construye la línea institucional de auditoría de correo:
-      ✉ Enviado el DD/MM/YYYY HH:mm a: correo@cliente.com (CC: recepcion@basculaspesa.com.mx)
+    Construye el indicador corporativo de trazabilidad de envío de correo:
+      Enviado el DD/MM/YYYY HH:mm | Para: {correo_destino} | CC: {correo_cc}
+    Nunca coloca la palabra genérica 'Cliente' como destinatario.
     """
     if not isinstance(orden, dict):
         orden = dict(orden) if orden else {}
@@ -698,23 +748,24 @@ def formatear_info_envio_correo(orden: dict) -> str:
 
     raw_fecha = orden.get("fecha_envio_correo") or orden.get("fecha_envio_email")
     fecha_str = formatear_fecha_hora_mexico(raw_fecha)
-    destino_raw = (
-        orden.get("correo_destino")
-        or orden.get("correo_cliente")
-        or orden.get("email_cliente")
-        or ""
-    )
-    destino = str(destino_raw or "").strip()
-    if not destino or destino.lower() in ("none", "null", "sin registrar"):
-        destino = "Cliente"
+
+    invalidos_dest = {"", "none", "null", "sin registrar", "cliente", "destinatario registrado"}
+    destino = ""
+    for k in ("correo_destino", "correo_cliente", "email_cliente"):
+        cand = str(orden.get(k) or "").strip()
+        if cand and cand.lower() not in invalidos_dest and "@" in cand:
+            destino = cand
+            break
 
     cc_raw = orden.get("correo_cc") or ""
     cc = str(cc_raw or "").strip()
     if not cc or cc.lower() in ("none", "null"):
         cc = "recepcion@basculaspesa.com.mx"
 
-    partes_fecha = f"el {fecha_str} " if fecha_str else ""
-    return f"✉ Enviado {partes_fecha}a: {destino} (CC: {cc})"
+    encabezado = f"Enviado el {fecha_str}" if fecha_str else "Enviado"
+    if destino:
+        return f"{encabezado} | Para: {destino} | CC: {cc}"
+    return f"{encabezado} | CC: {cc}"
 
 
 

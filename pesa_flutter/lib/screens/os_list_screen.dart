@@ -49,15 +49,26 @@ Widget buildEmailAuditBanner(String infoCorreo, {EdgeInsetsGeometry? margin}) {
       borderRadius: BorderRadius.circular(5),
       border: Border.all(color: const Color(0xFFA7F3D0)),
     ),
-    child: Text(
-      infoCorreo,
-      softWrap: true,
-      style: const TextStyle(
-        fontSize: 10.5,
-        fontWeight: FontWeight.w600,
-        color: Color(0xFF065F46),
-        height: 1.3,
-      ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 1.5, right: 6),
+          child: Icon(Icons.mark_email_read_outlined, size: 13, color: Color(0xFF065F46)),
+        ),
+        Expanded(
+          child: Text(
+            infoCorreo,
+            softWrap: true,
+            style: const TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF065F46),
+              height: 1.3,
+            ),
+          ),
+        ),
+      ],
     ),
   );
 }
@@ -73,14 +84,14 @@ String normalizarTexto(String texto) {
   return resultado;
 }
 
-// ── Design Tokens ──────────────────────────────────────────────────────────
-const _kCarmineRed = Color(0xFFB81D24);
-const _kBgColor    = Color(0xFFF5F5F7);
+// ── Design Tokens — Básculas PESA Minimalista Corporativo ───────────────────
+const _kCarmineRed = Color(0xFFC8102E);
+const _kBgColor    = Color(0xFFFFFFFF);
 const _kCardBg     = Color(0xFFFFFFFF);
-const _kBorder     = Color(0xFFE5E5EA);
-const _kTextPrim   = Color(0xFF1D1D1F);
-const _kTextSec    = Color(0xFF86868B);
-const _kTableHead  = Color(0xFFF3F4F6);
+const _kBorder     = Color(0xFFE2E8F0);
+const _kTextPrim   = Color(0xFF0F172A);
+const _kTextSec    = Color(0xFF475569);
+const _kTableHead  = Color(0xFFF8FAFC);
 
 /// Enrutador dinámico por tipo de documento:
 /// OSOB -> ObservacionesBasculaScreen (PRIMERA condición prioritaria)
@@ -350,8 +361,8 @@ class _OsListScreenState extends State<OsListScreen> {
               const SizedBox(width: 8),
               Expanded(child: Text(
                 totalOS > 0
-                    ? '✓ Sincronizado — $totalOS órdenes'
-                    : sync.message.isNotEmpty ? sync.message : '✓ Sincronizado',
+                    ? 'Sincronizado — $totalOS órdenes'
+                    : sync.message.isNotEmpty ? sync.message : 'Sincronizado',
                 style: const TextStyle(fontSize: 13),
               )),
             ]),
@@ -484,7 +495,7 @@ class _OsListScreenState extends State<OsListScreen> {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               backgroundColor: const Color(0xFF2E7D32),
-              content: Text('✓ Se enviaron los correos pendientes con éxito ($n)'),
+              content: Text('Se enviaron los correos pendientes con éxito ($n)'),
             ),
           );
         });
@@ -1217,7 +1228,7 @@ class _OsListScreenState extends State<OsListScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
             icon: const Icon(Icons.delete_forever_rounded, size: 16),
-            label: const Text('🗑️ Eliminar datos desde 0'),
+            label: const Text('Eliminar datos desde 0'),
             onPressed: () => Navigator.of(dialogCtx).pop(true),
           ),
         ],
@@ -1245,14 +1256,14 @@ class _OsListScreenState extends State<OsListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Color(0xFF2E7D32),
-            content: Text('✓ Orden reiniciada correctamente. Lista para nueva captura.'),
+            content: Text('Orden reiniciada correctamente. Lista para nueva captura.'),
           ),
         );
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFFC62828),
-            content: Text('⚠️ No se pudo resetear la orden $folio por completo.'),
+            content: Text('No se pudo resetear la orden $folio por completo.'),
           ),
         );
       }
@@ -1559,22 +1570,52 @@ class _OsListScreenState extends State<OsListScreen> {
     }
 
     final bool yaEnviado = itemsEnvio.isNotEmpty &&
-        itemsEnvio.any((o) =>
-            o['email_enviado'] == 1 || o['email_enviado'] == true || o['email_enviado'] == '1' || o['email_enviado'] == 'true');
+        itemsEnvio.any(esCorreoEnviadoOrden);
 
-    // 1. Obtener correo registrado si existe
+    // 1. Obtener correo registrado real si existe (orden -> catálogo de clientes -> órdenes hermanas)
     String correoActual = '';
     for (final it in itemsEnvio) {
-      final c = (it['correo_cliente'] ?? '').toString().trim();
-      if (c.isNotEmpty &&
-          c.toLowerCase() != 'ivancolin1207@gmail.com' &&
-          c.toLowerCase() != 'sin registrar' &&
-          c.toLowerCase() != 'none' &&
-          c.toLowerCase() != 'null') {
-        correoActual = c;
-        break;
+      for (final k in const ['correo_destino', 'correo_cliente', 'email_cliente']) {
+        final c = (it[k] ?? '').toString().trim();
+        final low = c.toLowerCase();
+        if (c.contains('@') &&
+            low != 'ivancolin1207@gmail.com' &&
+            low != 'cliente' &&
+            low != 'sin registrar' &&
+            low != 'destinatario registrado' &&
+            low != 'none' &&
+            low != 'null') {
+          correoActual = c;
+          break;
+        }
       }
+      if (correoActual.isNotEmpty) break;
     }
+
+    final String clientePreview = itemsEnvio.isNotEmpty
+        ? (itemsEnvio.first['cliente'] ?? 'Cliente').toString().trim()
+        : 'Cliente';
+    if (correoActual.isEmpty && clientePreview.isNotEmpty) {
+      try {
+        final catCli = await LocalDbService.instance.getCatalogoClientes();
+        for (final cli in catCli) {
+          final nom = (cli['nombre'] ?? '').toString().trim();
+          final em = (cli['email'] ?? '').toString().trim();
+          if (nom.toLowerCase() == clientePreview.toLowerCase() &&
+              em.contains('@') &&
+              em.toLowerCase() != 'ivancolin1207@gmail.com') {
+            correoActual = em;
+            break;
+          }
+        }
+      } catch (_) {}
+    }
+
+    final (asuntoPreview, _) = armarCorreoInstitucional(
+      itemsEnvio,
+      clientePreview,
+      esLote: esLote,
+    );
 
     // Modal de captura si falta correo o para confirmar/editar destinatario
     final formKey = GlobalKey<FormState>();
@@ -1608,14 +1649,14 @@ class _OsListScreenState extends State<OsListScreen> {
           _all = _all.map((m) {
             final f = folioDe(m);
             if (foliosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
-              return {...m, 'email_enviado': 0, 'email_status': 'cola', 'correo_cliente': destino};
+              return {...m, 'email_enviado': 0, 'email_status': 'cola', 'correo_cliente': destino, 'correo_destino': destino};
             }
             return m;
           }).toList();
           _filtered = _filtered.map((m) {
             final f = folioDe(m);
             if (foliosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
-              return {...m, 'email_enviado': 0, 'email_status': 'cola', 'correo_cliente': destino};
+              return {...m, 'email_enviado': 0, 'email_status': 'cola', 'correo_cliente': destino, 'correo_destino': destino};
             }
             return m;
           }).toList();
@@ -1623,7 +1664,7 @@ class _OsListScreenState extends State<OsListScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             backgroundColor: Color(0xFFD97706),
-            content: Text('⏳ Guardado en cola offline. Se enviará al sincronizar con internet.'),
+            content: Text('Guardado en cola offline. Se enviará al sincronizar con internet.'),
           ),
         );
         await _loadLocal();
@@ -1638,13 +1679,15 @@ class _OsListScreenState extends State<OsListScreen> {
           return PopScope(
             canPop: !isSendingModal,
             child: AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               title: Row(
                 children: [
                   Icon(
                     yaEnviado ? Icons.mark_email_read_rounded : Icons.mail_outline_rounded,
-                    color: const Color(0xFFB81D24),
-                    size: 26,
+                    color: _kCarmineRed,
+                    size: 24,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -1652,7 +1695,7 @@ class _OsListScreenState extends State<OsListScreen> {
                       esLote
                           ? (yaEnviado ? 'Reenviar Lote por Correo' : 'Enviar Lote por Correo')
                           : (yaEnviado ? 'Reenviar por Correo — $folio' : 'Enviar por Correo — $folio'),
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _kTextPrim),
                     ),
                   ),
                 ],
@@ -1667,14 +1710,14 @@ class _OsListScreenState extends State<OsListScreen> {
                       Text(
                         'Se enviará un SOLO correo con ${itemsEnvio.length} reporte(s) PDF firmado(s).'
                         '${omitidas > 0 ? '\n$omitidas orden(es) del lote sin realizar se omitirán del correo.' : ''}',
-                        style: const TextStyle(fontSize: 13, height: 1.4),
+                        style: const TextStyle(fontSize: 13, height: 1.4, color: _kTextSec),
                       ),
                       const SizedBox(height: 8),
                     ],
-                    if (etiquetasEnvio.isNotEmpty) ...[
+                    if (foliosEnvio.isNotEmpty) ...[
                       Container(
                         width: double.infinity,
-                        constraints: const BoxConstraints(maxHeight: 150),
+                        constraints: const BoxConstraints(maxHeight: 165),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
                           color: const Color(0xFFF8FAFC),
@@ -1687,21 +1730,31 @@ class _OsListScreenState extends State<OsListScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               const Text(
-                                'Folios procesados:',
+                                'Asunto del correo:',
                                 style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1D1D1F),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: _kTextSec,
                                 ),
                               ),
-                              const SizedBox(height: 4),
+                              const SizedBox(height: 2),
                               Text(
-                                etiquetasEnvio.join('\n'),
+                                asuntoPreview,
                                 style: const TextStyle(
                                   fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF0B57D0),
-                                  height: 1.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _kTextPrim,
+                                  height: 1.35,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'ID (${foliosEnvio.length}): ${foliosEnvio.join(', ')}',
+                                style: const TextStyle(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _kCarmineRed,
+                                  height: 1.4,
                                 ),
                               ),
                             ],
@@ -1712,7 +1765,7 @@ class _OsListScreenState extends State<OsListScreen> {
                     ],
                     const Text(
                       'Se enviará desde ivancolin1207@gmail.com con CC obligatoria a recepcion@basculaspesa.com.mx',
-                      style: TextStyle(fontSize: 12, color: Color(0xFF4B5563), height: 1.35),
+                      style: TextStyle(fontSize: 12, color: _kTextSec, height: 1.35),
                     ),
                     const SizedBox(height: 14),
                     TextFormField(
@@ -1732,7 +1785,7 @@ class _OsListScreenState extends State<OsListScreen> {
                       decoration: InputDecoration(
                         labelText: 'Correo del Cliente',
                         hintText: 'cliente@empresa.com',
-                        prefixIcon: const Icon(Icons.alternate_email, color: Color(0xFFB81D24)),
+                        prefixIcon: const Icon(Icons.alternate_email, color: _kCarmineRed),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                     ),
@@ -1746,7 +1799,7 @@ class _OsListScreenState extends State<OsListScreen> {
                 ),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFB81D24),
+                    backgroundColor: _kCarmineRed,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
@@ -1971,7 +2024,7 @@ class _OsListScreenState extends State<OsListScreen> {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   backgroundColor: const Color(0xFF2E7D32),
-                                  content: Text('✓ Correo enviado con éxito a $destino' + (esLote ? ' (${confirmados.length} órdenes en lote)' : '')),
+                                  content: Text('Correo enviado con éxito a $destino' + (esLote ? ' (${confirmados.length} órdenes en lote)' : '')),
                                 ),
                               );
                               await _loadLocal();
@@ -2798,28 +2851,34 @@ class _MobilePhoneDashboard extends StatelessWidget {
       itemBuilder: (ctx, i) {
         final group = groups[i];
         if (group.isLote) {
-          return _MobileLoteCard(
-            group: group,
-            state: state,
-            onCaptura: (os) async {
-              await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
-              await state._loadLocal();
-            },
+          return RepaintBoundary(
+            key: ValueKey('mob_lote_${group.loteKey}'),
+            child: _MobileLoteCard(
+              group: group,
+              state: state,
+              onCaptura: (os) async {
+                await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
+                await state._loadLocal();
+              },
+            ),
           );
         }
         final os = group.items.first;
-        return _MobileOsCard(
-          os: os,
-          onCaptura: () async {
-            await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
-            await state._loadLocal();
-          },
-          onAbrirPdf: state._abrirPdf,
-          onDescargarPdf: state._descargarPdfConNomenclatura,
-          onRehacer: state._mostrarDialogoRehacerToma,
-          onEliminarDatos: state._mostrarDialogoEliminarDatosDesdeCero,
-          onSubirPdfManual: state._subirPdfManual,
-          onEmail: state._manejarAccionEmail,
+        return RepaintBoundary(
+          key: ValueKey('mob_os_${os['folio_os'] ?? os['folio'] ?? i}'),
+          child: _MobileOsCard(
+            os: os,
+            onCaptura: () async {
+              await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
+              await state._loadLocal();
+            },
+            onAbrirPdf: state._abrirPdf,
+            onDescargarPdf: state._descargarPdfConNomenclatura,
+            onRehacer: state._mostrarDialogoRehacerToma,
+            onEliminarDatos: state._mostrarDialogoEliminarDatosDesdeCero,
+            onSubirPdfManual: state._subirPdfManual,
+            onEmail: state._manejarAccionEmail,
+          ),
         );
       },
     );
@@ -3015,19 +3074,28 @@ class _MobileOsCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFFF3F4F6),
+              color: const Color(0xFFF8FAFC),
               borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: const Color(0xFFE5E7EB), width: 0.5),
+              border: Border.all(color: const Color(0xFFE2E8F0), width: 0.8),
             ),
-            child: Text(
-              '👤 Técnico: ${os['tecnico_nombre'] ?? os['tecnico'] ?? 'Sin asignar'}',
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF374151),
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.person_outline, size: 13, color: _kTextSec),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    'Técnico: ${os['tecnico_nombre'] ?? os['tecnico'] ?? 'Sin asignar'}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: _kTextPrim,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 8),
@@ -3078,7 +3146,7 @@ class _MobileOsCard extends StatelessWidget {
           ),
           const SizedBox(height: 12),
 
-          // Fila Inferior (Acciones ergonómicas táctiles)
+          // Fila Inferior (Acciones ergonómicas táctiles — iconografía vectorial limpia)
           if (isCerrado) ...[
             // A) TIENE PDF REAL GENERADO O ADJUNTADO
             Row(
@@ -3086,20 +3154,21 @@ class _MobileOsCard extends StatelessWidget {
                 Expanded(
                   child: SizedBox(
                     height: 44,
-                    child: ElevatedButton(
+                    child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFE3F2FD),
-                        foregroundColor: const Color(0xFF1565C0),
+                        backgroundColor: const Color(0xFFEFF6FF),
+                        foregroundColor: const Color(0xFF1D4ED8),
                         elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFBBDEFB)),
+                          side: const BorderSide(color: Color(0xFFBFDBFE)),
                         ),
                       ),
                       onPressed: () => onAbrirPdf(context, os),
-                      child: const Text(
-                        '📄 Ver PDF',
+                      icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
+                      label: const Text(
+                        'Ver PDF',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -3109,20 +3178,21 @@ class _MobileOsCard extends StatelessWidget {
                 Expanded(
                   child: SizedBox(
                     height: 44,
-                    child: ElevatedButton(
+                    child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFE8F5E9),
-                        foregroundColor: const Color(0xFF2E7D32),
+                        backgroundColor: const Color(0xFFECFDF5),
+                        foregroundColor: const Color(0xFF047857),
                         elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFC8E6C9)),
+                          side: const BorderSide(color: Color(0xFFA7F3D0)),
                         ),
                       ),
                       onPressed: () => onDescargarPdf(context, os),
-                      child: const Text(
-                        '📥 Descargar',
+                      icon: const Icon(Icons.download_outlined, size: 15),
+                      label: const Text(
+                        'Descargar',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -3132,20 +3202,21 @@ class _MobileOsCard extends StatelessWidget {
                 Expanded(
                   child: SizedBox(
                     height: 44,
-                    child: ElevatedButton(
+                    child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFFFFF3E0),
-                        foregroundColor: const Color(0xFFE65100),
+                        backgroundColor: const Color(0xFFFFFBEB),
+                        foregroundColor: const Color(0xFFB45309),
                         elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(8),
-                          side: const BorderSide(color: Color(0xFFFFE0B2)),
+                          side: const BorderSide(color: Color(0xFFFDE68A)),
                         ),
                       ),
                       onPressed: () => onRehacer(context, os),
-                      child: const Text(
-                        '🔄 Rehacer',
+                      icon: const Icon(Icons.refresh_rounded, size: 15),
+                      label: const Text(
+                        'Rehacer',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -3177,11 +3248,11 @@ class _MobileOsCard extends StatelessWidget {
                                 : (correoEnviado ? Colors.white : (enCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
                             side: BorderSide(color: enviando ? Colors.transparent : (correoEnviado ? Colors.transparent : (enCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                           ),
                           icon: Icon(enviando ? Icons.hourglass_top_rounded : (correoEnviado ? Icons.mark_email_read : (enCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                           label: Text(
-                            enviando ? "⏳ Enviando..." : (correoEnviado ? "✓ Reenviar" : (enCola ? "⏳ En cola" : "✉ Correo")),
+                            enviando ? "Enviando..." : (correoEnviado ? "Reenviar" : (enCola ? "En cola" : "Correo")),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
@@ -3210,7 +3281,7 @@ class _MobileOsCard extends StatelessWidget {
                       onPressed: () => onSubirPdfManual(context, os),
                       icon: const Icon(Icons.upload_file_rounded, size: 16),
                       label: const Text(
-                        '📤 Subir PDF',
+                        'Subir PDF',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -3234,7 +3305,7 @@ class _MobileOsCard extends StatelessWidget {
                       onPressed: () => onEliminarDatos(context, os),
                       icon: const Icon(Icons.delete_forever_rounded, size: 16),
                       label: const Text(
-                        '🗑️ Eliminar',
+                        'Eliminar',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -3260,7 +3331,7 @@ class _MobileOsCard extends StatelessWidget {
                   onPressed: () => context.push('/escaneo', extra: {'folio_os': os['folio_os'] ?? ''}),
                   icon: const Icon(Icons.camera_alt_rounded, size: 18),
                   label: const Text(
-                    '📷 Adjuntar PDF / Escaneo',
+                    'Adjuntar PDF / Escaneo',
                     style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -3271,7 +3342,7 @@ class _MobileOsCard extends StatelessWidget {
                 height: 44,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: noIniciada ? const Color(0xFFE65100) : _kCarmineRed,
+                    backgroundColor: _kCarmineRed,
                     foregroundColor: Colors.white,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
@@ -3281,7 +3352,7 @@ class _MobileOsCard extends StatelessWidget {
                   onPressed: onCaptura,
                   icon: Icon(noIniciada ? Icons.edit : Icons.edit_document, size: 18),
                   label: Text(
-                    noIniciada ? '✍️ Iniciar Captura' : '📝 Continuar Toma de Datos',
+                    noIniciada ? 'Iniciar Captura' : 'Continuar Toma de Datos',
                     style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -3307,7 +3378,7 @@ class _MobileOsCard extends StatelessWidget {
                       onPressed: () => onSubirPdfManual(context, os),
                       icon: const Icon(Icons.upload_file_rounded, size: 16),
                       label: const Text(
-                        '📤 Subir PDF manual',
+                        'Subir PDF manual',
                         style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
@@ -3332,7 +3403,7 @@ class _MobileOsCard extends StatelessWidget {
                         onPressed: () => onEliminarDatos(context, os),
                         icon: const Icon(Icons.delete_forever_rounded, size: 16),
                         label: const Text(
-                          '🗑️ Eliminar datos',
+                          'Eliminar datos',
                           style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                       ),
@@ -3416,8 +3487,8 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '👤 Técnico: ${first['tecnico_nombre'] ?? first['tecnico'] ?? 'Sin asignar'}',
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF4B5563)),
+                          'Técnico: ${first['tecnico_nombre'] ?? first['tecnico'] ?? 'Sin asignar'}',
+                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _kTextSec),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -3440,11 +3511,11 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                               : (loteEnviado ? Colors.white : (loteEnCola ? const Color(0xFFB45309) : const Color(0xFFE65100))),
                           side: BorderSide(color: enviando ? Colors.transparent : (loteEnviado ? Colors.transparent : (loteEnCola ? const Color(0xFFF59E0B) : const Color(0xFFFFB74D)))),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                         ),
                         icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.mark_email_read : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                         label: Text(
-                          enviando ? "⏳ Enviando..." : (loteEnviado ? "✓ Reenviar Lote" : (loteEnCola ? "⏳ En cola" : "✉ Finalizar y Enviar Lote")),
+                          enviando ? "Enviando..." : (loteEnviado ? "Reenviar Lote" : (loteEnCola ? "En cola" : "Finalizar y Enviar Lote")),
                           style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                         onPressed: enviando ? null : () => widget.state._procesarEnvioCorreo(item: item, esLote: true),
@@ -3599,31 +3670,37 @@ class _TabletDesktopDashboard extends StatelessWidget {
       itemBuilder: (ctx, i) {
         final group = groups[i];
         if (group.isLote) {
-          return _LoteRow(
-            group: group,
-            onEnviarLote: state._estaEnviandoEmail ? null : () => state._procesarEnvioCorreo(item: group, esLote: true),
-            hideTecnico: hideTecnico,
-            onCaptura: (os) async {
-              await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
-              await state._loadLocal();
-            },
+          return RepaintBoundary(
+            key: ValueKey('tab_lote_${group.loteKey}'),
+            child: _LoteRow(
+              group: group,
+              onEnviarLote: state._estaEnviandoEmail ? null : () => state._procesarEnvioCorreo(item: group, esLote: true),
+              hideTecnico: hideTecnico,
+              onCaptura: (os) async {
+                await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
+                await state._loadLocal();
+              },
+            ),
           );
         }
         final os = group.items.first;
-        return _OsRow(
-          os: os,
-          index: i,
-          hideTecnico: hideTecnico,
-          onCaptura: () async {
-            await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
-            await state._loadLocal();
-          },
-          onAbrirPdf: state._abrirPdf,
-          onDescargarPdf: state._descargarPdfConNomenclatura,
-          onRehacer: state._mostrarDialogoRehacerToma,
-          onEliminarDatos: state._mostrarDialogoEliminarDatosDesdeCero,
-          onSubirPdfManual: state._subirPdfManual,
-          onEmail: (ctx, os) => state._manejarEnvioCorreoOrden(os),
+        return RepaintBoundary(
+          key: ValueKey('tab_os_${os['folio_os'] ?? os['folio'] ?? i}'),
+          child: _OsRow(
+            os: os,
+            index: i,
+            hideTecnico: hideTecnico,
+            onCaptura: () async {
+              await navegarCapturaSegunTipo(ctx, Map<String, dynamic>.from(os));
+              await state._loadLocal();
+            },
+            onAbrirPdf: state._abrirPdf,
+            onDescargarPdf: state._descargarPdfConNomenclatura,
+            onRehacer: state._mostrarDialogoRehacerToma,
+            onEliminarDatos: state._mostrarDialogoEliminarDatosDesdeCero,
+            onSubirPdfManual: state._subirPdfManual,
+            onEmail: (ctx, os) => state._manejarEnvioCorreoOrden(os),
+          ),
         );
       },
     );
@@ -3765,16 +3842,16 @@ class _SyncChip extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (sync.state) {
       case SyncState.syncing:
-        return _chip(Colors.blue.shade50, Colors.blue.shade700, '↻ Sincronizando...');
+        return _chip(Colors.blue.shade50, Colors.blue.shade700, 'Sincronizando...');
       case SyncState.success:
-        return _chip(Colors.green.shade50, Colors.green.shade700, '✓ Sincronizado');
+        return _chip(Colors.green.shade50, Colors.green.shade700, 'Sincronizado');
       case SyncState.error:
         final errText = (sync.errorMessage != null && sync.errorMessage!.isNotEmpty)
             ? sync.errorMessage!
-            : (sync.message.isNotEmpty ? sync.message : '⚠ Error');
+            : (sync.message.isNotEmpty ? sync.message : 'Error');
         return _chip(Colors.orange.shade50, Colors.orange.shade700, errText);
       case SyncState.offline:
-        return _chip(Colors.grey.shade100, Colors.grey.shade600, '📵 Sin conexión');
+        return _chip(Colors.grey.shade100, Colors.grey.shade600, 'Sin conexión');
       default:
         return _chip(Colors.grey.shade100, Colors.grey.shade600, 'Listo');
     }
@@ -4528,8 +4605,8 @@ class _OsRow extends StatelessWidget {
                         final bool enviando = st != null && st._estaEnviandoEmail;
                         return _buildBtnAccion(
                           label: enviando
-                              ? "⏳ Enviando..."
-                              : (correoEnviado ? "✓ Reenviar Correo" : (enCola ? "⏳ En cola (Offline)" : "✉ Enviar Correo")),
+                              ? "Enviando..."
+                              : (correoEnviado ? "Reenviar Correo" : (enCola ? "En cola (Offline)" : "Enviar Correo")),
                           icon: enviando
                               ? Icons.hourglass_top_rounded
                               : (correoEnviado ? Icons.mark_email_read : (enCola ? Icons.schedule_send : Icons.mail_outline)),
@@ -4783,8 +4860,8 @@ class _LoteRowState extends State<_LoteRow> {
                               icon: Icon(enviando ? Icons.hourglass_top_rounded : (loteEnviado ? Icons.mark_email_read : (loteEnCola ? Icons.schedule_send : Icons.mail_outline)), size: 14),
                               label: Text(
                                 enviando
-                                    ? "⏳ Enviando..."
-                                    : (loteEnviado ? "✓ Reenviar Lote" : (loteEnCola ? "⏳ Lote en cola (Offline)" : "✉ Finalizar y Enviar Lote")),
+                                    ? "Enviando..."
+                                    : (loteEnviado ? "Reenviar Lote" : (loteEnCola ? "Lote en cola (Offline)" : "Finalizar y Enviar Lote")),
                                 style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
                               ),
                               onPressed: enviando ? null : () {
@@ -4968,10 +5045,10 @@ class EmailStatusBadge extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.mark_email_read_rounded, size: 13, color: Color(0xFF2E7D32)),
-              SizedBox(width: 4),
-              Text(
-                '✓ Enviado',
+              const Icon(Icons.mark_email_read_rounded, size: 13, color: Color(0xFF2E7D32)),
+              const SizedBox(width: 4),
+              const Text(
+                'Enviado',
                 style: TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.bold,
@@ -4996,11 +5073,11 @@ class EmailStatusBadge extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.mail_outline_rounded, size: 13, color: Color(0xFFD97706)),
-              SizedBox(width: 4),
+              Icon(enCola ? Icons.schedule_send : Icons.mail_outline_rounded, size: 13, color: const Color(0xFFD97706)),
+              const SizedBox(width: 4),
               Text(
-                enCola ? '⏳ En cola (Offline)' : '✉ Envío pendiente',
-                style: TextStyle(
+                enCola ? 'En cola (Offline)' : 'Envío pendiente',
+                style: const TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.bold,
                   color: Color(0xFFB45309),

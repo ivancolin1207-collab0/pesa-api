@@ -81,18 +81,48 @@ class PesaTabletApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SyncService()),
       ],
       child: MaterialApp.router(
-        title: 'PESA Tablet',
+        title: 'Básculas PESA',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
             seedColor: const Color(0xFFC8102E),
+            primary: const Color(0xFFC8102E),
+            surface: Colors.white,
             brightness: Brightness.light,
           ),
           useMaterial3: true,
-          scaffoldBackgroundColor: const Color(0xFFF9FAFB),
+          scaffoldBackgroundColor: Colors.white,
+          dividerColor: const Color(0xFFE2E8F0),
+          cardTheme: CardThemeData(
+            color: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            elevation: 0,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+              side: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+          ),
+          inputDecorationTheme: InputDecorationTheme(
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFE2E8F0)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFC8102E), width: 1.5),
+            ),
+          ),
           appBarTheme: const AppBarTheme(
             backgroundColor: Color(0xFFC8102E),
             foregroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
             elevation: 0,
           ),
         ),

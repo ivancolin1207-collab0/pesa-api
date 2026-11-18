@@ -329,6 +329,7 @@ class LocalDbService {
         ''');
         await db.execute(_createTableBorradoresSql);
         await _asegurarTablasCatalogosAdmin(db);
+        await _asegurarIndicesRendimiento(db);
         final devId = _generateUuid();
         await db.insert('meta', {'key': 'device_id', 'value': devId});
       },
@@ -512,6 +513,7 @@ class LocalDbService {
           } catch (e) {
             debugPrint('[LocalDB] Backfill id_tecnico error: $e');
           }
+          await _asegurarIndicesRendimiento(db);
         } catch (e) {
           debugPrint('[LocalDB] onOpen check error: $e');
         }
@@ -719,6 +721,73 @@ class LocalDbService {
       _adminTablesVerificada = true;
     } catch (e) {
       debugPrint('[LocalDB] _asegurarTablasCatalogosAdmin error: $e');
+    }
+  }
+
+  /// Crea los índices SQLite de alto rendimiento y sanea destinatarios genéricos ('Cliente').
+  Future<void> _asegurarIndicesRendimiento(Database db) async {
+    const ddl = <String>[
+      'CREATE INDEX IF NOT EXISTS idx_ordenes_folio ON ordenes_servicio(folio_os)',
+      'CREATE INDEX IF NOT EXISTS idx_ordenes_folio_alt ON ordenes_servicio(folio)',
+      'CREATE INDEX IF NOT EXISTS idx_ordenes_lote ON ordenes_servicio(id_lote)',
+      'CREATE INDEX IF NOT EXISTS idx_ordenes_estatus ON ordenes_servicio(estatus)',
+      'CREATE INDEX IF NOT EXISTS idx_ordenes_fecha ON ordenes_servicio(fecha DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_ordenes_cliente ON ordenes_servicio(cliente)',
+    ];
+    for (final stmt in ddl) {
+      try {
+        await db.execute(stmt);
+      } catch (e) {
+        debugPrint('[LocalDB] Error creando índice ($stmt): $e');
+      }
+    }
+    try {
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_ordenes_v_folio ON ordenes(folio)');
+    } catch (_) {}
+
+    // Saneamiento local de valores genéricos ('Cliente', 'Sin registrar') en correo_destino / correo_cliente
+    try {
+      await db.execute('''
+        UPDATE ordenes_servicio
+        SET correo_destino = NULL
+        WHERE LOWER(TRIM(COALESCE(correo_destino, ''))) IN ('cliente', 'sin registrar', 'destinatario registrado', 'none', 'null', '-', '—')
+      ''');
+      await db.execute('''
+        UPDATE ordenes_servicio
+        SET correo_cliente = NULL
+        WHERE LOWER(TRIM(COALESCE(correo_cliente, ''))) IN ('cliente', 'sin registrar', 'destinatario registrado', 'none', 'null', '-', '—')
+      ''');
+      await db.execute('''
+        UPDATE ordenes_servicio
+        SET correo_destino = correo_cliente
+        WHERE (correo_destino IS NULL OR TRIM(correo_destino) = '')
+          AND correo_cliente IS NOT NULL AND correo_cliente LIKE '%@%'
+      ''');
+      await db.execute('''
+        UPDATE ordenes_servicio
+        SET correo_destino = (
+          SELECT c.email FROM cat_clientes_local c
+          WHERE LOWER(TRIM(c.nombre)) = LOWER(TRIM(ordenes_servicio.cliente))
+            AND c.email IS NOT NULL AND c.email LIKE '%@%'
+          LIMIT 1
+        )
+        WHERE (correo_enviado = 1 OR email_enviado = 1)
+          AND (correo_destino IS NULL OR TRIM(correo_destino) = '')
+      ''');
+      await db.execute('''
+        UPDATE ordenes_servicio
+        SET correo_destino = (
+          SELECT o2.correo_destino FROM ordenes_servicio o2
+          WHERE LOWER(TRIM(o2.cliente)) = LOWER(TRIM(ordenes_servicio.cliente))
+            AND o2.correo_destino IS NOT NULL AND o2.correo_destino LIKE '%@%'
+          ORDER BY o2.fecha_envio_correo DESC
+          LIMIT 1
+        )
+        WHERE (correo_enviado = 1 OR email_enviado = 1)
+          AND (correo_destino IS NULL OR TRIM(correo_destino) = '')
+      ''');
+    } catch (e) {
+      debugPrint('[LocalDB] Saneamiento de correos locales: $e');
     }
   }
 

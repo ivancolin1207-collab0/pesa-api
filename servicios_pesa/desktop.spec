@@ -40,6 +40,7 @@ all_hidden = sorted(list(set(
         'services.lp_pdf_generator',
         'services.lv_pdf_generator',
         'services.metrology',
+        'services.catalog_cache',
         'services.os_pdf_generator',
         'services.pdf_generator',
         'services.pdf_router',

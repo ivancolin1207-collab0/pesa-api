@@ -2584,23 +2584,23 @@ class BatchGeneratorWidget(QWidget):
         lay.addWidget(self._progress)
 
         # Botón de acción principal (cambia según modalidad)
-        self.btn_ejecutar = QPushButton("🖨️  Generar e Imprimir PDF")
+        self.btn_ejecutar = QPushButton("Generar e Imprimir PDF")
         self.btn_ejecutar.setFixedHeight(40)
         self.btn_ejecutar.setEnabled(True)
         self.btn_ejecutar.setStyleSheet("""
             QPushButton {
-                background-color: #E63946;
+                background-color: #C8102E;
                 color: #FFFFFF;
                 border: none;
-                border-radius: 9px;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: 700;
                 padding: 0 24px;
             }
-            QPushButton:hover   { background-color: #D90429; }
-            QPushButton:pressed { background-color: #B70020; }
+            QPushButton:hover   { background-color: #A50D26; }
+            QPushButton:pressed { background-color: #880B20; }
             QPushButton:disabled {
-                background-color: #C7C7CC;
+                background-color: #CBD5E1;
                 color: #FFFFFF;
             }
         """)
@@ -2614,7 +2614,7 @@ class BatchGeneratorWidget(QWidget):
         self._btn_asignar = self.btn_ejecutar
 
         # ── Botón Llenar Formulario Digital (solo visible tras asignación DIGITAL) ──
-        self.btn_llenar_digital = QPushButton("📝  Llenar Formulario Digital")
+        self.btn_llenar_digital = QPushButton("Llenar Formulario Digital")
         self.btn_llenar_digital.setFixedHeight(40)
         self.btn_llenar_digital.setVisible(False)
         self.btn_llenar_digital.setStyleSheet("""
@@ -2906,77 +2906,106 @@ class BatchGeneratorWidget(QWidget):
                 "tipo_instrumento": str(t_inst or "").strip(),
             })
 
-        if (sucursal_id or cliente_id) and _HAS_DB and _db_pool:
-            try:
-                conn = _db_pool.get_connection()
+        try:
+            from services.catalog_cache import catalog_cache
+            cached_eq = catalog_cache.get_cached_equipos(cliente_id, sucursal_id)
+        except Exception:
+            catalog_cache = None
+            cached_eq = None
+
+        if cached_eq is not None:
+            self._current_catalog = list(cached_eq)
+            if hasattr(self, '_equipo_cards'):
+                for card in self._equipo_cards:
+                    if hasattr(card, 'set_instrument_catalog'):
+                        card.set_instrument_catalog(self._current_catalog)
+            return
+
+        if not ((sucursal_id or cliente_id) and _HAS_DB and _db_pool):
+            self._current_catalog = []
+            return
+
+        class _EquiposBgWorker(QThread):
+            ready = pyqtSignal(list)
+
+            def __init__(self, cid, sid, parent_w):
+                super().__init__(parent_w)
+                self._cid = cid
+                self._sid = sid
+
+            def run(self_w):
                 try:
-                    with conn.cursor() as cur:
-                        if sucursal_id:
-                            cur.execute('''
-                                SELECT numero_serie, marca, modelo, id_indicador_equipo,
-                                       ubicacion_interna, capacidad_maxima, division_minima, tipo_instrumento
-                                FROM cliente_equipos
-                                WHERE sucursal_id = %s AND activo IS NOT FALSE
-                            ''', (sucursal_id,))
+                    conn = _db_pool.get_connection()
+                    try:
+                        with conn.cursor() as cur:
+                            if self_w._sid:
+                                cur.execute('''
+                                    SELECT numero_serie, marca, modelo, id_indicador_equipo,
+                                           ubicacion_interna, capacidad_maxima, division_minima, tipo_instrumento
+                                    FROM cliente_equipos
+                                    WHERE sucursal_id = %s AND activo IS NOT FALSE
+                                ''', (self_w._sid,))
+                                for row in cur.fetchall():
+                                    _push_eq(*row)
+                            elif self_w._cid:
+                                cur.execute('''
+                                    SELECT ce.numero_serie, ce.marca, ce.modelo, ce.id_indicador_equipo,
+                                           ce.ubicacion_interna, ce.capacidad_maxima, ce.division_minima, ce.tipo_instrumento
+                                    FROM cliente_equipos ce
+                                    JOIN cliente_sucursales cs ON cs.id = ce.sucursal_id
+                                    WHERE cs.cliente_id = %s AND ce.activo IS NOT FALSE
+                                ''', (self_w._cid,))
+                                for row in cur.fetchall():
+                                    _push_eq(*row)
+
+                            if self_w._sid:
+                                cur.execute('''
+                                    SELECT os.ns, os.marca, os.modelo, os.id_equipo::text,
+                                           os.ubicacion,
+                                           COALESCE(NULLIF(TRIM(os.instrumento_capacidad), ''), os.alcance_max::text, ''),
+                                           COALESCE(NULLIF(TRIM(os.instrumento_division), ''), os.div_minima::text, ''),
+                                           COALESCE(ti.nombre, '')
+                                    FROM ordenes_servicio os
+                                    LEFT JOIN cat_tipo_instrumento ti ON ti.id = os.id_tipo_instrumento
+                                    WHERE os.sucursal_id = %s
+                                      AND COALESCE(UPPER(TRIM(os.estado)), '') <> 'CANCELADA'
+                                    ORDER BY os.updated_at DESC NULLS LAST, os.id DESC
+                                    LIMIT 200
+                                ''', (self_w._sid,))
+                            else:
+                                cur.execute('''
+                                    SELECT os.ns, os.marca, os.modelo, os.id_equipo::text,
+                                           os.ubicacion,
+                                           COALESCE(NULLIF(TRIM(os.instrumento_capacidad), ''), os.alcance_max::text, ''),
+                                           COALESCE(NULLIF(TRIM(os.instrumento_division), ''), os.div_minima::text, ''),
+                                           COALESCE(ti.nombre, '')
+                                    FROM ordenes_servicio os
+                                    LEFT JOIN cat_tipo_instrumento ti ON ti.id = os.id_tipo_instrumento
+                                    WHERE os.id_cliente = %s
+                                      AND COALESCE(UPPER(TRIM(os.estado)), '') <> 'CANCELADA'
+                                    ORDER BY os.updated_at DESC NULLS LAST, os.id DESC
+                                    LIMIT 200
+                                ''', (self_w._cid,))
                             for row in cur.fetchall():
                                 _push_eq(*row)
-                        elif cliente_id:
-                            cur.execute('''
-                                SELECT ce.numero_serie, ce.marca, ce.modelo, ce.id_indicador_equipo,
-                                       ce.ubicacion_interna, ce.capacidad_maxima, ce.division_minima, ce.tipo_instrumento
-                                FROM cliente_equipos ce
-                                JOIN cliente_sucursales cs ON cs.id = ce.sucursal_id
-                                WHERE cs.cliente_id = %s AND ce.activo IS NOT FALSE
-                            ''', (cliente_id,))
-                            for row in cur.fetchall():
-                                _push_eq(*row)
+                    finally:
+                        _db_pool.release_connection(conn)
+                except Exception as e:
+                    logger.debug("Autocomplete equipos en segundo plano omitido: %s", e)
+                self_w.ready.emit(list(catalog))
 
-                        # Complementar con historial de ordenes_servicio del cliente / sucursal
-                        if sucursal_id:
-                            cur.execute('''
-                                SELECT os.ns, os.marca, os.modelo, os.id_equipo::text,
-                                       os.ubicacion,
-                                       COALESCE(NULLIF(TRIM(os.instrumento_capacidad), ''), os.alcance_max::text, ''),
-                                       COALESCE(NULLIF(TRIM(os.instrumento_division), ''), os.div_minima::text, ''),
-                                       COALESCE(ti.nombre, '')
-                                FROM ordenes_servicio os
-                                LEFT JOIN cat_tipo_instrumento ti ON ti.id = os.id_tipo_instrumento
-                                WHERE os.sucursal_id = %s
-                                  AND COALESCE(UPPER(TRIM(os.estado)), '') <> 'CANCELADA'
-                                ORDER BY os.updated_at DESC NULLS LAST, os.id DESC
-                                LIMIT 250
-                            ''', (sucursal_id,))
-                        else:
-                            cur.execute('''
-                                SELECT os.ns, os.marca, os.modelo, os.id_equipo::text,
-                                       os.ubicacion,
-                                       COALESCE(NULLIF(TRIM(os.instrumento_capacidad), ''), os.alcance_max::text, ''),
-                                       COALESCE(NULLIF(TRIM(os.instrumento_division), ''), os.div_minima::text, ''),
-                                       COALESCE(ti.nombre, '')
-                                FROM ordenes_servicio os
-                                LEFT JOIN cat_tipo_instrumento ti ON ti.id = os.id_tipo_instrumento
-                                WHERE os.id_cliente = %s
-                                  AND COALESCE(UPPER(TRIM(os.estado)), '') <> 'CANCELADA'
-                                ORDER BY os.updated_at DESC NULLS LAST, os.id DESC
-                                LIMIT 250
-                            ''', (cliente_id,))
-                        for row in cur.fetchall():
-                            _push_eq(*row)
-                finally:
-                    _db_pool.release_connection(conn)
-            except Exception as e:
-                logger.warning(f"Error cargando historial de equipos (cliente={cliente_id}, sucursal={sucursal_id}): {e}")
+        def _on_eq_ready(items: list):
+            if catalog_cache is not None:
+                catalog_cache.set_cached_equipos(cliente_id, sucursal_id, items)
+            self._current_catalog = items
+            if hasattr(self, '_equipo_cards'):
+                for card in self._equipo_cards:
+                    if hasattr(card, 'set_instrument_catalog'):
+                        card.set_instrument_catalog(items)
 
-        # Guardar el catálogo activo: las tarjetas creadas DESPUÉS del cambio
-        # de sucursal también lo recibirán vía self._current_catalog en
-        # _update_equipos_section.
-        self._current_catalog = catalog
-
-        # Distribuir el catálogo a todas las tarjetas de equipo activas
-        if hasattr(self, '_equipo_cards'):
-            for card in self._equipo_cards:
-                if hasattr(card, 'set_instrument_catalog'):
-                    card.set_instrument_catalog(catalog)
+        self._eq_bg_worker = _EquiposBgWorker(cliente_id, sucursal_id, self)
+        self._eq_bg_worker.ready.connect(_on_eq_ready)
+        self._eq_bg_worker.start()
 
     on_params_changed = _on_params_changed
 

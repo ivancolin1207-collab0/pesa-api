@@ -510,15 +510,6 @@ class SyncService extends ChangeNotifier {
       notifyListeners();
 
       try {
-        final pullCount = await _pullNuevos(updatedAfter: updatedAfter).timeout(
-          const Duration(seconds: 25),
-          onTimeout: () {
-            debugPrint('[Sync PULL] ⏱ TIMEOUT 25s — sirviendo datos locales inmediatamente');
-            _fallbackCargarLocal();
-            return 0;
-          },
-        );
-
         // Catálogos lazy + Catálogos Admin completos (clientes, sucursales, técnicos, historial de equipos)
         final existingCli = await LocalDbService.instance.getCatalogoClientes();
         final existingSuc = await LocalDbService.instance.getCatalogoSucursales();
@@ -534,29 +525,38 @@ class SyncService extends ChangeNotifier {
             existingSuc.isEmpty ||
             esAdminSync;
 
-        if (requiereCatAdmin) {
-          try {
-            await _pullAdminCatalogos()
-                .timeout(const Duration(seconds: 18), onTimeout: () => false);
-          } catch (_) {}
-        }
+        int pullCount = 0;
+        final parallelTasks = <Future<void>>[
+          _pullNuevos(updatedAfter: updatedAfter)
+              .timeout(
+                const Duration(seconds: 25),
+                onTimeout: () {
+                  debugPrint('[Sync PULL] TIMEOUT 25s — sirviendo datos locales inmediatamente');
+                  _fallbackCargarLocal();
+                  return 0;
+                },
+              )
+              .then((c) => pullCount = c),
+          if (requiereCatAdmin)
+            _pullAdminCatalogos()
+                .timeout(const Duration(seconds: 18), onTimeout: () => false)
+                .then((_) {})
+                .catchError((_) {}),
+          if (catalogStale || forceFull)
+            _pullMarcasModelos()
+                .timeout(const Duration(seconds: 8), onTimeout: () {})
+                .then((_) => LocalDbService.instance.setLastCatalogSyncTime(DateTime.now().toUtc()))
+                .catchError((_) {}),
+        ];
 
-        if (catalogStale || forceFull) {
-          try {
-            await _pullMarcasModelos()
-                .timeout(const Duration(seconds: 8), onTimeout: () {});
-            await LocalDbService.instance.setLastCatalogSyncTime(DateTime.now().toUtc());
-          } catch (_) {}
-        } else {
-          debugPrint('[Sync] Catálogos frescos (< 24h) — skip PULL marcas/modelos');
-        }
+        await Future.wait(parallelTasks);
 
         _lastSync = DateTime.now();
         await _refreshPending();
         _state   = SyncState.success;
         _message = pullCount > 0
-            ? 'Sincronizado ✓ ($pullCount nuevas OS)'
-            : 'Sincronizado ✓ Sin cambios nuevos';
+            ? 'Sincronizado ($pullCount nuevas OS)'
+            : 'Sincronizado — sin cambios nuevos';
 
         if (AuthService.esSupervisorCalibracionActual) {
           unawaited(_refrescarRepositorioCalibraciones());
