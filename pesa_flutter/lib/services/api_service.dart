@@ -9,6 +9,8 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'auth_service.dart';
+import 'local_db_service.dart';
+import 'metrology_helper.dart';
 
 class ApiService {
   static final ApiService instance = ApiService._();
@@ -779,11 +781,38 @@ class ApiService {
   Future<bool> subirPdf(String folio, File file, {int? osId, Map<String, dynamic>? data}) =>
       uploadPdf(folio, file, osId: osId, data: data);
 
-  /// Sube el PDF binario generado al endpoint de Render para disponibilidad inmediata.
+  /// Sube el PDF binario generado al endpoint de Render para disponibilidad inmediata,
+  /// adjuntando siempre los metadatos actualizados del equipo (marca, modelo, id_indicador, CCA, DVE).
   Future<bool> uploadPdf(String folio, File file, {int? osId, Map<String, dynamic>? data}) async {
     if (_token == null) {
       await _renovarSesionSilenciosa();
     }
+    Map<String, dynamic> effectiveData = <String, dynamic>{
+      if (data != null) ...data,
+    };
+    try {
+      final osLocal = await LocalDbService.instance.getOsByFolio(folio);
+      if (osLocal != null) {
+        final metaLocal = extraerMetaCorreoOrden({
+          ...osLocal,
+          if (data != null) ...data,
+        });
+        effectiveData = <String, dynamic>{
+          ...metaLocal,
+          if (osLocal['datos_tecnicos_json'] != null && effectiveData['datos_tecnicos_json'] == null)
+            'datos_tecnicos_json': osLocal['datos_tecnicos_json'],
+          ...effectiveData,
+        };
+      } else if (data != null) {
+        effectiveData = <String, dynamic>{
+          ...extraerMetaCorreoOrden(data),
+          ...effectiveData,
+        };
+      }
+    } catch (e) {
+      debugPrint('[API] uploadPdf meta enrich fallback ($folio): $e');
+    }
+
     final uri = Uri.parse('$_baseUrl/api/v1/ordenes/$folio/upload-pdf');
     debugPrint('[API] uploadPdf → $uri (folio: $folio, size: ${file.lengthSync()} bytes)');
 
@@ -795,8 +824,12 @@ class ApiService {
       if (osId != null && osId > 0) {
         request.fields['os_id'] = osId.toString();
       }
-      if (data != null) {
-        request.fields['data'] = jsonEncode(data);
+      if (effectiveData.isNotEmpty) {
+        request.fields['data'] = jsonEncode(effectiveData);
+      }
+      if (effectiveData['correo_cliente'] != null &&
+          effectiveData['correo_cliente'].toString().trim().isNotEmpty) {
+        request.fields['correo_cliente'] = effectiveData['correo_cliente'].toString().trim();
       }
       request.files.add(await http.MultipartFile.fromPath(
         'file', file.path,
@@ -979,19 +1012,33 @@ class ApiService {
   }
 
   /// Dispara el envío o reintento de correo electrónico para una orden individual.
-  Future<Map<String, dynamic>> enviarEmailOrden(String folio, {String? correo, bool forzar = false, Duration timeout = const Duration(seconds: 20)}) async {
+  Future<Map<String, dynamic>> enviarEmailOrden(
+    String folio, {
+    String? correo,
+    bool forzar = false,
+    List<Map<String, dynamic>>? ordenesMeta,
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
     final cleanFolio = folio.trim();
     debugPrint('[API] enviarEmailOrden $cleanFolio (destinatario: $correo)');
     return _postCorreo(_rutasCorreoOrden(cleanFolio), <String, dynamic>{
       'folio': cleanFolio,
       'forzar': forzar,
       if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
+      if (ordenesMeta != null && ordenesMeta.isNotEmpty) 'ordenes_meta': ordenesMeta,
     }, timeout: timeout);
   }
 
   /// Dispara el envío agrupado de un lote. El backend adjunta y cita ÚNICAMENTE
   /// las órdenes FIRMADAS/Cerradas con PDF existente.
-  Future<Map<String, dynamic>> enviarEmailLote(String loteId, {String? correo, bool forzar = true, List<String>? folios, Duration timeout = const Duration(seconds: 20)}) async {
+  Future<Map<String, dynamic>> enviarEmailLote(
+    String loteId, {
+    String? correo,
+    bool forzar = true,
+    List<String>? folios,
+    List<Map<String, dynamic>>? ordenesMeta,
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
     final cleanLote = loteId.trim();
     debugPrint('[API] enviarEmailLote $cleanLote (destinatario: $correo, folios: $folios)');
     return _postCorreo(_rutasCorreoLote(cleanLote), <String, dynamic>{
@@ -999,6 +1046,7 @@ class ApiService {
       'forzar': forzar,
       if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
       if (folios != null && folios.isNotEmpty) 'folios': folios,
+      if (ordenesMeta != null && ordenesMeta.isNotEmpty) 'ordenes_meta': ordenesMeta,
     }, timeout: timeout);
   }
 

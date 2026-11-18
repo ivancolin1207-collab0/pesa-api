@@ -23,6 +23,196 @@ logger = logging.getLogger("pesa_api.email")
 # Cerrojo en memoria para evitar envíos concurrentes simultáneos de la misma orden/lote
 _folios_enviando_email: Set[str] = set()
 _folios_lock = asyncio.Lock()
+_email_cols_checked: bool = False
+
+
+async def _ensure_email_columns(conn) -> None:
+    """Garantiza de forma idempotente que existan las columnas marca/modelo/CCA/DVE antes de consultar."""
+    global _email_cols_checked
+    if _email_cols_checked or conn is None:
+        return
+    for col in ("marca", "modelo", "numero_cca", "numero_dve"):
+        try:
+            await conn.execute(f"ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS {col} TEXT")
+        except Exception:
+            pass
+    _email_cols_checked = True
+
+
+_INVALIDOS_CORREO = {
+    "", "none", "null", "sin id", "sin modelo", "sin serie", "sin marca",
+    "n/a", "na", "--", "-", "s-id", "s/id", "por definir", "sin ubicacion", "sin ubicación",
+}
+
+
+def _limpiar_val_correo(raw_val: Any, es_regulatorio: bool = False) -> str:
+    if raw_val is None:
+        return ""
+    s = re.sub(r"[\r\n\t]+", " ", str(raw_val)).strip()
+    if not s or s.lower() in _INVALIDOS_CORREO:
+        return ""
+    if es_regulatorio and re.match(r"^(CCA|DVE)\.\d{2}\.?$", s, re.IGNORECASE):
+        return ""
+    return s
+
+
+def _extraer_dt_dict(orden: Dict[str, Any]) -> Dict[str, Any]:
+    raw_dt = orden.get("datos_tecnicos_json") or orden.get("datos_captura")
+    if isinstance(raw_dt, dict):
+        return raw_dt
+    if isinstance(raw_dt, str) and raw_dt.strip():
+        try:
+            parsed = json.loads(raw_dt)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return {}
+
+
+def formatear_linea_correo_orden(orden: dict) -> str:
+    """
+    Construye la etiqueta dinámica de equipo para Asunto y Cuerpo de correo:
+      FOLIO-MARCA-MODELO-ID-CCA-DVE
+    Omitiendo cualquier campo vacío o placeholder ('sin id', 'sin modelo', etc.).
+    """
+    if not isinstance(orden, dict):
+        orden = dict(orden) if orden else {}
+
+    invalidos = {'', 'none', 'null', 'sin id', 'sin modelo', 'sin serie', 'sin marca', 'n/a', 'na'}
+    dt = _extraer_dt_dict(orden)
+
+    def _obtener(claves: tuple[str, ...], es_reg: bool = False) -> str:
+        for k in claves:
+            v = _limpiar_val_correo(orden.get(k), es_regulatorio=es_reg)
+            if v and v.lower() not in invalidos:
+                return v
+        for k in claves:
+            v = _limpiar_val_correo(dt.get(k), es_regulatorio=es_reg)
+            if v and v.lower() not in invalidos:
+                return v
+        return ""
+
+    partes: List[str] = []
+
+    folio = _limpiar_val_correo(orden.get("folio") or orden.get("folio_os"))
+    if folio:
+        partes.append(folio)
+
+    marca = _obtener(("marca", "equipo_marca", "indicador_marca"))
+    if marca:
+        partes.append(marca)
+
+    modelo = _obtener(("modelo", "equipo_modelo", "indicador_modelo"))
+    if modelo:
+        partes.append(modelo)
+
+    id_ind = _obtener(("id_indicador", "id_equipo", "indicador_id", "no_identificacion", "id_interno", "tag"))
+    if id_ind:
+        partes.append(id_ind)
+
+    cca = _obtener(("numero_cca", "cca", "folio_cca"), es_reg=True)
+    if cca:
+        partes.append(cca if cca.upper().startswith("CCA") else f"CCA {cca}")
+
+    dve = _obtener(("numero_dve", "folio_dve"), es_reg=True)
+    if not dve:
+        div_ver = _limpiar_val_correo(orden.get("div_verificacion") or dt.get("div_verificacion"), es_regulatorio=True)
+        if div_ver and div_ver.upper().startswith("DVE"):
+            dve = div_ver
+    if dve:
+        partes.append(dve if dve.upper().startswith("DVE") else f"DVE {dve}")
+
+    return "-".join(partes)
+
+
+def _clave_orden_folio(folio_str: str):
+    """Ordenamiento natural numérico de folios (ej. OS-26-810 < OS-26-811 < OS-26-1000)."""
+    partes = re.split(r"(\d+)", str(folio_str or "").strip().upper())
+    return [int(p) if p.isdigit() else p for p in partes]
+
+
+def construir_asunto_y_cuerpo_correo(
+    ordenes_lote: List[Dict[str, Any]],
+    cliente: str,
+    es_lote: bool = False,
+) -> tuple[str, str, str, List[str]]:
+    """
+    Genera de forma homologada (asunto, cuerpo_html, cuerpo_texto, etiquetas)
+    tanto para órdenes individuales (1 documento) como para lotes de 1..N documentos.
+    """
+    etiquetas = [formatear_linea_correo_orden(o) for o in ordenes_lote if o]
+    etiquetas = [e for e in etiquetas if e]
+
+    cliente_limpio = re.sub(r"[\r\n]+", " ", str(cliente or "Cliente")).strip() or "Cliente"
+    n = len(etiquetas)
+
+    if n == 1:
+        asunto = f"Reporte de Servicio - {etiquetas[0]} - {cliente_limpio} | Básculas PESA"
+    else:
+        lista_asunto = ", ".join(etiquetas)
+        asunto = f"Reporte de Servicio - Lote ({n} documentos): {lista_asunto} - {cliente_limpio} | Básculas PESA"
+
+    if n > 1 or es_lote:
+        txt_ordenes = "orden" if n == 1 else "órdenes"
+        intro_html = (
+            f"Hacemos entrega de los reportes digitales correspondientes al "
+            f"<strong>Lote de Servicios ({n} {txt_ordenes})</strong>:"
+        )
+        cierre_html = (
+            "Adjunto a este correo encontrará cada uno de los certificados y reportes "
+            "en formato PDF con sus respectivas firmas digitales."
+        )
+    else:
+        intro_html = "Hacemos entrega del reporte digital correspondiente al servicio realizado:"
+        cierre_html = (
+            "Adjunto a este correo encontrará el certificado y reporte en formato PDF "
+            "con sus respectivas firmas digitales."
+        )
+
+    lineas_html = "<br>\n                                ".join(etiquetas)
+    lineas_txt = "\n".join(etiquetas)
+
+    cuerpo_texto = f"""Estimado cliente ({cliente_limpio}):
+
+Hacemos entrega de los reportes digitales correspondientes ({n} {'documento' if n == 1 else 'documentos'}):
+
+Folios procesados:
+{lineas_txt}
+
+Los documentos se encuentran certificados con sus respectivas firmas digitales.
+
+Atentamente,
+Básculas PESA
+recepcion@basculaspesa.com.mx
+"""
+
+    cuerpo_html = f"""
+                <html>
+                <body style="font-family: Arial, sans-serif; color: #1D1D1F; line-height: 1.5;">
+                    <div style="background-color: #B71C1C; padding: 20px; text-align: left; border-radius: 8px 8px 0 0;">
+                        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Básculas PESA</h1>
+                    </div>
+                    <div style="padding: 24px; border: 1px solid #E5E5EA; border-top: none; border-radius: 0 0 8px 8px; background-color: #FFFFFF;">
+                        <p>Estimado cliente <strong>{cliente_limpio}</strong>,</p>
+                        <p>{intro_html}</p>
+                        <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px 16px; border-radius: 6px; margin: 16px 0;">
+                            <strong>Folios procesados:</strong>
+                            <div style="font-weight:bold; color:#0B57D0; line-height:1.6;">
+                                {lineas_html}
+                            </div>
+                        </div>
+                        <p>{cierre_html}</p>
+                        <hr style="border: none; border-top: 1px solid #E5E5EA; margin: 24px 0;">
+                        <p style="font-size: 12px; color: #64748B; margin: 0;">
+                            Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
+                            Para cualquier aclaración o seguimiento, favor de responder con copia a <a href="mailto:recepcion@basculaspesa.com.mx">recepcion@basculaspesa.com.mx</a>.
+                        </p>
+                    </div>
+                </body>
+                </html>
+                """
+    return asunto, cuerpo_html, cuerpo_texto, etiquetas
 
 
 _ESTATUS_FINALIZADOS = {
@@ -183,40 +373,157 @@ def sanear_nombre_cliente(cliente: str) -> str:
     return c
 
 
-def extraer_id_equipo_de_pdf_bytes(pdf_bytes: Optional[bytes]) -> str:
-    """Extrae el ID del indicador/equipo directamente del contenido binario del PDF."""
+_TOKENS_CABECERA_PDF = {
+    "TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "CAPACIDAD", "DIVISION", "DIVISIÓN",
+    "PUNTOS", "UBICACION", "UBICACIÓN", "FUNCIONAMIENTO", "NUMERO", "NÚMERO", "FOLIO",
+    "HOLO", "HOLO.", "PRUEBAS", "N/A", "NA", "NONE", "NULL", "--", "-",
+}
+
+
+def _extraer_texto_primera_pagina_pdf(pdf_bytes: Optional[bytes]) -> str:
+    """Obtiene el texto plano de la primera página del PDF (solo lectura en memoria)."""
     if not pdf_bytes or len(pdf_bytes) < 100:
         return ""
-    # 1. Intentar con fitz (PyMuPDF) si está disponible
     try:
         import fitz
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         if len(doc) > 0:
             txt = doc[0].get_text() or ""
-            m = re.search(r"ID\s*(?:INTERNO\s*/\s*TAG|INDICADOR|EQUIPO)?\s*(?:/\s*(?:EQUIPO|TAG))?:\s*([^\n\r\t|]+)", txt, re.IGNORECASE)
-            if m:
-                val = m.group(1).split()[0].strip()
-                if val.upper() not in ["TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "N/A", "NONE", "NULL", "--"]:
-                    return val
+            if txt.strip():
+                return txt
     except Exception:
         pass
-
-    # 2. Intentar con pypdf
     try:
         import io
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(pdf_bytes))
         if reader.pages:
             txt = reader.pages[0].extract_text() or ""
-            m = re.search(r"ID\s*(?:INTERNO\s*/\s*TAG|INDICADOR|EQUIPO)?\s*(?:/\s*(?:EQUIPO|TAG))?:\s*([^\n\r\t|]+)", txt, re.IGNORECASE)
-            if m:
-                val = m.group(1).split()[0].strip()
-                if val.upper() not in ["TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "N/A", "NONE", "NULL", "--"]:
-                    return val
+            if txt.strip():
+                return txt
     except Exception:
         pass
-
     return ""
+
+
+def extraer_metadatos_equipo_de_pdf_bytes(pdf_bytes: Optional[bytes]) -> Dict[str, str]:
+    """
+    Extrae (marca, modelo, id_indicador, numero_cca, numero_dve) directamente
+    del encabezado del PDF firmado (OS, OSOB, OSOCC, RE, LP, LV) en memoria.
+    """
+    txt = _extraer_texto_primera_pagina_pdf(pdf_bytes)
+    if not txt:
+        return {}
+    txt_norm = re.sub(r"\s+", " ", txt).strip()
+    out: Dict[str, str] = {}
+
+    def _limpiar_captura(raw: str, es_reg: bool = False) -> str:
+        val = _limpiar_val_correo(raw, es_regulatorio=es_reg)
+        if not val or val.upper() in _TOKENS_CABECERA_PDF:
+            return ""
+        return val
+
+    m_marca = re.search(
+        r"(?:MARCA\s+INDICADOR|MARCA)\s*:\s*(.*?)(?=\s*(?:MODELO(?:\s+INDICADOR)?\s*:|(?:NO\.?\s*DE\s*|N[ÚU]MERO\s+DE\s*)?SERIE(?:\s*/\s*N/S)?\s*:|N/S\s*:|ID\s+(?:INDICADOR|INTERNO|EQUIPO)|CAPACIDAD|ALCANCE|$))",
+        txt_norm,
+        re.IGNORECASE,
+    )
+    if m_marca:
+        v = _limpiar_captura(m_marca.group(1))
+        if v:
+            out["marca"] = v
+
+    m_modelo = re.search(
+        r"(?:MODELO\s+INDICADOR|MODELO)\s*:\s*(.*?)(?=\s*(?:(?:NO\.?\s*DE\s*|N[ÚU]MERO\s+DE\s*)?SERIE(?:\s*/\s*N/S)?\s*:|N/S\s*:|ID\s+(?:INDICADOR|INTERNO|EQUIPO)|CAPACIDAD|ALCANCE|DIVISI[ÓO]N|CLASE|$))",
+        txt_norm,
+        re.IGNORECASE,
+    )
+    if m_modelo:
+        v = _limpiar_captura(m_modelo.group(1))
+        if v:
+            out["modelo"] = v
+
+    m_id = re.search(
+        r"ID\s*(?:INTERNO\s*/\s*TAG|INDICADOR\s*/\s*EQUIPO|INDICADOR|EQUIPO)\s*:\s*(.*?)(?=\s*(?:TIPO\s+DE\s+INSTRUMENTO\s*:|FUNCIONAMIENTO\s*:|MARCA(?:\s+INDICADOR)?\s*:|MODELO(?:\s+INDICADOR)?\s*:|(?:NO\.?\s*DE\s*|N[ÚU]MERO\s+DE\s*)?SERIE|CAPACIDAD|ALCANCE|DIVISI[ÓO]N|UBICACI[ÓO]N|CELDAS\s+DE\s+CARGA|PRUEBAS|$))",
+        txt_norm,
+        re.IGNORECASE,
+    )
+    if m_id:
+        v = _limpiar_captura(m_id.group(1))
+        if v:
+            out["id_indicador"] = v
+
+    m_cca = re.search(
+        r"(?:N[ÚU]MERO\s+CCA|FOLIO\s+CCA)\s*:\s*(.*?)(?=\s*(?:FOLIO\s+DVE\s*:|N[ÚU]MERO\s+DVE\s*:|HOLO\.?\s*ANTERIOR|TIPO\s+DE\s+INSTRUMENTO\s*:|PRUEBAS\s+METROL|INSTRUCCI[ÓO]N\s*:|INSPECCI[ÓO]N|OBSERVACIONES|$))",
+        txt_norm,
+        re.IGNORECASE,
+    )
+    if m_cca:
+        raw_cca = re.sub(r"(?:^|\s+)[XJIA](?=\s+[XJIA]|\s*$)", "", m_cca.group(1).strip())
+        raw_cca = re.sub(r"(?:\s+[XJIA])+\s*$", "", raw_cca).strip()
+        if not re.match(r"^(?:[XJIA]\s*)+$", raw_cca):
+            v = _limpiar_captura(raw_cca, es_reg=True)
+            if v:
+                out["numero_cca"] = v
+
+    m_dve = re.search(
+        r"(?:FOLIO\s+DVE|N[ÚU]MERO\s+DVE)\s*:\s*(.*?)(?=\s*(?:HOLO\.?\s*ANTERIOR\s*:|HOLO\.?\s*NUEVO\s*:|TIPO\s+DE\s+INSTRUMENTO\s*:|PRUEBAS\s+METROL|INSTRUCCI[ÓO]N\s*:|INSPECCI[ÓO]N|UBICACI[ÓO]N\s*:|OBSERVACIONES|$))",
+        txt_norm,
+        re.IGNORECASE,
+    )
+    if m_dve:
+        v = _limpiar_captura(m_dve.group(1), es_reg=True)
+        if v:
+            out["numero_dve"] = v
+
+    return out
+
+
+def extraer_id_equipo_de_pdf_bytes(pdf_bytes: Optional[bytes]) -> str:
+    """Extrae el ID del indicador/equipo directamente del contenido binario del PDF."""
+    meta = extraer_metadatos_equipo_de_pdf_bytes(pdf_bytes)
+    if meta.get("id_indicador"):
+        return meta["id_indicador"]
+    return ""
+
+
+def _consolidar_orden_correo(orden_row: Dict[str, Any], content_pdf: Optional[bytes], folio_fallback: str = "") -> Dict[str, Any]:
+    """
+    Unifica los metadatos de una orden combinando el PDF firmado adjunto,
+    las columnas de BD y datos_tecnicos_json para construir su etiqueta de correo.
+    """
+    base = dict(orden_row) if orden_row else {}
+    dt = _extraer_dt_dict(base)
+    meta_pdf = extraer_metadatos_equipo_de_pdf_bytes(content_pdf)
+
+    def _pick(claves_db: tuple[str, ...], clave_pdf: str, es_reg: bool = False) -> str:
+        # Prioridad 1: valor impreso en el certificado PDF adjunto (fuente de verdad del documento enviado)
+        v_pdf = _limpiar_val_correo(meta_pdf.get(clave_pdf), es_regulatorio=es_reg)
+        if v_pdf:
+            return v_pdf
+        # Prioridad 2: columnas directas en ordenes_servicio
+        for k in claves_db:
+            v_db = _limpiar_val_correo(base.get(k), es_regulatorio=es_reg)
+            if v_db:
+                return v_db
+        # Prioridad 3: datos_tecnicos_json
+        for k in claves_db:
+            v_dt = _limpiar_val_correo(dt.get(k), es_regulatorio=es_reg)
+            if v_dt:
+                return v_dt
+        return ""
+
+    folio_real = _limpiar_val_correo(base.get("folio_os") or base.get("folio") or folio_fallback)
+    return {
+        "folio": folio_real,
+        "folio_os": folio_real,
+        "marca": _pick(("marca", "equipo_marca", "indicador_marca"), "marca"),
+        "modelo": _pick(("modelo", "equipo_modelo", "indicador_modelo"), "modelo"),
+        "id_indicador": _pick(("id_indicador", "id_equipo", "indicador_id", "no_identificacion", "id_interno", "tag"), "id_indicador"),
+        "numero_cca": _pick(("numero_cca", "cca", "folio_cca"), "numero_cca", es_reg=True),
+        "numero_dve": _pick(("numero_dve", "folio_dve"), "numero_dve", es_reg=True),
+        "datos_tecnicos_json": dt,
+    }
 
 
 def construir_nombre_pdf(folio: str, cliente: str = "", id_equipo: str = "", servicio: str = "") -> str:
@@ -227,6 +534,8 @@ def construir_nombre_pdf(folio: str, cliente: str = "", id_equipo: str = "", ser
         c_limpio = "Pilgrims Pride" if ("pilgrim" in str(cliente).lower() or "696" in folio or "706" in folio) else "Empresa"
 
     id_limpio = limpiar_texto(id_equipo)
+    if id_limpio.upper() in ("S-ID", "SID", "SIN ID"):
+        id_limpio = ""
     s_limpio = limpiar_texto(servicio)
     if not s_limpio or s_limpio.lower() in ["servicio", "none", "null"]:
         s_limpio = "Ajuste" if "ajuste" in str(servicio).lower() else "Calibracion"
@@ -289,7 +598,7 @@ def _enviar_smtp_sync(destinatario: str, cc: str, asunto: str, cuerpo_html: str,
 
 async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_override: Optional[str] = None, forzar: bool = False, folios_lista: Optional[List[str]] = None, auto: bool = False) -> Dict[str, Any]:
     """
-    Envía por correo el PDF de una orden (o lote si pertenece a uno).
+    Envía por correo el PDF de una orden (o lote de 1 hasta N documentos terminados).
     Se ejecuta de forma asíncrona tolerante a fallos. Soporta db=None (obtiene del pool).
 
     auto=True → disparo automático (subida de PDF / sync). Si la orden pertenece a un
@@ -312,12 +621,15 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
 
     folios_a_bloquear: List[str] = []
     try:
+        await _ensure_email_columns(conn)
         str_id = str(folio_o_id).strip()
         row = await conn.fetchrow(
             """
             SELECT os.id, os.folio_os, os.id_lote, os.correo_cliente, os.email_enviado,
                    os.fecha_envio_email,
-                   os.pdf_path, os.pdf_b64, os.tipo_servicio, os.id_equipo, os.indicador_id,
+                   os.pdf_path, os.pdf_b64, os.tipo_servicio,
+                   os.marca, os.modelo, os.id_equipo, os.indicador_id,
+                   os.numero_cca, os.numero_dve,
                    os.fecha, os.dictamen, os.datos_tecnicos_json,
                    COALESCE(cl.razon_social, os.cliente, '') AS cliente,
                    COALESCE(ts.nombre, os.tipo_servicio, '') AS srv_nombre
@@ -354,15 +666,17 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
         if folios_lista:
             folios_lista = list(dict.fromkeys([str(f).strip() for f in folios_lista if str(f).strip()]))
 
-        # Si pertenece a un Lote o se pasó lista de folios, agrupar las órdenes del lote
+        # Si pertenece a un Lote o se pasó lista explícita de folios (1..N), agrupar órdenes del lote
         es_agrupacion_lote = False
         lote_rows = []
-        if folios_lista and len(folios_lista) > 1:
+        if folios_lista and len(folios_lista) >= 1:
             lote_rows = await conn.fetch(
                 """
                 SELECT os.id, os.folio_os, os.correo_cliente, os.email_enviado,
                        os.fecha_envio_email,
-                       os.pdf_path, os.pdf_b64, os.tipo_servicio, os.id_equipo, os.indicador_id,
+                       os.pdf_path, os.pdf_b64, os.tipo_servicio,
+                       os.marca, os.modelo, os.id_equipo, os.indicador_id,
+                       os.numero_cca, os.numero_dve,
                        os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
                        COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
                        COALESCE(cl.razon_social, os.cliente, '') AS cliente,
@@ -375,21 +689,22 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 """,
                 folios_lista,
             )
-            # Deduplicar registros devueltos por folio preservando orden
             lote_rows_dict = {}
             for r in lote_rows:
                 fk = str(r["folio_os"] or "").strip()
                 if fk and fk not in lote_rows_dict:
                     lote_rows_dict[fk] = r
-            lote_rows = list(lote_rows_dict.values())
-            if len(lote_rows) > 1:
+            lote_rows = sorted(lote_rows_dict.values(), key=lambda rx: _clave_orden_folio(rx["folio_os"]))
+            if len(lote_rows) >= 1:
                 es_agrupacion_lote = True
         elif id_lote and str(id_lote).strip():
             lote_rows = await conn.fetch(
                 """
                 SELECT os.id, os.folio_os, os.correo_cliente, os.email_enviado,
                        os.fecha_envio_email,
-                       os.pdf_path, os.pdf_b64, os.tipo_servicio, os.id_equipo, os.indicador_id,
+                       os.pdf_path, os.pdf_b64, os.tipo_servicio,
+                       os.marca, os.modelo, os.id_equipo, os.indicador_id,
+                       os.numero_cca, os.numero_dve,
                        os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
                        COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
                        COALESCE(cl.razon_social, os.cliente, '') AS cliente,
@@ -402,17 +717,19 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 """,
                 id_lote,
             )
-            # Deduplicar registros devueltos por folio preservando orden
             lote_rows_dict = {}
             for r in lote_rows:
                 fk = str(r["folio_os"] or "").strip()
                 if fk and fk not in lote_rows_dict:
                     lote_rows_dict[fk] = r
-            lote_rows = list(lote_rows_dict.values())
-            if len(lote_rows) > 1:
+            lote_rows = sorted(lote_rows_dict.values(), key=lambda rx: _clave_orden_folio(rx["folio_os"]))
+            if len(lote_rows) > 1 or (len(lote_rows) == 1 and forzar):
                 es_agrupacion_lote = True
 
-        # ── Control de Idempotencia contra envíos duplicados (< 2 minutos) ───────
+        # ── Control de Idempotencia contra envíos duplicados automáticos ───────
+        # Si forzar=True (acción explícita "Reenviar Lote" / "Reenviar Correo"), solo
+        # proteger contra reintentos HTTP idénticos en <= 5s; en modo auto usar 120s.
+        ventana_idemp = 5 if forzar else 120
         if es_agrupacion_lote:
             lote_ya_enviado = False
             if lote_rows:
@@ -430,14 +747,15 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                         tiempos.append(abs((now_c - fe_dt).total_seconds()))
                     except Exception:
                         break
-                if len(tiempos) == len(lote_rows) and all(t <= 120 for t in tiempos):
+                if len(tiempos) == len(lote_rows) and all(t <= ventana_idemp for t in tiempos):
                     lote_ya_enviado = True
 
             if lote_ya_enviado:
                 folios_desc = [str(r["folio_os"]) for r in lote_rows]
                 logger.info(
-                    "[EMAIL IDEMPOTENCIA] Lote %s ya fue enviado hace < 2 minutos. Retornando status=already_sent.",
+                    "[EMAIL IDEMPOTENCIA] Lote %s ya fue enviado hace <= %ds. Retornando status=already_sent.",
                     id_lote or folios_desc,
+                    ventana_idemp,
                 )
                 return {
                     "ok": True,
@@ -454,11 +772,12 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     f_envio_dt = datetime.fromisoformat(f_envio) if isinstance(f_envio, str) else f_envio
                     now_ref = datetime.now(timezone.utc) if getattr(f_envio_dt, "tzinfo", None) else datetime.utcnow()
                     diff_seg = abs((now_ref - f_envio_dt).total_seconds())
-                    if diff_seg <= 120:  # Menos de 2 minutos
+                    if diff_seg <= ventana_idemp:
                         logger.info(
-                            "[EMAIL IDEMPOTENCIA] Orden %s ya fue enviada hace %.1fs (< 120s). Retornando status=already_sent sin invocar SMTP.",
+                            "[EMAIL IDEMPOTENCIA] Orden %s ya fue enviada hace %.1fs (<= %ds). Retornando status=already_sent.",
                             folio_str,
                             diff_seg,
+                            ventana_idemp,
                         )
                         return {
                             "ok": True,
@@ -491,202 +810,169 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 _folios_enviando_email.add(f)
 
         if es_agrupacion_lote:
-                # REGLA ESTRICTA: solo órdenes FIRMADAS/CERRADAS y con PDF existente.
-                ordenes_validas = []   # [(row, pdf_bytes)]
-                no_listas = []
-                adjuntos_procesados = set()
+            # REGLA ESTRICTA: solo órdenes FIRMADAS/CERRADAS y con PDF existente.
+            ordenes_validas = []   # [(row, pdf_bytes)]
+            no_listas = []
+            adjuntos_procesados = set()
+            for r in lote_rows:
+                f_i = str(r["folio_os"] or "").strip()
+                if not f_i or f_i in adjuntos_procesados:
+                    continue
+                pdf_bytes = _cargar_pdf_bytes(r, f_i) if (_es_finalizada(r) or forzar) else None
+                if not pdf_bytes and _es_finalizada(r):
+                    pdf_bytes = _cargar_pdf_bytes(r, f_i)
+                if pdf_bytes and (_es_finalizada(r) or r.get("has_pdf")):
+                    adjuntos_procesados.add(f_i)
+                    ordenes_validas.append((r, pdf_bytes))
+                elif pdf_bytes and folios_lista and f_i in folios_lista:
+                    adjuntos_procesados.add(f_i)
+                    ordenes_validas.append((r, pdf_bytes))
+                else:
+                    no_listas.append(f_i)
+
+            # Envío automático (no forzado): esperar a que el lote esté completo.
+            if no_listas and not forzar:
+                logger.info("[EMAIL] Lote %s pendiente: folios no listos %s. Esperando...", id_lote, no_listas)
+                return {
+                    "ok": False,
+                    "motivo": "Lote en proceso de captura/subida. Se enviará al completar el lote.",
+                    "pendientes": no_listas,
+                }
+
+            if not ordenes_validas:
+                return {
+                    "ok": False,
+                    "motivo": "El lote no tiene órdenes firmadas con PDF listas para enviar.",
+                    "omitidas": no_listas,
+                }
+
+            # Destinatario para el lote
+            destinatario = correo_override
+            if not destinatario:
                 for r in lote_rows:
-                    f_i = str(r["folio_os"] or "").strip()
-                    if not f_i or f_i in adjuntos_procesados:
-                        continue
-                    pdf_bytes = _cargar_pdf_bytes(r, f_i) if _es_finalizada(r) else None
-                    if pdf_bytes:
-                        adjuntos_procesados.add(f_i)
-                        ordenes_validas.append((r, pdf_bytes))
-                    else:
-                        no_listas.append(f_i)
+                    if r["correo_cliente"] and str(r["correo_cliente"]).strip():
+                        destinatario = str(r["correo_cliente"]).strip()
+                        break
 
-                # Envío automático (no forzado): esperar a que el lote esté completo.
-                if no_listas and not forzar:
-                    logger.info("[EMAIL] Lote %s pendiente: folios no listos %s. Esperando...", id_lote, no_listas)
-                    return {
-                        "ok": False,
-                        "motivo": "Lote en proceso de captura/subida. Se enviará al completar el lote.",
-                        "pendientes": no_listas,
-                    }
+            if not destinatario:
+                logger.warning("[EMAIL] No se encontró correo de cliente para el lote %s", id_lote)
+                return {"ok": False, "motivo": "No se ha capturado el correo del cliente para este lote"}
 
-                if not ordenes_validas:
-                    return {
-                        "ok": False,
-                        "motivo": "El lote no tiene órdenes firmadas con PDF listas para enviar.",
-                        "omitidas": no_listas,
-                    }
+            adjuntos = []
+            folios_lote = []
+            ordenes_lote_correo: List[Dict[str, Any]] = []
+            empresa_lote = ordenes_validas[0][0]["cliente"] or lote_rows[0]["cliente"] or "Cliente"
+            folios_agregados = set()
 
-                # Destinatario para el lote
-                destinatario = correo_override
-                if not destinatario:
-                    for r in lote_rows:
-                        if r["correo_cliente"] and str(r["correo_cliente"]).strip():
-                            destinatario = str(r["correo_cliente"]).strip()
-                            break
+            for r, content_pdf in ordenes_validas:
+                f_i = str(r["folio_os"] or "").strip()
+                if not f_i or f_i in folios_agregados:
+                    continue
+                folios_agregados.add(f_i)
+                folios_lote.append(f_i)
 
-                if not destinatario:
-                    logger.warning("[EMAIL] No se encontró correo de cliente para el lote %s", id_lote)
-                    return {"ok": False, "motivo": "No se ha capturado el correo del cliente para este lote"}
-
-                adjuntos = []
-                folios_lote = []   # SOLO folios válidos únicos
-                empresa_lote = ordenes_validas[0][0]["cliente"] or lote_rows[0]["cliente"] or "Cliente"
-                folios_agregados = set()
-
-                for r, content_pdf in ordenes_validas:
-                    f_i = str(r["folio_os"] or "").strip()
-                    if not f_i or f_i in folios_agregados:
-                        continue
-                    folios_agregados.add(f_i)
-                    folios_lote.append(f_i)
-
-                    # 1. Obtener registro completo e independiente de esa orden específica desde la base de datos
-                    try:
-                        row_hija = await conn.fetchrow(
-                            """
-                            SELECT os.id, os.folio_os, os.id_lote, os.correo_cliente, os.email_enviado,
-                                   os.pdf_path, os.pdf_b64, os.tipo_servicio, os.id_equipo, os.indicador_id,
-                                   os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
-                                   COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
-                                   COALESCE(cl.razon_social, os.cliente, '') AS cliente,
-                                   COALESCE(ts.nombre, os.tipo_servicio, '') AS srv_nombre
-                            FROM ordenes_servicio os
-                            LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
-                            LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
-                            WHERE os.folio_os = $1
-                            LIMIT 1
-                            """,
-                            f_i,
-                        )
-                        orden_hija = dict(row_hija) if row_hija else dict(r)
-                    except Exception as e_hija:
-                        logger.warning("[EMAIL] Error consultando orden hija %s: %s", f_i, e_hija)
-                        orden_hija = dict(r)
-
-                    # 2. Extraer los datos particulares de ESA orden, NO los datos genéricos del lote
-                    # Prioridad 1: Extracción directa e infalible desde los bytes del PDF de la orden
-                    id_desde_pdf = extraer_id_equipo_de_pdf_bytes(content_pdf)
-
-                    # Prioridad 2: id_indicador / id_equipo de la orden hija
-                    id_desde_db = (
-                        orden_hija.get("id_indicador") or
-                        orden_hija.get("id_equipo") or
-                        orden_hija.get("indicador_id") or
-                        orden_hija.get("no_identificacion") or
-                        ""
+                try:
+                    row_hija = await conn.fetchrow(
+                        """
+                        SELECT os.id, os.folio_os, os.id_lote, os.correo_cliente, os.email_enviado,
+                               os.pdf_path, os.pdf_b64, os.tipo_servicio,
+                               os.marca, os.modelo, os.id_equipo, os.indicador_id,
+                               os.numero_cca, os.numero_dve,
+                               os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
+                               COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
+                               COALESCE(cl.razon_social, os.cliente, '') AS cliente,
+                               COALESCE(ts.nombre, os.tipo_servicio, '') AS srv_nombre
+                        FROM ordenes_servicio os
+                        LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
+                        LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
+                        WHERE os.folio_os = $1
+                        LIMIT 1
+                        """,
+                        f_i,
                     )
+                    orden_hija = dict(row_hija) if row_hija else dict(r)
+                except Exception as e_hija:
+                    logger.warning("[EMAIL] Error consultando orden hija %s: %s", f_i, e_hija)
+                    orden_hija = dict(r)
 
-                    # Prioridad 3: datos_tecnicos_json de la orden hija
-                    if not id_desde_db and orden_hija.get("datos_tecnicos_json"):
-                        try:
-                            dj = json.loads(orden_hija["datos_tecnicos_json"]) if isinstance(orden_hija["datos_tecnicos_json"], str) else orden_hija["datos_tecnicos_json"]
-                            if isinstance(dj, dict):
-                                id_desde_db = (
-                                    dj.get("id_equipo") or
-                                    dj.get("id_indicador") or
-                                    dj.get("indicador_id") or
-                                    dj.get("no_identificacion") or
-                                    ""
-                                )
-                        except Exception:
-                            pass
+                orden_consolidada = _consolidar_orden_correo(orden_hija, content_pdf, folio_fallback=f_i)
+                ordenes_lote_correo.append(orden_consolidada)
 
-                    id_equipo_real = str(id_desde_pdf or id_desde_db or "S-ID").strip()
-                    servicio_real = str(orden_hija.get("srv_nombre") or orden_hija.get("tipo_servicio") or "Servicio").strip()
-                    empresa_real = sanear_nombre_cliente(orden_hija.get("cliente") or empresa_lote)
-
-                    # 3. Construir la búsqueda y el nombre del archivo con sus metadatos correspondientes
-                    nombre_adj = construir_nombre_pdf(
-                        folio=f_i,
-                        cliente=empresa_real,
-                        id_equipo=id_equipo_real,
-                        servicio=servicio_real,
-                    )
-                    adjuntos.append((nombre_adj, content_pdf))
-
-                folios_unicos = list(dict.fromkeys([f.strip() for f in folios_lote if f]))
-                folios_lote = folios_unicos
-                n = len(adjuntos)
-                total_ordenes = len(folios_unicos)
-                txt_ordenes = "orden" if n == 1 else "órdenes"
-                txt_docs = "documento" if n == 1 else "documentos"
-                folios_str = _unir_folios(folios_lote)
-                asunto = f"Reporte de Servicio - Lote {folios_str} ({n} {txt_docs}) - {empresa_lote} | Básculas PESA"
-
-                cuerpo_texto = f"""Estimado cliente ({empresa_lote}):
-
-Adjuntamos los reportes correspondientes al Lote de Órdenes de Servicio ({n} documentos):
-Folios: {', '.join(folios_lote)}
-
-Los documentos se encuentran certificados con las firmas digitales correspondientes.
-
-Atentamente,
-Básculas PESA
-recepcion@basculaspesa.com.mx
-"""
-                cuerpo_html = f"""
-                <html>
-                <body style="font-family: Arial, sans-serif; color: #1D1D1F; line-height: 1.5;">
-                    <div style="background-color: #B71C1C; padding: 20px; text-align: left; border-radius: 8px 8px 0 0;">
-                        <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Básculas PESA</h1>
-                    </div>
-                    <div style="padding: 24px; border: 1px solid #E5E5EA; border-top: none; border-radius: 0 0 8px 8px; background-color: #FFFFFF;">
-                        <p>Estimado cliente <strong>{empresa_lote}</strong>,</p>
-                        <p>Hacemos entrega de los reportes digitales correspondientes al <strong>Lote de Servicios ({n} {txt_ordenes})</strong>:</p>
-                        <div style="background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 12px 16px; border-radius: 6px; margin: 16px 0;">
-                            <strong>Folios procesados:</strong><br>
-                            <span style="color: #0369A1; font-weight: 600;">{', '.join(folios_lote)}</span>
-                        </div>
-                        <p>Adjunto a este correo encontrará cada uno de los certificados y reportes en formato PDF con sus respectivas firmas digitales.</p>
-                        <hr style="border: none; border-top: 1px solid #E5E5EA; margin: 24px 0;">
-                        <p style="font-size: 12px; color: #64748B; margin: 0;">
-                            Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
-                            Para cualquier aclaración o seguimiento, favor de responder con copia a <a href="mailto:recepcion@basculaspesa.com.mx">recepcion@basculaspesa.com.mx</a>.
-                        </p>
-                    </div>
-                </body>
-                </html>
-                """
-
-                loop = asyncio.get_running_loop()
-                ok = await loop.run_in_executor(
-                    None,
-                    _enviar_smtp_sync,
-                    destinatario,
-                    settings.EMAIL_CC,
-                    asunto,
-                    cuerpo_html,
-                    cuerpo_texto,
-                    adjuntos,
-                )
-
-                if ok:
-                    # Solo se marcan como enviadas las órdenes realmente adjuntadas.
+                # Auto-sanar columnas vacías en BD con los datos reales extraídos del PDF firmado
+                try:
                     await conn.execute(
                         """
-                        UPDATE ordenes_servicio
-                        SET email_enviado = TRUE,
-                            fecha_envio_email = NOW()
-                        WHERE folio_os = ANY($1::text[])
+                        UPDATE ordenes_servicio SET
+                            marca      = COALESCE(NULLIF(marca, ''), NULLIF($1, '')),
+                            modelo     = COALESCE(NULLIF(modelo, ''), NULLIF($2, '')),
+                            id_equipo  = COALESCE(NULLIF(id_equipo, ''), NULLIF($3, '')),
+                            numero_cca = COALESCE(NULLIF(numero_cca, ''), NULLIF($4, '')),
+                            numero_dve = COALESCE(NULLIF(numero_dve, ''), NULLIF($5, ''))
+                        WHERE folio_os = $6
                         """,
-                        folios_lote,
+                        orden_consolidada["marca"],
+                        orden_consolidada["modelo"],
+                        orden_consolidada["id_indicador"],
+                        orden_consolidada["numero_cca"],
+                        orden_consolidada["numero_dve"],
+                        f_i,
                     )
-                    return {
-                        "ok": True,
-                        "lote": True,
-                        "count": n,
-                        "folios": folios_lote,
-                        "omitidas": no_listas,
-                        "destinatario": destinatario,
-                        "asunto": asunto,
-                    }
-                return {"ok": False, "motivo": "Fallo el envío por SMTP"}
+                except Exception:
+                    pass
+
+                id_equipo_real = orden_consolidada["id_indicador"] or ""
+                servicio_real = str(orden_hija.get("srv_nombre") or orden_hija.get("tipo_servicio") or "Servicio").strip()
+                empresa_real = sanear_nombre_cliente(orden_hija.get("cliente") or empresa_lote)
+
+                nombre_adj = construir_nombre_pdf(
+                    folio=f_i,
+                    cliente=empresa_real,
+                    id_equipo=id_equipo_real,
+                    servicio=servicio_real,
+                )
+                adjuntos.append((nombre_adj, content_pdf))
+
+            folios_lote = list(dict.fromkeys([f.strip() for f in folios_lote if f]))
+            n = len(adjuntos)
+            asunto, cuerpo_html, cuerpo_texto, etiquetas = construir_asunto_y_cuerpo_correo(
+                ordenes_lote_correo,
+                empresa_lote,
+                es_lote=True,
+            )
+
+            loop = asyncio.get_running_loop()
+            ok = await loop.run_in_executor(
+                None,
+                _enviar_smtp_sync,
+                destinatario,
+                settings.EMAIL_CC,
+                asunto,
+                cuerpo_html,
+                cuerpo_texto,
+                adjuntos,
+            )
+
+            if ok:
+                await conn.execute(
+                    """
+                    UPDATE ordenes_servicio
+                    SET email_enviado = TRUE,
+                        fecha_envio_email = NOW()
+                    WHERE folio_os = ANY($1::text[])
+                    """,
+                    folios_lote,
+                )
+                return {
+                    "ok": True,
+                    "lote": True,
+                    "count": n,
+                    "folios": folios_lote,
+                    "etiquetas": etiquetas,
+                    "omitidas": no_listas,
+                    "destinatario": destinatario,
+                    "asunto": asunto,
+                }
+            return {"ok": False, "motivo": "Fallo el envío por SMTP"}
 
         # ── Orden individual ──────────────────────────────────────────────────
         destinatario = correo_override or (row["correo_cliente"] and str(row["correo_cliente"]).strip())
@@ -700,32 +986,35 @@ recepcion@basculaspesa.com.mx
         if not content_pdf:
             return {"ok": False, "motivo": f"No se encontró el PDF para la orden {folio}"}
 
-        # Prioridad 1: Extracción directa e infalible desde los bytes del PDF de la orden
-        id_desde_pdf = extraer_id_equipo_de_pdf_bytes(content_pdf)
+        orden_consolidada = _consolidar_orden_correo(dict(row), content_pdf, folio_fallback=str(folio or ""))
+        try:
+            await conn.execute(
+                """
+                UPDATE ordenes_servicio SET
+                    marca      = COALESCE(NULLIF(marca, ''), NULLIF($1, '')),
+                    modelo     = COALESCE(NULLIF(modelo, ''), NULLIF($2, '')),
+                    id_equipo  = COALESCE(NULLIF(id_equipo, ''), NULLIF($3, '')),
+                    numero_cca = COALESCE(NULLIF(numero_cca, ''), NULLIF($4, '')),
+                    numero_dve = COALESCE(NULLIF(numero_dve, ''), NULLIF($5, ''))
+                WHERE id = $6
+                """,
+                orden_consolidada["marca"],
+                orden_consolidada["modelo"],
+                orden_consolidada["id_indicador"],
+                orden_consolidada["numero_cca"],
+                orden_consolidada["numero_dve"],
+                actual_id,
+            )
+        except Exception:
+            pass
 
-        id_eq = row["id_equipo"] or row["indicador_id"] or ""
-        if not id_eq and row["datos_tecnicos_json"]:
-            try:
-                dj = json.loads(row["datos_tecnicos_json"]) if isinstance(row["datos_tecnicos_json"], str) else row["datos_tecnicos_json"]
-                if isinstance(dj, dict):
-                    id_eq = (
-                        dj.get("id_equipo") or
-                        dj.get("id_indicador") or
-                        dj.get("indicador_id") or
-                        dj.get("no_identificacion") or
-                        ""
-                    )
-            except Exception:
-                pass
-
-        id_equipo_real = str(id_desde_pdf or id_eq or "S-ID").strip()
-        empresa = sanear_nombre_cliente(row["cliente"] or "Cliente")
+        id_equipo_real = orden_consolidada["id_indicador"] or ""
+        cliente_mostrar = str(row["cliente"] or "Cliente").strip() or "Cliente"
+        empresa = sanear_nombre_cliente(cliente_mostrar)
         folio_up = str(folio or "").strip().upper()
-        es_osocc = folio_up.startswith("OSOCC-")
-        es_osob = folio_up.startswith("OSOB-")
-        if es_osocc:
+        if folio_up.startswith("OSOCC-"):
             servicio_default = "Diagnóstico y Revisión de Celda de Carga"
-        elif es_osob:
+        elif folio_up.startswith("OSOB-"):
             servicio_default = "Inspección y Revisión de Básculas"
         else:
             servicio_default = "Calibración"
@@ -738,56 +1027,11 @@ recepcion@basculaspesa.com.mx
             servicio=servicio_real,
         )
 
-        id_txt = f" ({id_equipo_real})" if id_equipo_real and id_equipo_real != "S-ID" else (" (S/ID)" if (es_osob or es_osocc) else "")
-        if es_osocc:
-            asunto = f"Diagnóstico y Revisión de Celda {folio}{id_txt} - {empresa} | Básculas PESA"
-            doc_titulo_correo = f"Formato de Diagnóstico y Revisión de Celda de Carga {folio}"
-        elif es_osob:
-            asunto = f"Formato de Inspección y Revisión {folio}{id_txt} - {empresa} | Básculas PESA"
-            doc_titulo_correo = f"Formato de Inspección y Revisión {folio}"
-        else:
-            asunto = f"Orden de Servicio {folio}{id_txt} - {empresa} | Básculas PESA"
-            doc_titulo_correo = f"Orden de Servicio {folio}"
-        cuerpo_texto = f"""Estimado cliente ({empresa}):
-
-Adjuntamos el reporte oficial correspondiente a {doc_titulo_correo}.
-Servicio: {servicio_real}
-
-El documento cuenta con validez y firmas digitales.
-
-Atentamente,
-Básculas PESA
-recepcion@basculaspesa.com.mx
-"""
-        cuerpo_html = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; color: #1D1D1F; line-height: 1.5;">
-            <div style="background-color: #B71C1C; padding: 20px; text-align: left; border-radius: 8px 8px 0 0;">
-                <h1 style="color: #ffffff; margin: 0; font-size: 24px;">Básculas PESA</h1>
-            </div>
-            <div style="padding: 24px; border: 1px solid #E5E5EA; border-top: none; border-radius: 0 0 8px 8px; background-color: #FFFFFF;">
-                <p>Estimado cliente <strong>{empresa}</strong>,</p>
-                <p>Hacemos entrega del documento digital oficial correspondiente a <strong>{doc_titulo_correo}</strong>:</p>
-                <table style="width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 13px;">
-                    <tr style="border-bottom: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0; color: #64748B; width: 140px;">Folio:</td>
-                        <td style="padding: 8px 0; font-weight: bold; color: #B81D24;">{folio}</td>
-                    </tr>
-                    <tr style="border-bottom: 1px solid #E2E8F0;">
-                        <td style="padding: 8px 0; color: #64748B;">Tipo de Servicio:</td>
-                        <td style="padding: 8px 0; font-weight: 600;">{servicio_real}</td>
-                    </tr>
-                </table>
-                <p>Adjunto a este correo encontrará el reporte completo en formato PDF con firmas electrónicas.</p>
-                <hr style="border: none; border-top: 1px solid #E5E5EA; margin: 24px 0;">
-                <p style="font-size: 12px; color: #64748B; margin: 0;">
-                    Este es un correo institucional emitido por Básculas PESA.<br>
-                    Para dudas o seguimiento, favor de contactar a <a href="mailto:recepcion@basculaspesa.com.mx">recepcion@basculaspesa.com.mx</a>.
-                </p>
-            </div>
-        </body>
-        </html>
-        """
+        asunto, cuerpo_html, cuerpo_texto, etiquetas = construir_asunto_y_cuerpo_correo(
+            [orden_consolidada],
+            cliente_mostrar,
+            es_lote=False,
+        )
 
         loop = asyncio.get_running_loop()
         ok = await loop.run_in_executor(
@@ -811,7 +1055,13 @@ recepcion@basculaspesa.com.mx
                 """,
                 actual_id,
             )
-            return {"ok": True, "folio": folio, "destinatario": destinatario}
+            return {
+                "ok": True,
+                "folio": folio,
+                "etiquetas": etiquetas,
+                "destinatario": destinatario,
+                "asunto": asunto,
+            }
 
         return {"ok": False, "motivo": "Fallo el envío por SMTP"}
 

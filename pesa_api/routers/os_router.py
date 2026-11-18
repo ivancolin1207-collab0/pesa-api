@@ -555,6 +555,31 @@ async def upload_pdf_tablet_os(
     if data:
         try:
             p = json.loads(data)
+            dt_in = p.get("datos_tecnicos_json")
+            dt_map = {}
+            if isinstance(dt_in, dict):
+                dt_map = dt_in
+            elif isinstance(dt_in, str) and dt_in.strip():
+                try:
+                    dec_dt = json.loads(dt_in)
+                    if isinstance(dec_dt, dict):
+                        dt_map = dec_dt
+                except Exception:
+                    pass
+
+            marca_up = str(p.get("marca") or dt_map.get("marca") or "").strip() or None
+            modelo_up = str(p.get("modelo") or dt_map.get("modelo") or "").strip() or None
+            id_eq_up = str(
+                p.get("id_indicador") or p.get("id_equipo") or p.get("indicador_id")
+                or dt_map.get("id_indicador") or dt_map.get("id_equipo") or ""
+            ).strip() or None
+            ns_up = str(p.get("ns") or p.get("serie") or dt_map.get("ns") or dt_map.get("serie") or "").strip() or None
+            ubic_up = str(p.get("ubicacion") or dt_map.get("ubicacion") or "").strip() or None
+            cca_raw = str(p.get("numero_cca") or p.get("cca") or dt_map.get("numero_cca") or dt_map.get("cca") or "").strip()
+            dve_raw = str(p.get("numero_dve") or p.get("folio_dve") or dt_map.get("numero_dve") or dt_map.get("folio_dve") or "").strip()
+            cca_up = None if (not cca_raw or re.match(r"^CCA\.\d{2}\.?$", cca_raw, re.IGNORECASE)) else cca_raw
+            dve_up = None if (not dve_raw or re.match(r"^DVE\.\d{2}\.?$", dve_raw, re.IGNORECASE)) else dve_raw
+
             await db.execute(
                 """
                 UPDATE ordenes_servicio SET
@@ -567,13 +592,22 @@ async def upload_pdf_tablet_os(
                     nombre_ing           = COALESCE($5, nombre_ing),
                     puesto_ing           = COALESCE($6, puesto_ing),
                     firma_cliente_nombre = COALESCE($5, firma_cliente_nombre),
-                    unidad_medida        = COALESCE($7, unidad_medida)
+                    unidad_medida        = COALESCE($7, unidad_medida),
+                    marca                = COALESCE($9, marca),
+                    modelo               = COALESCE($10, modelo),
+                    id_equipo            = COALESCE($11, id_equipo),
+                    indicador_id         = COALESCE($11, indicador_id),
+                    ns                   = COALESCE($12, ns),
+                    ubicacion            = COALESCE($13, ubicacion),
+                    numero_cca           = COALESCE($14, numero_cca),
+                    numero_dve           = COALESCE($15, numero_dve)
                 WHERE id = $8
                 """,
                 p.get("observaciones"), p.get("dictamen"),
                 p.get("firma_tecnico"), p.get("firma_cliente"),
                 p.get("nombre_ing") or p.get("firma_cliente_nombre"), p.get("puesto_ing"),
                 p.get("unidad_medida"), actual_id,
+                marca_up, modelo_up, id_eq_up, ns_up, ubic_up, cca_up, dve_up,
             )
             if p.get("datos_tecnicos_json"):
                 try:

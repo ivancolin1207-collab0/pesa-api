@@ -849,6 +849,7 @@ class _FirmaScreenState extends State<FirmaScreen>
       // ── MODAL: Solicitar Correo del Cliente para envío automático de la OS individual ──
       final String? emailPrevio = (widget.capturaData['correo_cliente'] ?? widget.capturaData['email_cliente'])?.toString().trim();
       final emailTextCtrl = TextEditingController(text: emailPrevio ?? '');
+      final String lineaPreviewCorreo = formatearLineaCorreoOrden(widget.capturaData);
 
       final bool? procedio = await showDialog<bool>(
         context: context,
@@ -871,6 +872,33 @@ class _FirmaScreenState extends State<FirmaScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (lineaPreviewCorreo.isNotEmpty) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Text(
+                        'Folios procesados:',
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF1D1D1F)),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        lineaPreviewCorreo,
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0B57D0), height: 1.4),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
               const Text(
                 'Ingresa el correo electrónico del cliente para el envío automático del reporte en PDF al sincronizar:',
                 style: TextStyle(fontSize: 13, color: Color(0xFF374151), height: 1.4),
@@ -1109,6 +1137,7 @@ class _FirmaScreenState extends State<FirmaScreen>
       try {
         final uploadPayload = <String, dynamic>{
           ...enrichedOs,
+          ...extraerMetaCorreoOrden(enrichedOs),
           'fecha': fechaEjecucionHoy,
           'fecha_servicio': fechaEjecucionHoy,
           'fecha_cierre': fechaCierreIso,

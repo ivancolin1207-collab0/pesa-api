@@ -398,5 +398,80 @@ String construirEtiquetaInstrumento(Map<String, dynamic> orden) {
   return partes.join(' - ');
 }
 
+/// Extrae los metadatos limpios de equipo y folios regulatorios de una orden
+/// para garantizar que el servidor tenga los datos actualizados antes del correo.
+Map<String, dynamic> extraerMetaCorreoOrden(Map<String, dynamic> orden) {
+  const invalidos = {
+    '', 'none', 'null', 'sin id', 'sin modelo', 'sin serie', 'sin marca',
+    'n/a', 'na', '--', '-', 's-id', 's/id', 'por definir',
+  };
+  final dt = _extraerMapaDatosTecnicos(orden);
+
+  String pick(List<String> keys) {
+    for (final k in keys) {
+      final v = (orden[k] ?? '').toString().trim();
+      if (v.isNotEmpty && !invalidos.contains(v.toLowerCase())) return v;
+    }
+    for (final k in keys) {
+      final v = (dt[k] ?? '').toString().trim();
+      if (v.isNotEmpty && !invalidos.contains(v.toLowerCase())) return v;
+    }
+    return '';
+  }
+
+  final folio = (orden['folio'] ?? orden['folio_os'] ?? '').toString().trim();
+  final marca = pick(['marca', 'equipo_marca', 'indicador_marca']);
+  final modelo = pick(['modelo', 'equipo_modelo', 'indicador_modelo']);
+  final idInd = pick(['id_indicador', 'id_equipo', 'indicador_id', 'no_identificacion', 'id_interno', 'tag']);
+  final cca = extraerNumeroCca(orden);
+  final dve = extraerNumeroDve(orden);
+
+  return <String, dynamic>{
+    'folio': folio,
+    'folio_os': folio,
+    if (marca.isNotEmpty) 'marca': marca,
+    if (modelo.isNotEmpty) 'modelo': modelo,
+    if (idInd.isNotEmpty) 'id_indicador': idInd,
+    if (idInd.isNotEmpty) 'id_equipo': idInd,
+    if (cca.isNotEmpty) 'numero_cca': cca,
+    if (dve.isNotEmpty) 'numero_dve': dve,
+  };
+}
+
+/// Construye la etiqueta dinámica de correo por equipo:
+///   `FOLIO-MARCA-MODELO-ID-CCA-DVE`
+/// incluyendo CCA, DVE o ambos si aplican, y omitiendo campos vacíos o placeholders.
+String formatearLineaCorreoOrden(Map<String, dynamic> orden) {
+  const invalidos = {
+    '', 'none', 'null', 'sin id', 'sin modelo', 'sin serie', 'sin marca',
+    'n/a', 'na', '--', '-', 's-id', 's/id', 'por definir',
+  };
+  final meta = extraerMetaCorreoOrden(orden);
+  final partes = <String>[];
+
+  final folio = (meta['folio'] ?? '').toString().trim();
+  if (folio.isNotEmpty) partes.add(folio);
+
+  for (final campo in ['marca', 'modelo', 'id_indicador']) {
+    final val = (meta[campo] ?? '').toString().trim();
+    if (val.isNotEmpty && !invalidos.contains(val.toLowerCase())) {
+      partes.add(val);
+    }
+  }
+
+  final cca = (meta['numero_cca'] ?? '').toString().trim();
+  if (cca.isNotEmpty && !invalidos.contains(cca.toLowerCase())) {
+    partes.add(cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca');
+  }
+
+  final dve = (meta['numero_dve'] ?? '').toString().trim();
+  if (dve.isNotEmpty && !invalidos.contains(dve.toLowerCase())) {
+    partes.add(dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve');
+  }
+
+  return partes.join('-');
+}
+
+
 
 

@@ -14,6 +14,8 @@ import 'package:http/http.dart' as http;
 import 'api_service.dart';
 import 'auth_service.dart';
 import 'local_db_service.dart';
+import 'metrology_helper.dart';
+export 'metrology_helper.dart' show formatearLineaCorreoOrden, extraerMetaCorreoOrden;
 import 'package:intl/intl.dart';
 
 
@@ -1061,20 +1063,35 @@ class SyncService extends ChangeNotifier {
     return null;
   }
 
-  /// Antes de un envío de LOTE: garantiza que el servidor tenga la versión FINAL
-  /// (más reciente) del PDF de cada folio. Si la copia local más reciente difiere
-  /// de la del servidor y es posterior a la última subida conocida, se re-sube.
+  /// Antes de un envío de correo (individual o LOTE de 1..N órdenes): garantiza que
+  /// el servidor tenga tanto los campos actualizados (marca, modelo, id_indicador,
+  /// numero_cca, numero_dve) como la versión FINAL del PDF de cada folio.
   /// Nunca borra ni modifica archivos locales.
   Future<void> asegurarPdfsVigentesEnServidor(List<String> folios) async {
     for (final folio in folios.toSet()) {
       try {
         final os = await LocalDbService.instance.getOsByFolio(folio);
         if (os == null) continue;
+        final metaEquipo = extraerMetaCorreoOrden(os);
+        final uploadData = <String, dynamic>{
+          ...metaEquipo,
+          if (os['ns'] != null) 'ns': os['ns'],
+          if (os['ubicacion'] != null) 'ubicacion': os['ubicacion'],
+          if (os['datos_tecnicos_json'] != null) 'datos_tecnicos_json': os['datos_tecnicos_json'],
+        };
+
         final local = await _pdfMasReciente(folio, [
           (os['pdf_path_local'] as String?)?.trim(),
           (os['pdf_path'] as String?)?.trim(),
         ]);
-        if (local == null) continue;
+        if (local == null) {
+          if (metaEquipo.length > 2) {
+            await ApiService.instance
+                .patchInstrumentoOrden(folio, metaEquipo, timeout: const Duration(seconds: 10))
+                .catchError((_) => false);
+          }
+          continue;
+        }
         final localBytes = await local.readAsBytes();
         final serverBytes = await ApiService.instance
             .fetchPdfFresco(folio)
@@ -1084,19 +1101,31 @@ class SyncService extends ChangeNotifier {
           for (int i = 0; i < localBytes.length; i++) {
             if (localBytes[i] != serverBytes[i]) { iguales = false; break; }
           }
-          if (iguales) continue; // el servidor ya tiene la versión final
+          if (iguales) {
+            if (metaEquipo.length > 2) {
+              await ApiService.instance
+                  .patchInstrumentoOrden(folio, metaEquipo, timeout: const Duration(seconds: 10))
+                  .catchError((_) => false);
+            }
+            continue; // el servidor ya tiene la versión final del PDF
+          }
         }
         final tsServidor = DateTime.tryParse((os['fecha_subida_servidor'] ?? '').toString());
         final mtimeLocal = local.lastModifiedSync();
         if (serverBytes != null && tsServidor != null && !mtimeLocal.isAfter(tsServidor)) {
+          if (metaEquipo.length > 2) {
+            await ApiService.instance
+                .patchInstrumentoOrden(folio, metaEquipo, timeout: const Duration(seconds: 10))
+                .catchError((_) => false);
+          }
           continue; // la versión del servidor es posterior (p.ej. regenerada en escritorio)
         }
         final ok = await ApiService.instance
-            .uploadPdf(folio, local, osId: os['local_id'] as int?)
+            .uploadPdf(folio, local, osId: os['local_id'] as int?, data: uploadData)
             .timeout(const Duration(seconds: 25), onTimeout: () => false);
-        debugPrint('[LOTE] $folio: versión final ${local.path} re-subida antes del envío → $ok');
+        debugPrint('[LOTE] $folio: versión final ${local.path} + metadatos re-subida antes del envío → $ok');
       } catch (e) {
-        debugPrint('[LOTE] No se pudo verificar PDF vigente de $folio: $e');
+        debugPrint('[LOTE] No se pudo verificar PDF/metadatos vigentes de $folio: $e');
       }
     }
   }
@@ -1226,6 +1255,7 @@ class SyncService extends ChangeNotifier {
         }
 
         final osId = os['local_id'] as int? ?? os['id'] as int?;
+        final metaEquipo = extraerMetaCorreoOrden(os);
         debugPrint('[Sync] Subiendo binario PDF para $folio (${await pdfFile.length()} bytes)...');
         final uploadOk = await ApiService.instance.uploadPdf(
           folio,
@@ -1233,6 +1263,10 @@ class SyncService extends ChangeNotifier {
           osId: osId,
           data: {
             'folio_os': folio,
+            ...metaEquipo,
+            'ns': os['ns'] ?? os['serie'],
+            'ubicacion': os['ubicacion'],
+            'datos_tecnicos_json': os['datos_tecnicos_json'],
             'fecha': os['fecha'],
             'fecha_servicio': os['fecha_servicio'] ?? os['fecha'],
             'fecha_cierre': os['fecha_cierre'],
@@ -1336,9 +1370,26 @@ class SyncService extends ChangeNotifier {
         await db.marcarColaCorreoEnviando(id, foliosAEnviar, correo);
 
         try {
+          await asegurarPdfsVigentesEnServidor(foliosAEnviar);
+          final metasCola = <Map<String, dynamic>>[];
+          for (final fMeta in foliosAEnviar) {
+            final rowMeta = await db.getOsByFolio(fMeta);
+            if (rowMeta != null) metasCola.add(extraerMetaCorreoOrden(rowMeta));
+          }
           final res = tipo == 'lote'
-              ? await ApiService.instance.enviarEmailLote(ref, correo: correo, forzar: true, folios: folios)
-              : await ApiService.instance.enviarEmailOrden(ref, correo: correo, forzar: true);
+              ? await ApiService.instance.enviarEmailLote(
+                  ref,
+                  correo: correo,
+                  forzar: true,
+                  folios: folios,
+                  ordenesMeta: metasCola,
+                )
+              : await ApiService.instance.enviarEmailOrden(
+                  ref,
+                  correo: correo,
+                  forzar: true,
+                  ordenesMeta: metasCola,
+                );
           
           final bool exito = res['ok'] == true || res['status'] == 'already_sent';
           if (exito) {
@@ -1397,7 +1448,14 @@ class SyncService extends ChangeNotifier {
         // 2. Marcar INMEDIATAMENTE como 'enviando' para que ningún otro hilo lo tome
         await db.updateEmailStatus(folio, enviado: false, status: 'enviando', correo: correo);
         try {
-          final res = await ApiService.instance.enviarEmailOrden(folio, correo: correo, forzar: true);
+          await asegurarPdfsVigentesEnServidor([folio]);
+          final metaOrden = extraerMetaCorreoOrden(os);
+          final res = await ApiService.instance.enviarEmailOrden(
+            folio,
+            correo: correo,
+            forzar: true,
+            ordenesMeta: [metaOrden],
+          );
           final bool exito = res['ok'] == true || res['status'] == 'already_sent';
           if (exito) {
             // Si el backend agrupó un lote, marcar todos los folios realmente enviados (evita reenvíos).

@@ -1488,7 +1488,32 @@ class _OsListScreenState extends State<OsListScreen> {
       }
     }
     final int omitidas = itemsBase.map(folioDe).where((f) => f.isNotEmpty).toSet().length - itemsEnvio.length;
+
+    // Ordenar naturalmente del 1 al N por número de folio (ej. OS-26-810, OS-26-811, ...)
+    int compararFolioNatural(String a, String b) {
+      final reg = RegExp(r'(\d+|\D+)');
+      final pa = reg.allMatches(a.toUpperCase()).map((m) => m.group(0)!).toList();
+      final pb = reg.allMatches(b.toUpperCase()).map((m) => m.group(0)!).toList();
+      final len = pa.length < pb.length ? pa.length : pb.length;
+      for (int i = 0; i < len; i++) {
+        final na = int.tryParse(pa[i]);
+        final nb = int.tryParse(pb[i]);
+        final cmp = (na != null && nb != null) ? na.compareTo(nb) : pa[i].compareTo(pb[i]);
+        if (cmp != 0) return cmp;
+      }
+      return pa.length.compareTo(pb.length);
+    }
+
+    itemsEnvio.sort((a, b) => compararFolioNatural(folioDe(a), folioDe(b)));
+
     final List<String> foliosEnvio = itemsEnvio.map(folioDe).where((f) => f.isNotEmpty).toList();
+    final List<String> etiquetasEnvio = itemsEnvio
+        .map(formatearLineaCorreoOrden)
+        .where((e) => e.isNotEmpty)
+        .toList();
+    final List<Map<String, dynamic>> ordenesMetaEnvio = itemsEnvio
+        .map(extraerMetaCorreoOrden)
+        .toList();
 
     if (esLote && itemsEnvio.isEmpty) {
       if (mounted) {
@@ -1624,11 +1649,50 @@ class _OsListScreenState extends State<OsListScreen> {
                   children: [
                     if (esLote) ...[
                       Text(
-                        'Se enviará un SOLO correo con ${itemsEnvio.length} reporte(s) PDF firmado(s): ${foliosEnvio.join(', ')}.'
+                        'Se enviará un SOLO correo con ${itemsEnvio.length} reporte(s) PDF firmado(s).'
                         '${omitidas > 0 ? '\n$omitidas orden(es) del lote sin realizar se omitirán del correo.' : ''}',
                         style: const TextStyle(fontSize: 13, height: 1.4),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 8),
+                    ],
+                    if (etiquetasEnvio.isNotEmpty) ...[
+                      Container(
+                        width: double.infinity,
+                        constraints: const BoxConstraints(maxHeight: 150),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF8FAFC),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: SingleChildScrollView(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Folios procesados:',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF1D1D1F),
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                etiquetasEnvio.join('\n'),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF0B57D0),
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
                     ],
                     const Text(
                       'Se enviará desde ivancolin1207@gmail.com con CC obligatoria a recepcion@basculaspesa.com.mx',
@@ -1709,9 +1773,44 @@ class _OsListScreenState extends State<OsListScreen> {
                                     ),
                                   ],
                                 ),
-                                content: Text(
-                                  'Se enviarán $totalValidas órdenes de servicio al correo $destino con copia a recepcion@basculaspesa.com.mx, ¿desea continuar?',
-                                  style: const TextStyle(fontSize: 13, height: 1.4),
+                                content: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Se enviarán $totalValidas órdenes de servicio al correo $destino con copia a recepcion@basculaspesa.com.mx:',
+                                      style: const TextStyle(fontSize: 13, height: 1.4),
+                                    ),
+                                    if (etiquetasEnvio.isNotEmpty) ...[
+                                      const SizedBox(height: 10),
+                                      Container(
+                                        width: double.infinity,
+                                        constraints: const BoxConstraints(maxHeight: 150),
+                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFF8FAFC),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                                        ),
+                                        child: SingleChildScrollView(
+                                          child: Text(
+                                            etiquetasEnvio.join('\n'),
+                                            style: const TextStyle(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF0B57D0),
+                                              height: 1.5,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 10),
+                                    const Text(
+                                      '¿Desea continuar?',
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                                    ),
+                                  ],
                                 ),
                                 actions: [
                                   TextButton(
@@ -1751,14 +1850,25 @@ class _OsListScreenState extends State<OsListScreen> {
                               return;
                             }
 
-                            if (esLote) {
-                              // Un SOLO correo con la versión FINAL de cada documento del lote
-                              await context.read<SyncService>().asegurarPdfsVigentesEnServidor(foliosEnvio);
-                            }
+                            // Sincronizar campos actualizados de equipo/CCA/DVE y PDF final antes de disparar el correo
+                            await context.read<SyncService>().asegurarPdfsVigentesEnServidor(foliosEnvio);
 
                             final Map<String, dynamic> res = esLote
-                                ? await ApiService.instance.enviarEmailLote(loteId, correo: destino, forzar: true, folios: foliosEnvio, timeout: const Duration(seconds: 20))
-                                : await ApiService.instance.enviarEmailOrden(folio, correo: destino, forzar: true, timeout: const Duration(seconds: 20));
+                                ? await ApiService.instance.enviarEmailLote(
+                                    loteId,
+                                    correo: destino,
+                                    forzar: true,
+                                    folios: foliosEnvio,
+                                    ordenesMeta: ordenesMetaEnvio,
+                                    timeout: const Duration(seconds: 25),
+                                  )
+                                : await ApiService.instance.enviarEmailOrden(
+                                    folio,
+                                    correo: destino,
+                                    forzar: true,
+                                    ordenesMeta: ordenesMetaEnvio,
+                                    timeout: const Duration(seconds: 25),
+                                  );
 
                             // Cerrar modal SIEMPRE al terminar
                             if (Navigator.of(ctx).canPop()) {

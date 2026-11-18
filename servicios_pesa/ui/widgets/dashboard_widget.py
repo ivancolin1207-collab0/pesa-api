@@ -4580,6 +4580,54 @@ class DashboardWidget(QWidget):
                 f"No se pudo completar el envío del lote {lote_id}:\n{err_msg}"
             )
 
+    def _obtener_lineas_preview_correo(self, folios: list[str]) -> list[str]:
+        """Consulta BD local/remota para previsualizar FOLIO-MARCA-MODELO-ID-CCA-DVE en diálogos de correo."""
+        from services.metrology import formatear_linea_correo_orden
+        if not folios:
+            return []
+        por_folio: dict[str, dict] = {}
+        if _DEPS_OK and _db_pool:
+            try:
+                conn = _db_pool.get_connection()
+                with conn.cursor() as cur:
+                    for col_m in ("marca", "modelo", "numero_cca", "numero_dve"):
+                        try:
+                            cur.execute(f"ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS {col_m} TEXT")
+                        except Exception:
+                            conn.rollback()
+                    conn.commit()
+                    cur.execute(
+                        """
+                        SELECT os.folio_os, os.marca, os.modelo,
+                               COALESCE(os.id_equipo, os.indicador_id, ''),
+                               os.numero_cca, os.numero_dve, os.datos_tecnicos_json
+                        FROM ordenes_servicio os
+                        WHERE os.folio_os = ANY(%s)
+                        """,
+                        (folios,),
+                    )
+                    for r in cur.fetchall():
+                        por_folio[str(r[0] or "").strip()] = {
+                            "folio": r[0],
+                            "marca": r[1],
+                            "modelo": r[2],
+                            "id_indicador": r[3],
+                            "numero_cca": r[4],
+                            "numero_dve": r[5],
+                            "datos_tecnicos_json": r[6],
+                        }
+                _db_pool.release_connection(conn)
+            except Exception as e_prev:
+                logger.debug("No se pudo previsualizar lineas correo: %s", e_prev)
+        out: list[str] = []
+        for f in folios:
+            cf = str(f or "").strip()
+            if not cf:
+                continue
+            d = por_folio.get(cf, {"folio": cf})
+            out.append(formatear_linea_correo_orden(d))
+        return out
+
     def _on_click_email_os(self, folio: str, os_id, correo_actual: str, email_enviado: bool, btn_widget: "QPushButton | None" = None):
         """
         Diálogo interactivo para confirmar o modificar el correo del cliente y
@@ -4591,6 +4639,8 @@ class DashboardWidget(QWidget):
         remitente_sistema = os.getenv("EMAIL_USER", "ivancolin1207@gmail.com").strip().lower()
         correo = str(correo_actual or "").strip()
         msg_title = f"Envío de Correo — {clean_folio}"
+        lineas_prev = self._obtener_lineas_preview_correo([clean_folio])
+        etiqueta_prev = lineas_prev[0] if lineas_prev else clean_folio
 
         # Paso A: Verificar correo destinatario antes de llamar al servidor
         if not correo or correo.lower() in ['sin registrar', 'none', 'null', '', remitente_sistema]:
@@ -4598,6 +4648,7 @@ class DashboardWidget(QWidget):
                 self,
                 msg_title,
                 f"La orden {clean_folio} no tiene correo de cliente registrado.\n\n"
+                f"Equipo a enviar:\n  • {etiqueta_prev}\n\n"
                 f"Ingresa el correo del cliente receptor (se enviará con CC a recepcion@basculaspesa.com.mx):",
                 text=""
             )
@@ -4614,7 +4665,8 @@ class DashboardWidget(QWidget):
             correo = correo_input.strip()
         else:
             prompt = (
-                f"Confirme o modifique el correo del cliente para enviar la orden {clean_folio}:\n"
+                f"Confirme o modifique el correo del cliente para enviar:\n"
+                f"  • {etiqueta_prev}\n\n"
                 f"(Se incluirá CC automático a recepcion@basculaspesa.com.mx)"
             )
             correo_input, ok = QInputDialog.getText(self, msg_title, prompt, text=correo)
@@ -4662,7 +4714,10 @@ class DashboardWidget(QWidget):
 
         correo = str(correo_actual or "").strip()
         remitente_sistema = os.getenv("EMAIL_USER", "ivancolin1207@gmail.com").strip().lower()
-        fols_str = ", ".join(all_folios[:4]) + (f" y {len(all_folios)-4} más" if len(all_folios) > 4 else "")
+        lineas_prev = self._obtener_lineas_preview_correo(all_folios)
+        vista_previa = "\n".join(f"  • {ln}" for ln in lineas_prev[:8])
+        if len(lineas_prev) > 8:
+            vista_previa += f"\n  … y {len(lineas_prev) - 8} más"
         msg_title = f"Enviar Lote por Correo — Lote {lote_id}"
 
         # Paso A: Verificar correo destinatario antes de llamar al servidor
@@ -4670,7 +4725,8 @@ class DashboardWidget(QWidget):
             correo_input, ok = QInputDialog.getText(
                 self,
                 msg_title,
-                f"El lote {lote_id} ({len(all_folios)} órdenes: {fols_str}) no tiene correo de cliente registrado.\n\n"
+                f"El lote {lote_id} ({len(all_folios)} órdenes) no tiene correo de cliente registrado.\n\n"
+                f"Folios procesados:\n{vista_previa}\n\n"
                 f"Ingresa el correo del cliente receptor (se enviará con CC a recepcion@basculaspesa.com.mx):",
                 text=""
             )
@@ -4688,7 +4744,8 @@ class DashboardWidget(QWidget):
             correo = correo_input.strip()
         else:
             prompt = (
-                f"Se agruparán {len(all_folios)} órdenes ({fols_str}) en UN SOLO CORREO con todos sus PDFs adjuntos.\n\n"
+                f"Se agruparán {len(all_folios)} órdenes en UN SOLO CORREO con sus PDFs adjuntos:\n"
+                f"{vista_previa}\n\n"
                 f"Confirme o modifique el correo electrónico del cliente:\n"
                 f"(Se incluirá CC obligatorio a recepcion@basculaspesa.com.mx)"
             )
@@ -4774,7 +4831,7 @@ class DashboardWidget(QWidget):
 
     def _enviar_email_backend_lote(self, lote_id: str, all_folios: list, correo: str) -> tuple[bool, str]:
         """
-        Dispara el endpoint de Render /api/v1/lotes/{lote_id}/enviar-email con timeout seguro (15s).
+        Dispara el endpoint de Render /api/v1/lotes/{lote_id}/enviar-email con timeout seguro (20s).
         Si falla o es lote virtual, recurre al fallback SMTP directo que compila y adjunta todos los PDFs.
         """
         import json
@@ -4782,25 +4839,31 @@ class DashboardWidget(QWidget):
         import urllib.error
 
         clean_lote = str(lote_id or "").strip()
-        data_bytes = json.dumps({"correo": correo, "forzar": True}).encode("utf-8")
+        folios_clean = [str(f).strip() for f in (all_folios or []) if str(f).strip()]
+        payload = {"correo": correo, "forzar": True, "folios": folios_clean}
+        data_bytes = json.dumps(payload).encode("utf-8")
 
-        # 1. Intentar backend Render si el lote existe con ID real en el backend
-        if not clean_lote.startswith("RETRO-") and clean_lote != "None":
-            url = f"https://pesa-api-za9i.onrender.com/api/v1/lotes/{clean_lote}/enviar-email"
+        urls_intentar = []
+        if not clean_lote.startswith("RETRO-") and clean_lote != "None" and clean_lote:
+            urls_intentar.append(f"https://pesa-api-za9i.onrender.com/api/v1/lotes/{clean_lote}/enviar-email")
+        if folios_clean:
+            urls_intentar.append("https://pesa-api-za9i.onrender.com/api/v1/correos/enviar")
+
+        for url in urls_intentar:
             try:
                 req = urllib.request.Request(
                     url, data=data_bytes, method="POST",
                     headers={"User-Agent": "PesaWindowsERP/1.0", "Content-Type": "application/json"}
                 )
-                with urllib.request.urlopen(req, timeout=15) as resp:
+                with urllib.request.urlopen(req, timeout=20) as resp:
                     if resp.status in (200, 201):
-                        self._actualizar_email_db_local_lote(clean_lote, all_folios, correo, True)
+                        self._actualizar_email_db_local_lote(clean_lote, folios_clean, correo, True)
                         return True, "Lote enviado correctamente por el servidor"
             except Exception as e_render:
-                logger.info("[EMAIL LOTE] Render no pudo procesar (%s), usando fallback SMTP directo...", e_render)
+                logger.info("[EMAIL LOTE] Render (%s) no pudo procesar (%s), probando siguiente/fallback...", url, e_render)
 
         # 2. Fallback SMTP directo local con todos los PDFs del lote adjuntos
-        return self._enviar_smtp_directo_lote(lote_id, all_folios, correo)
+        return self._enviar_smtp_directo_lote(lote_id, folios_clean, correo)
 
     def _sanear_nombre_cliente(self, cliente: str) -> str:
         """
@@ -4811,7 +4874,8 @@ class DashboardWidget(QWidget):
 
     def _enviar_smtp_directo_lote(self, lote_id: str, all_folios: list, correo_dest: str) -> tuple[bool, str]:
         """
-        Envío agrupado directo por SMTP Gmail con todos los PDFs del lote adjuntos.
+        Envío agrupado directo por SMTP Gmail con todos los PDFs del lote adjuntos (1..N órdenes)
+        y plantilla HTML institucional homologada FOLIO-MARCA-MODELO-ID-CCA-DVE.
         Credenciales: ivancolin1207@gmail.com / kqavslorcqmepzww
         CC obligatorio: recepcion@basculaspesa.com.mx
         """
@@ -4824,6 +4888,10 @@ class DashboardWidget(QWidget):
         from email.mime.application import MIMEApplication
         from pathlib import Path
         import tempfile
+        from services.metrology import (
+            construir_asunto_y_cuerpo_correo,
+            extraer_metadatos_equipo_de_pdf_bytes,
+        )
 
         smtp_user = "ivancolin1207@gmail.com"
         smtp_pass = "kqavslorcqmepzww"
@@ -4836,31 +4904,49 @@ class DashboardWidget(QWidget):
         ]
 
         adjuntos = []
+        ordenes_correo: list[dict] = []
+        folios_procesados: list[str] = []
         empresa_lote = "Cliente"
 
-        # Conectar a BD para consultar datos de los folios
+        # Ordenar folios naturalmente (ej. OS-26-810, OS-26-811, ...)
+        folios_ordenados = sorted(
+            list(dict.fromkeys([str(f or "").strip() for f in (all_folios or []) if str(f or "").strip()])),
+            key=lambda s: [int(p) if p.isdigit() else p for p in re.split(r"(\d+)", s.upper())],
+        )
+
+        # Conectar a BD para consultar datos completos de cada folio
         db_rows_by_folio = {}
         if _DEPS_OK and _db_pool:
             try:
                 conn = _db_pool.get_connection()
                 with conn.cursor() as cur:
+                    for col_m in ("marca", "modelo", "numero_cca", "numero_dve"):
+                        try:
+                            cur.execute(f"ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS {col_m} TEXT")
+                        except Exception:
+                            conn.rollback()
+                    conn.commit()
                     cur.execute(
                         """
                         SELECT 
                             os.folio_os,
-                            cl.razon_social,
+                            COALESCE(cl.razon_social, os.cliente, ''),
                             COALESCE(os.id_equipo, os.indicador_id, ''),
                             COALESCE(ts.nombre, os.tipo_servicio),
                             os.pdf_b64,
                             os.pdf_path,
                             os.datos_tecnicos_json,
-                            os.correo_cliente
+                            os.correo_cliente,
+                            os.marca,
+                            os.modelo,
+                            os.numero_cca,
+                            os.numero_dve
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
                         LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
                         WHERE os.folio_os = ANY(%s)
                         """,
-                        (all_folios,)
+                        (folios_ordenados,)
                     )
                     for r in cur.fetchall():
                         db_rows_by_folio[r[0]] = {
@@ -4871,12 +4957,16 @@ class DashboardWidget(QWidget):
                             "pdf_path": r[5],
                             "datos_tecnicos_json": r[6],
                             "correo_cliente": r[7] or "",
+                            "marca": r[8] or "",
+                            "modelo": r[9] or "",
+                            "numero_cca": r[10] or "",
+                            "numero_dve": r[11] or "",
                         }
                 _db_pool.release_connection(conn)
             except Exception as e_db:
                 logger.warning("Error consultando BD para lote %s: %s", lote_id, e_db)
 
-        for folio in all_folios:
+        for folio in folios_ordenados:
             clean_folio = str(folio or "").strip()
             pdf_bytes = None
             db_info = db_rows_by_folio.get(clean_folio, {})
@@ -4894,7 +4984,7 @@ class DashboardWidget(QWidget):
                         break
                     except Exception:
                         pass
-                if not pdf_bytes:
+                if not pdf_bytes and d.exists():
                     for p in d.glob(f"*{clean_folio}*.pdf"):
                         if p.exists() and p.stat().st_size > 500:
                             try:
@@ -4916,29 +5006,28 @@ class DashboardWidget(QWidget):
                     empresa_limpia = self._sanear_nombre_cliente(db_info.get("cliente") or empresa_lote)
                 except Exception:
                     empresa_limpia = "Empresa"
-                id_eq = db_info.get("id_equipo") or ""
+
+                meta_pdf = extraer_metadatos_equipo_de_pdf_bytes(pdf_bytes)
+                orden_item = {
+                    "folio": clean_folio,
+                    "marca": meta_pdf.get("marca") or db_info.get("marca") or "",
+                    "modelo": meta_pdf.get("modelo") or db_info.get("modelo") or "",
+                    "id_indicador": meta_pdf.get("id_indicador") or db_info.get("id_equipo") or "",
+                    "numero_cca": meta_pdf.get("numero_cca") or db_info.get("numero_cca") or "",
+                    "numero_dve": meta_pdf.get("numero_dve") or db_info.get("numero_dve") or "",
+                    "datos_tecnicos_json": db_info.get("datos_tecnicos_json"),
+                }
+                ordenes_correo.append(orden_item)
+                folios_procesados.append(clean_folio)
+
+                id_eq = orden_item["id_indicador"]
                 if not id_eq and db_info.get("datos_tecnicos_json"):
                     try:
                         dj = json.loads(db_info["datos_tecnicos_json"]) if isinstance(db_info["datos_tecnicos_json"], str) else db_info["datos_tecnicos_json"]
                         if isinstance(dj, dict):
-                            id_eq = dj.get("id_equipo") or dj.get("id_indicador") or dj.get("indicador_id") or dj.get("no_identificacion") or ""
+                            id_eq = dj.get("id_equipo") or dj.get("id_indicador") or dj.get("indicador_id") or ""
                     except Exception:
                         pass
-
-                # Extraer del PDF físico directamente para garantizar unicidad e independencia
-                try:
-                    import io
-                    from pypdf import PdfReader
-                    reader = PdfReader(io.BytesIO(pdf_bytes))
-                    if reader.pages:
-                        txt_p = reader.pages[0].extract_text() or ""
-                        m_id = re.search(r"ID\s*(?:INDICADOR|EQUIPO)?\s*(?:/\s*EQUIPO)?:\s*([^\n\r\t]+)", txt_p, re.IGNORECASE)
-                        if m_id:
-                            val_p = m_id.group(1).split()[0].strip()
-                            if val_p.upper() not in ["TIPO", "MARCA", "MODELO", "SERIE", "ALCANCE", "N/A", "NONE", "NULL", "--"]:
-                                id_eq = val_p
-                except Exception:
-                    pass
 
                 srv = db_info.get("servicio") or "Servicio"
                 id_part = f"-{id_eq}" if id_eq else ""
@@ -4949,9 +5038,11 @@ class DashboardWidget(QWidget):
         if not adjuntos:
             return False, f"No se encontraron archivos PDF para las órdenes del lote {lote_id}"
 
-        f_ini = all_folios[0] if all_folios else ""
-        f_fin = all_folios[-1] if all_folios else ""
-        asunto = f"Reporte de Servicio - Lote {f_ini} al {f_fin} ({len(adjuntos)} órdenes) - {empresa_lote} | Básculas PESA"
+        asunto, cuerpo_html, cuerpo_texto, _ = construir_asunto_y_cuerpo_correo(
+            ordenes_correo,
+            empresa_lote,
+            es_lote=True,
+        )
 
         # Destinatario TO: el capturado del cliente (no el remitente institucional)
         destinatario_to = str(correo_dest or "").strip()
@@ -4965,26 +5056,16 @@ class DashboardWidget(QWidget):
         if not destinatario_to or destinatario_to.lower() == smtp_user.lower():
             return False, f"El destinatario no puede ser la cuenta del remitente ({smtp_user}). Ingrese el correo del cliente."
 
-        msg = MIMEMultipart()
+        msg = MIMEMultipart("mixed")
         msg["From"] = f"Básculas PESA <{smtp_user}>"
         msg["To"] = destinatario_to
         msg["Cc"] = smtp_cc
         msg["Subject"] = asunto
 
-        cuerpo = f"""Estimado Cliente ({empresa_lote}),
-
-Adjunto a este correo encontrará los reportes digitales correspondientes al Lote de Órdenes de Servicio ({len(adjuntos)} órdenes):
-Folios: {', '.join(all_folios)}
-
-Los documentos se encuentran certificados con sus firmas digitales correspondientes.
-
-Quedamos a sus órdenes para cualquier duda o aclaración.
-
-Atentamente,
-Básculas PESA
-recepcion@basculaspesa.com.mx
-"""
-        msg.attach(MIMEText(cuerpo, "plain", "utf-8"))
+        msg_alt = MIMEMultipart("alternative")
+        msg_alt.attach(MIMEText(cuerpo_texto, "plain", "utf-8"))
+        msg_alt.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+        msg.attach(msg_alt)
 
         for nombre_adj, b_content in adjuntos:
             part = MIMEApplication(b_content, Name=nombre_adj)
@@ -5000,7 +5081,7 @@ recepcion@basculaspesa.com.mx
                 server.starttls()
                 server.login(smtp_user, smtp_pass)
                 server.sendmail(smtp_user, destinatarios_totales, msg.as_string())
-            self._actualizar_email_db_local_lote(lote_id, all_folios, destinatario_to, True)
+            self._actualizar_email_db_local_lote(lote_id, folios_procesados, destinatario_to, True)
             return True, "Lote enviado con éxito vía SMTP"
         except Exception as exc:
             return False, str(exc)
@@ -5049,7 +5130,8 @@ recepcion@basculaspesa.com.mx
 
     def _enviar_smtp_directo_os(self, folio: str, correo_dest: str) -> tuple[bool, str]:
         """
-        Envío directo por SMTP Gmail de emergencia en caso de que Render no responda.
+        Envío directo por SMTP Gmail de emergencia en caso de que Render no responda,
+        usando la misma plantilla institucional FOLIO-MARCA-MODELO-ID-CCA-DVE.
         Credenciales: ivancolin1207@gmail.com / kqavslorcqmepzww
         CC obligatorio: recepcion@basculaspesa.com.mx
         """
@@ -5062,6 +5144,10 @@ recepcion@basculaspesa.com.mx
         from email.mime.application import MIMEApplication
         from pathlib import Path
         import tempfile
+        from services.metrology import (
+            construir_asunto_y_cuerpo_correo,
+            extraer_metadatos_equipo_de_pdf_bytes,
+        )
 
         clean_folio = str(folio or "").strip()
         smtp_user = "ivancolin1207@gmail.com"
@@ -5083,7 +5169,7 @@ recepcion@basculaspesa.com.mx
                     break
                 except Exception:
                     pass
-            if not pdf_bytes:
+            if not pdf_bytes and d.exists():
                 for p in d.glob(f"*{clean_folio}*.pdf"):
                     if p.exists() and p.stat().st_size > 500:
                         try:
@@ -5096,19 +5182,34 @@ recepcion@basculaspesa.com.mx
         empresa = "Cliente"
         id_eq = ""
         srv = "Servicio"
+        marca_db = ""
+        modelo_db = ""
+        cca_db = ""
+        dve_db = ""
+        dt_db = None
 
         if _DEPS_OK and _db_pool:
             try:
                 conn = _db_pool.get_connection()
                 with conn.cursor() as cur:
+                    for col_m in ("marca", "modelo", "numero_cca", "numero_dve"):
+                        try:
+                            cur.execute(f"ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS {col_m} TEXT")
+                        except Exception:
+                            conn.rollback()
+                    conn.commit()
                     cur.execute(
                         """
                         SELECT 
-                            cl.razon_social,
+                            COALESCE(cl.razon_social, os.cliente, ''),
                             COALESCE(os.id_equipo, os.indicador_id, ''),
                             COALESCE(ts.nombre, os.tipo_servicio),
                             os.pdf_b64,
-                            os.datos_tecnicos_json
+                            os.datos_tecnicos_json,
+                            os.marca,
+                            os.modelo,
+                            os.numero_cca,
+                            os.numero_dve
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
                         LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
@@ -5126,9 +5227,14 @@ recepcion@basculaspesa.com.mx
                                 pdf_bytes = base64.b64decode(row[3].strip())
                             except Exception:
                                 pass
-                        if not id_eq and row[4]:
+                        dt_db = row[4]
+                        marca_db = row[5] or ""
+                        modelo_db = row[6] or ""
+                        cca_db = row[7] or ""
+                        dve_db = row[8] or ""
+                        if not id_eq and dt_db:
                             try:
-                                dj = json.loads(row[4]) if isinstance(row[4], str) else row[4]
+                                dj = json.loads(dt_db) if isinstance(dt_db, str) else dt_db
                                 if isinstance(dj, dict):
                                     id_eq = dj.get("id_equipo") or dj.get("id_indicador") or ""
                             except Exception:
@@ -5136,6 +5242,21 @@ recepcion@basculaspesa.com.mx
                 _db_pool.release_connection(conn)
             except Exception as e_q:
                 logger.warning("Error consultando BD para orden %s: %s", clean_folio, e_q)
+
+        if not pdf_bytes:
+            return False, f"No se encontró el archivo PDF para la orden {clean_folio}"
+
+        meta_pdf = extraer_metadatos_equipo_de_pdf_bytes(pdf_bytes)
+        orden_item = {
+            "folio": clean_folio,
+            "marca": meta_pdf.get("marca") or marca_db,
+            "modelo": meta_pdf.get("modelo") or modelo_db,
+            "id_indicador": meta_pdf.get("id_indicador") or id_eq,
+            "numero_cca": meta_pdf.get("numero_cca") or cca_db,
+            "numero_dve": meta_pdf.get("numero_dve") or dve_db,
+            "datos_tecnicos_json": dt_db,
+        }
+        id_eq = orden_item["id_indicador"] or id_eq
 
         try:
             empresa_limpia = self._sanear_nombre_cliente(empresa)
@@ -5149,40 +5270,26 @@ recepcion@basculaspesa.com.mx
         if not destinatario_to or destinatario_to.lower() == smtp_user.lower():
             return False, f"El destinatario no puede ser la cuenta del remitente ({smtp_user}). Ingrese el correo del cliente."
 
-        msg = MIMEMultipart()
+        asunto, cuerpo_html, cuerpo_texto, _ = construir_asunto_y_cuerpo_correo(
+            [orden_item],
+            empresa,
+            es_lote=False,
+        )
+
+        msg = MIMEMultipart("mixed")
         msg["From"] = f"Básculas PESA <{smtp_user}>"
         msg["To"] = destinatario_to
         msg["Cc"] = smtp_cc
-        if clean_folio.upper().startswith("OSOCC-"):
-            id_lbl = f" ({id_eq})" if id_eq else ""
-            msg["Subject"] = f"Diagnóstico y Revisión de Celda {clean_folio}{id_lbl} - {empresa} | Básculas PESA"
-            doc_desc = f"el Formato de Diagnóstico y Revisión de Celda de Carga {clean_folio}"
-        elif clean_folio.upper().startswith("OSOB-"):
-            id_lbl = f" ({id_eq})" if id_eq else ""
-            msg["Subject"] = f"Formato de Inspección y Revisión {clean_folio}{id_lbl} - {empresa} | Básculas PESA"
-            doc_desc = f"el Formato de Inspección y Revisión de Básculas {clean_folio}"
-        else:
-            msg["Subject"] = f"Orden de Servicio {clean_folio} — Básculas PESA"
-            doc_desc = f"la Orden de Servicio {clean_folio}"
+        msg["Subject"] = asunto
 
-        cuerpo = f"""Estimado Cliente ({empresa}),
+        msg_alt = MIMEMultipart("alternative")
+        msg_alt.attach(MIMEText(cuerpo_texto, "plain", "utf-8"))
+        msg_alt.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+        msg.attach(msg_alt)
 
-Adjunto a este correo encontrará {doc_desc} correspondiente a los trabajos realizados por Básculas PESA.
-
-Agradecemos su preferencia y quedamos a sus órdenes para cualquier duda o aclaración.
-
-Atentamente,
-Básculas PESA
-recepcion@basculaspesa.com.mx
-"""
-        msg.attach(MIMEText(cuerpo, "plain", "utf-8"))
-
-        if pdf_bytes:
-            part = MIMEApplication(pdf_bytes, Name=nombre_adj)
-            part["Content-Disposition"] = f'attachment; filename="{nombre_adj}"'
-            msg.attach(part)
-        else:
-            return False, f"No se encontró el archivo PDF para la orden {clean_folio}"
+        part = MIMEApplication(pdf_bytes, Name=nombre_adj)
+        part["Content-Disposition"] = f'attachment; filename="{nombre_adj}"'
+        msg.attach(part)
 
         destinatarios_totales = [destinatario_to]
         if smtp_cc and smtp_cc not in destinatarios_totales:
