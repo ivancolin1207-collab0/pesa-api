@@ -579,12 +579,12 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         text_w = fm.horizontalAdvance(display)
         text_h = fm.height()
 
-        badge_w = min(text_w + padding_h * 2, option.rect.width() - margin * 2)
-        badge_h = text_h + padding_v * 2
-        badge_x = option.rect.x() + margin
-        badge_y = option.rect.y() + (option.rect.height() - badge_h) // 2
+        badge_w = int(min(text_w + padding_h * 2, option.rect.width() - margin * 2))
+        badge_h = int(text_h + padding_v * 2)
+        badge_x = int(option.rect.x() + margin)
+        badge_y = int(option.rect.y() + (option.rect.height() - badge_h) // 2)
 
-        badge_rect = QRect(badge_x, badge_y, badge_w, badge_h)
+        badge_rect = QRect(badge_x, badge_y, max(1, badge_w), max(1, badge_h))
 
         path = QPainterPath()
         path.addRoundedRect(
@@ -709,12 +709,12 @@ class SyncCheckDelegate(QStyledItemDelegate):
         padding_v = 4
         margin    = 4
 
-        badge_w = min(tw + padding_h * 2, option.rect.width() - margin * 2)
-        badge_h = th + padding_v * 2
-        badge_x = option.rect.x() + margin
-        badge_y = option.rect.y() + (option.rect.height() - badge_h) // 2
+        badge_w = int(min(tw + padding_h * 2, option.rect.width() - margin * 2))
+        badge_h = int(th + padding_v * 2)
+        badge_x = int(option.rect.x() + margin)
+        badge_y = int(option.rect.y() + (option.rect.height() - badge_h) // 2)
 
-        badge_rect = QRect(badge_x, badge_y, badge_w, badge_h)
+        badge_rect = QRect(badge_x, badge_y, max(1, badge_w), max(1, badge_h))
 
         path = QPainterPath()
         path.addRoundedRect(

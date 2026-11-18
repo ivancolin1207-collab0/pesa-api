@@ -164,8 +164,8 @@ class DrawingCanvas(QWidget):
         # Línea base de firma (guía)
         pen_guide = QPen(QColor("#E5E7EB"), 1, Qt.PenStyle.DashLine)
         painter.setPen(pen_guide)
-        y_base = int(self.height() * 0.75)
-        painter.drawLine(20, y_base, self.width() - 20, y_base)
+        y_base = int(round(self.height() * 0.75))
+        painter.drawLine(20, int(y_base), int(self.width() - 20), int(y_base))
 
         # Ícono de firma (si está vacío)
         if not self._strokes and not self._current_stroke:

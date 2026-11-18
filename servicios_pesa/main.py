@@ -94,12 +94,19 @@ if str(_PROJECT_ROOT) not in sys.path:
 # Captura cualquier crash que ocurra fuera de un try/except explícito.
 # ══════════════════════════════════════════════════════════════════════════════
 def _global_exception_handler(exc_type, exc_value, exc_tb):
-    """Captura excepciones no manejadas y las muestra antes de cerrar."""
+    """Captura excepciones no manejadas, las registra en el log y las muestra antes de cerrar."""
     error_text = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
-    print("=" * 70, file=sys.stderr)
-    print("ERROR CRÍTICO NO CAPTURADO:", file=sys.stderr)
-    print(error_text, file=sys.stderr)
-    print("=" * 70, file=sys.stderr)
+    try:
+        logging.getLogger("main").critical("ERROR CRÍTICO NO CAPTURADO:\n%s", error_text)
+    except Exception:
+        pass
+    try:
+        print("=" * 70, file=sys.stderr)
+        print("ERROR CRÍTICO NO CAPTURADO:", file=sys.stderr)
+        print(error_text, file=sys.stderr)
+        print("=" * 70, file=sys.stderr)
+    except Exception:
+        pass
 
     # Intentar mostrar QMessageBox si QApplication ya existe
     try:

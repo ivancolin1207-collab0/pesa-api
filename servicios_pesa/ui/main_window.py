@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from PyQt6.QtCore    import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QRectF
+from PyQt6.QtCore    import Qt, QTimer, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, QPointF, QRectF
 from PyQt6.QtGui     import QFont, QColor, QPainter, QPen, QPainterPath
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QHBoxLayout, QVBoxLayout,
@@ -128,6 +128,11 @@ class VectorNavIcon(QWidget):
         self._color = QColor(hex_color)
         self.update()
 
+    @staticmethod
+    def _dl(p: QPainter, x1: float, y1: float, x2: float, y2: float) -> None:
+        """Traza una línea vectorial usando QPointF explícito (compatible 100% con PyQt6)."""
+        p.drawLine(QPointF(float(x1), float(y1)), QPointF(float(x2), float(y2)))
+
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -135,6 +140,7 @@ class VectorNavIcon(QWidget):
         p.setPen(pen)
         p.setBrush(Qt.BrushStyle.NoBrush)
         k = self._key
+        dl = self._dl
 
         if k == "dashboard":
             p.drawRoundedRect(QRectF(2.5, 2.5, 6.2, 6.2), 1.5, 1.5)
@@ -143,59 +149,65 @@ class VectorNavIcon(QWidget):
             p.drawRoundedRect(QRectF(11.3, 11.3, 6.2, 6.2), 1.5, 1.5)
         elif k == "mi_firma":
             path = QPainterPath()
-            path.moveTo(3, 16.5)
+            path.moveTo(3.0, 16.5)
             path.lineTo(6.5, 15.5)
             path.lineTo(15.8, 6.2)
             path.lineTo(13.8, 4.2)
             path.lineTo(4.5, 13.5)
             path.closeSubpath()
             p.drawPath(path)
-            p.drawLine(3, 17, 17, 17)
+            dl(p, 3.0, 17.0, 17.0, 17.0)
         elif k == "lote":
-            p.drawRoundedRect(QRectF(4, 2.5, 11, 14), 1.8, 1.8)
-            p.drawLine(7, 7, 12, 7)
-            p.drawLine(7, 10, 12, 10)
-            p.drawLine(7, 13, 10, 13)
+            p.drawRoundedRect(QRectF(4.0, 2.5, 11.0, 14.0), 1.8, 1.8)
+            dl(p, 7.0, 7.0, 12.0, 7.0)
+            dl(p, 7.0, 10.0, 12.0, 10.0)
+            dl(p, 7.0, 13.0, 10.0, 13.0)
         elif k == "buscar_os":
-            p.drawEllipse(QRectF(3, 3, 10.5, 10.5))
-            p.drawLine(12.2, 12.2, 16.8, 16.8)
+            p.drawEllipse(QRectF(3.0, 3.0, 10.5, 10.5))
+            dl(p, 12.2, 12.2, 16.8, 16.8)
         elif k == "recepcion_os":
-            p.drawRoundedRect(QRectF(3, 3.5, 14, 13), 2.0, 2.0)
-            p.drawLine(3, 11.5, 7, 11.5)
-            p.drawLine(13, 11.5, 17, 11.5)
-            p.drawLine(7.2, 8.2, 9.5, 10.5)
-            p.drawLine(9.5, 10.5, 13.2, 6.5)
+            p.drawRoundedRect(QRectF(3.0, 3.5, 14.0, 13.0), 2.0, 2.0)
+            dl(p, 3.0, 11.5, 7.0, 11.5)
+            dl(p, 13.0, 11.5, 17.0, 11.5)
+            dl(p, 7.2, 8.2, 9.5, 10.5)
+            dl(p, 9.5, 10.5, 13.2, 6.5)
         elif k == "escaneos":
-            p.drawLine(3, 6.5, 3, 3.5); p.drawLine(3, 3.5, 6, 3.5)
-            p.drawLine(14, 3.5, 17, 3.5); p.drawLine(17, 3.5, 17, 6.5)
-            p.drawLine(3, 13.5, 3, 16.5); p.drawLine(3, 16.5, 6, 16.5)
-            p.drawLine(14, 16.5, 17, 16.5); p.drawLine(17, 16.5, 17, 13.5)
-            p.drawLine(4.5, 10, 15.5, 10)
+            dl(p, 3.0, 6.5, 3.0, 3.5)
+            dl(p, 3.0, 3.5, 6.0, 3.5)
+            dl(p, 14.0, 3.5, 17.0, 3.5)
+            dl(p, 17.0, 3.5, 17.0, 6.5)
+            dl(p, 3.0, 13.5, 3.0, 16.5)
+            dl(p, 3.0, 16.5, 6.0, 16.5)
+            dl(p, 14.0, 16.5, 17.0, 16.5)
+            dl(p, 17.0, 16.5, 17.0, 13.5)
+            dl(p, 4.5, 10.0, 15.5, 10.0)
         elif k == "catalogos":
-            p.drawEllipse(QRectF(3.5, 3, 13, 4.2))
-            p.drawLine(3.5, 5.1, 3.5, 14.8)
-            p.drawLine(16.5, 5.1, 16.5, 14.8)
-            p.drawArc(QRectF(3.5, 8.2, 13, 4.2), 180 * 16, 180 * 16)
-            p.drawArc(QRectF(3.5, 12.6, 13, 4.2), 180 * 16, 180 * 16)
+            p.drawEllipse(QRectF(3.5, 3.0, 13.0, 4.2))
+            dl(p, 3.5, 5.1, 3.5, 14.8)
+            dl(p, 16.5, 5.1, 16.5, 14.8)
+            p.drawArc(QRectF(3.5, 8.2, 13.0, 4.2), int(180 * 16), int(180 * 16))
+            p.drawArc(QRectF(3.5, 12.6, 13.0, 4.2), int(180 * 16), int(180 * 16))
         elif k == "configuracion":
-            p.drawLine(3, 6, 17, 6)
-            p.drawLine(3, 10, 17, 10)
-            p.drawLine(3, 14, 17, 14)
+            dl(p, 3.0, 6.0, 17.0, 6.0)
+            dl(p, 3.0, 10.0, 17.0, 10.0)
+            dl(p, 3.0, 14.0, 17.0, 14.0)
             p.setBrush(QColor("#FFFFFF"))
-            p.drawEllipse(QRectF(6, 4.2, 3.6, 3.6))
+            p.drawEllipse(QRectF(6.0, 4.2, 3.6, 3.6))
             p.drawEllipse(QRectF(11.5, 8.2, 3.6, 3.6))
             p.drawEllipse(QRectF(7.5, 12.2, 3.6, 3.6))
         elif k == "brand":
             # Balanza metrológica corporativa vectorial
-            p.drawLine(10, 3.5, 10, 15.5)
-            p.drawLine(5.5, 16.2, 14.5, 16.2)
-            p.drawLine(4, 6.5, 16, 6.5)
-            p.drawLine(4.5, 6.5, 3, 11.2); p.drawLine(4.5, 6.5, 6, 11.2)
-            p.drawArc(QRectF(2.5, 10, 4, 2.5), 180 * 16, 180 * 16)
-            p.drawLine(15.5, 6.5, 14, 11.2); p.drawLine(15.5, 6.5, 17, 11.2)
-            p.drawArc(QRectF(13.5, 10, 4, 2.5), 180 * 16, 180 * 16)
+            dl(p, 10.0, 3.5, 10.0, 15.5)
+            dl(p, 5.5, 16.2, 14.5, 16.2)
+            dl(p, 4.0, 6.5, 16.0, 6.5)
+            dl(p, 4.5, 6.5, 3.0, 11.2)
+            dl(p, 4.5, 6.5, 6.0, 11.2)
+            p.drawArc(QRectF(2.5, 10.0, 4.0, 2.5), int(180 * 16), int(180 * 16))
+            dl(p, 15.5, 6.5, 14.0, 11.2)
+            dl(p, 15.5, 6.5, 17.0, 11.2)
+            p.drawArc(QRectF(13.5, 10.0, 4.0, 2.5), int(180 * 16), int(180 * 16))
         else:
-            p.drawRoundedRect(QRectF(4, 4, 12, 12), 2, 2)
+            p.drawRoundedRect(QRectF(4.0, 4.0, 12.0, 12.0), 2.0, 2.0)
         p.end()
 
 
