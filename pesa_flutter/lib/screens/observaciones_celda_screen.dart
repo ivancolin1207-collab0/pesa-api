@@ -28,7 +28,9 @@ import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/nombre_recibe.dart';
+import '../widgets/pesa_components.dart';
 import '../widgets/signature_shield.dart';
 
 class ObservacionesCeldaScreen extends StatefulWidget {
@@ -40,9 +42,9 @@ class ObservacionesCeldaScreen extends StatefulWidget {
 }
 
 class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
-  static const Color _pesaRed = Color(0xFFB81D24);
-  static const Color _pesaDark = Color(0xFF1D1D1F);
-  static const Color _osoccBlue = Color(0xFF0284C7);
+  static const Color _pesaRed = PesaColors.brand;
+  static const Color _pesaDark = PesaColors.textPrimary;
+  static const Color _osoccBlue = PesaColors.brand;
 
   static const Map<int, String> _checklistLabels = {
     1: 'Cuerpo metálico / Deformación',
@@ -1101,11 +1103,15 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
         }
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFFF5F5F7),
+        backgroundColor: PesaColors.canvas,
         appBar: AppBar(
-          backgroundColor: _pesaDark,
-          foregroundColor: Colors.white,
+          backgroundColor: PesaColors.surface,
+          foregroundColor: PesaColors.textPrimary,
           elevation: 0,
+          bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(1),
+            child: Divider(height: 1, color: PesaColors.border),
+          ),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
             tooltip: 'Guardar borrador y volver',
@@ -1120,31 +1126,40 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'FORMATO DE DIAGNÓSTICO Y REVISIÓN DE CELDA DE CARGA',
-                style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, letterSpacing: 0.2),
+                'Diagnóstico de Celda de Carga',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
               ),
               Text(
-                'Folio: $folio  •  Fecha: $fechaRaw',
-                style: const TextStyle(fontSize: 11.5, color: Color(0xFFE0F2FE)),
+                'Folio: $folio · $fechaRaw',
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  color: PesaColors.textSecondary,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
             ],
           ),
           actions: [
-            TextButton.icon(
-              onPressed: _guardando
-                  ? null
-                  : () async {
-                      await guardarBorrador();
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Borrador de celda guardado localmente.'),
-                          duration: Duration(seconds: 2),
-                        ),
-                      );
-                    },
-              icon: const Icon(Icons.save_outlined, color: Colors.white, size: 18),
-              label: const Text('Borrador', style: TextStyle(color: Colors.white, fontSize: 12)),
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: _guardando
+                      ? null
+                      : () async {
+                          await guardarBorrador();
+                          if (!context.mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Borrador de celda guardado localmente.'),
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        },
+                  child: PesaDraftIndicator(saving: _guardando),
+                ),
+              ),
             ),
           ],
         ),

@@ -12,6 +12,7 @@ hidden_models    = collect_submodules('models')
 all_hidden = sorted(list(set(
     hidden_ui + hidden_services + hidden_database + hidden_auth + hidden_models + hidden_reportlab + [
         'ui',
+        'ui.theme',
         'ui.main_window',
         'ui.widgets',
         'ui.widgets.dashboard_widget',

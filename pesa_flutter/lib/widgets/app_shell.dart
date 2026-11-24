@@ -8,26 +8,25 @@ import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../services/sync_service.dart';
 
-// ── Tokens corporativos minimalistas Básculas PESA ──────────────────────────
+// ── Tokens corporativos minimalistas Básculas PESA v3.2 ─────────────────────
 const _red         = Color(0xFFC8102E);
 const _redLight    = Color(0xFFF8FAFC); // fondo ítem activo neutro (sin tintes rosados)
-const _sidebarBg   = Colors.white;
+const _sidebarBg   = Color(0xFFFFFFFF);
 const _sidebarW    = 240.0;
 const _textActive  = Color(0xFFC8102E);
-const _textInact   = Color(0xFF475569);
-const _divider     = Color(0xFFE2E8F0);
-const _bgGeneral   = Colors.white;
+const _textInact   = Color(0xFF6B7280);
+const _divider     = Color(0xFFE5E7EB);
+const _bgGeneral   = Color(0xFFF6F7F9);
 
-/// Items del menú lateral — todos los roles (iconos vectoriales limpios, sin prefijos decorativos)
+/// Items del menú lateral — todos los roles (iconos vectoriales limpios, sin duplicados)
 const _navItemsAll = [
-  _NavItem(icon: Icons.dashboard_outlined,        label: 'Dashboard General',   route: '/os'),
-  _NavItem(icon: Icons.add_circle_outline,        label: 'Generar / Asignar',   route: '/nuevo-doc'),
-  _NavItem(icon: Icons.description_outlined,      label: 'Generar Formatos',    route: '/nuevo-doc'),
-  _NavItem(icon: Icons.history_outlined,          label: 'Buscar / Historial',  route: '/historial'),
-  _NavItem(icon: Icons.document_scanner_outlined, label: 'Adjuntar Escaneo',    route: '/escaneo'),
-  _NavItem(icon: Icons.draw_outlined,             label: 'Mi Firma',            route: '/mi-firma'),
-  _NavItem(icon: Icons.category_outlined,         label: 'Catálogos',           route: '/catalogos'),
-  _NavItem(icon: Icons.settings_outlined,         label: 'Configuración',       route: '/settings'),
+  _NavItem(icon: Icons.dashboard_outlined,        label: 'Dashboard',          route: '/os'),
+  _NavItem(icon: Icons.add_box_outlined,          label: 'Generar Formatos',   route: '/nuevo-doc'),
+  _NavItem(icon: Icons.history_outlined,          label: 'Buscar / Historial', route: '/historial'),
+  _NavItem(icon: Icons.document_scanner_outlined, label: 'Adjuntar Escaneo',   route: '/escaneo'),
+  _NavItem(icon: Icons.draw_outlined,             label: 'Mi Firma',           route: '/mi-firma'),
+  _NavItem(icon: Icons.category_outlined,         label: 'Catálogos',          route: '/catalogos'),
+  _NavItem(icon: Icons.settings_outlined,         label: 'Configuración',      route: '/settings'),
 ];
 
 /// Labels de ítems exclusivos de administrador (nunca visibles para técnicos)
@@ -113,9 +112,9 @@ class _AppShellState extends State<AppShell> {
   bool _usaDrawer = false;
   final GlobalKey<ScaffoldState> _shellScaffoldKey = GlobalKey<ScaffoldState>();
 
-  /// < 700dp (Samsung Fold doblado / celular) → Drawer hamburguesa flotante.
-  /// ≥ 700dp (Fold desplegado / Tablets) → barra lateral colapsable.
-  static const double kBreakpointDrawer = 700;
+  /// < 720dp (teléfono / Fold cerrado) → Barra inferior corporativa + Drawer.
+  /// ≥ 720dp (Tablet / Fold desplegado) → Barra lateral blanca colapsable.
+  static const double kBreakpointDrawer = 720;
 
   void alternarMenu() {
     if (_usaDrawer) {
@@ -214,8 +213,8 @@ class _AppShellState extends State<AppShell> {
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeInOut,
             width: _isSidebarOpen ? _sidebarW : 0.0,
-            color: _sidebarBg,
             decoration: const BoxDecoration(
+              color: _sidebarBg,
               border: Border(right: BorderSide(color: _divider)),
             ),
             child: Visibility(
@@ -241,6 +240,24 @@ class _AppShellState extends State<AppShell> {
         ]),
       );
     } else {
+      final auth = context.watch<AuthService>();
+      final bool isTec = _isTecnicoRole(auth.role);
+      final List<_NavItem> bottomItems = isTec
+          ? const [
+              _NavItem(icon: Icons.dashboard_outlined,        label: 'Órdenes',   route: '/os'),
+              _NavItem(icon: Icons.history_outlined,          label: 'Historial', route: '/historial'),
+              _NavItem(icon: Icons.document_scanner_outlined, label: 'Escaneo',   route: '/escaneo'),
+              _NavItem(icon: Icons.draw_outlined,             label: 'Mi Firma',  route: '/mi-firma'),
+            ]
+          : const [
+              _NavItem(icon: Icons.dashboard_outlined, label: 'Órdenes',   route: '/os'),
+              _NavItem(icon: Icons.add_box_outlined,   label: 'Generar',   route: '/nuevo-doc'),
+              _NavItem(icon: Icons.history_outlined,   label: 'Historial', route: '/historial'),
+              _NavItem(icon: Icons.category_outlined,  label: 'Catálogos', route: '/catalogos'),
+            ];
+      int selectedIdx = bottomItems.indexWhere((i) => widget.currentRoute.startsWith(i.route));
+      if (selectedIdx < 0) selectedIdx = 0;
+
       return Scaffold(
         key: _shellScaffoldKey,
         backgroundColor: _bgGeneral,
@@ -252,6 +269,32 @@ class _AppShellState extends State<AppShell> {
           ),
         ),
         body: widget.child,
+        bottomNavigationBar: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: _divider, width: 1)),
+          ),
+          child: NavigationBar(
+            selectedIndex: selectedIdx,
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            indicatorColor: _redLight,
+            height: 64,
+            onDestinationSelected: (idx) {
+              final target = bottomItems[idx].route;
+              if (!widget.currentRoute.startsWith(target)) {
+                context.go(target);
+              }
+            },
+            destinations: bottomItems
+                .map((item) => NavigationDestination(
+                      icon: Icon(item.icon, size: 22),
+                      selectedIcon: Icon(item.icon, size: 22, color: _red),
+                      label: item.label,
+                    ))
+                .toList(),
+          ),
+        ),
       );
     }
   }

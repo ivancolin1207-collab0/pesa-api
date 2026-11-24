@@ -10,51 +10,51 @@ Filosofía: Alto contraste, tipografía corporativa limpia, sin pasteles deslava
 # PALETA DE COLORES — Industrial Enterprise
 # ──────────────────────────────────────────────────────────────────────────────
 COLORS: dict[str, str] = {
-    # Fondos corporativos minimalistas (Básculas PESA)
-    "bg_primary":       "#FFFFFF",   # Fondo principal blanco puro
-    "bg_surface":       "#F8FAFC",   # Superficies secundarias gris ultra claro
-    "bg_card":          "#FFFFFF",   # Tarjetas / paneles
+    # Fondos corporativos minimalistas (Básculas PESA v3.2)
+    "bg_primary":       "#F6F7F9",   # Canvas principal gris muy suave
+    "bg_surface":       "#F8FAFC",   # Superficies secundarias / badges neutros
+    "bg_card":          "#FFFFFF",   # Tarjetas / paneles / tablas
     "bg_input":         "#FFFFFF",   # Campos de entrada
 
     # Acentos corporativos
     "accent_primary":   "#C8102E",   # Rojo Corporativo Básculas PESA
-    "accent_hover":     "#A50D26",   # Rojo hover
+    "accent_hover":     "#A60D26",   # Rojo hover
     "accent_pressed":   "#880B20",   # Rojo pressed
     "accent_muted":     "#F8FAFC",   # Superficie neutra activa (cero fondos rosados)
     "accent_border":    "#CBD5E1",   # Borde neutro corporativo
-    "navy":             "#0F172A",   # Negro carbón corporativo
+    "navy":             "#111827",   # Carbón corporativo
     "focus_blue":       "#C8102E",   # Foco corporativo
 
     # Texto
-    "text_primary":     "#0F172A",   # Negro carbón
-    "text_secondary":   "#475569",   # Gris pizarra corporativo
-    "text_muted":       "#64748B",   # Gris claro / hints
+    "text_primary":     "#111827",   # Texto primario
+    "text_secondary":   "#6B7280",   # Texto secundario
+    "text_muted":       "#9CA3AF",   # Placeholders / hints
     "text_disabled":    "#CBD5E1",
     "text_on_red":      "#FFFFFF",
 
     # Bordes
-    "border_default":   "#E2E8F0",   # Borde fino 1px
+    "border_default":   "#E5E7EB",   # Borde fino 1px
     "border_strong":    "#CBD5E1",   # Borde marcado
     "border_focus":     "#C8102E",   # Foco en rojo corporativo
 
-    # Estados semánticos sobrios (sin pasteles IA)
-    "success":          "#0F172A",
+    # Estados semánticos discretos (punto 6px + contenedor neutro)
+    "success":          "#16A34A",
     "success_bg":       "#F8FAFC",
-    "warning":          "#334155",
+    "warning":          "#D97706",
     "warning_bg":       "#F8FAFC",
     "error":            "#C8102E",
     "error_bg":         "#FFFFFF",
-    "info":             "#0F172A",
+    "info":             "#111827",
     "info_bg":          "#F8FAFC",
 
-    # Badges de estado OS monocromáticos corporativos
-    "estado_proceso":       "#334155",
+    # Badges de estado OS corporativos
+    "estado_proceso":       "#111827",
     "estado_proceso_bg":    "#F8FAFC",
     "estado_cancelada":     "#C8102E",
     "estado_cancelada_bg":  "#FFFFFF",
-    "estado_escaneada":     "#0F172A",
+    "estado_escaneada":     "#111827",
     "estado_escaneada_bg":  "#F8FAFC",
-    "estado_fisico":        "#0F172A",
+    "estado_fisico":        "#111827",
     "estado_fisico_bg":     "#F8FAFC",
 }
 
@@ -187,24 +187,24 @@ QComboBox QAbstractItemView {
     background-color: #FFFFFF;
     border: 1px solid #E5E7EB;
     border-radius: 8px;
-    selection-background-color: #FEE2E2;
-    selection-color: #991B1B;
-    color: #1F2937;
+    selection-background-color: #F8FAFC;
+    selection-color: #111827;
+    color: #111827;
     outline: none;
     padding: 4px;
 }
 QComboBox QAbstractItemView::item {
     min-height: 32px;
     padding-left: 8px;
-    color: #1F2937;
+    color: #111827;
     background-color: #FFFFFF;
 }
 QComboBox QAbstractItemView::item:selected {
-    background-color: #FEE2E2;
-    color: #991B1B;
+    background-color: #F8FAFC;
+    color: #111827;
 }
 QComboBox QAbstractItemView::item:hover {
-    background-color: #F3F4F6;
+    background-color: #F8FAFC;
     color: #111827;
 }
 QComboBox QLineEdit {
@@ -332,50 +332,50 @@ QTreeWidget::item {
     border-bottom: 1px solid #F1F5F9;
 }
 QTreeWidget::item:hover {
-    background-color: #F1F5F9;
+    background-color: #F8FAFC;
 }
 QTreeWidget::item:selected {
-    background-color: #EFF6FF;
-    color: #0F172A;
+    background-color: #F8FAFC;
+    color: #111827;
 }
 
-/* Cabecera de la tabla — Enterprise dark header */
+/* Cabecera de la tabla — Enterprise header */
 QHeaderView::section {
-    background-color: #F8FAFC;
-    color: #475569;
+    background-color: #F9FAFB;
+    color: #6B7280;
     font-weight: 700;
-    font-size: 10px;
+    font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.6px;
     border: none;
-    border-bottom: 2px solid #E2E8F0;
-    border-right: 1px solid #F1F5F9;
+    border-bottom: 1px solid #E5E7EB;
+    border-right: none;
     padding: 8px 10px;
 }
 QHeaderView::section:first { border-radius: 8px 0 0 0; }
 QHeaderView::section:last  { border-right: none; border-radius: 0 8px 0 0; }
-QHeaderView::section:hover { background-color: #EFF6FF; color: #0F172A; }
+QHeaderView::section:hover { background-color: #F3F4F6; color: #111827; }
 QHeaderView { background: transparent; border: none; }
 
 /* ─── QTableWidget ────────────────────────────────────────────────────────── */
 QTableWidget, QTableView {
     background-color: #FFFFFF;
-    color: #0F172A;
-    gridline-color: #F1F5F9;
-    border: 1px solid #E2E8F0;
-    border-radius: 8px;
+    color: #111827;
+    gridline-color: #F3F4F6;
+    border: 1px solid #E5E7EB;
+    border-radius: 12px;
     outline: none;
-    alternate-background-color: #FBFCFD;
+    alternate-background-color: #FFFFFF;
 }
 QTableWidget::item, QTableView::item {
-    color: #0F172A;
+    color: #111827;
     padding: 6px 10px;
     border: none;
 }
-QTableWidget::item:hover, QTableView::item:hover { background-color: #F1F5F9; }
+QTableWidget::item:hover, QTableView::item:hover { background-color: #F8FAFC; }
 QTableWidget::item:selected, QTableView::item:selected {
-    background-color: #EFF6FF;
-    color: #0F172A;
+    background-color: #F8FAFC;
+    color: #111827;
 }
 QTableWidget QLineEdit {
     color: #0F172A !important;

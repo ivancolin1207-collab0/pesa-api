@@ -19,8 +19,10 @@ import '../services/metrology_helper.dart';
 import '../services/pdf_storage_service.dart';
 import '../services/sync_service.dart';
 import '../services/tipo_servicio_rules.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
+import '../widgets/pesa_components.dart';
 import '../widgets/sync_check_badge.dart';
 import 'calibraciones_repositorio_view.dart';
 import 'captura_screen.dart';
@@ -88,14 +90,14 @@ String normalizarTexto(String texto) {
   return resultado;
 }
 
-// ── Design Tokens — Básculas PESA Minimalista Corporativo ───────────────────
-const _kCarmineRed = Color(0xFFC8102E);
-const _kBgColor    = Color(0xFFFFFFFF);
-const _kCardBg     = Color(0xFFFFFFFF);
-const _kBorder     = Color(0xFFE2E8F0);
-const _kTextPrim   = Color(0xFF0F172A);
-const _kTextSec    = Color(0xFF475569);
-const _kTableHead  = Color(0xFFF8FAFC);
+// ── Design Tokens — Básculas PESA Minimalista Corporativo v3.2 ──────────────
+const _kCarmineRed = PesaColors.brand;
+const _kBgColor    = PesaColors.canvas;
+const _kCardBg     = PesaColors.surface;
+const _kBorder     = PesaColors.border;
+const _kTextPrim   = PesaColors.textPrimary;
+const _kTextSec    = PesaColors.textSecondary;
+const _kTableHead  = PesaColors.tableHeader;
 
 /// Enrutador dinámico por tipo de documento:
 /// OSOB -> ObservacionesBasculaScreen (PRIMERA condición prioritaria)
@@ -193,6 +195,7 @@ class _OsListScreenState extends State<OsListScreen> {
   String  _modalidad = 'Todas las Modalidades';
   String? _tecnico;
   String? _estado;
+  String  _quickStatus = 'Todas'; // 'Todas' | 'Pendientes' | 'En Proceso' | 'Cerradas'
   String  _filtroTipoServicio = 'Todos los Servicios';
   String  _filtroEmpresa = 'Todas las Empresas';
   List<String> _listaEmpresas = ['Todas las Empresas'];
@@ -670,6 +673,7 @@ class _OsListScreenState extends State<OsListScreen> {
       modalidad: _modalidad,
       tecnico: _tecnico,
       estado: _estado,
+      quickStatus: _quickStatus,
       tipoServicio: _filtroTipoServicio,
       empresa: _filtroEmpresa,
       query: _query,
@@ -2215,10 +2219,10 @@ class _OsListScreenState extends State<OsListScreen> {
   }
 
   Widget _selectorVista(bool repoActivo) {
-    const metro = Color(0xFF5B3FD6);
     return LayoutBuilder(builder: (context, c) {
       final compacto = c.maxWidth < 650;
       return Container(
+        color: _kBgColor,
         padding: EdgeInsets.fromLTRB(compacto ? 12 : 24, 10, compacto ? 12 : 24, 4),
         child: Align(
           alignment: compacto ? Alignment.center : Alignment.centerLeft,
@@ -2228,30 +2232,30 @@ class _OsListScreenState extends State<OsListScreen> {
             segments: [
               ButtonSegment<bool>(
                 value: false,
-                icon: const Text('📋'),
+                icon: const Icon(Icons.assignment_outlined, size: 17),
                 label: Text(compacto ? 'Mis Órdenes' : 'Mis Órdenes Asignadas'),
               ),
               ButtonSegment<bool>(
                 value: true,
-                icon: const Text('📑'),
+                icon: const Icon(Icons.folder_copy_outlined, size: 17),
                 label: Text(compacto ? 'Calibraciones' : 'Repositorio Calibraciones (Todos)'),
               ),
             ],
             selected: {repoActivo},
             onSelectionChanged: (s) => setState(() => _vistaRepositorio = s.first),
             style: ButtonStyle(
-              visualDensity: VisualDensity.compact,
+              visualDensity: VisualDensity.standard,
               textStyle: const WidgetStatePropertyAll(
                 TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               ),
               backgroundColor: WidgetStateProperty.resolveWith((states) {
                 if (!states.contains(WidgetState.selected)) return Colors.white;
-                return repoActivo ? metro : _kCarmineRed;
+                return _kCarmineRed;
               }),
               foregroundColor: WidgetStateProperty.resolveWith((states) =>
                   states.contains(WidgetState.selected) ? Colors.white : _kTextPrim),
-              side: WidgetStatePropertyAll(
-                BorderSide(color: repoActivo ? metro : _kBorder),
+              side: const WidgetStatePropertyAll(
+                BorderSide(color: _kBorder),
               ),
             ),
           ),
@@ -2268,6 +2272,7 @@ class _FilterParams {
   final String modalidad;
   final String? tecnico;
   final String? estado;
+  final String quickStatus;
   final String tipoServicio;
   final String empresa;
   final String query;
@@ -2282,6 +2287,7 @@ class _FilterParams {
     required this.modalidad,
     required this.tecnico,
     required this.estado,
+    this.quickStatus = 'Todas',
     this.tipoServicio = 'Todos los Servicios',
     this.empresa = 'Todas las Empresas',
     required this.query,
@@ -2452,6 +2458,24 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
     if (p.estado != null && p.estado!.isNotEmpty &&
         (os['estado'] as String? ?? '') != p.estado) return false;
 
+    if (p.quickStatus != 'Todas') {
+      final estUp = '${os['estado'] ?? ''} ${os['estatus'] ?? ''}'.toUpperCase();
+      final bool hasPdf = os['has_pdf'] == 1 ||
+          os['has_pdf'] == '1' ||
+          os['has_pdf'] == true ||
+          os['pdf_subido'] == 1 ||
+          (os['pdf_path_local']?.toString().trim().isNotEmpty ?? false) ||
+          (os['pdf_b64_local']?.toString().length ?? 0) > 100 ||
+          (os['pdf_base64']?.toString().length ?? 0) > 100 ||
+          estUp.contains('CERRAD') ||
+          estUp.contains('COMPLET') ||
+          estUp.contains('FINALIZ') ||
+          estUp.contains('ESCAN');
+      if (p.quickStatus == 'Cerradas' && !hasPdf) return false;
+      if (p.quickStatus == 'Pendientes' && hasPdf) return false;
+      if (p.quickStatus == 'En Proceso' && (hasPdf || estUp.contains('CANCEL'))) return false;
+    }
+
     // 3. Filtros por Tipo de Servicio y Empresa / Cliente (con soporte de Lotes)
     String lid = (os['id_lote'] ?? os['lote'])?.toString().trim() ?? '';
     if (lid.isEmpty) {
@@ -2522,294 +2546,350 @@ class _MobilePhoneDashboard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.of(context).viewPadding.bottom;
+    final auth = context.watch<AuthService>();
     final isOnline = sync.state != SyncState.offline && sync.state != SyncState.error;
+    final rawName = auth.displayName.trim();
+    final firstName = rawName.isNotEmpty ? rawName.split(RegExp(r'\s+')).first : 'Técnico';
 
-    return Column(
-      children: [
-        // ── 1. HEADER & STATUS ───────────────────────────────────────────
-        Container(
-          color: _kCardBg,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          decoration: const BoxDecoration(
-            border: Border(bottom: BorderSide(color: _kBorder)),
-          ),
-          child: Row(
-            children: [
-              IconButton(
-                icon: const Icon(Icons.menu_rounded, color: _kTextPrim, size: 24),
-                onPressed: () => AppShell.toggleMenu(context),
-                tooltip: 'Menú',
-              ),
-              const SizedBox(width: 4),
-              const Text(
-                'Servicios PESA',
-                style: TextStyle(
-                  color: _kTextPrim,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 17,
-                ),
-              ),
-              const Spacer(),
-              // Píldora sutil de conectividad
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isOnline ? const Color(0xFFE8F5E9) : const Color(0xFFF2F2F7),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: isOnline ? const Color(0xFF2E7D32) : const Color(0xFF86868B),
-                      ),
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      isOnline ? 'En línea' : 'Sin conexión',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: isOnline ? const Color(0xFF2E7D32) : const Color(0xFF86868B),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 6),
-              // Botón sincronizar circular
-              GestureDetector(
-                onLongPress: () => state._mostrarMenuSincronizacion(context),
-                child: IconButton(
-                  icon: sync.state == SyncState.syncing
-                      ? const SizedBox(
-                          width: 18, height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: _kCarmineRed),
-                        )
-                      : const Icon(Icons.sync_rounded, color: _kTextPrim, size: 22),
-                  // [FIX-CUELGUE] Si está sincroni... siempre permitir tocar para forzar reset
-                  onPressed: () {
-                    if (sync.state == SyncState.syncing) {
-                      sync.forceResetSync();
-                    } else {
-                      state._sincronizarOrdenesServidor();
-                    }
-                  },
-                  tooltip: sync.state == SyncState.syncing ? 'Toca para cancelar' : 'Sincronizar (mantén presionado para opciones)',
-                ),
-              ),
-              if (!hideTecnico)
+    return Container(
+      color: _kBgColor,
+      child: Column(
+        children: [
+          // ── 1. HEADER LIMPIO CON SALUDO + ESTADO RED (PUNTO 6dp) ─────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: const BoxDecoration(
+              color: _kCardBg,
+              border: Border(bottom: BorderSide(color: _kBorder)),
+            ),
+            child: Row(
+              children: [
                 IconButton(
-                  icon: const Icon(Icons.add_circle_rounded, color: _kCarmineRed, size: 24),
-                  tooltip: 'Nuevo Documento / Asignar',
-                  onPressed: () async {
-                    await context.push('/nuevo-doc');
-                    await state._loadLocal();
-                  },
+                  icon: const Icon(Icons.menu_rounded, color: _kTextPrim, size: 24),
+                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                  onPressed: () => AppShell.toggleMenu(context),
+                  tooltip: 'Menú',
                 ),
-            ],
-          ),
-        ),
-
-        // ── 2. KPI SUMMARY (Grid 2x2 Limpio) ──────────────────────────────
-        Container(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  children: [
-                    _buildMobileKpiCard('TOTAL PERÍODO', state._kpiTotal, const Color(0xFF2E7D32)),
-                    const SizedBox(height: 8),
-                    _buildMobileKpiCard('CERRADOS', state._kpiCerrado, const Color(0xFF1565C0)),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  children: [
-                    _buildMobileKpiCard('EN PROCESO', state._kpiProceso, _kCarmineRed),
-                    const SizedBox(height: 8),
-                    _buildMobileKpiCard('FORMATOS FÍSICOS', state._kpiFisico, const Color(0xFF7B1FA2)),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-
-        // ── 3. FILTROS RÁPIDOS (Horizontal Scroll + Search Bar) ────────────
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-          child: Column(
-            children: [
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  children: [
-                    for (final p in ['Todo', 'Hoy', 'Semana', 'Mes']) ...[
-                      ChoiceChip(
-                        label: Text(p),
-                        selected: state._periodo == p,
-                        selectedColor: _kCarmineRed,
-                        labelStyle: TextStyle(
-                          fontSize: 12,
-                          fontWeight: state._periodo == p ? FontWeight.bold : FontWeight.normal,
-                          color: state._periodo == p ? Colors.white : _kTextPrim,
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Hola, $firstName',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _kTextPrim,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                          letterSpacing: -0.2,
                         ),
-                        backgroundColor: Colors.white,
-                        side: BorderSide(
-                          color: state._periodo == p ? _kCarmineRed : _kBorder,
+                      ),
+                      const Text(
+                        'Básculas PESA · Órdenes',
+                        style: TextStyle(color: _kTextSec, fontSize: 11.5),
+                      ),
+                    ],
+                  ),
+                ),
+                PesaStatusBadge(
+                  label: isOnline ? 'En línea' : 'Offline',
+                  dotColor: isOnline ? PesaColors.dotGreen : PesaColors.dotAmber,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                ),
+                const SizedBox(width: 4),
+                GestureDetector(
+                  onLongPress: () => state._mostrarMenuSincronizacion(context),
+                  child: IconButton(
+                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                    icon: sync.state == SyncState.syncing
+                        ? const SizedBox(
+                            width: 18, height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: _kCarmineRed),
+                          )
+                        : const Icon(Icons.sync_rounded, color: _kTextPrim, size: 22),
+                    onPressed: () {
+                      if (sync.state == SyncState.syncing) {
+                        sync.forceResetSync();
+                      } else {
+                        state._sincronizarOrdenesServidor();
+                      }
+                    },
+                    tooltip: sync.state == SyncState.syncing ? 'Toca para cancelar' : 'Sincronizar',
+                  ),
+                ),
+                if (!hideTecnico)
+                  IconButton(
+                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                    icon: const Icon(Icons.add_circle_rounded, color: _kCarmineRed, size: 26),
+                    tooltip: 'Nuevo Documento',
+                    onPressed: () async {
+                      await context.push('/nuevo-doc');
+                      await state._loadLocal();
+                    },
+                  ),
+              ],
+            ),
+          ),
+
+          // ── 2. KPI SUMMARY (Grid 2x2 Corporativo — cifras en carbón tabular) ─
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    children: [
+                      _buildMobileKpiCard(
+                        'TOTAL PERÍODO',
+                        state._kpiTotal,
+                        active: state._quickStatus == 'Todas',
+                        onTap: () {
+                          state.setState(() => state._quickStatus = 'Todas');
+                          state._applyFilters();
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileKpiCard(
+                        'CERRADAS',
+                        state._kpiCerrado,
+                        dotColor: PesaColors.dotGreen,
+                        active: state._quickStatus == 'Cerradas',
+                        onTap: () {
+                          state.setState(() => state._quickStatus = state._quickStatus == 'Cerradas' ? 'Todas' : 'Cerradas');
+                          state._applyFilters();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    children: [
+                      _buildMobileKpiCard(
+                        'EN PROCESO',
+                        state._kpiProceso,
+                        dotColor: PesaColors.dotAmber,
+                        active: state._quickStatus == 'En Proceso',
+                        onTap: () {
+                          state.setState(() => state._quickStatus = state._quickStatus == 'En Proceso' ? 'Todas' : 'En Proceso');
+                          state._applyFilters();
+                        },
+                      ),
+                      const SizedBox(height: 8),
+                      _buildMobileKpiCard(
+                        'FORMATOS FÍSICOS',
+                        state._kpiFisico,
+                        dotColor: PesaColors.dotNeutral,
+                        active: state._modalidad == 'Solo Físicos',
+                        onTap: () {
+                          state.setState(() => state._modalidad = state._modalidad == 'Solo Físicos' ? 'Todas las Modalidades' : 'Solo Físicos');
+                          state._applyFilters();
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── 3. CHIPS DE ESTADO RÁPIDOS + BÚSQUEDA (48dp) ─────────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Column(
+              children: [
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: Row(
+                    children: [
+                      for (final st in ['Todas', 'Pendientes', 'En Proceso', 'Cerradas']) ...[
+                        ChoiceChip(
+                          label: Text(st),
+                          selected: state._quickStatus == st,
+                          selectedColor: _kCarmineRed,
+                          showCheckmark: false,
+                          materialTapTargetSize: MaterialTapTargetSize.padded,
+                          labelStyle: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w600,
+                            color: state._quickStatus == st ? Colors.white : _kTextPrim,
+                          ),
+                          backgroundColor: Colors.white,
+                          side: BorderSide(
+                            color: state._quickStatus == st ? _kCarmineRed : _kBorder,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          onSelected: (_) {
+                            state.setState(() => state._quickStatus = st);
+                            state._applyFilters();
+                          },
                         ),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        onSelected: (_) {
-                          state.setState(() => state._periodo = p);
+                        const SizedBox(width: 6),
+                      ],
+                      _buildMobileChipDropdown(
+                        label: state._periodo == 'Todo' ? 'Periodo' : state._periodo,
+                        items: const ['Todo', 'Hoy', 'Semana', 'Mes'],
+                        onSelected: (val) {
+                          state.setState(() => state._periodo = val);
                           state._applyFilters();
                         },
                       ),
                       const SizedBox(width: 6),
+                      _buildMobileChipDropdown(
+                        label: state._modalidad,
+                        items: const ['Todas las Modalidades', 'Solo Físicos', 'Solo Digitales'],
+                        onSelected: (val) {
+                          state.setState(() => state._modalidad = val);
+                          state._applyFilters();
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _buildMobileChipDropdown(
+                        label: state._filtroTipoServicio,
+                        items: state._listaTiposServicio,
+                        onSelected: (val) {
+                          state.setState(() => state._filtroTipoServicio = val);
+                          state._applyFilters();
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _buildMobileChipDropdown(
+                        label: state._filtroEmpresa,
+                        items: state._listaEmpresas,
+                        onSelected: (val) {
+                          state.setState(() => state._filtroEmpresa = val);
+                          state._applyFilters();
+                        },
+                      ),
                     ],
-                    _buildMobileChipDropdown(
-                      label: state._estado ?? 'Estado',
-                      items: ['Todos', ...state._estados],
-                      onSelected: (val) {
-                        state.setState(() => state._estado = (val == 'Todos' ? null : val));
-                        state._applyFilters();
-                      },
-                    ),
-                    const SizedBox(width: 6),
-                    _buildMobileChipDropdown(
-                      label: state._modalidad,
-                      items: ['Todas las Modalidades', 'Solo Físicos', 'Solo Digitales'],
-                      onSelected: (val) {
-                        state.setState(() => state._modalidad = val);
-                        state._applyFilters();
-                      },
-                    ),
-                    const SizedBox(width: 6),
-                    _buildMobileChipDropdown(
-                      label: state._filtroTipoServicio,
-                      items: state._listaTiposServicio,
-                      onSelected: (val) {
-                        state.setState(() => state._filtroTipoServicio = val);
-                        state._applyFilters();
-                      },
-                    ),
-                    const SizedBox(width: 6),
-                    _buildMobileChipDropdown(
-                      label: state._filtroEmpresa,
-                      items: state._listaEmpresas,
-                      onSelected: (val) {
-                        state.setState(() => state._filtroEmpresa = val);
-                        state._applyFilters();
-                      },
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 8),
-              // Search bar (Estilo iOS 40px, #EBEBED, radius 10px)
-              SizedBox(
-                height: 40,
-                child: TextField(
-                  controller: state._searchCtrl,
-                  style: const TextStyle(fontSize: 13, color: _kTextPrim),
-                  decoration: InputDecoration(
-                    hintText: 'Buscar por folio, cliente, sucursal...',
-                    hintStyle: const TextStyle(color: _kTextSec, fontSize: 13),
-                    prefixIcon: const Icon(Icons.search, size: 18, color: _kTextSec),
-                    suffixIcon: state._query.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.cancel, size: 16, color: _kTextSec),
-                            onPressed: () {
-                              state._searchCtrl.clear();
-                              state.setState(() => state._query = '');
-                              state._applyFilters();
-                            },
-                          )
-                        : null,
-                    contentPadding: const EdgeInsets.symmetric(vertical: 0),
-                    filled: true,
-                    fillColor: const Color(0xFFEBEBED),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide.none,
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: _kCarmineRed, width: 1.5),
-                    ),
                   ),
-                  onChanged: (v) {
-                    state.setState(() => state._query = v);
-                    state._applyFilters();
-                  },
                 ),
-              ),
-            ],
+                const SizedBox(height: 8),
+                SizedBox(
+                  height: 48,
+                  child: TextField(
+                    controller: state._searchCtrl,
+                    style: const TextStyle(fontSize: 13.5, color: _kTextPrim),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar folio, cliente, marca, modelo, serie, CCA/DVE…',
+                      hintStyle: const TextStyle(color: PesaColors.textTertiary, fontSize: 13),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 20, color: _kTextSec),
+                      suffixIcon: state._query.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 18, color: _kTextSec),
+                              onPressed: () {
+                                state._searchCtrl.clear();
+                                state.setState(() => state._query = '');
+                                state._applyFilters();
+                              },
+                            )
+                          : null,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: PesaColors.borderStrong),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: PesaColors.borderStrong),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(color: _kCarmineRed, width: 1.5),
+                      ),
+                    ),
+                    onChanged: (v) {
+                      state.setState(() => state._query = v);
+                      state._applyFilters();
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 8),
+          const SizedBox(height: 6),
 
-        // ── 4. LISTA DE TARJETAS TÉCNICAS (Card List View) ────────────────
-        Expanded(
-          child: state._loading
-              ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
-              : state._filtered.isEmpty
-                  ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
-                  : _buildMobileCardList(context),
-        ),
-        SizedBox(height: bottom > 0 ? bottom : 8),
-      ],
+          // ── 4. LISTA DE TARJETAS TÉCNICAS ────────────────────────────────
+          Expanded(
+            child: state._loading
+                ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
+                : state._filtered.isEmpty
+                    ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
+                    : _buildMobileCardList(context),
+          ),
+          SizedBox(height: bottom > 0 ? bottom : 8),
+        ],
+      ),
     );
   }
 
-  Widget _buildMobileKpiCard(String label, int value, Color color) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: _kCardBg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kBorder, width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Text(
-            label,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: _kTextSec,
-              fontSize: 10,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.5,
-            ),
+  Widget _buildMobileKpiCard(
+    String label,
+    int value, {
+    Color? dotColor,
+    bool active = false,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: _kCardBg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: active ? _kCarmineRed : _kBorder,
+            width: active ? 1.5 : 1,
           ),
-          const SizedBox(height: 2),
-          Text(
-            value.toString(),
-            maxLines: 1,
-            style: TextStyle(
-              color: color,
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-              height: 1.1,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(
+              children: [
+                if (dotColor != null) ...[
+                  PesaSemanticDot(color: dotColor, size: 6),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _kTextSec,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-        ],
+            const SizedBox(height: 4),
+            Text(
+              value.toString(),
+              maxLines: 1,
+              style: const TextStyle(
+                color: _kTextPrim,
+                fontSize: 22,
+                fontWeight: FontWeight.w700,
+                height: 1.1,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -2928,13 +3008,9 @@ class _MobileOsCard extends StatelessWidget {
 
     final String estatusLabel = isCerrado
         ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
-        : (noIniciada ? '⚠️ Sin Formato' : 'Pendiente');
-    final Color estatusFg = isCerrado
-        ? const Color(0xFF2E7D32)
-        : (noIniciada ? const Color(0xFFD97706) : const Color(0xFF2563EB));
-    final Color estatusBg = isCerrado
-        ? const Color(0xFFE8F5E9)
-        : (noIniciada ? const Color(0xFFFFFBEB) : const Color(0xFFEFF6FF));
+        : (noIniciada ? 'Sin Formato' : 'En Proceso');
+    final Color estatusFg = _kTextPrim;
+    final Color estatusBg = PesaColors.surfaceMuted;
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
@@ -3530,6 +3606,13 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
               ),
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+            child: PesaBatchProgressBar(
+              completed: widget.group.items.where(_OsListScreenState.tienePdfReal).length,
+              total: count,
+            ),
+          ),
           Builder(
             builder: (context) {
               final infoLote = formatearInfoEnvioCorreoLote(widget.group.items);
@@ -3723,9 +3806,9 @@ class _Header extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      color: _kCardBg,
       padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
       decoration: const BoxDecoration(
+        color: _kCardBg,
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
       child: Row(
@@ -3841,29 +3924,20 @@ class _SyncChip extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (sync.state) {
       case SyncState.syncing:
-        return _chip(const Color(0xFFF8FAFC), const Color(0xFF0F172A), 'Sincronizando...');
+        return const PesaStatusBadge(label: 'Sincronizando…', dotColor: PesaColors.dotAmber);
       case SyncState.success:
-        return _chip(const Color(0xFFF8FAFC), const Color(0xFF0F172A), 'Sincronizado');
+        return const PesaStatusBadge(label: 'Sincronizado', dotColor: PesaColors.dotGreen);
       case SyncState.error:
         final errText = (sync.errorMessage != null && sync.errorMessage!.isNotEmpty)
             ? sync.errorMessage!
             : (sync.message.isNotEmpty ? sync.message : 'Error');
-        return _chip(Colors.white, _kCarmineRed, errText, borderColor: _kCarmineRed);
+        return PesaStatusBadge(label: errText, dotColor: PesaColors.dotRed, textColor: _kCarmineRed);
       case SyncState.offline:
-        return _chip(const Color(0xFFF8FAFC), const Color(0xFF475569), 'Sin conexión');
+        return const PesaStatusBadge(label: 'Sin conexión', dotColor: PesaColors.dotAmber);
       default:
-        return _chip(const Color(0xFFF8FAFC), const Color(0xFF475569), 'Listo');
+        return const PesaStatusBadge(label: 'En línea', dotColor: PesaColors.dotGreen);
     }
   }
-  Widget _chip(Color bg, Color fg, String label, {Color borderColor = const Color(0xFFCBD5E1)}) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: borderColor),
-        ),
-        child: Text(label, style: TextStyle(fontSize: 11, color: fg, fontWeight: FontWeight.w600)),
-      );
 }
 
 // ── KPI Bar (Tablet / Desktop - 4 horizontal cards) ───────────────────────
@@ -3879,36 +3953,39 @@ class _KpiBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: _kCardBg,
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+      color: _kBgColor,
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(
         children: [
           _KpiCard(
             label: 'TOTAL PERIODO',
             value: total,
             sub: '${total == 1 ? "1 orden" : "$total órdenes"} en el periodo',
-            color: const Color(0xFF16A34A),
+            color: _kTextPrim,
           ),
           const SizedBox(width: 12),
           _KpiCard(
             label: 'EN PROCESO',
             value: proceso,
             sub: 'órdenes pendientes de cerrar',
-            color: _kCarmineRed,
+            color: _kTextPrim,
+            dotColor: PesaColors.dotAmber,
           ),
           const SizedBox(width: 12),
           _KpiCard(
             label: 'CERRADOS',
             value: cerrado,
             sub: 'Total cerradas',
-            color: const Color(0xFF2563EB),
+            color: _kTextPrim,
+            dotColor: PesaColors.dotGreen,
           ),
           const SizedBox(width: 12),
           _KpiCard(
             label: 'FORMATOS FÍSICOS',
             value: fisico,
             sub: 'órdenes en formato físico',
-            color: const Color(0xFF7C3AED),
+            color: _kTextPrim,
+            dotColor: PesaColors.dotNeutral,
           ),
         ],
       ),
@@ -3920,11 +3997,13 @@ class _KpiCard extends StatelessWidget {
   final String label, sub;
   final int value;
   final Color color;
+  final Color? dotColor;
   const _KpiCard({
     required this.label,
     required this.value,
     required this.sub,
     required this.color,
+    this.dotColor,
   });
 
   @override
@@ -3935,25 +4014,30 @@ class _KpiCard extends StatelessWidget {
             color: _kCardBg,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: _kBorder),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.03),
-                blurRadius: 6,
-                offset: const Offset(0, 2),
-              ),
-            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                label,
-                style: const TextStyle(
-                  color: _kTextSec,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.6,
-                ),
+              Row(
+                children: [
+                  if (dotColor != null) ...[
+                    PesaSemanticDot(color: dotColor!, size: 6),
+                    const SizedBox(width: 6),
+                  ],
+                  Expanded(
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: _kTextSec,
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 6),
               Text(
@@ -3961,8 +4045,9 @@ class _KpiCard extends StatelessWidget {
                 style: TextStyle(
                   color: color,
                   fontSize: 28,
-                  fontWeight: FontWeight.w800,
+                  fontWeight: FontWeight.w700,
                   height: 1.0,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
               const SizedBox(height: 4),
@@ -4715,9 +4800,9 @@ class _LoteRowState extends State<_LoteRow> {
         InkWell(
           onTap: () => setState(() => _expanded = !_expanded),
           child: Container(
-            color: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             decoration: const BoxDecoration(
+              color: Colors.white,
               border: Border(
                 bottom: BorderSide(color: _kBorder),
                 left: BorderSide(color: _kTextPrim, width: 3),
@@ -4787,12 +4872,12 @@ class _LoteRowState extends State<_LoteRow> {
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.person, size: 13, color: Colors.blueAccent),
+                                    const Icon(Icons.person_outline, size: 13, color: _kTextSec),
                                     const SizedBox(width: 3),
                                     Flexible(
                                       child: Text(
                                         'Técnico: $tecnicoNombre',
-                                        style: const TextStyle(fontSize: 10.5, color: Colors.blueGrey, fontWeight: FontWeight.w500),
+                                        style: const TextStyle(fontSize: 10.5, color: _kTextSec, fontWeight: FontWeight.w500),
                                         overflow: TextOverflow.ellipsis,
                                         maxLines: 1,
                                       ),
@@ -4806,15 +4891,25 @@ class _LoteRowState extends State<_LoteRow> {
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.person_outline, size: 12, color: Colors.grey),
+                                    Icon(Icons.person_outline, size: 12, color: PesaColors.textTertiary),
                                     SizedBox(width: 3),
                                     Text(
                                       'Sin técnico asignado',
-                                      style: TextStyle(fontSize: 9.5, color: Colors.grey, fontStyle: FontStyle.italic),
+                                      style: TextStyle(fontSize: 9.5, color: PesaColors.textTertiary),
                                     ),
                                   ],
                                 ),
                               ),
+                            Padding(
+                              padding: const EdgeInsets.only(top: 6.0),
+                              child: SizedBox(
+                                width: 200,
+                                child: PesaBatchProgressBar(
+                                  completed: widget.group.items.where(_OsListScreenState.tienePdfReal).length,
+                                  total: count,
+                                ),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -5111,34 +5206,12 @@ class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.onSync});
 
   @override
-  Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.assignment_outlined, size: 64, color: Colors.grey.shade300),
-            const SizedBox(height: 16),
-            const Text(
-              'No hay registros para este período',
-              style: TextStyle(fontSize: 15, color: _kTextSec),
-            ),
-            const SizedBox(height: 4),
-            const Text(
-              'Sincroniza para descargar las órdenes del servidor',
-              style: TextStyle(fontSize: 12, color: _kTextSec),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton.icon(
-              onPressed: onSync,
-              icon: const Icon(Icons.sync, size: 16),
-              label: const Text('Sincronizar con servidor'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _kCarmineRed,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => PesaEmptyState(
+        icon: Icons.assignment_outlined,
+        title: 'No hay órdenes para este filtro',
+        subtitle: 'Prueba cambiar el estado seleccionado o sincroniza para descargar órdenes del servidor.',
+        actionLabel: 'Sincronizar ahora',
+        onAction: onSync,
       );
 }
 

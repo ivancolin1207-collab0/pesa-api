@@ -366,16 +366,16 @@ class UserChip(QFrame):
     def _update_frame_style(self):
         self.setStyleSheet("""
             QFrame#user_chip {
-                background-color: #F5F5F7;
+                background-color: #F8FAFC;
                 border-radius: 10px;
-                border: 1px solid rgba(0,0,0,0.06);
+                border: 1px solid #E5E7EB;
             }
         """)
 
     def update_user(self, nombre: str, role: str) -> None:
         """Actualiza el chip con los datos del usuario autenticado."""
         initials = "".join(p[0].upper() for p in nombre.split() if p)[:2] or "US"
-        color, bg = self._ROLE_COLORS.get(role, ("#86868B", "#F5F5F7"))
+        color, _bg = self._ROLE_COLORS.get(role, ("#111827", "#F8FAFC"))
 
         self._avatar.setText(initials)
         self._avatar.setStyleSheet(f"""
@@ -387,7 +387,7 @@ class UserChip(QFrame):
         """)
         self._lbl_name.setText(nombre)
         self._lbl_name.setStyleSheet(
-            "font-size: 12px; font-weight: 600; color: #1D1D1F; background: transparent;"
+            "font-size: 12px; font-weight: 600; color: #111827; background: transparent;"
         )
 
         role_labels = {
@@ -396,12 +396,12 @@ class UserChip(QFrame):
         }
         self._lbl_role.setText(role_labels.get(role, role.title()))
         self._lbl_role.setStyleSheet(
-            f"font-size: 10px; color: {color}; font-weight: 500; background: transparent;"
+            "font-size: 10.5px; color: #6B7280; font-weight: 500; background: transparent;"
         )
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# ConnectionIndicator — Estado de conexión BD
+# ConnectionIndicator — Estado de conexión BD (punto semántico 6px)
 # ══════════════════════════════════════════════════════════════════════════════
 class ConnectionIndicator(QWidget):
     def __init__(self, parent=None):
@@ -410,12 +410,12 @@ class ConnectionIndicator(QWidget):
         lay.setContentsMargins(14, 4, 14, 4)
         lay.setSpacing(6)
 
-        self._dot = QLabel("●")
-        self._dot.setStyleSheet("font-size: 8px; color: #FF9F0A;")
-        self._dot.setFixedWidth(12)
+        self._dot = QLabel()
+        self._dot.setFixedSize(6, 6)
+        self._dot.setStyleSheet("background-color: #D97706; border-radius: 3px;")
 
         self._lbl = QLabel("Verificando…")
-        self._lbl.setStyleSheet("font-size: 10px; color: #86868B;")
+        self._lbl.setStyleSheet("font-size: 10.5px; color: #6B7280; font-weight: 500;")
 
         lay.addWidget(self._dot)
         lay.addWidget(self._lbl, stretch=1)
@@ -428,13 +428,13 @@ class ConnectionIndicator(QWidget):
 
     def set_status(self, connected: Optional[bool]) -> None:
         if connected is True:
-            self._dot.setStyleSheet("font-size: 8px; color: #34C759;")
+            self._dot.setStyleSheet("background-color: #16A34A; border-radius: 3px;")
             self._lbl.setText("BD Conectada")
         elif connected is False:
-            self._dot.setStyleSheet("font-size: 8px; color: #FF3B30;")
+            self._dot.setStyleSheet("background-color: #C8102E; border-radius: 3px;")
             self._lbl.setText("Sin conexión")
         else:
-            self._dot.setStyleSheet("font-size: 8px; color: #FF9F0A;")
+            self._dot.setStyleSheet("background-color: #D97706; border-radius: 3px;")
             self._lbl.setText("Verificando…")
 
 
@@ -503,21 +503,21 @@ class MainWindow(QMainWindow):
         self._sidebar = self._build_sidebar()
         root.addWidget(self._sidebar)
 
-        # Área de contenido (header + stack) en blanco puro corporativo
+        # Área de contenido (header + stack) sobre canvas corporativo #F6F7F9
         content_wrapper = QWidget()
-        content_wrapper.setStyleSheet("background-color: #FFFFFF;")
+        content_wrapper.setStyleSheet("background-color: #F6F7F9;")
         content_wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay = QVBoxLayout(content_wrapper)
         cw_lay.setContentsMargins(0, 0, 0, 0)
         cw_lay.setSpacing(0)
 
-        # Header breadcrumb + hamburguesa
+        # Header minimalista con título, estado BD y acción primaria
         self._header = self._build_header()
         cw_lay.addWidget(self._header)
 
         # Stack de páginas con tamaño expandible
         self._stack = QStackedWidget()
-        self._stack.setStyleSheet("background-color: #FFFFFF;")
+        self._stack.setStyleSheet("background-color: #F6F7F9;")
         self._stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay.addWidget(self._stack, stretch=1)
 
@@ -530,7 +530,7 @@ class MainWindow(QMainWindow):
         sb.setStyleSheet("""
             QWidget#sidebar {
                 background-color: #FFFFFF;
-                border-right: 1px solid #E2E8F0;
+                border-right: 1px solid #E5E7EB;
             }
         """)
 
@@ -725,55 +725,73 @@ class MainWindow(QMainWindow):
         self._anim_group.start()
 
     def _build_header(self) -> QWidget:
-        """Header con breadcrumb y título de página actual.
-        SIN botón hamburguesa duplicado — el toggle del sidebar vive en la marca lateral.
-        """
+        """Header minimalista con título de vista, estado discreto de PostgreSQL y acción primaria."""
         header = QWidget()
         header.setObjectName("content_header")
-        header.setFixedHeight(52)
+        header.setFixedHeight(56)
         header.setStyleSheet("""
             QWidget#content_header {
                 background-color: #FFFFFF;
-                border-bottom: 1px solid #E2E8F0;
+                border-bottom: 1px solid #E5E7EB;
             }
         """)
 
         lay = QHBoxLayout(header)
-        lay.setContentsMargins(20, 0, 24, 0)
-        lay.setSpacing(10)
+        lay.setContentsMargins(24, 0, 24, 0)
+        lay.setSpacing(12)
 
-        # Breadcrumb — sin botón ☰ duplicado
+        # Título / Breadcrumb de la vista activa
         self._lbl_breadcrumb = QLabel("Dashboard")
         self._lbl_breadcrumb.setObjectName("breadcrumb")
         self._lbl_breadcrumb.setStyleSheet(
-            "color: #86868B; font-size: 13px; font-weight: 600;"
+            "color: #111827; font-size: 15px; font-weight: 700; letter-spacing: -0.2px; background: transparent;"
         )
         lay.addWidget(self._lbl_breadcrumb)
         lay.addStretch()
 
-        # Indicador de sesión (pequeño chip)
-        if _HAS_SESSION and _session and _session.is_authenticated:
-            _role_labels = {
-                "admin":      "ADMINISTRADOR",
-                "logistica":  "LOGÍSTICA",
-                "servicio":   "TÉCNICO",
-                "calibrador": "CALIBRADOR",
-                "inspector":  "INSPECTOR",
-                "recepcion":  "RECEPCIÓN",
+        # Píldora discreta de conexión PostgreSQL (punto semántico 6px)
+        try:
+            from ui.theme import StatusBadge, PrimaryButton
+            self._header_conn_badge = StatusBadge("Verificando BD…", dot_color="#D97706", parent=header)
+            lay.addWidget(self._header_conn_badge)
+        except Exception:
+            self._header_conn_badge = None
+
+        # Indicador de rol discreto
+        self._header_role_chip = QLabel("")
+        self._header_role_chip.setStyleSheet("""
+            background-color: #F8FAFC;
+            color: #6B7280;
+            border: 1px solid #E5E7EB;
+            font-size: 10.5px;
+            font-weight: 700;
+            border-radius: 6px;
+            padding: 4px 9px;
+            letter-spacing: 0.5px;
+        """)
+        self._header_role_chip.setVisible(False)
+        lay.addWidget(self._header_role_chip)
+
+        # Botón primario global [+ Nuevo Documento] (visible para admin/logística fuera de Generar Formatos)
+        self._btn_header_nuevo = QPushButton("+ Nuevo Documento")
+        self._btn_header_nuevo.setFixedHeight(34)
+        self._btn_header_nuevo.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_header_nuevo.setStyleSheet("""
+            QPushButton {
+                background-color: #C8102E;
+                color: #FFFFFF;
+                border: 1px solid #C8102E;
+                border-radius: 8px;
+                font-size: 12.5px;
+                font-weight: 600;
+                padding: 0 14px;
             }
-            _role_txt = _role_labels.get(_session.role, _session.role.upper())
-            role_chip = QLabel(f"  {_role_txt}  ")
-            role_chip.setStyleSheet("""
-                background-color: #F8FAFC;
-                color: #0F172A;
-                border: 1px solid #CBD5E1;
-                font-size: 10px;
-                font-weight: 700;
-                border-radius: 4px;
-                padding: 3px 8px;
-                letter-spacing: 0.5px;
-            """)
-            lay.addWidget(role_chip)
+            QPushButton:hover { background-color: #A60D26; border-color: #A60D26; }
+            QPushButton:pressed { background-color: #880B20; }
+        """)
+        self._btn_header_nuevo.clicked.connect(lambda: self.ir_a_generar_formato("OS"))
+        self._btn_header_nuevo.setVisible(False)
+        lay.addWidget(self._btn_header_nuevo)
 
         return header
 
@@ -837,7 +855,7 @@ class MainWindow(QMainWindow):
             if key in self._nav_buttons:
                 self._nav_buttons[key].setVisible(True)
 
-        # Paso 3: actualizar chip de usuario
+        # Paso 3: actualizar chip de usuario y controles de cabecera
         if _session.is_authenticated:
             _role_labels_chip = {
                 "admin":      "Administrador",
@@ -849,6 +867,22 @@ class MainWindow(QMainWindow):
             }
             _rol_display = _role_labels_chip.get(_session.role, _session.role.capitalize())
             self._user_chip.update_user(_session.nombre_completo, _rol_display)
+
+            if hasattr(self, "_header_role_chip") and self._header_role_chip is not None:
+                _role_upper = {
+                    "admin":      "ADMINISTRADOR",
+                    "logistica":  "LOGÍSTICA",
+                    "servicio":   "TÉCNICO",
+                    "calibrador": "CALIBRADOR",
+                    "inspector":  "INSPECTOR",
+                    "recepcion":  "RECEPCIÓN",
+                }.get(_session.role, _session.role.upper())
+                self._header_role_chip.setText(_role_upper)
+                self._header_role_chip.setVisible(True)
+
+            if hasattr(self, "_btn_header_nuevo") and self._btn_header_nuevo is not None:
+                can_create = "lote" in allowed
+                self._btn_header_nuevo.setVisible(can_create and self._current_key not in ("dashboard", "lote"))
 
         # Paso 4: log para trazabilidad
         try:
@@ -894,9 +928,11 @@ class MainWindow(QMainWindow):
             for k, btn in self._nav_buttons.items():
                 btn.set_active(k == key)
 
-            # Actualizar breadcrumb
+            # Actualizar breadcrumb y visibilidad del botón rápido de cabecera
             meta = self._page_meta.get(key, ("", key.replace("_", " ").title(), ""))
             self._lbl_breadcrumb.setText(meta[1])
+            if hasattr(self, "_btn_header_nuevo") and self._btn_header_nuevo is not None:
+                self._btn_header_nuevo.setVisible(("lote" in allowed) and key not in ("dashboard", "lote"))
             self.statusBar().showMessage("Listo")
             logger.debug("Navegado a: %s", key)
 
@@ -1030,12 +1066,16 @@ class MainWindow(QMainWindow):
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.setSpacing(14)
 
-        icon_char = "🚧" if (error or wip) else "⚠"
+        icon_char = "!" if (error or wip) else "i"
         lbl_icon = QLabel(icon_char)
         lbl_icon.setObjectName("placeholder_icon")
         lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lbl_icon.setStyleSheet("font-size: 52px; background: transparent;")
-        lay.addWidget(lbl_icon)
+        lbl_icon.setFixedSize(48, 48)
+        lbl_icon.setStyleSheet(
+            "font-size: 20px; font-weight: 700; color: #6B7280; "
+            "background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 24px;"
+        )
+        lay.addWidget(lbl_icon, alignment=Qt.AlignmentFlag.AlignCenter)
 
         title = key.replace("_", " ").title() if not wip else "Próximamente"
         lbl_title = QLabel(title)
@@ -1060,7 +1100,12 @@ class MainWindow(QMainWindow):
 
     def _on_folios_reseteados(self) -> None:
         """Refresca el dashboard tras un reset de folios de prueba."""
-        self.statusBar().showMessage("✅  Folios reiniciados. Dashboard actualizado.", 6000)
+        self.statusBar().showMessage("Folios reiniciados. Dashboard actualizado.", 6000)
+        try:
+            from ui.theme import show_toast
+            show_toast(self, "Folios reiniciados y Dashboard actualizado.", level="success")
+        except Exception:
+            pass
         if "dashboard" in self._pages:
             dash = self._pages["dashboard"]
             if hasattr(dash, "refresh"):
@@ -1141,11 +1186,21 @@ class MainWindow(QMainWindow):
                 dash.refresh()
         self._navigate("dashboard")
 
+    def _sync_conn_widgets(self, connected: Optional[bool]) -> None:
+        self._conn_indicator.set_status(connected)
+        if hasattr(self, "_header_conn_badge") and self._header_conn_badge is not None:
+            if connected is True:
+                self._header_conn_badge.set_status("PostgreSQL Conectado", "#16A34A")
+            elif connected is False:
+                self._header_conn_badge.set_status("Modo Offline", "#D97706")
+            else:
+                self._header_conn_badge.set_status("Verificando BD…", "#D97706")
+
     def _test_connection(self) -> None:
         from database.connection import db_pool
-        self._conn_indicator.set_status(None)
+        self._sync_conn_widgets(None)
         ok = db_pool.test_connection()
-        self._conn_indicator.set_status(ok)
+        self._sync_conn_widgets(ok)
         if ok:
             ver = db_pool.get_server_version()
             QMessageBox.information(self, "Conexión Exitosa",
@@ -1170,9 +1225,9 @@ class MainWindow(QMainWindow):
         try:
             from database.connection import db_pool
             ok = db_pool.test_connection()
-            self._conn_indicator.set_status(ok)
+            self._sync_conn_widgets(ok)
         except Exception:
-            self._conn_indicator.set_status(False)
+            self._sync_conn_widgets(False)
 
     # ── Cerrar Sesión ─────────────────────────────────────────────────────────
 

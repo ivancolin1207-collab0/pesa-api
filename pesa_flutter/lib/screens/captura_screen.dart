@@ -10,6 +10,8 @@ import '../services/local_db_service.dart';
 import '../services/sync_service.dart';
 import '../services/tipo_servicio_rules.dart';
 import '../services/metrology_helper.dart';
+import '../theme/pesa_theme.dart';
+import '../widgets/pesa_components.dart';
 import '../widgets/repetibilidad_table.dart';
 import '../widgets/excentricidad_table.dart';
 import '../widgets/exactitud_table.dart';
@@ -216,6 +218,9 @@ class _CapturaScreenState extends State<CapturaScreen>
   void initState() {
     super.initState();
     _tabCtrl = TabController(length: 4, vsync: this);
+    _tabCtrl.addListener(() {
+      if (mounted) setState(() {});
+    });
     _os = Map<String, dynamic>.from(widget.osData);
     _divMinCtrl.addListener(() {
       if (mounted) setState(() {});
@@ -1069,36 +1074,45 @@ class _CapturaScreenState extends State<CapturaScreen>
         bottom: false,
         child: Scaffold(
           resizeToAvoidBottomInset: true,
-          backgroundColor: const Color(0xFFF5F5F7),
+          backgroundColor: PesaColors.canvas,
           appBar: AppBar(
-            backgroundColor: _kDark,
-            foregroundColor: Colors.white,
+            backgroundColor: PesaColors.surface,
+            foregroundColor: PesaColors.textPrimary,
+            elevation: 0,
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back),
+              icon: const Icon(Icons.arrow_back_rounded),
               onPressed: () async {
                 await _mostrarDialogoSalida(context);
               },
             ),
             title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(folio, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 17)),
-              Text(_os['cliente'] ?? '',
-                  style: const TextStyle(fontSize: 11, color: Colors.white70)),
+              Text(
+                folio,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16.5,
+                  color: PesaColors.textPrimary,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ),
+              Text(
+                _os['cliente'] ?? '',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary),
+              ),
             ]),
             actions: [
-              TextButton.icon(
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.white,
-                  backgroundColor: Colors.white.withValues(alpha: 0.12),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                icon: const Icon(Icons.save_outlined, size: 16),
-                label: const Text('Borrador', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                onPressed: () => _guardarBorrador(mostrarSnackbar: true),
-              ),
-              const SizedBox(width: 8),
               Padding(
-                padding: const EdgeInsets.only(right: 14),
+                padding: const EdgeInsets.only(right: 6),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () => _guardarBorrador(mostrarSnackbar: true),
+                  child: PesaDraftIndicator(saving: _saving || _savingParcial),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
                 child: Center(
                   child: SyncCheckBadge(
                     status: (_os['sync_check_status'] as String?) ?? 'RECIBIDA_TABLET',
@@ -1109,20 +1123,49 @@ class _CapturaScreenState extends State<CapturaScreen>
                 ),
               ),
             ],
-            bottom: TabBar(
-              controller: _tabCtrl,
-              indicatorColor: Colors.white,
-              labelColor: Colors.white,
-              unselectedLabelColor: Colors.white60,
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
-              tabs: const [
-                Tab(text: 'Instrumento',   icon: Icon(Icons.scale,              size: 16)),
-                Tab(text: 'Repetibilidad', icon: Icon(Icons.repeat,             size: 16)),
-                Tab(text: 'Excentricidad', icon: Icon(Icons.center_focus_weak,  size: 16)),
-                Tab(text: 'Exactitud',     icon: Icon(Icons.straighten,         size: 16)),
-              ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(88),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Divider(height: 1, color: PesaColors.divider),
+                  PesaStepProgressBar(
+                    currentStep: _tabCtrl.index + 1,
+                    totalSteps: 4,
+                    stepLabel: const [
+                      'Paso 1 de 4 · Datos del Equipo',
+                      'Paso 2 de 4 · Repetibilidad',
+                      'Paso 3 de 4 · Excentricidad',
+                      'Paso 4 de 4 · Exactitud y Cierre',
+                    ][_tabCtrl.index.clamp(0, 3)],
+                  ),
+                  Container(
+                    decoration: const BoxDecoration(
+                      color: PesaColors.surface,
+                      border: Border(
+                        top: BorderSide(color: PesaColors.divider),
+                        bottom: BorderSide(color: PesaColors.border),
+                      ),
+                    ),
+                    child: TabBar(
+                      controller: _tabCtrl,
+                      indicatorColor: _kRed,
+                      indicatorWeight: 2.5,
+                      labelColor: _kRed,
+                      unselectedLabelColor: PesaColors.textSecondary,
+                      isScrollable: true,
+                      tabAlignment: TabAlignment.start,
+                      labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+                      tabs: const [
+                        Tab(text: '1. Equipo'),
+                        Tab(text: '2. Repetibilidad'),
+                        Tab(text: '3. Excentricidad'),
+                        Tab(text: '4. Exactitud'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
           body: TabBarView(
@@ -1156,27 +1199,9 @@ class _CapturaScreenState extends State<CapturaScreen>
           children: [
             const Expanded(child: _SectionTitle('Identificación del Instrumento')),
             if (_historialInstrumentos.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(Icons.bolt_rounded, size: 13, color: Color(0xFF1D4ED8)),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Autocompletado (${_historialInstrumentos.length} eq.)',
-                      style: const TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                        color: Color(0xFF1D4ED8),
-                      ),
-                    ),
-                  ],
-                ),
+              PesaStatusBadge(
+                label: 'Autocompletado (${_historialInstrumentos.length} eq.)',
+                dotColor: PesaColors.dotGreen,
               ),
           ],
         ),
@@ -1857,21 +1882,27 @@ class _CapturaScreenState extends State<CapturaScreen>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            color: _aplExc ? Colors.green.shade50 : Colors.orange.shade50,
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          Container(
+            decoration: const BoxDecoration(
+              color: PesaColors.surface,
+              border: Border(bottom: BorderSide(color: PesaColors.border)),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(children: [
-              Icon(_aplExc ? Icons.check_circle_outline : Icons.info_outline,
-                  size: 16,
-                  color: _aplExc ? Colors.green.shade700 : Colors.orange.shade700),
+              PesaSemanticDot(
+                color: _aplExc ? PesaColors.dotGreen : PesaColors.dotAmber,
+                size: 6,
+              ),
               const SizedBox(width: 8),
               Expanded(child: Text(
                 _aplExc
                     ? 'Prueba de Excentricidad activa — captura los valores de cada posición.'
                     : 'Excentricidad marcada como No Aplica.',
-                style: TextStyle(fontSize: 12,
-                    color: _aplExc ? Colors.green.shade800 : Colors.orange.shade800),
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w500,
+                  color: PesaColors.textPrimary,
+                ),
               )),
               if (!_aplExc)
                 TextButton.icon(

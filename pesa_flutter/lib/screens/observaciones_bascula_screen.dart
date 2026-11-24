@@ -28,7 +28,9 @@ import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/nombre_recibe.dart';
+import '../widgets/pesa_components.dart';
 import '../widgets/signature_shield.dart';
 
 class ObservacionesBasculaScreen extends StatefulWidget {
@@ -40,8 +42,8 @@ class ObservacionesBasculaScreen extends StatefulWidget {
 }
 
 class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen> {
-  static const Color _pesaRed = Color(0xFFB81D24);
-  static const Color _pesaDark = Color(0xFF1D1D1F);
+  static const Color _pesaRed = PesaColors.brand;
+  static const Color _pesaDark = PesaColors.textPrimary;
 
   static const Map<int, String> _checklistLabels = {
     1: 'Charola / Plato / Cubierta (Sin golpes, deformaciones ni corrosión)',
@@ -1199,13 +1201,17 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
         await _guardarBorradorLocal();
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFFF3F4F6),
+        backgroundColor: PesaColors.canvas,
         appBar: AppBar(
-          backgroundColor: _pesaDark,
-          foregroundColor: Colors.white,
-          elevation: 2,
+          backgroundColor: PesaColors.surface,
+          foregroundColor: PesaColors.textPrimary,
+          elevation: 0,
+          bottom: const PreferredSize(
+            preferredSize: Size.fromHeight(1),
+            child: Divider(height: 1, color: PesaColors.border),
+          ),
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back),
+            icon: const Icon(Icons.arrow_back_rounded),
             onPressed: () async {
               await _guardarBorradorLocal();
               if (context.mounted) {
@@ -1214,61 +1220,55 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
             },
           ),
           title: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Inspección y Revisión ($folio)',
-                    style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    'FORMATO DE INSPECCIÓN Y REVISIÓN DE BÁSCULAS · $fechaHoyFmt',
-                    style: const TextStyle(fontSize: 10.5, color: Colors.white70),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Inspección y Revisión ($folio)',
+                      style: const TextStyle(
+                        fontSize: 15.5,
+                        fontWeight: FontWeight.w700,
+                        color: PesaColors.textPrimary,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      'OSOB · $fechaHoyFmt',
+                      style: const TextStyle(fontSize: 11, color: PesaColors.textSecondary),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: _pesaRed,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: Colors.white38, width: 0.8),
-              ),
-              child: const Text(
-                'OSOB DIGITAL',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 10.5,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: 0.4,
+              const SizedBox(width: 6),
+              const PesaStatusBadge(label: 'OSOB', dotColor: PesaColors.brand),
+            ],
+          ),
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 12),
+              child: Center(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () async {
+                    await _guardarBorradorSilencioso();
+                    if (!mounted) return;
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Borrador OSOB guardado localmente'),
+                        duration: Duration(seconds: 2),
+                      ),
+                    );
+                  },
+                  child: PesaDraftIndicator(saving: _guardando || _guardandoParcial),
                 ),
               ),
             ),
           ],
         ),
-        actions: [
-          TextButton.icon(
-            onPressed: () async {
-              await _guardarBorradorSilencioso();
-              if (!mounted) return;
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Borrador OSOB guardado localmente'),
-                  duration: Duration(seconds: 2),
-                ),
-              );
-            },
-            icon: const Icon(Icons.save_outlined, color: Colors.white, size: 18),
-            label: const Text('Borrador', style: TextStyle(color: Colors.white, fontSize: 12)),
-          ),
-        ],
-      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 32),
         child: Column(

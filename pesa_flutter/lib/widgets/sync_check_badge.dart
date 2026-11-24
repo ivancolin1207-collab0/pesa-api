@@ -26,7 +26,7 @@ class SyncCheckInfo {
     statusKey: 'ASIGNADA',
     checkSymbols: '✓',
     checkCount: 1,
-    color: Color(0xFF475569),
+    color: Color(0xFFC8102E),
     backgroundColor: Color(0xFFF8FAFC),
     label: 'Asignada',
     title: 'Asignada en Servidor',
@@ -37,7 +37,7 @@ class SyncCheckInfo {
     statusKey: 'RECIBIDA_TABLET',
     checkSymbols: '✓✓',
     checkCount: 2,
-    color: Color(0xFF334155),
+    color: Color(0xFFD97706),
     backgroundColor: Color(0xFFF8FAFC),
     label: 'En Tablet',
     title: 'Recibida en Tablet / Offline',
@@ -48,7 +48,7 @@ class SyncCheckInfo {
     statusKey: 'SUBIDA_SERVIDOR',
     checkSymbols: '✓✓',
     checkCount: 2,
-    color: Color(0xFF0F172A),
+    color: Color(0xFF16A34A),
     backgroundColor: Color(0xFFF8FAFC),
     label: 'Enviada',
     title: 'Enviada al Servidor / Concluida',
@@ -59,7 +59,7 @@ class SyncCheckInfo {
     statusKey: 'AUDITADA_ADMIN',
     checkSymbols: '✓✓',
     checkCount: 2,
-    color: Color(0xFF0F172A),
+    color: Color(0xFF16A34A),
     backgroundColor: Color(0xFFF8FAFC),
     label: 'Abierto',
     title: 'Abierto en Windows',
@@ -133,7 +133,7 @@ class SyncCheckBadge extends StatelessWidget {
           padding: padding,
           decoration: BoxDecoration(
             color: info.backgroundColor,
-            borderRadius: BorderRadius.circular(4),
+            borderRadius: BorderRadius.circular(6),
             border: Border.all(
               color: const Color(0xFFCBD5E1),
               width: 1,
@@ -143,16 +143,23 @@ class SyncCheckBadge extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              _buildCheckIcons(info),
+              Container(
+                width: 6,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: info.color,
+                  shape: BoxShape.circle,
+                ),
+              ),
               if (showLabel) ...[
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 Text(
                   info.label,
                   style: TextStyle(
-                    color: info.color,
+                    color: const Color(0xFF111827),
                     fontSize: fontSize,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.2,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.1,
                   ),
                 ),
               ],

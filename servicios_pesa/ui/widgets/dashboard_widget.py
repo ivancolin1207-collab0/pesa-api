@@ -306,30 +306,47 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
 
     return f"{'-'.join(partes)}.pdf"
 
-# -- Paleta Corporativa Minimalista Básculas PESA -----------------------------
-_BG       = "#FFFFFF"   # Fondo principal blanco puro
-_WHITE    = "#FFFFFF"
-_DARK     = "#0F172A"   # Texto primario negro carbón
-_GRAY     = "#475569"   # Texto secundario pizarra
-_LGRAY    = "#94A3B8"   # Placeholder / hint
+# -- Paleta Corporativa Minimalista Básculas PESA v3.2 ------------------------
+_BG       = "#F6F7F9"   # Canvas principal gris muy suave
+_WHITE    = "#FFFFFF"   # Tarjetas, tablas y formularios
+_DARK     = "#111827"   # Texto primario
+_GRAY     = "#6B7280"   # Texto secundario
+_LGRAY    = "#9CA3AF"   # Placeholder / hint
 _RED      = "#C8102E"   # Rojo Corporativo Básculas PESA
-_RED2     = "#A50D26"   # Rojo hover
-_BORDER   = "#E2E8F0"   # Borde fino 1px
-_SEP      = "#F1F5F9"   # Separador ultra fino
+_RED2     = "#A60D26"   # Rojo hover
+_BORDER   = "#E5E7EB"   # Borde fino 1px
+_SEP      = "#F3F4F6"   # Separador horizontal entre filas
 _SEG_BG   = "#F8FAFC"   # Superficie secundaria ultra clara
+
+try:
+    from ui.theme import (
+        LinearProgressBar as _LinearProgressBar,
+        OverflowMenuButton as _OverflowMenuButton,
+        show_toast as _show_toast,
+        BTN_TABLE_PRIMARY_QSS as _BTN_TBL_PRI_QSS,
+        BTN_TABLE_SECONDARY_QSS as _BTN_TBL_SEC_QSS,
+        MENU_QSS as _THEME_MENU_QSS,
+    )
+except Exception:
+    _LinearProgressBar = None
+    _OverflowMenuButton = None
+    _show_toast = None
+    _BTN_TBL_PRI_QSS = ""
+    _BTN_TBL_SEC_QSS = ""
+    _THEME_MENU_QSS = ""
 
 # Diccionario monocromático sobrio para tipos de servicio (cero colores pastel/IA)
 COLOR_TIPO_SERVICIO = {
-    'Observaciones Celda': '#0F172A',
-    'OSOCC': '#0F172A',
-    'Observaciones Celda (OSOCC)': '#0F172A',
-    'Formato de Diagnóstico y Revisión de Celda de Carga': '#0F172A',
-    'Observaciones': '#0F172A',
-    'Inspección': '#0F172A',
-    'OSOB': '#0F172A',
-    'Observaciones (OSOB)': '#0F172A',
-    'Inspección y Revisión de Básculas (OSOB)': '#0F172A',
-    'Formato de Inspección y Revisión de Básculas': '#0F172A',
+    'Observaciones Celda': '#111827',
+    'OSOCC': '#111827',
+    'Observaciones Celda (OSOCC)': '#111827',
+    'Formato de Diagnóstico y Revisión de Celda de Carga': '#111827',
+    'Observaciones': '#111827',
+    'Inspección': '#111827',
+    'OSOB': '#111827',
+    'Observaciones (OSOB)': '#111827',
+    'Inspección y Revisión de Básculas (OSOB)': '#111827',
+    'Formato de Inspección y Revisión de Básculas': '#111827',
 }
 
 
@@ -459,17 +476,23 @@ class WordWrapTextDelegate(QStyledItemDelegate):
 # Delegate para badges de estado (pintado directo con QPainter)
 # =============================================================================
 class StatusBadgeDelegate(QStyledItemDelegate):
-    """Pinta etiquetas monocromáticas sobrias Básculas PESA (#F8FAFC / #CBD5E1 / #0F172A)."""
+    """Pinta etiquetas corporativas neutras (#F8FAFC / #CBD5E1 / #111827) con punto semántico 6px solo en estatus."""
 
-    _ACTIVE_TOKENS = ("proceso", "pend", "sin tipo", "pending")
-
-    def _resolve_colors(self, text: str) -> tuple[str, str, str, bool]:
+    def _resolve_colors(self, text: str, col_idx: int = -1) -> tuple[str, str, str, Optional[str]]:
+        """Retorna (bg_hex, fg_hex, border_hex, dot_hex_or_None)."""
         lower = str(text or "").strip().lower()
+        # Solo la columna ESTATUS (col 8) lleva punto semántico de 6px; servicio/modalidad son neutros.
+        if col_idx != 8:
+            return ("#F8FAFC", "#111827", "#E5E7EB", None)
         if "cancel" in lower:
-            return ("#FFFFFF", "#C8102E", "#C8102E", True)
-        if any(tok in lower for tok in self._ACTIVE_TOKENS):
-            return ("#F8FAFC", "#334155", "#94A3B8", True)
-        return ("#F8FAFC", "#0F172A", "#CBD5E1", False)
+            return ("#F8FAFC", "#C8102E", "#CBD5E1", "#C8102E")
+        if "pend" in lower or "sin tipo" in lower or "asig" in lower:
+            return ("#F8FAFC", "#111827", "#CBD5E1", "#C8102E")
+        if "proceso" in lower:
+            return ("#F8FAFC", "#111827", "#CBD5E1", "#D97706")
+        if any(tok in lower for tok in ("cerrad", "complet", "escan", "finaliz", "terminad", "firmad")):
+            return ("#F8FAFC", "#111827", "#CBD5E1", "#16A34A")
+        return ("#F8FAFC", "#111827", "#CBD5E1", "#6B7280")
 
     def _abbreviate(self, text: str) -> str:
         """Mantiene textos legibles y sin truncamiento dentro de la etiqueta."""
@@ -499,8 +522,9 @@ class StatusBadgeDelegate(QStyledItemDelegate):
             super().paint(painter, option, index)
             return
 
+        from PyQt6.QtCore import QRectF as _QRectF
         display = self._abbreviate(str(text))
-        bg_hex, fg_hex, brd_hex, has_dot = self._resolve_colors(display)
+        bg_hex, fg_hex, brd_hex, dot_hex = self._resolve_colors(display, index.column())
         bg_color = QColor(bg_hex)
         fg_color = QColor(fg_hex)
         brd_color = QColor(brd_hex)
@@ -508,16 +532,15 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Fondo limpio de la celda (blanco puro / gris ultra sutil en hover; cero tintes rosados)
         if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
             painter.fillRect(option.rect, QColor("#F8FAFC"))
         else:
             painter.fillRect(option.rect, QColor("#FFFFFF"))
 
         padding_h = 8
-        padding_v = 3
+        padding_v = 4
         margin    = 4
-        dot_space = 10 if has_dot else 0
+        dot_space = 11 if dot_hex else 0
 
         font = QFont(option.font)
         font.setWeight(QFont.Weight.DemiBold)
@@ -528,7 +551,7 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         text_w = fm.horizontalAdvance(display)
         text_h = fm.height()
 
-        badge_w = int(min(text_w + padding_h * 2 + dot_space, option.rect.width() - margin * 2))
+        badge_w = int(min(text_w + padding_h * 2 + dot_space, max(20, option.rect.width() - margin * 2)))
         badge_h = int(text_h + padding_v * 2)
         badge_x = int(option.rect.x() + margin)
         badge_y = int(option.rect.y() + (option.rect.height() - badge_h) // 2)
@@ -537,21 +560,20 @@ class StatusBadgeDelegate(QStyledItemDelegate):
 
         path = QPainterPath()
         path.addRoundedRect(
-            float(badge_rect.x()), float(badge_rect.y()),
-            float(badge_rect.width()), float(badge_rect.height()),
-            4.0, 4.0
+            _QRectF(float(badge_rect.x()), float(badge_rect.y()),
+                    float(badge_rect.width()), float(badge_rect.height())),
+            6.0, 6.0
         )
         painter.fillPath(path, QBrush(bg_color))
         painter.setPen(QPen(brd_color, 1.0))
         painter.drawPath(path)
 
-        if has_dot:
-            from PyQt6.QtCore import QRectF as _QRectF
+        if dot_hex:
             dot_x = float(badge_rect.x() + padding_h)
-            dot_y = float(badge_rect.y()) + (float(badge_rect.height()) - 5.0) / 2.0
+            dot_y = float(badge_rect.y()) + (float(badge_rect.height()) - 6.0) / 2.0
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor("#C8102E"))
-            painter.drawEllipse(_QRectF(dot_x, dot_y, 5.0, 5.0))
+            painter.setBrush(QColor(dot_hex))
+            painter.drawEllipse(_QRectF(dot_x, dot_y, 6.0, 6.0))
 
         painter.setPen(fg_color)
         draw_rect = badge_rect.adjusted(padding_h + dot_space, 0, -padding_h, 0)
@@ -566,58 +588,59 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         font = QFont(option.font)
         font.setPointSizeF(8.5)
         fm = QFontMetrics(font)
-        w = fm.horizontalAdvance(str(text)) + 24
-        return QSize(max(w, 150), 44)
+        w = fm.horizontalAdvance(str(text)) + 28
+        return QSize(max(w, 130), 46)
 
 
 # =============================================================================
-# Delegate para checks de sincronizacion y trazabilidad (estilo WhatsApp)
+# Delegate para checks de sincronizacion y trazabilidad (punto semántico 6px)
 # =============================================================================
 class SyncCheckDelegate(QStyledItemDelegate):
     """
-    Renderiza visualmente el estado de sincronizacion tipo WhatsApp como pildoras redondeadas:
-      - ASIGNADA:        ✓ Gris  (#616161) — Asignada en Servidor
-      - RECIBIDA_TABLET: ✓✓ Gris (#616161) — Recibida en Tablet / En campo
-      - SUBIDA_SERVIDOR: ✓✓ Azul (#1565C0) — Enviada al Servidor / Concluida
-      - AUDITADA_ADMIN:  ✓✓ Verde (#2E7D32) — Abierto por Administración
+    Renderiza visualmente el estado de sincronización como etiqueta neutra
+    (#F8FAFC / #CBD5E1 / #111827) con punto semántico circular de 6px:
+      - ASIGNADA:        punto rojo #C8102E   — Asignada en Servidor
+      - RECIBIDA_TABLET: punto ámbar #D97706  — Recibida en Tablet / En campo
+      - SUBIDA_SERVIDOR: punto verde #16A34A  — Recibida en Servidor / Concluida
+      - AUDITADA_ADMIN:  punto verde #16A34A  — Abierto por Administración
     """
     _CONFIG = {
         "ASIGNADA": {
-            "symbol": "✓",
             "text": "Asignada",
-            "fg": "#334155",
+            "dot": "#C8102E",
+            "fg": "#111827",
             "bg": "#F8FAFC",
             "border": "#CBD5E1",
             "tooltip": "Asignada en Servidor (Pendiente de descarga en tablet)",
         },
         "RECIBIDA_TABLET": {
-            "symbol": "✓✓",
             "text": "En tablet",
-            "fg": "#334155",
+            "dot": "#D97706",
+            "fg": "#111827",
             "bg": "#F8FAFC",
             "border": "#CBD5E1",
             "tooltip": "Recibida en Tablet / Tomada en campo offline",
         },
         "SUBIDA_SERVIDOR": {
-            "symbol": "✓✓",
             "text": "Recibida",
-            "fg": "#0F172A",
+            "dot": "#16A34A",
+            "fg": "#111827",
             "bg": "#F8FAFC",
             "border": "#CBD5E1",
             "tooltip": "Recibida en Servidor / Concluida con PDF",
         },
         "RECIBIDA_SERVIDOR": {
-            "symbol": "✓✓",
             "text": "Recibida",
-            "fg": "#0F172A",
+            "dot": "#16A34A",
+            "fg": "#111827",
             "bg": "#F8FAFC",
             "border": "#CBD5E1",
             "tooltip": "Recibida en Servidor / Concluida con PDF",
         },
         "AUDITADA_ADMIN": {
-            "symbol": "✓✓",
             "text": "Abierto",
-            "fg": "#0F172A",
+            "dot": "#16A34A",
+            "fg": "#111827",
             "bg": "#F8FAFC",
             "border": "#CBD5E1",
             "tooltip": "Abierto por Administración / Oficina en Windows",
@@ -635,6 +658,7 @@ class SyncCheckDelegate(QStyledItemDelegate):
         return self._CONFIG["ASIGNADA"]
 
     def paint(self, painter: QPainter, option: QStyleOptionViewItem, index) -> None:
+        from PyQt6.QtCore import QRectF as _QRectF
         raw_val = index.data(Qt.ItemDataRole.UserRole) or index.data(Qt.ItemDataRole.DisplayRole)
         cfg = self._get_cfg(str(raw_val or ""))
 
@@ -646,11 +670,11 @@ class SyncCheckDelegate(QStyledItemDelegate):
         else:
             painter.fillRect(option.rect, QColor("#FFFFFF"))
 
-        symbol = cfg["symbol"]
-        text   = cfg["text"]
-        fg_col = QColor(cfg["fg"])
-        bg_col = QColor(cfg["bg"])
-        brd_col= QColor(cfg["border"])
+        text    = cfg["text"]
+        dot_col = QColor(cfg["dot"])
+        fg_col  = QColor(cfg["fg"])
+        bg_col  = QColor(cfg["bg"])
+        brd_col = QColor(cfg["border"])
 
         font = QFont(option.font)
         font.setPixelSize(11)
@@ -658,15 +682,15 @@ class SyncCheckDelegate(QStyledItemDelegate):
         painter.setFont(font)
         fm = QFontMetrics(font)
 
-        label_full = f"{symbol} {text}"
-        tw = fm.horizontalAdvance(label_full)
+        tw = fm.horizontalAdvance(text)
         th = fm.height()
 
-        padding_h = 7
-        padding_v = 3
+        padding_h = 8
+        padding_v = 4
         margin    = 4
+        dot_space = 11
 
-        badge_w = int(min(tw + padding_h * 2, option.rect.width() - margin * 2))
+        badge_w = int(min(tw + padding_h * 2 + dot_space, max(24, option.rect.width() - margin * 2)))
         badge_h = int(th + padding_v * 2)
         badge_x = int(option.rect.x() + margin)
         badge_y = int(option.rect.y() + (option.rect.height() - badge_h) // 2)
@@ -675,22 +699,28 @@ class SyncCheckDelegate(QStyledItemDelegate):
 
         path = QPainterPath()
         path.addRoundedRect(
-            float(badge_rect.x()), float(badge_rect.y()),
-            float(badge_rect.width()), float(badge_rect.height()),
-            4.0, 4.0
+            _QRectF(float(badge_rect.x()), float(badge_rect.y()),
+                    float(badge_rect.width()), float(badge_rect.height())),
+            6.0, 6.0
         )
         painter.fillPath(path, QBrush(bg_col))
         painter.setPen(QPen(brd_col, 1.0))
         painter.drawPath(path)
 
+        dot_x = float(badge_rect.x() + padding_h)
+        dot_y = float(badge_rect.y()) + (float(badge_rect.height()) - 6.0) / 2.0
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(dot_col)
+        painter.drawEllipse(_QRectF(dot_x, dot_y, 6.0, 6.0))
+
         painter.setPen(fg_col)
-        draw_rect = badge_rect.adjusted(padding_h, 0, -padding_h, 0)
-        painter.drawText(draw_rect, Qt.AlignmentFlag.AlignCenter, label_full)
+        draw_rect = badge_rect.adjusted(padding_h + dot_space, 0, -padding_h, 0)
+        painter.drawText(draw_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
 
         painter.restore()
 
     def sizeHint(self, option: QStyleOptionViewItem, index) -> QSize:
-        return QSize(100, 44)
+        return QSize(96, 46)
 
 
 # =============================================================================
@@ -828,23 +858,24 @@ class QuickEditOSDialog(QDialog):
 # =============================================================================
 class KPICard(QFrame):
     """
-    Tarjeta KPI Corporativa Minimalista Básculas PESA:
-    Fondo blanco puro (#FFFFFF), borde 1px solid #E2E8F0, línea de acento superior de 3px.
+    Tarjeta KPI Corporativa Minimalista Básculas PESA (clic para filtrar rápido):
+    Fondo blanco puro (#FFFFFF), borde 1px solid #E5E7EB, radio 12px,
+    indicador discreto activo en #C8102E al seleccionarse como filtro rápido.
     """
 
+    clicked = pyqtSignal(str)
+
     def __init__(self, title: str, value: str, subtitle: str = "",
-                 value_color: str = "#0F172A", accent_color: str = "#C8102E", parent=None):
+                 value_color: str = "#111827", accent_color: str = "#C8102E",
+                 filter_key: str = "", dot_color: Optional[str] = None, parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
         self._value_color = value_color
+        self._accent_color = accent_color
+        self._filter_key = filter_key
+        self._active = False
         self.setObjectName("kpi_card")
-        self.setStyleSheet(f"""
-            QFrame#kpi_card {{
-                background: #FFFFFF;
-                border: 1px solid #E2E8F0;
-                border-top: 3px solid {accent_color};
-                border-radius: 10px;
-            }}
-        """)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setToolTip(f"Filtrar tabla por: {title}")
 
         self.setMinimumSize(140, 96)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -853,18 +884,37 @@ class KPICard(QFrame):
         lay.setContentsMargins(18, 14, 18, 14)
         lay.setSpacing(4)
 
+        head_row = QHBoxLayout()
+        head_row.setContentsMargins(0, 0, 0, 0)
+        head_row.setSpacing(6)
+
+        if dot_color:
+            dot = QLabel()
+            dot.setFixedSize(6, 6)
+            dot.setStyleSheet(f"background-color: {dot_color}; border-radius: 3px; border: none;")
+            head_row.addWidget(dot)
+
         lbl_title = QLabel(title.upper())
         lbl_title.setObjectName("kpi_title")
         lbl_title.setStyleSheet(
-            "font-size: 10.5px; font-weight: 700; color: #475569; "
+            "font-size: 10.5px; font-weight: 700; color: #6B7280; "
             "letter-spacing: 0.6px; background: transparent; border: none;"
         )
-        lay.addWidget(lbl_title)
+        head_row.addWidget(lbl_title)
+        head_row.addStretch()
+
+        self._lbl_active_tag = QLabel("Activo")
+        self._lbl_active_tag.setStyleSheet(
+            "font-size: 10px; font-weight: 700; color: #C8102E; background: transparent; border: none;"
+        )
+        self._lbl_active_tag.setVisible(False)
+        head_row.addWidget(self._lbl_active_tag)
+        lay.addLayout(head_row)
 
         self.lbl_value = QLabel(value)
         self.lbl_value.setObjectName("kpi_value")
         self.lbl_value.setStyleSheet(
-            f"font-size: 27px; font-weight: 700; color: {value_color}; "
+            f"font-size: 28px; font-weight: 700; color: {value_color}; "
             "letter-spacing: -0.5px; background: transparent; border: none;"
         )
         lay.addWidget(self.lbl_value)
@@ -873,11 +923,48 @@ class KPICard(QFrame):
             lbl_sub = QLabel(subtitle)
             lbl_sub.setObjectName("kpi_subtitle")
             lbl_sub.setStyleSheet(
-                "font-size: 11px; color: #64748B; font-weight: 400; background: transparent; border: none;"
+                "font-size: 11px; color: #9CA3AF; font-weight: 400; background: transparent; border: none;"
             )
             lay.addWidget(lbl_sub)
 
         lay.addStretch()
+        self._apply_card_style()
+
+    def _apply_card_style(self) -> None:
+        if self._active:
+            self.setStyleSheet("""
+                QFrame#kpi_card {
+                    background: #FFFFFF;
+                    border: 1.5px solid #C8102E;
+                    border-radius: 12px;
+                }
+                QFrame#kpi_card:hover {
+                    background: #F8FAFC;
+                }
+            """)
+        else:
+            self.setStyleSheet("""
+                QFrame#kpi_card {
+                    background: #FFFFFF;
+                    border: 1px solid #E5E7EB;
+                    border-radius: 12px;
+                }
+                QFrame#kpi_card:hover {
+                    background: #F8FAFC;
+                    border-color: #CBD5E1;
+                }
+            """)
+        if hasattr(self, "_lbl_active_tag"):
+            self._lbl_active_tag.setVisible(self._active and self._filter_key not in ("", "all"))
+
+    def set_active(self, active: bool) -> None:
+        self._active = bool(active)
+        self._apply_card_style()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._filter_key)
+        super().mousePressEvent(event)
 
     def set_value(self, value: str) -> None:
         self.lbl_value.setText(value)
@@ -1339,7 +1426,7 @@ class EditarActividadDialog(QDialog):
         self._folio  = folio
         self._tecnicos: list[tuple[int, str]] = []
 
-        self.setWindowTitle(f"📅  Editar Actividad  —  {folio}")
+        self.setWindowTitle(f"Editar Actividad — {folio}")
         self.setMinimumWidth(480)
         self.setModal(True)
 
@@ -1363,7 +1450,7 @@ class EditarActividadDialog(QDialog):
             "}"
         )
 
-        title = QLabel(f"📅  Actividad — {self._folio}")
+        title = QLabel(f"Actividad — {self._folio}")
         title.setStyleSheet(
             "font-size: 15px; font-weight: 700; color: #1D1D1F;"
             " background: transparent;"
@@ -1433,7 +1520,7 @@ class EditarActividadDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
 
-        self._btn_save = QPushButton("💾  Guardar Actividad")
+        self._btn_save = QPushButton("Guardar Actividad")
         self._btn_save.setFixedHeight(36)
         self._btn_save.setStyleSheet(
             "QPushButton { background:#C8102E; color:#FFFFFF; border:none;"
@@ -1558,7 +1645,7 @@ class EditarActividadDialog(QDialog):
             )
         finally:
             self._btn_save.setEnabled(True)
-            self._btn_save.setText("💾  Guardar Actividad")
+            self._btn_save.setText("Guardar Actividad")
 
 
 # =============================================================================
@@ -1580,7 +1667,7 @@ class _SearchWorker(QThread):
             _asegurar_columnas_correo_bd_sync(conn)
             like_val = f"%{self.search_text}%"
             tec_clause = "AND os.id_tecnico = %s" if self.tec_id_filter is not None else ""
-            params_list = [like_val, like_val, like_val, like_val, like_val, like_val, like_val]
+            params_list = [like_val] * 10
             if self.tec_id_filter is not None:
                 params_list.append(self.tec_id_filter)
 
@@ -1628,13 +1715,16 @@ class _SearchWorker(QThread):
                     LEFT JOIN cat_tipo_servicio  ts  ON os.id_tipo_servicio = ts.id
                     LEFT JOIN cliente_sucursales suc ON os.sucursal_id      = suc.id
                     WHERE (
-                        os.folio_os                ILIKE %s OR
-                        cl.razon_social            ILIKE %s OR
-                        suc.nombre_sucursal        ILIKE %s OR
-                        COALESCE(os.marca, '')     ILIKE %s OR
-                        COALESCE(os.modelo, '')    ILIKE %s OR
-                        COALESCE(os.ns, '')        ILIKE %s OR
-                        COALESCE(os.id_equipo::text, '') ILIKE %s
+                        os.folio_os                      ILIKE %s OR
+                        cl.razon_social                  ILIKE %s OR
+                        suc.nombre_sucursal              ILIKE %s OR
+                        COALESCE(tc.nombre_completo, '') ILIKE %s OR
+                        COALESCE(os.marca, '')           ILIKE %s OR
+                        COALESCE(os.modelo, '')          ILIKE %s OR
+                        COALESCE(os.ns, '')              ILIKE %s OR
+                        COALESCE(os.id_equipo::text, '') ILIKE %s OR
+                        COALESCE(os.numero_cca, '')      ILIKE %s OR
+                        COALESCE(os.numero_dve, '')      ILIKE %s
                     )
                     {tec_clause}
                     ORDER BY os.folio_os DESC
@@ -1725,9 +1815,9 @@ class DashboardWidget(QWidget):
     _COL_MODAL    = 7
     _COL_ESTADO   = 8
     _COL_SYNC     = 9
-    _COL_ACCIONES = 10  # columna dedicada de botones de acción (375px)
-    _W_SYNC       = 94
-    _W_ACCIONES   = 375   # ancho compacto para los 4 botones dejando amplio espacio a FOLIO OS y SUCURSAL
+    _COL_ACCIONES = 10  # columna dedicada de acciones limpias (2 botones + menú ⋯)
+    _W_SYNC       = 96
+    _W_ACCIONES   = 228   # ancho compacto: 2 acciones primarias + botón ⋯ dejando máximo respiro a la tabla
     _ITEM_PAD_H   = 10    # padding horizontal limpio de celda
 
     _sig_lote_email_result = pyqtSignal(bool, str, str, str, object, object)
@@ -1743,11 +1833,10 @@ class DashboardWidget(QWidget):
         self._loader:      Optional[_DashboardLoader]   = None
         self._all_loaded_rows: list = []
         self._date_preset  = "mes"
+        self._active_kpi_filter: str = "all"
         self._filters_loaded = False
 
         # ── Caché en memoria para navegación instantánea entre pestañas ──────
-        # Estructura: {'kpis': (total, proceso, cerrados, fisicos),
-        #              'rows': [...], 'filters': [...], 'preset': str}
         self._data_cache: dict = {}
         self._cache_valid: bool = False
 
@@ -1772,6 +1861,11 @@ class DashboardWidget(QWidget):
         root_lay.setContentsMargins(0, 0, 0, 0)
         root_lay.setSpacing(0)
 
+        # Barra de progreso lineal sutil (3px) en la parte superior para cargas asíncronas
+        self._loading_bar = _LinearProgressBar(self) if _LinearProgressBar else None
+        if self._loading_bar is not None:
+            root_lay.addWidget(self._loading_bar)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -1783,26 +1877,31 @@ class DashboardWidget(QWidget):
         scroll.setWidget(inner)
 
         self._inner_lay = QVBoxLayout(inner)
-        self._inner_lay.setContentsMargins(24, 16, 24, 24)
-        self._inner_lay.setSpacing(20)
+        self._inner_lay.setContentsMargins(24, 18, 24, 24)
+        self._inner_lay.setSpacing(16)
 
         # 1. Header de bienvenida
         self._inner_lay.addWidget(self._build_header())
 
-        # 2. KPI Cards (4 tarjetas) — SIEMPRE ENCIMA DE LOS FILTROS
+        # 2. KPI Cards (4 tarjetas interactivas con filtro rápido al clic)
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(16)
-        self._card_total   = KPICard("Total Periodo",    "--", subtitle="del periodo seleccionado", value_color="#0F172A", accent_color="#C8102E")
-        self._card_proceso = KPICard("En Proceso",       "--", subtitle="activos actualmente",      value_color="#0F172A", accent_color="#334155")
-        self._card_cerrados= KPICard("Cerrados",         "--", subtitle="finalizados",              value_color="#0F172A", accent_color="#0F172A")
-        self._card_fisicos = KPICard("Formatos Físicos", "--", subtitle="pendientes de escanear",   value_color="#0F172A", accent_color="#94A3B8")
-        for card in [self._card_total, self._card_proceso,
-                     self._card_cerrados, self._card_fisicos]:
+        self._card_total    = KPICard("Total Periodo",    "--", subtitle="del periodo seleccionado", value_color="#111827", filter_key="all")
+        self._card_proceso  = KPICard("En Proceso",       "--", subtitle="activos actualmente",      value_color="#111827", filter_key="proceso",  dot_color="#D97706")
+        self._card_cerrados = KPICard("Cerrados",         "--", subtitle="finalizados",              value_color="#111827", filter_key="cerrado",  dot_color="#16A34A")
+        self._card_fisicos  = KPICard("Formatos Físicos", "--", subtitle="pendientes de escanear",   value_color="#111827", filter_key="fisico",   dot_color="#6B7280")
+        self._kpi_cards = {
+            "all": self._card_total,
+            "proceso": self._card_proceso,
+            "cerrado": self._card_cerrados,
+            "fisico": self._card_fisicos,
+        }
+        for card in self._kpi_cards.values():
+            card.clicked.connect(self._on_kpi_card_clicked)
             kpi_row.addWidget(card)
         self._inner_lay.addLayout(kpi_row)
 
-        # 3. Barra de filtros — DEBAJO DE LOS KPIS, NUNCA ENCIMADA
-        self._inner_lay.addSpacing(4)
+        # 3. Barra de filtros unificada
         self._inner_lay.addWidget(self._build_filter_bar())
 
         # 4. Barra de estado de conexion / sync
@@ -1812,6 +1911,76 @@ class DashboardWidget(QWidget):
         self._inner_lay.addWidget(self._build_table_panel(), stretch=1)
 
         root_lay.addWidget(scroll)
+
+    def _on_kpi_card_clicked(self, filter_key: str) -> None:
+        """Aplica o desactiva un filtro rápido al hacer clic en cualquier tarjeta KPI."""
+        if filter_key == "all" or filter_key == self._active_kpi_filter:
+            self._active_kpi_filter = "all"
+        else:
+            self._active_kpi_filter = filter_key
+
+        for k, card in getattr(self, "_kpi_cards", {}).items():
+            card.set_active(k == self._active_kpi_filter and self._active_kpi_filter != "all")
+
+        # Aplicar sobre filas ya cargadas sin bloquear red
+        self._apply_active_filters_to_loaded_rows()
+
+    def _apply_active_filters_to_loaded_rows(self) -> None:
+        """Aplica filtros locales (KPI rápido, modalidad, servicio y búsqueda) sobre _all_loaded_rows."""
+        rows = list(self._all_loaded_rows or [])
+        kpi_f = getattr(self, "_active_kpi_filter", "all")
+
+        if kpi_f == "proceso":
+            rows = [r for r in rows if not self._is_estado_cerrado(str(r[7] or ""))]
+        elif kpi_f == "cerrado":
+            rows = [r for r in rows if self._is_estado_cerrado(str(r[7] or ""))]
+        elif kpi_f == "fisico":
+            rows = [
+                r for r in rows
+                if "fisic" in str(r[6] if len(r) > 6 else "").lower()
+                or "físic" in str(r[6] if len(r) > 6 else "").lower()
+            ]
+
+        if hasattr(self, "_combo_modal_bar"):
+            filtro_mod = self._combo_modal_bar.currentText().strip()
+            if filtro_mod and filtro_mod != "Todas las Modalidades":
+                filtered_rows = []
+                for row in rows:
+                    modalidad_raw = str(row[6]).lower() if len(row) > 6 else ""
+                    if filtro_mod == "Solo Digitales" and "digital" not in modalidad_raw:
+                        continue
+                    elif filtro_mod == "Solo Físicos" and ("fisic" not in modalidad_raw and "físic" not in modalidad_raw):
+                        continue
+                    filtered_rows.append(row)
+                rows = filtered_rows
+
+        if hasattr(self, "_combo_tipo_servicio_bar"):
+            filtro_ts = str(self._combo_tipo_servicio_bar.currentData() or "").strip().upper()
+            if filtro_ts:
+                filtered_ts = []
+                for row in rows:
+                    f_str = str(row[0] or "").strip().upper()
+                    s_str = str(row[5] or "").strip().upper() if len(row) > 5 else ""
+                    if filtro_ts == "OSOCC" and not (f_str.startswith("OSOCC-") or "OSOCC" in s_str or "OBSERVACIONES CELDA" in s_str):
+                        continue
+                    elif filtro_ts == "OSOB" and (f_str.startswith("OSOCC-") or not (f_str.startswith("OSOB-") or "OSOB" in s_str or "OBSERVACION" in s_str)):
+                        continue
+                    elif filtro_ts == "RMA" and not (f_str.startswith("RMA-") or "REFACCION" in s_str or "REMISI" in s_str):
+                        continue
+                    elif filtro_ts == "RE" and not (f_str.startswith("RE-") or "REVISI" in s_str):
+                        continue
+                    elif filtro_ts == "LV" and not (f_str.startswith("LV-") or f_str.startswith("LP-") or "LEVANTAMIENTO" in s_str):
+                        continue
+                    elif filtro_ts == "OS" and not f_str.startswith("OS-"):
+                        continue
+                    filtered_ts.append(row)
+                rows = filtered_ts
+
+        self._data_cache['rows'] = rows
+        self._cache_valid = True
+        self._fill_table_rows(rows)
+        if hasattr(self, "_search_global") and self._search_global.text().strip():
+            self._apply_search_filter()
 
     # -------------------------------------------------------------------------
     # Header de bienvenida
@@ -2146,17 +2315,17 @@ class DashboardWidget(QWidget):
         # -- Buscador rapido --------------------------------------------------
         self._search_global = QLineEdit()
         self._search_global.setPlaceholderText(
-            "Buscar por folio, cliente, sucursal o técnico..."
+            "Buscar por folio, cliente, sucursal, técnico, marca, modelo, serie, ID, CCA o DVE..."
         )
         self._search_global.setFixedHeight(36)
         self._search_global.setStyleSheet("""
             QLineEdit {
                 background: #FFFFFF;
                 border: 1px solid #CBD5E1;
-                border-radius: 6px;
+                border-radius: 8px;
                 padding: 0 12px;
                 font-size: 13px;
-                color: #0F172A;
+                color: #111827;
             }
             QLineEdit:focus {
                 background: #FFFFFF;
@@ -2178,8 +2347,8 @@ class DashboardWidget(QWidget):
         bar.setStyleSheet("""
             QFrame#sync_bar {
                 background: #FFFFFF;
-                border: 1px solid #E5E5EA;
-                border-radius: 8px;
+                border: 1px solid #E5E7EB;
+                border-radius: 10px;
             }
         """)
 
@@ -2187,25 +2356,30 @@ class DashboardWidget(QWidget):
         lay.setContentsMargins(14, 7, 14, 7)
         lay.setSpacing(8)
 
+        self._sync_conn_dot = QLabel()
+        self._sync_conn_dot.setFixedSize(6, 6)
+        self._sync_conn_dot.setStyleSheet("background-color: #16A34A; border-radius: 3px;")
+        lay.addWidget(self._sync_conn_dot)
+
         self._lbl_conn_mode = QLabel()
         self._lbl_conn_mode.setFixedHeight(20)
         self._lbl_conn_mode.setStyleSheet(
-            "font-size: 9pt; font-weight: 500; background: transparent;"
+            "font-size: 12px; font-weight: 600; color: #111827; background: transparent;"
         )
         self._update_conn_badge()
         lay.addWidget(self._lbl_conn_mode)
 
         self._lbl_pending_count = QLabel()
         self._lbl_pending_count.setStyleSheet(
-            "font-size: 9pt; color: #92400E; font-weight: 600; background: transparent;"
+            "font-size: 12px; color: #D97706; font-weight: 600; background: transparent;"
         )
         lay.addWidget(self._lbl_pending_count)
         self._refresh_pending_count()
 
         # ── Indicador de carga asíncrona ────────────────────────────────────
-        self._lbl_loading = QLabel("⟳ Cargando...")
+        self._lbl_loading = QLabel("Actualizando datos…")
         self._lbl_loading.setStyleSheet(
-            "font-size: 9pt; color: #6B7280; font-style: italic; background: transparent;"
+            "font-size: 12px; color: #6B7280; background: transparent;"
         )
         self._lbl_loading.setVisible(False)
         lay.addWidget(self._lbl_loading)
@@ -2223,15 +2397,10 @@ class DashboardWidget(QWidget):
         panel.setStyleSheet("""
             QFrame#table_panel {
                 background: #FFFFFF;
-                border: 1px solid #E5E5EA;
-                border-radius: 10px;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
             }
         """)
-        sh = QGraphicsDropShadowEffect(panel)
-        sh.setBlurRadius(12)
-        sh.setOffset(0, 2)
-        sh.setColor(QColor(0, 0, 0, 10))
-        panel.setGraphicsEffect(sh)
 
         lay = QVBoxLayout(panel)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -2446,49 +2615,49 @@ class DashboardWidget(QWidget):
         # Colocar el checkbox maestro dentro de la cabecera col 0
         QTimer.singleShot(0, lambda: self._place_header_checkbox(table))
 
-        # Estilo corporativo minimalista Básculas PESA (blanco puro, bordes #E2E8F0, hover #F8FAFC)
+        # Estilo corporativo minimalista Básculas PESA v3.2 (cabecera #F9FAFB, divisores #F3F4F6, hover #F8FAFC)
         table.setStyleSheet("""
             QTreeWidget {
                 background: #FFFFFF;
                 border: none;
-                border-radius: 0 0 10px 10px;
+                border-radius: 0 0 12px 12px;
                 font-size: 13px;
-                color: #0F172A;
+                color: #111827;
                 outline: none;
                 selection-background-color: #F8FAFC;
-                selection-color: #0F172A;
+                selection-color: #111827;
             }
             QTreeWidget::item {
                 padding: 4px 10px;
-                border-bottom: 1px solid #E2E8F0;
-                min-height: 48px;
+                border-bottom: 1px solid #F3F4F6;
+                min-height: 50px;
                 font-size: 12.5px;
                 font-weight: 400;
-                color: #0F172A;
+                color: #111827;
             }
             QTreeWidget::item:hover {
                 background: #F8FAFC;
             }
             QTreeWidget::item:selected {
-                background: #F1F5F9;
-                color: #0F172A;
+                background: #F8FAFC;
+                color: #111827;
             }
             QHeaderView::section {
-                background: #F8FAFC;
-                color: #475569;
+                background: #F9FAFB;
+                color: #6B7280;
                 font-size: 11px;
                 font-weight: 700;
                 text-transform: uppercase;
-                letter-spacing: 0.5px;
+                letter-spacing: 0.6px;
                 padding: 0 10px;
                 border: none;
-                border-bottom: 1px solid #E2E8F0;
+                border-bottom: 1px solid #E5E7EB;
                 height: 40px;
                 min-height: 40px;
             }
             QHeaderView::section:hover {
-                background: #F1F5F9;
-                color: #0F172A;
+                background: #F3F4F6;
+                color: #111827;
             }
         """)
 
@@ -2598,15 +2767,19 @@ class DashboardWidget(QWidget):
     def _update_conn_badge(self) -> None:
         if not hasattr(self, "_lbl_conn_mode"):
             return
-        if _HAS_SYNC and _sync_manager and _sync_manager.is_online():
-            self._lbl_conn_mode.setText("  Conectado · PostgreSQL")
+        is_on = bool(_HAS_SYNC and _sync_manager and _sync_manager.is_online())
+        if hasattr(self, "_sync_conn_dot") and self._sync_conn_dot is not None:
+            dot_c = "#16A34A" if is_on else "#D97706"
+            self._sync_conn_dot.setStyleSheet(f"background-color: {dot_c}; border-radius: 3px;")
+        if is_on:
+            self._lbl_conn_mode.setText("Conectado · PostgreSQL")
             self._lbl_conn_mode.setStyleSheet(
-                "font-size: 9pt; font-weight: 600; color: #0F172A; background: transparent;"
+                "font-size: 12px; font-weight: 600; color: #111827; background: transparent;"
             )
         else:
-            self._lbl_conn_mode.setText("  Offline · SQLite Local")
+            self._lbl_conn_mode.setText("Modo Offline · SQLite Local")
             self._lbl_conn_mode.setStyleSheet(
-                "font-size: 9pt; font-weight: 600; color: #475569; background: transparent;"
+                "font-size: 12px; font-weight: 600; color: #6B7280; background: transparent;"
             )
 
     def _refresh_pending_count(self) -> None:
@@ -2730,11 +2903,14 @@ class DashboardWidget(QWidget):
         self._refresh_pending_count()
         self._update_conn_badge()
         self._async_refresh(load_filters=False, force=True)
-        QMessageBox.information(
-            self, "Sincronización y Actualización",
-            "No hay registros locales pendientes de sincronizar.\n"
-            "Se ha consultado y actualizado la lista de órdenes directamente desde PostgreSQL."
-        )
+        if _show_toast:
+            _show_toast(self, "Sin pendientes locales. Lista actualizada desde PostgreSQL.", level="success")
+        else:
+            QMessageBox.information(
+                self, "Sincronización y Actualización",
+                "No hay registros locales pendientes de sincronizar.\n"
+                "Se ha consultado y actualizado la lista de órdenes directamente desde PostgreSQL."
+            )
 
     def _on_started_sync(self, pending: int) -> None:
         
@@ -2772,10 +2948,13 @@ class DashboardWidget(QWidget):
         self._data_cache.clear()
         self._refresh_pending_count()
         QTimer.singleShot(300, lambda: self._async_refresh(load_filters=False, force=True))
-        QMessageBox.information(
-            self, "Sincronizacion Completada",
-            f"{n} registro(s) sincronizado(s) con el servidor central."
-        )
+        if _show_toast:
+            _show_toast(self, f"{n} registro(s) sincronizado(s) con el servidor central.", level="success")
+        else:
+            QMessageBox.information(
+                self, "Sincronización Completada",
+                f"{n} registro(s) sincronizado(s) con el servidor central."
+            )
 
     def _on_sync_error(self, msg: str) -> None:
         if hasattr(self, "_progress_dlg") and self._progress_dlg:
@@ -2932,63 +3111,7 @@ class DashboardWidget(QWidget):
     @pyqtSlot(list)
     def _on_rows_ready(self, rows: list) -> None:
         self._all_loaded_rows = rows
-
-        # --- APLICAR FILTRO DE MODALIDAD ---
-        if hasattr(self, "_combo_modal_bar"):
-            filtro_mod = self._combo_modal_bar.currentText().strip()
-            if filtro_mod and filtro_mod != "Todas las Modalidades":
-                filtered_rows = []
-                for row in rows:
-                    modalidad_raw = str(row[6]).lower() if len(row) > 6 else ""
-                    if filtro_mod == "Solo Digitales":
-                        if "digital" not in modalidad_raw:
-                            continue  # Ocultar si no es digital
-                    elif filtro_mod == "Solo Físicos":
-                        if "fisic" not in modalidad_raw and "físic" not in modalidad_raw:
-                            continue  # Ocultar si no es físico
-                    filtered_rows.append(row)
-                rows = filtered_rows
-        # -----------------------------------
-
-        # --- APLICAR FILTRO DE TIPO DE SERVICIO / FORMATO ---
-        if hasattr(self, "_combo_tipo_servicio_bar"):
-            filtro_ts = str(self._combo_tipo_servicio_bar.currentData() or "").strip().upper()
-            if filtro_ts:
-                filtered_ts = []
-                for row in rows:
-                    f_str = str(row[0] or "").strip().upper()
-                    s_str = str(row[5] or "").strip().upper() if len(row) > 5 else ""
-                    if filtro_ts == "OSOCC":
-                        if not (f_str.startswith("OSOCC-") or "OSOCC" in s_str or "OBSERVACIONES CELDA" in s_str):
-                            continue
-                    elif filtro_ts == "OSOB":
-                        if f_str.startswith("OSOCC-"):
-                            continue
-                        if not (f_str.startswith("OSOB-") or "OSOB" in s_str or "OBSERVACION" in s_str):
-                            continue
-                    elif filtro_ts == "RMA":
-                        if not (f_str.startswith("RMA-") or "REFACCION" in s_str or "REMISI" in s_str):
-                            continue
-                    elif filtro_ts == "RE":
-                        if not (f_str.startswith("RE-") or "REVISI" in s_str):
-                            continue
-                    elif filtro_ts == "LV":
-                        if not (f_str.startswith("LV-") or f_str.startswith("LP-") or "LEVANTAMIENTO" in s_str):
-                            continue
-                    elif filtro_ts == "OS":
-                        if not f_str.startswith("OS-"):
-                            continue
-                    filtered_ts.append(row)
-                rows = filtered_ts
-        # ----------------------------------------------------
-
-        # Guardar en caché para restauración instantánea
-        self._data_cache['rows'] = rows
-        self._cache_valid = True
-        self._fill_table_rows(rows)
-        # Reaplicar filtro de búsqueda si el usuario ya escribió algo en el buscador
-        if hasattr(self, "_search_global") and self._search_global.text().strip():
-            self._on_search_changed()
+        self._apply_active_filters_to_loaded_rows()
 
     @pyqtSlot(str)
     def _on_load_error(self, msg: str) -> None:
@@ -2996,7 +3119,9 @@ class DashboardWidget(QWidget):
         self._show_loading(False)
 
     def _show_loading(self, visible: bool) -> None:
-        """Muestra/oculta un indicador sutil en la barra de estado."""
+        """Muestra/oculta la barra lineal superior de 3px y el texto discreto de estado."""
+        if hasattr(self, "_loading_bar") and self._loading_bar is not None:
+            self._loading_bar.set_running(visible)
         if hasattr(self, "_lbl_loading"):
             self._lbl_loading.setVisible(visible)
 
@@ -4328,102 +4453,60 @@ class DashboardWidget(QWidget):
         parent_item: "QTreeWidgetItem | None" = None,
         grupo_ord: list = None,
     ) -> QWidget:
-        """Crea el widget de acciones para una fila PADRE de lote."""
+        """
+        Widget de acciones limpias para fila PADRE de lote:
+        Solo 2 acciones principales visibles ([PDF] + [Enviar Lote / Lote Enviado])
+        y un menú contextual discreto [⋯] para acciones secundarias (Modalidad, Reenviar, Eliminar).
+        """
         container = QWidget()
         container.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(container)
         lay.setContentsMargins(6, 0, 4, 0)
-        lay.setSpacing(4)
+        lay.setSpacing(6)
 
-        _btn_sec_lote = """
+        _btn_sec_lote = _BTN_TBL_SEC_QSS or """
             QPushButton {
                 background-color: #FFFFFF;
-                color: #0F172A;
+                color: #111827;
                 border: 1px solid #CBD5E1;
-                border-radius: 5px;
-                font-size: 8.5pt;
+                border-radius: 6px;
+                font-size: 11.5px;
                 font-weight: 600;
-                padding: 0 6px;
-                min-height: 26px;
+                padding: 0 10px;
+                min-height: 28px;
             }
-            QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
+            QPushButton:hover { background-color: #F8FAFC; border-color: #9CA3AF; }
             QPushButton::menu-indicator { image: none; width: 0; }
         """
-        _btn_lote_style = _btn_sec_lote
-        _btn_modal_fisico_style = _btn_sec_lote
-        _btn_modal_digital_style = _btn_sec_lote
-        _btn_del_style = """
-            QPushButton {
-                background-color: #FFFFFF;
-                color: #C8102E;
-                border: 1px solid #C8102E;
-                border-radius: 5px;
-                font-size: 8.5pt;
-                font-weight: 600;
-                padding: 0 6px;
-                min-height: 26px;
+        _menu_style = _THEME_MENU_QSS or """
+            QMenu {
+                background: #FFFFFF;
+                border: 1px solid #E5E7EB;
+                border-radius: 8px;
+                padding: 4px;
+                font-size: 12.5px;
             }
-            QPushButton:hover { background-color: #F8FAFC; color: #A50D26; border-color: #A50D26; }
+            QMenu::item { padding: 7px 14px; border-radius: 6px; color: #111827; }
+            QMenu::item:selected { background: #F8FAFC; }
+            QMenu::separator { height: 1px; background: #F3F4F6; margin: 4px 8px; }
         """
 
-        # ── Botón PDF Lote ────────────────────────────────────────────────────
+        # 1. Acción primaria 1: [ PDF ]
         btn_pdf_lote = QPushButton("PDF")
-        btn_pdf_lote.setStyleSheet(_btn_lote_style)
-        btn_pdf_lote.setFixedSize(62, 28)
-        btn_pdf_lote.setToolTip(
-            f"Buscar y abrir el PDF compilado del lote\n"
-            f"{folio_inicio or all_folios[0]} → {folio_fin or all_folios[-1]}"
-        )
+        btn_pdf_lote.setObjectName("btn_action_pdf")
+        btn_pdf_lote.setStyleSheet(_btn_sec_lote)
+        btn_pdf_lote.setFixedSize(56, 28)
+        btn_pdf_lote.setCursor(Qt.CursorShape.PointingHandCursor)
         fi = folio_inicio or (all_folios[0] if all_folios else "")
-        ff = folio_fin   or (all_folios[-1] if all_folios else "")
+        ff = folio_fin or (all_folios[-1] if all_folios else "")
+        btn_pdf_lote.setToolTip(f"Abrir PDF compilado del lote ({fi} al {ff})")
         btn_pdf_lote.clicked.connect(
             lambda _c, _fi=fi, _ff=ff, _af=list(all_folios):
                 self._open_pdf_lote(_fi, _ff, _af)
         )
         lay.addWidget(btn_pdf_lote)
 
-        # ── Botón Modalidad (menú desplegable Físico ↔ Digital) ───────────────
-        is_digital = (str(modalidad).upper() == "DIGITAL")
-        modal_text  = "📱 Digital" if is_digital else "📄 Físico"
-        modal_style = _btn_modal_digital_style if is_digital else _btn_modal_fisico_style
-
-        btn_modal = QPushButton("Cambiar a Físico" if is_digital else "Cambiar a Digital")
-        btn_modal.setStyleSheet(modal_style.replace("padding: 0 4px;", "padding: 0 8px;"))
-        btn_modal.setMinimumWidth(124)
-        btn_modal.setFixedHeight(28)
-        btn_modal.setToolTip("Cambiar modalidad del lote (Físico / Digital)")
-        btn_modal.setCursor(Qt.CursorShape.PointingHandCursor)
-
-        menu_modal = QMenu(btn_modal)
-        menu_modal.setStyleSheet("""
-            QMenu {
-                background: #FFFFFF;
-                border: 1px solid #E5E5EA;
-                border-radius: 8px;
-                padding: 4px;
-                font-size: 9pt;
-            }
-            QMenu::item { padding: 8px 18px; border-radius: 4px; color: #1D1D1F; }
-            QMenu::item:selected { background: #F5F5F7; }
-        """)
-        act_fisico  = QAction("Físico  — formato impreso / escaneo", btn_modal)
-        act_digital = QAction("Digital — captura en tablet / app móvil", btn_modal)
-        menu_modal.addAction(act_fisico)
-        menu_modal.addAction(act_digital)
-
-        act_fisico.triggered.connect(
-            lambda _c, ids=list(all_os_ids), b=btn_modal, pi=parent_item:
-                self._cambiar_modalidad_lote(ids, "FISICO", b, pi)
-        )
-        act_digital.triggered.connect(
-            lambda _c, ids=list(all_os_ids), b=btn_modal, pi=parent_item:
-                self._cambiar_modalidad_lote(ids, "DIGITAL", b, pi)
-        )
-
-        btn_modal.setMenu(menu_modal)
-        lay.addWidget(btn_modal)
-
-        # ── Botón Estado de Correo del Lote ───────────────────────────────────
+        # 2. Acción primaria 2: [ Enviar Lote ] / [ Lote Enviado ]
         lote_email_enviado = bool(grupo_ord) and all(
             (bool(r[22]) if len(r) > 22 and r[22] is not None else False)
             or (len(r) > 24 and r[24] is not None and str(r[24]).strip())
@@ -4437,48 +4520,85 @@ class DashboardWidget(QWidget):
                     break
         info_lote_tt = self._extraer_info_correo_lote(grupo_ord or [])
 
+        btn_mail_lote = QPushButton("Lote Enviado" if lote_email_enviado else "Enviar Lote")
+        btn_mail_lote.setObjectName("btn_action_mail_lote")
+        btn_mail_lote.setFixedSize(112, 28)
+        btn_mail_lote.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_mail_lote.setStyleSheet(_btn_sec_lote)
         if lote_email_enviado:
-            btn_mail_lote = QPushButton("Lote Enviado")
-            btn_mail_lote.setFixedSize(100, 28)
-            btn_mail_lote.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_mail_lote.setStyleSheet(_btn_sec_lote)
-            tt_lote = f"{info_lote_tt}\n(Clic para reenviar lote)" if info_lote_tt else f"Correo de lote enviado a: {correo_lote or 'Destinatario'}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar lote)"
+            tt_lote = (
+                f"{info_lote_tt}\n(Clic para reenviar lote)"
+                if info_lote_tt
+                else f"Correo de lote enviado a: {correo_lote or 'Destinatario'}\nCC: recepcion@basculaspesa.com.mx\n(Clic para reenviar lote)"
+            )
             btn_mail_lote.setToolTip(tt_lote)
         else:
-            btn_mail_lote = QPushButton("Lote Pendiente")
-            btn_mail_lote.setFixedSize(110, 28)
-            btn_mail_lote.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_mail_lote.setStyleSheet(_btn_sec_lote)
-            btn_mail_lote.setToolTip(f"Envío de lote pendiente\nDestinatario: {correo_lote or 'Sin registrar'}\n(Clic para enviar lote vía servidor)")
-
+            btn_mail_lote.setToolTip(
+                f"Enviar lote por correo\nDestinatario: {correo_lote or 'Sin registrar'}"
+            )
         btn_mail_lote.clicked.connect(
             lambda _, lid=lote_id, af=list(all_folios), em=correo_lote, env=lote_email_enviado, b=btn_mail_lote, pi=parent_item:
                 self._on_click_email_lote(lid, af, em, env, b, parent_item=pi)
         )
         lay.addWidget(btn_mail_lote)
 
-        # ── Botón Eliminar Lote (solo admin) ──────────────────────────────────
+        # 3. Menú contextual discreto [ ⋯ ] para acciones secundarias
+        btn_more = _OverflowMenuButton() if _OverflowMenuButton else QPushButton("⋯")
+        btn_more.setObjectName("btn_action_more")
+        btn_more.setFixedSize(30, 28)
+        btn_more.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu_more = QMenu(btn_more)
+        menu_more.setStyleSheet(_menu_style)
+
+        is_digital = (str(modalidad).upper() == "DIGITAL")
+        act_resend = QAction(
+            "Reenviar correo del lote" if lote_email_enviado else "Enviar correo del lote",
+            menu_more,
+        )
+        act_resend.triggered.connect(
+            lambda _, lid=lote_id, af=list(all_folios), em=correo_lote, env=lote_email_enviado, b=btn_mail_lote, pi=parent_item:
+                self._on_click_email_lote(lid, af, em, env, b, parent_item=pi)
+        )
+        menu_more.addAction(act_resend)
+        menu_more.addSeparator()
+
+        act_fisico = QAction("Cambiar lote a Físico (impresión)", menu_more)
+        act_fisico.setEnabled(is_digital)
+        act_fisico.triggered.connect(
+            lambda _c, ids=list(all_os_ids), pi=parent_item:
+                self._cambiar_modalidad_lote(ids, "FISICO", None, pi)
+        )
+        menu_more.addAction(act_fisico)
+
+        act_digital = QAction("Cambiar lote a Digital (tablet)", menu_more)
+        act_digital.setEnabled(not is_digital)
+        act_digital.triggered.connect(
+            lambda _c, ids=list(all_os_ids), pi=parent_item:
+                self._cambiar_modalidad_lote(ids, "DIGITAL", None, pi)
+        )
+        menu_more.addAction(act_digital)
+
         if self._is_admin():
-            btn_del = QPushButton("Eliminar")
-            btn_del.setStyleSheet(_btn_del_style)
-            btn_del.setFixedSize(62, 28)
-            btn_del.setToolTip("Eliminar todos los folios de este lote")
-            btn_del.clicked.connect(
+            menu_more.addSeparator()
+            act_del = QAction("Eliminar lote completo", menu_more)
+            act_del.triggered.connect(
                 lambda _checked, ids=list(all_os_ids), fols=list(all_folios):
                     self._confirm_delete_batch(ids, fols)
             )
-            lay.addWidget(btn_del)
+            menu_more.addAction(act_del)
 
+        btn_more.setMenu(menu_more)
+        lay.addWidget(btn_more)
         lay.addStretch()
         return container
 
     def _cambiar_modalidad_lote(
         self, os_ids: list, nueva_modalidad: str,
-        btn_modal: "QPushButton", parent_item: "QTreeWidgetItem | None"
+        btn_modal: "QPushButton | None", parent_item: "QTreeWidgetItem | None"
     ) -> None:
         """
         Actualiza la modalidad de todos los registros del lote en PostgreSQL
-        y refresca el botón + la celda MODALIDAD del árbol en tiempo real.
+        y refresca la celda MODALIDAD del árbol en tiempo real con notificación toast.
         """
         if not os_ids or not _DEPS_OK or _db_pool is None:
             return
@@ -4504,28 +4624,11 @@ class DashboardWidget(QWidget):
             )
             return
 
-        # ── Actualizar UI en tiempo real sin recargar toda la tabla ──────────
         is_digital = (nueva_modalidad.upper() == "DIGITAL")
-        new_text   = "Cambiar a Físico" if is_digital else "Cambiar a Digital"
         new_label  = "Digital (Lote)" if is_digital else "Fisico (Lote)"
-        new_style  = """
-            QPushButton {
-                background: #FFFFFF; color: #0F172A;
-                border: 1px solid #CBD5E1; border-radius: 5px;
-                font-size: 8.5pt; font-weight: 600;
-                padding: 0 8px; min-height: 26px;
-            }
-            QPushButton:hover { background: #F1F5F9; border-color: #94A3B8; }
-            QPushButton::menu-indicator { image: none; width: 0; }
-        """
-        if btn_modal:
-            btn_modal.setText(new_text)
-            btn_modal.setStyleSheet(new_style)
 
-        # Actualizar la celda MODALIDAD del item padre en el árbol
         if parent_item:
             parent_item.setText(self._COL_MODAL, new_label)
-            # Actualizar filas hijas también
             for i in range(parent_item.childCount()):
                 child = parent_item.child(i)
                 child.setText(
@@ -4533,19 +4636,18 @@ class DashboardWidget(QWidget):
                     "Digital" if is_digital else "Fisico"
                 )
 
-        # Notificar éxito brevemente
-        lbl = QLabel(
-            f"  Modalidad → {'Digital' if is_digital else 'Físico'} guardada  ",
-            self
-        )
-        lbl.setStyleSheet(
-            "background: #0F172A; color: #FFFFFF; border-radius: 5px; "
-            "font-size: 9pt; font-weight: 600; padding: 6px 12px;"
-        )
-        lbl.setWindowFlags(Qt.WindowType.ToolTip)
-        lbl.move(self.mapToGlobal(self.rect().center()))
-        lbl.show()
-        QTimer.singleShot(2000, lbl.deleteLater)
+        if _show_toast:
+            _show_toast(self, f"Modalidad del lote actualizada a {'Digital' if is_digital else 'Físico'}.", level="success")
+        else:
+            lbl = QLabel(f"  Modalidad → {'Digital' if is_digital else 'Físico'} guardada  ", self)
+            lbl.setStyleSheet(
+                "background: #111827; color: #FFFFFF; border-radius: 6px; "
+                "font-size: 12px; font-weight: 600; padding: 6px 12px;"
+            )
+            lbl.setWindowFlags(Qt.WindowType.ToolTip)
+            lbl.move(self.mapToGlobal(self.rect().center()))
+            lbl.show()
+            QTimer.singleShot(2000, lbl.deleteLater)
 
 
     def _confirm_delete_batch(self, os_ids: list, folios: list) -> None:
@@ -4719,74 +4821,95 @@ class DashboardWidget(QWidget):
     def _build_action_cell(self, folio: str, estado: str, os_id,
                            tiene_adjunto: bool, sync_status: str,
                            row_data: tuple) -> QWidget:
-        """Construye el widget de botones de acción (sin contenedor de celda propio).
-        - Cerrado + PDF: [ 👁 Ver PDF ] [ 📥 Descargar ] [ 🔄 Rehacer ]
-        - En Proceso:    [ ✏️ Continuar Captura ]
-        - Asignado/Pendiente: etiqueta 'Pendiente'
-        Altura de botones: 28px, border-radius: 6px, font-size: 12px.
+        """
+        Widget de acciones limpias por orden individual (2 acciones primarias + menú ⋯):
+        - Con PDF:   [ PDF ] [ Descargar ] [ ⋯ ]
+        - Pendiente: [ PDF ] [ Capturar ]  [ ⋯ ]
+        El menú [ ⋯ ] agrupa Reenviar/Enviar Correo, Rehacer, Cambiar Modalidad, Editar y Eliminar.
         """
         container = QWidget()
         container.setStyleSheet("background: transparent;")
         lay = QHBoxLayout(container)
         lay.setContentsMargins(6, 0, 4, 0)
-        lay.setSpacing(4)
+        lay.setSpacing(6)
 
-        estatus = str(estado or "").strip().lower()
         has_real_pdf = self._check_real_has_pdf(folio, row_data)
-        has_med = self._check_has_mediciones(row_data[17] if len(row_data) > 17 else None)
+        is_osob_folio = str(folio or "").strip().upper().startswith(("OSOB-", "OSOCC-"))
+        modalidad_row = str(row_data[6] or "FISICO").strip().upper() if row_data and len(row_data) > 6 else "FISICO"
 
-        is_closed = (
-            self._is_estado_cerrado(estado)
-            or estatus in ("cerrado", "cerrada", "completada", "completada_digital",
-                        "escaneada", "terminada", "finalizada", "firmada")
-            or "cerrad" in estatus
-            or "complet" in estatus
-            or "finaliz" in estatus
-            or "firmad" in estatus
-        )
-
-        is_proceso = estatus in ('en proceso', 'proceso', 'pendiente de formato') or (not has_real_pdf and not has_med)
-
-        _BTN_SEC_STYLE = """
+        _BTN_SEC_STYLE = _BTN_TBL_SEC_QSS or """
             QPushButton {
                 background-color: #FFFFFF;
-                color: #0F172A;
+                color: #111827;
                 border: 1px solid #CBD5E1;
-                border-radius: 5px;
-                font-size: 11px;
+                border-radius: 6px;
+                font-size: 11.5px;
                 font-weight: 600;
-                padding: 2px 4px;
+                padding: 0 8px;
+                min-height: 28px;
             }
-            QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
+            QPushButton:hover { background-color: #F8FAFC; border-color: #9CA3AF; }
+        """
+        _BTN_PRI_STYLE = _BTN_TBL_PRI_QSS or """
+            QPushButton {
+                background-color: #C8102E;
+                color: #FFFFFF;
+                border: 1px solid #C8102E;
+                border-radius: 6px;
+                font-size: 11.5px;
+                font-weight: 600;
+                padding: 0 10px;
+                min-height: 28px;
+            }
+            QPushButton:hover { background-color: #A60D26; border-color: #A60D26; }
         """
         _BTN_DISABLED_STYLE = """
             QPushButton {
                 background-color: #F8FAFC;
-                color: #94A3B8;
-                border: 1px solid #E2E8F0;
-                border-radius: 5px;
-                font-size: 11px;
+                color: #9CA3AF;
+                border: 1px solid #E5E7EB;
+                border-radius: 6px;
+                font-size: 11.5px;
                 font-weight: 500;
-                padding: 2px 4px;
+                padding: 0 8px;
+                min-height: 28px;
             }
         """
+        _menu_style = _THEME_MENU_QSS or """
+            QMenu {
+                background: #FFFFFF;
+                border: 1px solid #E5E7EB;
+                border-radius: 8px;
+                padding: 4px;
+                font-size: 12.5px;
+            }
+            QMenu::item { padding: 7px 14px; border-radius: 6px; color: #111827; }
+            QMenu::item:selected { background: #F8FAFC; }
+            QMenu::separator { height: 1px; background: #F3F4F6; margin: 4px 8px; }
+        """
 
-        # ── CONDICIÓN ESTRICTA: Solo si el archivo PDF existe realmente ───────
-        if has_real_pdf:
-            # 1. [ PDF ] — Botón secundario corporativo blanco (#FFFFFF / #CBD5E1)
-            btn_pdf = QPushButton("PDF")
+        # ── Acción 1: [ PDF ] ─────────────────────────────────────────────────
+        btn_pdf = QPushButton("PDF")
+        btn_pdf.setFixedSize(56, 28)
+        if has_real_pdf or is_osob_folio:
             btn_pdf.setObjectName("btn_action_pdf")
-            btn_pdf.setFixedSize(54, 28)
+            btn_pdf.setEnabled(True)
             btn_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_pdf.setStyleSheet(_BTN_SEC_STYLE)
             btn_pdf.setToolTip(f"Visualizar PDF de {folio}")
             btn_pdf.clicked.connect(lambda _, fl=str(folio): self._open_pdf(fl))
-            lay.addWidget(btn_pdf)
+        else:
+            btn_pdf.setObjectName("btn_action_pdf_disabled")
+            btn_pdf.setEnabled(False)
+            btn_pdf.setStyleSheet(_BTN_DISABLED_STYLE)
+            btn_pdf.setToolTip(f"PDF aún no disponible para {folio}")
+        lay.addWidget(btn_pdf)
 
-            # 2. [ Descargar ] — Botón secundario corporativo blanco
+        # ── Acción 2: [ Descargar ] (si hay PDF) o [ Capturar ] (#C8102E) ────
+        if has_real_pdf:
             btn_dl = QPushButton("Descargar")
             btn_dl.setObjectName("btn_action_download")
-            btn_dl.setFixedSize(80, 28)
+            btn_dl.setFixedSize(92, 28)
             btn_dl.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_dl.setStyleSheet(_BTN_SEC_STYLE)
             btn_dl.setToolTip(f"Descargar PDF de {folio} al disco")
@@ -4794,122 +4917,79 @@ class DashboardWidget(QWidget):
                 lambda _, fid=os_id, fl=folio, rd=row_data: self._descargar_pdf_os(fid, fl, row_data=rd)
             )
             lay.addWidget(btn_dl)
-
-            # 3. [ Rehacer ] — Botón secundario corporativo blanco
-            btn_rehacer = QPushButton("Rehacer")
-            btn_rehacer.setObjectName("btn_action_rehacer")
-            btn_rehacer.setFixedSize(68, 28)
-            btn_rehacer.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_rehacer.setStyleSheet(_BTN_SEC_STYLE)
-            btn_rehacer.setToolTip(f"Rehacer toma metrológica de {folio} (corregir y reemitir PDF)")
-            btn_rehacer.clicked.connect(
-                lambda _, fid=os_id, fl=folio, rd=row_data: self._abrir_captura_digital(fid, fl, rd)
-            )
-            lay.addWidget(btn_rehacer)
-
         else:
-            is_osob_folio = str(folio or "").strip().upper().startswith(("OSOB-", "OSOCC-"))
-            btn_pdf = QPushButton("PDF")
-            btn_pdf.setFixedSize(54, 28)
-            if is_osob_folio:
-                btn_pdf.setObjectName("btn_action_pdf")
-                btn_pdf.setEnabled(True)
-                btn_pdf.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn_pdf.setStyleSheet(_BTN_SEC_STYLE)
-                btn_pdf.setToolTip(f"Visualizar Formato PDF ({folio})")
-                btn_pdf.clicked.connect(lambda _, fl=str(folio): self._open_pdf(fl))
-            else:
-                btn_pdf.setObjectName("btn_action_pdf_disabled")
-                btn_pdf.setEnabled(False)
-                btn_pdf.setStyleSheet(_BTN_DISABLED_STYLE)
-                btn_pdf.setToolTip(f"PDF no disponible para {folio}")
-            lay.addWidget(btn_pdf)
-
-            btn_dl = QPushButton("Descargar")
-            btn_dl.setFixedSize(80, 28)
-            if is_osob_folio:
-                btn_dl.setObjectName("btn_action_download")
-                btn_dl.setEnabled(True)
-                btn_dl.setCursor(Qt.CursorShape.PointingHandCursor)
-                btn_dl.setStyleSheet(_BTN_SEC_STYLE)
-                btn_dl.setToolTip(f"Descargar PDF de {folio} al disco")
-                btn_dl.clicked.connect(
-                    lambda _, fid=os_id, fl=folio, rd=row_data: self._descargar_pdf_os(fid, fl, row_data=rd)
-                )
-            else:
-                btn_dl.setObjectName("btn_action_download_disabled")
-                btn_dl.setEnabled(False)
-                btn_dl.setStyleSheet(_BTN_DISABLED_STYLE)
-                btn_dl.setToolTip(f"PDF no disponible para {folio}")
-            lay.addWidget(btn_dl)
-
-            # Botón Capturar — ÚNICO botón con relleno rojo corporativo #C8102E en tabla
             btn_cap = QPushButton("Capturar")
             btn_cap.setObjectName("btn_action_capturar")
-            btn_cap.setFixedSize(76, 28)
+            btn_cap.setFixedSize(92, 28)
             btn_cap.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_cap.setStyleSheet("""
-                QPushButton {
-                    background-color: #C8102E;
-                    color: #FFFFFF;
-                    border: 1px solid #C8102E;
-                    border-radius: 5px;
-                    font-size: 11px;
-                    font-weight: 600;
-                    padding: 2px 4px;
-                }
-                QPushButton:hover { background-color: #A50D26; border-color: #A50D26; }
-            """)
+            btn_cap.setStyleSheet(_BTN_PRI_STYLE)
             btn_cap.setToolTip(f"Capturar datos metrológicos de {folio}")
             btn_cap.clicked.connect(
                 lambda _, fid=os_id, fl=folio, rd=row_data: self._abrir_captura_digital(fid, fl, rd)
             )
             lay.addWidget(btn_cap)
 
-        # ── Botón de Estado de Correo y Reenvío ───────────────────────────────
+        # ── Acción 3: Menú discreto [ ⋯ ] para todas las acciones secundarias ─
         email_enviado = bool(
             (len(row_data) > 22 and bool(row_data[22]))
             or (len(row_data) > 24 and row_data[24] is not None and str(row_data[24]).strip())
         )
         correo_cliente = str(row_data[23] or "").strip() if len(row_data) > 23 and row_data[23] is not None else ""
-        fecha_env_row = row_data[24] if len(row_data) > 24 else None
-        cc_env_row = (
-            str(row_data[30] or "").strip()
-            if len(row_data) > 30 and row_data[30] is not None and str(row_data[30]).strip()
-            else "recepcion@basculaspesa.com.mx"
-        )
-        info_mail_btn = formatear_info_envio_correo({
-            "correo_enviado": email_enviado,
-            "correo_destino": correo_cliente,
-            "fecha_envio_correo": fecha_env_row,
-            "correo_cc": cc_env_row,
-        })
 
-        if email_enviado:
-            btn_mail = QPushButton("Correo Enviado")
-            btn_mail.setObjectName("btn_action_mail_sent")
-            btn_mail.setFixedSize(112, 28)
-            btn_mail.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_mail.setStyleSheet(_BTN_SEC_STYLE)
-            btn_mail.setToolTip(
-                f"{info_mail_btn}\n(Clic para reenviar)"
-                if info_mail_btn
-                else f"Correo enviado a: {correo_cliente or 'Destinatario'}\nCC: {cc_env_row}\n(Clic para reenviar)"
+        btn_more = _OverflowMenuButton() if _OverflowMenuButton else QPushButton("⋯")
+        btn_more.setObjectName("btn_action_more")
+        btn_more.setFixedSize(30, 28)
+        btn_more.setCursor(Qt.CursorShape.PointingHandCursor)
+        menu_more = QMenu(btn_more)
+        menu_more.setStyleSheet(_menu_style)
+
+        if not has_real_pdf and is_osob_folio:
+            act_dl_osob = QAction("Descargar PDF", menu_more)
+            act_dl_osob.triggered.connect(
+                lambda _, fid=os_id, fl=folio, rd=row_data: self._descargar_pdf_os(fid, fl, row_data=rd)
             )
-        else:
-            btn_mail = QPushButton("Correo Pendiente")
-            btn_mail.setObjectName("btn_action_mail_pending")
-            btn_mail.setFixedSize(120, 28)
-            btn_mail.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn_mail.setStyleSheet(_BTN_SEC_STYLE)
-            btn_mail.setToolTip(f"Envío de correo pendiente\nDestinatario: {correo_cliente or 'Sin registrar'}\n(Clic para enviar vía servidor)")
+            menu_more.addAction(act_dl_osob)
 
-        btn_mail.clicked.connect(
-            lambda _, fl=folio, oid=os_id, em=correo_cliente, env=email_enviado, b=btn_mail:
-                self._on_click_email_os(fl, oid, em, env, b)
+        lbl_mail = "Reenviar correo" if email_enviado else "Enviar por correo"
+        act_mail = QAction(lbl_mail, menu_more)
+        act_mail.triggered.connect(
+            lambda _, fl=folio, oid=os_id, em=correo_cliente, env=email_enviado:
+                self._on_click_email_os(fl, oid, em, env, None)
         )
-        lay.addWidget(btn_mail)
+        menu_more.addAction(act_mail)
 
+        if has_real_pdf:
+            act_rehacer = QAction("Rehacer captura / reemitir PDF", menu_more)
+            act_rehacer.triggered.connect(
+                lambda _, fid=os_id, fl=folio, rd=row_data: self._abrir_captura_digital(fid, fl, rd)
+            )
+            menu_more.addAction(act_rehacer)
+
+        if self._is_admin() and os_id:
+            menu_more.addSeparator()
+            target_mod = "FISICO" if "DIGITAL" in modalidad_row else "DIGITAL"
+            act_mod = QAction(
+                "Cambiar a Físico" if target_mod == "FISICO" else "Cambiar a Digital",
+                menu_more,
+            )
+            act_mod.triggered.connect(
+                lambda _, oid=int(os_id), nm=target_mod: self._cambiar_modalidad_os(oid, nm)
+            )
+            menu_more.addAction(act_mod)
+
+        if self._is_admin_or_logistica() and os_id:
+            act_edit = QAction("Editar registro", menu_more)
+            act_edit.triggered.connect(lambda _, oid=os_id: self._quick_edit_os(oid))
+            menu_more.addAction(act_edit)
+
+        if self._is_admin():
+            menu_more.addSeparator()
+            act_del = QAction("Eliminar orden", menu_more)
+            act_del.triggered.connect(lambda _, oid=os_id, fl=folio: self._delete_single_os(oid, folio_fallback=fl))
+            menu_more.addAction(act_del)
+
+        btn_more.setMenu(menu_more)
+        lay.addWidget(btn_more)
         lay.addStretch()
         return container
 
@@ -4983,10 +5063,13 @@ class DashboardWidget(QWidget):
                             break
                 self._recalcular_alturas_filas()
 
-            QMessageBox.information(
-                self, "Correo Enviado",
-                f"La orden {folio} fue enviada con éxito.\n\n{info_vivo}"
-            )
+            if _show_toast:
+                _show_toast(self, f"Correo enviado ({folio}) a {correo_dest}.", level="success")
+            else:
+                QMessageBox.information(
+                    self, "Correo Enviado",
+                    f"La orden {folio} fue enviada con éxito.\n\n{info_vivo}"
+                )
         else:
             if btn_widget:
                 btn_widget.setEnabled(True)
@@ -5068,10 +5151,13 @@ class DashboardWidget(QWidget):
                                 btn.setToolTip(f"{info_vivo}\n(Clic para reenviar)")
                 self._recalcular_alturas_filas()
 
-            QMessageBox.information(
-                self, "Lote Enviado con Éxito",
-                f"El lote {lote_id} fue enviado por correo correctamente.\n\n{info_vivo}"
-            )
+            if _show_toast:
+                _show_toast(self, f"Lote {lote_id} enviado a {correo_dest}.", level="success")
+            else:
+                QMessageBox.information(
+                    self, "Lote Enviado con Éxito",
+                    f"El lote {lote_id} fue enviado por correo correctamente.\n\n{info_vivo}"
+                )
         else:
             if btn_widget:
                 btn_widget.setEnabled(True)
@@ -5200,7 +5286,7 @@ class DashboardWidget(QWidget):
         # Paso B: Ejecución en hilo con try/except y timeout estricto
         if btn_widget:
             btn_widget.setEnabled(False)
-            btn_widget.setText("⏳ Enviando...")
+            btn_widget.setText("Enviando...")
 
         def _worker():
             exito = False
@@ -5280,7 +5366,7 @@ class DashboardWidget(QWidget):
         # Paso B: Ejecución en hilo con try/except y timeout estricto
         if btn_widget:
             btn_widget.setEnabled(False)
-            btn_widget.setText("⏳ Enviando...")
+            btn_widget.setText("Enviando...")
 
         def _worker():
             exito = False
@@ -6447,22 +6533,46 @@ class DashboardWidget(QWidget):
             t = text.lower()
             return all(w in t for w in words)
 
+        def _item_searchable_text(it: QTreeWidgetItem) -> str:
+            parts = [
+                str(it.text(col) or "")
+                for col in (
+                    self._COL_FOLIO,
+                    self._COL_CLIENTE,
+                    self._COL_SUCURSAL,
+                    self._COL_TECNICO,
+                    self._COL_SERVICIO,
+                )
+            ]
+            for role in (
+                FolioInstrumentoDelegate.ROLE_RAW_FOLIO,
+                FolioInstrumentoDelegate.ROLE_SPECS_TEXT,
+                FolioInstrumentoDelegate.ROLE_CCA,
+                FolioInstrumentoDelegate.ROLE_DVE,
+            ):
+                val = it.data(self._COL_FOLIO, role)
+                if val:
+                    parts.append(str(val))
+            return " ".join(parts)
+
+        def _matches_folio_or_specs(it: QTreeWidgetItem) -> bool:
+            parts = [
+                str(it.text(self._COL_FOLIO) or ""),
+                str(it.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_RAW_FOLIO) or ""),
+                str(it.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_SPECS_TEXT) or ""),
+                str(it.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_CCA) or ""),
+                str(it.data(self._COL_FOLIO, FolioInstrumentoDelegate.ROLE_DVE) or ""),
+            ]
+            return search_term in " ".join(parts).lower()
+
         for i in range(n_top):
             parent_item = root.child(i)
-
-            # ── COLUMNA 1 = FOLIO OS (columna 0 es el checkbox, siempre vacío) ──
-            parent_folio = parent_item.text(1) or ""
-            child_count  = parent_item.childCount()
-
-            folios_lote = parent_item.data(self._COL_FOLIO, Qt.ItemDataRole.UserRole + 1) or []
+            child_count = parent_item.childCount()
             range_tuple = parent_item.data(self._COL_FOLIO, Qt.ItemDataRole.UserRole + 2)
-
             any_child_match = False
 
-            # Evaluar si el padre en sí coincide
             if _folio_only:
-                parent_match = _matches_folio_only(parent_folio)
-                # Si es numérico y tenemos rango de lote (ej. 669..672), checar si search_term cae dentro
+                parent_match = _matches_folio_or_specs(parent_item)
                 if not parent_match and _is_numeric_search and range_tuple:
                     min_c, max_c = range_tuple
                     if min_c is not None and max_c is not None:
@@ -6473,41 +6583,19 @@ class DashboardWidget(QWidget):
                         except ValueError:
                             pass
             else:
-                # Excluir col 5 (Técnico) del filtro de texto del padre.
-                # El técnico se filtra por ID exacto en SQL — incluirlo en texto
-                # genera falsos positivos con nombres parcialmente iguales.
-                parent_texts = " ".join(
-                    (parent_item.text(col) or "")
-                    for col in range(1, 7)
-                    if col != self._COL_TECNICO   # excluir columna Técnico
-                )
-                parent_match = _matches_all_fields(parent_texts)
+                parent_match = _matches_all_fields(_item_searchable_text(parent_item))
 
             for j in range(child_count):
                 child = parent_item.child(j)
-                child_folio = child.text(1) or ""
-
                 if _folio_only:
-                    child_match = _matches_folio_only(child_folio)
+                    child_match = _matches_folio_or_specs(child)
                 else:
-                    # Excluir col 5 (Técnico) del filtro textual: el técnico ya
-                    # fue filtrado exactamente por ID en la query SQL. Incluirlo
-                    # en el texto causaba falsos positivos cuando dos técnicos
-                    # comparten el mismo nombre parcial (ej. "Alan Guevara" vs
-                    # "Alan Terrazas").
-                    child_texts = " ".join(
-                        (child.text(col) or "")
-                        for col in range(1, 7)
-                        if col != self._COL_TECNICO   # excluir columna Técnico
-                    )
-                    child_match = _matches_all_fields(child_texts)
+                    child_match = _matches_all_fields(_item_searchable_text(child))
 
                 if child_match:
                     any_child_match = True
                     child.setHidden(False)
                 else:
-                    # Si no coincide el hijo directamente:
-                    # En modo general (búsqueda por cliente/sucursal/técnico), si el padre coincidió, mostrar todos
                     if not _folio_only and parent_match:
                         child.setHidden(False)
                     else:
@@ -6931,7 +7019,7 @@ class DashboardWidget(QWidget):
             return
         n = len(self._get_selected_rows())
         if n > 0:
-            self._btn_eliminar_sel.setText(f"🗑️  Eliminar ({n})")
+            self._btn_eliminar_sel.setText(f"Eliminar ({n})")
             self._btn_eliminar_sel.setEnabled(True)
             self._btn_eliminar_sel.setVisible(True)
         else:
@@ -7092,11 +7180,14 @@ class DashboardWidget(QWidget):
                         (nueva_modalidad, os_id),
                     )
                     logger.info("[ADMIN] Modalidad OS id=%s → %s", os_id, nueva_modalidad)
-            QMessageBox.information(
-                self, "Listo",
-                f"Modalidad actualizada a {nueva_modalidad}.\n"
-                "La tablet la descargará en la próxima sincronización."
-            )
+            if _show_toast:
+                _show_toast(self, f"Modalidad actualizada a {nueva_modalidad}.", level="success")
+            else:
+                QMessageBox.information(
+                    self, "Listo",
+                    f"Modalidad actualizada a {nueva_modalidad}.\n"
+                    "La tablet la descargará en la próxima sincronización."
+                )
             QTimer.singleShot(100, self.refresh)
         except Exception as e:
             logger.error("Error cambiando modalidad OS %s: %s", os_id, e)
@@ -7247,10 +7338,13 @@ class DashboardWidget(QWidget):
                 f"Errores:\n" + "\n".join(errores)
             )
         else:
-            QMessageBox.information(
-                self, "✅ Eliminación completada",
-                f"Se eliminaron correctamente {n} formato(s):\n\n{folios_str}"
-            )
+            if _show_toast:
+                _show_toast(self, f"Se eliminaron correctamente {n} formato(s).", level="success")
+            else:
+                QMessageBox.information(
+                    self, "Eliminación completada",
+                    f"Se eliminaron correctamente {n} formato(s):\n\n{folios_str}"
+                )
 
     def _marcar_auditada_admin(self, folio: str) -> None:
         """

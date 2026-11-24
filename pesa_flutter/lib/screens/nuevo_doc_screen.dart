@@ -694,17 +694,18 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               const _SectionTitle('4. Cliente / Razón Social'),
               const SizedBox(width: 8),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
-                  borderRadius: BorderRadius.circular(10),
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: const Color(0xFFCBD5E1)),
                 ),
                 child: Text(
                   '${_clientes.length} en catálogo',
                   style: const TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF1D4ED8),
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF111827),
                   ),
                 ),
               ),
@@ -752,17 +753,18 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               if (_sucursalesCliente.isNotEmpty) ...[
                 const SizedBox(width: 8),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFECFDF5),
-                    borderRadius: BorderRadius.circular(10),
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: const Color(0xFFCBD5E1)),
                   ),
                   child: Text(
                     '${_sucursalesCliente.length} dirección(es) registrada(s)',
                     style: const TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF047857),
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF111827),
                     ),
                   ),
                 ),
@@ -796,7 +798,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         width: 260,
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: isSelected ? const Color(0xFFFEF2F2) : Colors.white,
+                          color: Colors.white,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
                             color: isSelected ? _red : _border,
@@ -999,15 +1001,15 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                           _RegBadge(
                             prefix: 'CCA',
                             value: limpiarNumeroRegulatorio(_ccaCtrl.text),
-                            color: const Color(0xFF1D4ED8),
-                            bg: const Color(0xFFDBEAFE),
+                            color: const Color(0xFF111827),
+                            bg: const Color(0xFFF8FAFC),
                           ),
                         if (limpiarNumeroRegulatorio(_dveCtrl.text).isNotEmpty)
                           _RegBadge(
                             prefix: 'DVE',
                             value: limpiarNumeroRegulatorio(_dveCtrl.text),
-                            color: const Color(0xFF6D28D9),
-                            bg: const Color(0xFFEDE9FE),
+                            color: const Color(0xFF111827),
+                            bg: const Color(0xFFF8FAFC),
                           ),
                       ],
                     ),

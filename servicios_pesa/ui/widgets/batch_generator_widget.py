@@ -20,7 +20,7 @@ from typing import Optional
 from PyQt6.QtCore    import Qt, QTimer, pyqtSignal, QThread, pyqtSlot, QStringListModel, QDate
 from PyQt6.QtGui     import QFont, QColor
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel,
     QPushButton, QFrame, QSpinBox, QDateEdit,
     QComboBox, QScrollArea, QSizePolicy,
     QButtonGroup, QRadioButton, QMessageBox,
@@ -45,15 +45,15 @@ except ImportError:
     _HAS_SESSION = False
     session = None
 
-# ─── Paleta Corporativa Minimalista Básculas PESA ────────────────────────────
-_BG    = "#FFFFFF"
+# ─── Paleta Corporativa Minimalista Básculas PESA v3.2 ───────────────────────
+_BG    = "#F6F7F9"
 _WHITE = "#FFFFFF"
-_DARK  = "#0F172A"
-_GRAY  = "#475569"
+_DARK  = "#111827"
+_GRAY  = "#6B7280"
 _RED   = "#C8102E"
-_BLUE  = "#0F172A"
-_GREEN = "#0F172A"
-_AMBER = "#334155"
+_BLUE  = "#111827"
+_GREEN = "#111827"
+_AMBER = "#374151"
 
 # (Sin datos hardcoded — los catálogos se cargan exclusivamente desde PostgreSQL)
 
@@ -1179,79 +1179,91 @@ class EquipoCard(QFrame):
 # ══════════════════════════════════════════════════════════════════════════════
 class SelectCard(QPushButton):
     """
-    Tarjeta seleccionable tipo toggle.
-    Muestra: ícono + título + descripción corta.
+    Tarjeta seleccionable corporativa Básculas PESA (cero emojis, cero colores pastel/IA).
+    Muestra etiqueta de código sobria + título + descripción clara.
     """
-    def __init__(self, icon: str, title: str, desc: str,
+    def __init__(self, code: str, title: str, desc: str,
                  accent: str = _RED, parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
-        self._accent = accent
+        self._accent = _RED  # Único acento corporativo Básculas PESA
         self._selected = False
         self.setCheckable(True)
-        self.setFixedHeight(96)
+        self.setMinimumHeight(92)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 12, 16, 12)
-        lay.setSpacing(4)
+        lay.setSpacing(6)
 
         top = QHBoxLayout()
-        top.setSpacing(10)
+        top.setSpacing(8)
 
-        lbl_icon = QLabel(icon)
-        lbl_icon.setStyleSheet(f"font-size: 22px; background: transparent; color: {accent};")
-        lbl_icon.setFixedWidth(30)
-        top.addWidget(lbl_icon)
+        self._lbl_badge = QLabel(code)
+        self._lbl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        top.addWidget(self._lbl_badge)
 
-        lbl_title = QLabel(title)
-        lbl_title.setStyleSheet(
-            f"font-size: 14px; font-weight: 700; color: {_DARK}; background: transparent;"
+        self._lbl_title = QLabel(title)
+        self._lbl_title.setStyleSheet(
+            "font-size: 13.5px; font-weight: 700; color: #111827; background: transparent; border: none;"
         )
-        top.addWidget(lbl_title, stretch=1)
+        self._lbl_title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        top.addWidget(self._lbl_title, stretch=1)
         lay.addLayout(top)
 
-        lbl_desc = QLabel(desc)
-        lbl_desc.setWordWrap(True)
-        lbl_desc.setStyleSheet(
-            f"font-size: 11px; color: {_GRAY}; background: transparent;"
+        self._lbl_desc = QLabel(desc)
+        self._lbl_desc.setWordWrap(True)
+        self._lbl_desc.setStyleSheet(
+            "font-size: 11.5px; color: #6B7280; background: transparent; border: none;"
         )
-        lay.addWidget(lbl_desc)
+        self._lbl_desc.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lay.addWidget(self._lbl_desc)
 
         self._apply_style(False)
         self.toggled.connect(self._apply_style)
 
     def _apply_style(self, checked: bool) -> None:
         if checked:
-            self.setStyleSheet(f"""
-                QPushButton {{
-                    background: rgba({self._rgb()}, 0.08);
-                    border: 2px solid {self._accent};
+            self.setStyleSheet("""
+                QPushButton {
+                    background: #FFFFFF;
+                    border: 2px solid #C8102E;
                     border-radius: 12px;
                     text-align: left;
-                }}
+                }
             """)
+            self._lbl_badge.setStyleSheet(
+                "background: #C8102E; color: #FFFFFF; border: none; "
+                "border-radius: 5px; padding: 2px 7px; font-size: 10.5px; font-weight: 700;"
+            )
+            self._lbl_title.setStyleSheet(
+                "font-size: 13.5px; font-weight: 700; color: #C8102E; background: transparent; border: none;"
+            )
         else:
             self.setStyleSheet("""
                 QPushButton {
                     background: #FFFFFF;
-                    border: 1.5px solid rgba(0,0,0,0.10);
+                    border: 1px solid #E5E7EB;
                     border-radius: 12px;
                     text-align: left;
                 }
                 QPushButton:hover {
-                    border-color: rgba(0,0,0,0.18);
-                    background: #FAFAFA;
+                    border-color: #CBD5E1;
+                    background: #F8FAFC;
                 }
             """)
-
-    def _rgb(self) -> str:
-        h = self._accent.lstrip("#")
-        return f"{int(h[0:2],16)}, {int(h[2:4],16)}, {int(h[4:6],16)}"
+            self._lbl_badge.setStyleSheet(
+                "background: #F8FAFC; color: #6B7280; border: 1px solid #E5E7EB; "
+                "border-radius: 5px; padding: 2px 7px; font-size: 10.5px; font-weight: 700;"
+            )
+            self._lbl_title.setStyleSheet(
+                "font-size: 13.5px; font-weight: 700; color: #111827; background: transparent; border: none;"
+            )
 
 
 class StepHeader(QWidget):
-    """Cabecera de un paso con número, ícono y título."""
+    """Cabecera limpia de paso numerado (sin emojis informales)."""
     def __init__(self, step: int, icon: str, title: str, parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setStyleSheet("background: transparent;")
@@ -1262,16 +1274,16 @@ class StepHeader(QWidget):
         badge = QLabel(str(step))
         badge.setFixedSize(26, 26)
         badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        badge.setStyleSheet(f"""
-            background: {_RED}; color: #FFFFFF;
-            border-radius: 13px;
+        badge.setStyleSheet("""
+            background: #C8102E; color: #FFFFFF;
+            border-radius: 13px; border: none;
             font-size: 12px; font-weight: 700;
         """)
         lay.addWidget(badge)
 
-        lbl = QLabel(f"{icon}  {title}")
+        lbl = QLabel(str(title))
         lbl.setStyleSheet(
-            f"font-size: 13px; font-weight: 700; color: {_DARK}; background: transparent;"
+            "font-size: 14px; font-weight: 700; color: #111827; background: transparent; border: none;"
         )
         lay.addWidget(lbl)
         lay.addStretch()
@@ -1280,7 +1292,7 @@ class StepHeader(QWidget):
 def _sep() -> QFrame:
     f = QFrame()
     f.setFrameShape(QFrame.Shape.HLine)
-    f.setStyleSheet("background: rgba(0,0,0,0.06); border: none; margin: 2px 0;")
+    f.setStyleSheet("background: #F3F4F6; border: none; margin: 2px 0;")
     f.setFixedHeight(1)
     return f
 
@@ -1290,23 +1302,23 @@ def _section_card() -> tuple[QFrame, QVBoxLayout]:
     card.setStyleSheet("""
         QFrame {
             background: #FFFFFF;
-            border: 1px solid rgba(0,0,0,0.07);
-            border-radius: 14px;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
         }
     """)
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(22, 18, 22, 18)
+    lay.setContentsMargins(20, 18, 20, 18)
     lay.setSpacing(14)
     return card, lay
 
 
 def _field_label(text: str, required: bool = False) -> QLabel:
-    suffix = "  <span style='color:#E63946'>*</span>" if required else ""
+    suffix = "  <span style='color:#C8102E'>*</span>" if required else ""
     lbl = QLabel(f"{text}{suffix}")
     lbl.setTextFormat(Qt.TextFormat.RichText)
     lbl.setStyleSheet(
-        "font-size: 11px; font-weight: 700; color: #86868B; "
-        "letter-spacing: 0.3px; background: transparent;"
+        "font-size: 11.5px; font-weight: 600; color: #6B7280; "
+        "letter-spacing: 0.2px; background: transparent; border: none;"
     )
     return lbl
 
@@ -1575,15 +1587,15 @@ class BatchGeneratorWidget(QWidget):
         root.addWidget(scroll)
 
         # ── Título de página ──────────────────────────────────────────────────
-        self._lbl_title = QLabel("🖨️  Asistente de Generación de Formatos")
+        self._lbl_title = QLabel("Asistente de Generación de Formatos")
         self._lbl_title.setStyleSheet(
-            f"font-size: 22px; font-weight: 700; color: {_DARK}; "
-            f"letter-spacing: -0.4px; background: transparent;"
+            f"font-size: 20px; font-weight: 700; color: {_DARK}; "
+            f"letter-spacing: -0.3px; background: transparent;"
         )
         self._main_lay.addWidget(self._lbl_title)
 
-        self._lbl_sub = QLabel("Completa los 4 pasos para reservar folios y generar los documentos.")
-        self._lbl_sub.setStyleSheet(f"font-size: 12px; color: {_GRAY}; background: transparent;")
+        self._lbl_sub = QLabel("Completa los pasos guiados para reservar folios y generar o asignar los documentos.")
+        self._lbl_sub.setStyleSheet(f"font-size: 13px; color: {_GRAY}; background: transparent;")
         self._main_lay.addWidget(self._lbl_sub)
 
         # ── PASO 1: Modalidad ─────────────────────────────────────────────────
@@ -1591,41 +1603,41 @@ class BatchGeneratorWidget(QWidget):
 
         # ── PASO 2: Tipo de documento ─────────────────────────────────────────
         self._card_step2, step2_lay = _section_card()
-        step2_lay.addWidget(StepHeader(2, "📄", "Tipo de Documento"))
+        step2_lay.addWidget(StepHeader(2, "", "Tipo de Documento"))
         step2_lay.addWidget(_sep())
         self._card_step2_content = self._build_step2_content()
         step2_lay.addWidget(self._card_step2_content)
         self._main_lay.addWidget(self._card_step2)
         self._card_step2.setEnabled(False)
         self._card_step2.setStyleSheet("""
-            QFrame { background: #FAFAFA; border: 1px solid rgba(0,0,0,0.05);
-                     border-radius: 14px; }
+            QFrame { background: #F9FAFB; border: 1px solid #E5E7EB;
+                     border-radius: 12px; }
         """)
 
         # ── PASO 3: Parámetros ────────────────────────────────────────────────
         self._card_step3, step3_lay = _section_card()
-        step3_lay.addWidget(StepHeader(3, "⚙️", "Parámetros del Formato"))
+        step3_lay.addWidget(StepHeader(3, "", "Parámetros del Formato y Equipos"))
         step3_lay.addWidget(_sep())
         self._card_step3_content = self._build_step3_content()
         step3_lay.addWidget(self._card_step3_content)
         self._main_lay.addWidget(self._card_step3)
         self._card_step3.setEnabled(False)
         self._card_step3.setStyleSheet("""
-            QFrame { background: #FAFAFA; border: 1px solid rgba(0,0,0,0.05);
-                     border-radius: 14px; }
+            QFrame { background: #F9FAFB; border: 1px solid #E5E7EB;
+                     border-radius: 12px; }
         """)
 
         # ── PASO 4: Resumen + acción ──────────────────────────────────────────
         self._card_step4, step4_lay = _section_card()
-        step4_lay.addWidget(StepHeader(4, "🚀", "Confirmar y Ejecutar"))
+        step4_lay.addWidget(StepHeader(4, "", "Confirmar Folios y Ejecutar"))
         step4_lay.addWidget(_sep())
         self._step4_content = self._build_step4_content()
         step4_lay.addWidget(self._step4_content)
         self._main_lay.addWidget(self._card_step4)
         self._card_step4.setEnabled(False)
         self._card_step4.setStyleSheet("""
-            QFrame { background: #FAFAFA; border: 1px solid rgba(0,0,0,0.05);
-                     border-radius: 14px; }
+            QFrame { background: #F9FAFB; border: 1px solid #E5E7EB;
+                     border-radius: 12px; }
         """)
 
         self._main_lay.addStretch()
@@ -1636,29 +1648,26 @@ class BatchGeneratorWidget(QWidget):
     # ── PASO 1 ────────────────────────────────────────────────────────────────
     def _build_step1(self) -> QFrame:
         card, lay = _section_card()
-        lay.addWidget(StepHeader(1, "📱", "Modalidad de Trabajo"))
+        lay.addWidget(StepHeader(1, "", "Modalidad de Trabajo"))
         lay.addWidget(_sep())
 
         cards_row = QHBoxLayout()
-        cards_row.setSpacing(14)
+        cards_row.setSpacing(12)
 
         self._card_digital = SelectCard(
-            "📱", "Digital — Tablet",
-            "El técnico llena el formato en campo con la app móvil.\n"
-            "Firma digital integrada. Sincronización automática.",
-            accent=_BLUE,
+            "DIGITAL", "Digital — Tablet",
+            "Captura en campo desde app móvil con firma digital y sincronización automática.",
+            accent=_RED,
         )
         self._card_fisico = SelectCard(
-            "🖨️", "Físico — Impresión Calca",
-            "Genera PDF para papel duplicado carbón.\n"
-            "Requiere escaneo posterior del original firmado.",
+            "FÍSICO", "Físico — Impresión",
+            "Genera PDF para impresión en papel carbón con escaneo posterior del firmado.",
             accent=_RED,
         )
         self._card_hibrido = SelectCard(
-            "🔀", "Híbrido — Digital + Físico",
-            "Genera PDF físico de respaldo Y habilita captura digital.\n"
-            "Ideal para pruebas o cuando la conectividad es inestable.",
-            accent=_AMBER,
+            "HÍBRIDO", "Híbrido — Digital + Físico",
+            "Genera PDF de respaldo y habilita captura digital simultánea en tablet.",
+            accent=_RED,
         )
 
         # Grupo exclusivo de 3 botones
@@ -1683,44 +1692,44 @@ class BatchGeneratorWidget(QWidget):
     def _build_step2_content(self) -> QWidget:
         w = QWidget()
         w.setStyleSheet("background: transparent;")
-        row = QHBoxLayout(w)
-        row.setSpacing(14)
-        row.setContentsMargins(0, 0, 0, 0)
+        grid = QGridLayout(w)
+        grid.setSpacing(12)
+        grid.setContentsMargins(0, 0, 0, 0)
 
         self._card_os = SelectCard(
-            "📄", "Orden de Servicio (OS)",
+            "OS", "Orden de Servicio",
             "Calibración, ajuste e inspección de instrumentos.",
             accent=_RED,
         )
         self._card_rma = SelectCard(
-            "📋", "Remisión de Material (RMA)",
-            "Traslado de equipos o partes para servicio.",
-            accent=_BLUE,
+            "RMA", "Remisión de Material",
+            "Traslado de equipos o refacciones para servicio.",
+            accent=_RED,
         )
         self._card_re = SelectCard(
-            "⚖️", "Revisión de Báscula (RE)",
+            "RE", "Revisión de Báscula",
             "Verificación de celdas de carga y básculas.",
-            accent="#8B5CF6",
+            accent=_RED,
         )
         self._card_lp = SelectCard(
-            "📋", "Levantamiento de Proyecto (LP)",
+            "LP", "Levantamiento de Proyecto",
             "Levantamiento técnico de campo y proyectos.",
-            accent="#D32F2F",
+            accent=_RED,
         )
         self._card_lv = SelectCard(
-            "📏", "Levantamiento Metrológico (LV)",
-            "Pre-Visita: N básculas, logística de pesas patrón.",
-            accent="#E67E22",
+            "LV", "Levantamiento Metrológico",
+            "Pre-visita: básculas y logística de pesas patrón.",
+            accent=_RED,
         )
         self._card_osob = SelectCard(
-            "🔍", "Observaciones (OSOB)",
-            "Formato de Inspección y Revisión de Básculas.",
-            accent="#0D9488",
+            "OSOB", "Observaciones",
+            "Formato de inspección y revisión de básculas.",
+            accent=_RED,
         )
         self._card_osocc = SelectCard(
-            "🔌", "Observaciones Celda (OSOCC)",
-            "Diagnóstico unitario de celdas de carga (Stock o Cliente).",
-            accent="#0284C7",
+            "OSOCC", "Observaciones Celda",
+            "Diagnóstico unitario de celdas (Stock o Cliente).",
+            accent=_RED,
         )
 
         self._doc_group = QButtonGroup(self)
@@ -1741,13 +1750,16 @@ class BatchGeneratorWidget(QWidget):
         self._card_osob.toggled.connect(lambda chk: chk and self._on_tipo_doc("OSOB"))
         self._card_osocc.toggled.connect(lambda chk: chk and self._on_tipo_doc("OSOCC"))
 
-        row.addWidget(self._card_os)
-        row.addWidget(self._card_rma)
-        row.addWidget(self._card_re)
-        row.addWidget(self._card_lp)
-        row.addWidget(self._card_lv)
-        row.addWidget(self._card_osob)
-        row.addWidget(self._card_osocc)
+        # Cuadrícula uniforme en 2 filas (4 + 3) para lectura limpia sin apretar textos
+        grid.addWidget(self._card_os,    0, 0)
+        grid.addWidget(self._card_rma,   0, 1)
+        grid.addWidget(self._card_re,    0, 2)
+        grid.addWidget(self._card_lp,    0, 3)
+        grid.addWidget(self._card_lv,    1, 0)
+        grid.addWidget(self._card_osob,  1, 1)
+        grid.addWidget(self._card_osocc, 1, 2)
+        for col in range(4):
+            grid.setColumnStretch(col, 1)
         return w
 
     # ── PASO 3 ────────────────────────────────────────────────────────────────
@@ -1807,8 +1819,8 @@ class BatchGeneratorWidget(QWidget):
         self._frame_osocc_destino.setObjectName("frame_osocc_destino")
         self._frame_osocc_destino.setStyleSheet("""
             QFrame#frame_osocc_destino {
-                background: rgba(2,132,199,0.06);
-                border: 1.5px solid rgba(2,132,199,0.30);
+                background: #F8FAFC;
+                border: 1px solid #E5E7EB;
                 border-radius: 10px;
             }
         """)
@@ -1900,18 +1912,18 @@ class BatchGeneratorWidget(QWidget):
         self._frame_re_estructura.setObjectName("frame_re_estructura")
         self._frame_re_estructura.setStyleSheet("""
             QFrame#frame_re_estructura {
-                background: rgba(139,92,246,0.06);
-                border: 1.5px solid rgba(139,92,246,0.25);
+                background: #F8FAFC;
+                border: 1px solid #E5E7EB;
                 border-radius: 10px;
             }
         """)
         _re_vlay = QVBoxLayout(self._frame_re_estructura)
-        _re_vlay.setContentsMargins(14, 10, 14, 10)
-        _re_vlay.setSpacing(8)
+        _re_vlay.setContentsMargins(14, 12, 14, 12)
+        _re_vlay.setSpacing(10)
 
-        _lbl_re_sec = QLabel("⚖️  Información de Estructura  (Revisión de Báscula)")
+        _lbl_re_sec = QLabel("Información de Estructura (Revisión de Báscula)")
         _lbl_re_sec.setStyleSheet(
-            "font-size: 12px; font-weight: 700; color: #8B5CF6; background: transparent;"
+            "font-size: 12.5px; font-weight: 700; color: #111827; background: transparent; border: none;"
         )
         _re_vlay.addWidget(_lbl_re_sec)
 
@@ -2045,7 +2057,7 @@ class BatchGeneratorWidget(QWidget):
         # Grupo A — siempre visible
         _lbl_ga = QLabel("Grupo A — Celdas")
         _lbl_ga.setStyleSheet(
-            "font-size: 10px; font-weight: 700; color: #6D28D9; background: transparent;"
+            "font-size: 11px; font-weight: 700; color: #111827; background: transparent; border: none;"
         )
         _re_vlay.addWidget(_lbl_ga)
         _row_ga = QHBoxLayout(); _row_ga.setSpacing(12)
@@ -2224,14 +2236,14 @@ class BatchGeneratorWidget(QWidget):
         self.txt_observaciones.setStyleSheet("""
             QTextEdit {
                 background: #FFFFFF;
-                border: 1.5px solid #D1D5DB;
+                border: 1px solid #CBD5E1;
                 border-radius: 8px;
                 padding: 8px 12px;
                 font-size: 13px;
-                color: #1D1D1F;
+                color: #111827;
             }
             QTextEdit:focus {
-                border-color: #007AFF;
+                border: 1.5px solid #C8102E;
                 background: #FFFFFF;
             }
         """)
@@ -2273,18 +2285,18 @@ class BatchGeneratorWidget(QWidget):
         self._frame_rma_items.setObjectName("frame_rma_items")
         self._frame_rma_items.setStyleSheet("""
             QFrame#frame_rma_items {
-                background: rgba(37,99,235,0.04);
-                border: 1.5px solid rgba(37,99,235,0.22);
+                background: #F8FAFC;
+                border: 1px solid #E5E7EB;
                 border-radius: 10px;
             }
         """)
         _rma_vlay = QVBoxLayout(self._frame_rma_items)
-        _rma_vlay.setContentsMargins(14, 10, 14, 10)
+        _rma_vlay.setContentsMargins(14, 12, 14, 12)
         _rma_vlay.setSpacing(10)
 
-        _lbl_rma_sec = QLabel("📦  Partidas / Refacciones a Entregar")
+        _lbl_rma_sec = QLabel("Partidas / Refacciones a Entregar")
         _lbl_rma_sec.setStyleSheet(
-            "font-size: 12px; font-weight: 700; color: #1D4ED8; background: transparent;"
+            "font-size: 12.5px; font-weight: 700; color: #111827; background: transparent; border: none;"
         )
         _rma_vlay.addWidget(_lbl_rma_sec)
 
@@ -2438,7 +2450,7 @@ class BatchGeneratorWidget(QWidget):
 
         _col_pesas = QVBoxLayout(); _col_pesas.setSpacing(4)
         _lbl_pesas = QLabel("Pesas Patr\u00f3n a Llevar (cantidad / tipo):")
-        _lbl_pesas.setStyleSheet("font-size: 11px; font-weight: 600; color: #7C3F00; background: transparent;")
+        _lbl_pesas.setStyleSheet("font-size: 11.5px; font-weight: 600; color: #6B7280; background: transparent; border: none;")
         _col_pesas.addWidget(_lbl_pesas)
         self.txt_lv_pesas = QTextEdit()
         self.txt_lv_pesas.setPlaceholderText(
@@ -2449,20 +2461,20 @@ class BatchGeneratorWidget(QWidget):
         self.txt_lv_pesas.setMaximumHeight(100)
         self.txt_lv_pesas.setStyleSheet("""
             QTextEdit {
-                background: #FFFBF5;
-                border: 1.5px solid rgba(230,126,34,0.5);
-                border-radius: 7px;
+                background: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
                 padding: 6px 10px;
-                font-size: 12px; color: #1D1D1F;
+                font-size: 12.5px; color: #111827;
             }
-            QTextEdit:focus { border-color: #E67E22; }
+            QTextEdit:focus { border: 1.5px solid #C8102E; }
         """)
         _col_pesas.addWidget(self.txt_lv_pesas)
         _log_row.addLayout(_col_pesas, stretch=1)
 
         _col_maniobra = QVBoxLayout(); _col_maniobra.setSpacing(4)
         _lbl_maniobra = QLabel("Acomodo, Maniobras y Condiciones de Montaje:")
-        _lbl_maniobra.setStyleSheet("font-size: 11px; font-weight: 600; color: #7C3F00; background: transparent;")
+        _lbl_maniobra.setStyleSheet("font-size: 11.5px; font-weight: 600; color: #6B7280; background: transparent; border: none;")
         _col_maniobra.addWidget(_lbl_maniobra)
         self.txt_lv_maniobra = QTextEdit()
         self.txt_lv_maniobra.setPlaceholderText(
@@ -2473,13 +2485,13 @@ class BatchGeneratorWidget(QWidget):
         self.txt_lv_maniobra.setMaximumHeight(100)
         self.txt_lv_maniobra.setStyleSheet("""
             QTextEdit {
-                background: #FFFBF5;
-                border: 1.5px solid rgba(230,126,34,0.5);
-                border-radius: 7px;
+                background: #FFFFFF;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
                 padding: 6px 10px;
-                font-size: 12px; color: #1D1D1F;
+                font-size: 12.5px; color: #111827;
             }
-            QTextEdit:focus { border-color: #E67E22; }
+            QTextEdit:focus { border: 1.5px solid #C8102E; }
         """)
         _col_maniobra.addWidget(self.txt_lv_maniobra)
         _log_row.addLayout(_col_maniobra, stretch=1)
@@ -2538,14 +2550,14 @@ class BatchGeneratorWidget(QWidget):
 
         return w
 
-    # ── Barra de acción inferior ──────────────────────────────────────────────
+    # ── Barra de acción inferior (sticky footer corporativo) ──────────────────
     def _build_action_bar(self) -> QWidget:
         bar = QWidget()
-        bar.setFixedHeight(60)
+        bar.setFixedHeight(64)
         bar.setStyleSheet("""
             QWidget {
                 background: #FFFFFF;
-                border-top: 1px solid rgba(0,0,0,0.07);
+                border-top: 1px solid #E5E7EB;
             }
         """)
         lay = QHBoxLayout(bar)
@@ -2553,22 +2565,30 @@ class BatchGeneratorWidget(QWidget):
         lay.setSpacing(12)
 
         # Botón reiniciar
-        self.btn_reiniciar = QPushButton("↺  Reiniciar")
-        self.btn_reiniciar.setFixedHeight(36)
+        self.btn_reiniciar = QPushButton("Reiniciar")
+        self.btn_reiniciar.setFixedHeight(38)
+        self.btn_reiniciar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_reiniciar.setStyleSheet("""
             QPushButton {
-                background: transparent;
-                color: #86868B;
-                border: 1px solid rgba(0,0,0,0.12);
+                background: #FFFFFF;
+                color: #111827;
+                border: 1px solid #CBD5E1;
                 border-radius: 8px;
                 font-size: 13px;
+                font-weight: 600;
                 padding: 0 16px;
             }
-            QPushButton:hover { background: rgba(0,0,0,0.04); color: #1D1D1F; }
+            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
         """)
         self.btn_reiniciar.clicked.connect(self.reiniciar_formulario)
         lay.addWidget(self.btn_reiniciar)
 
+        # Mensaje inline de validación en el footer
+        self._lbl_validation_hint = QLabel("")
+        self._lbl_validation_hint.setStyleSheet(
+            "font-size: 12px; color: #6B7280; background: transparent; border: none;"
+        )
+        lay.addWidget(self._lbl_validation_hint)
         lay.addStretch()
 
         # Progreso (mientras genera)
@@ -2578,14 +2598,15 @@ class BatchGeneratorWidget(QWidget):
         self._progress.setFixedHeight(4)
         self._progress.setVisible(False)
         self._progress.setStyleSheet("""
-            QProgressBar { border: none; border-radius: 2px; background: #E5E5EA; }
-            QProgressBar::chunk { background: #E63946; border-radius: 2px; }
+            QProgressBar { border: none; border-radius: 2px; background: #E5E7EB; }
+            QProgressBar::chunk { background: #C8102E; border-radius: 2px; }
         """)
         lay.addWidget(self._progress)
 
         # Botón de acción principal (cambia según modalidad)
         self.btn_ejecutar = QPushButton("Generar e Imprimir PDF")
         self.btn_ejecutar.setFixedHeight(40)
+        self.btn_ejecutar.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_ejecutar.setEnabled(True)
         self.btn_ejecutar.setStyleSheet("""
             QPushButton {
@@ -2593,15 +2614,15 @@ class BatchGeneratorWidget(QWidget):
                 color: #FFFFFF;
                 border: none;
                 border-radius: 8px;
-                font-size: 14px;
+                font-size: 13.5px;
                 font-weight: 700;
                 padding: 0 24px;
             }
-            QPushButton:hover   { background-color: #A50D26; }
+            QPushButton:hover   { background-color: #A60D26; }
             QPushButton:pressed { background-color: #880B20; }
             QPushButton:disabled {
-                background-color: #CBD5E1;
-                color: #FFFFFF;
+                background-color: #E5E7EB;
+                color: #9CA3AF;
             }
         """)
         self.btn_ejecutar.clicked.connect(self._ejecutar)
@@ -2805,16 +2826,32 @@ class BatchGeneratorWidget(QWidget):
                 self.le_osocc_cliente_destino.setText(cli_sel)
                 self.le_osocc_cliente_destino.blockSignals(False)
 
-        valido = True
+        faltantes: list[str] = []
         if not self._es_osocc_stock():
             if hasattr(self, 'cmb_cliente') and (self.cmb_cliente.currentText().strip() == "" or "Selecciona" in self.cmb_cliente.currentText()):
-                valido = False
+                faltantes.append("Cliente")
         if hasattr(self, 'cmb_tecnico') and (self.cmb_tecnico.currentText().strip() == "" or "Selecciona" in self.cmb_tecnico.currentText()):
-            valido = False
+            faltantes.append("Técnico")
         if hasattr(self, '_tipo_doc') and self._tipo_doc == "OS" and hasattr(self, 'cmb_tipo_servicio') and (self.cmb_tipo_servicio.currentText().strip() == "" or "Selecciona" in self.cmb_tipo_servicio.currentText()):
-            valido = False
+            faltantes.append("Tipo de Servicio")
         if hasattr(self, 'input_folio_inicial') and self.input_folio_inicial.text().strip() == "":
-            valido = False
+            faltantes.append("Folio Inicial")
+        valido = len(faltantes) == 0
+        if hasattr(self, '_lbl_validation_hint'):
+            if not getattr(self, '_modalidad', None):
+                self._lbl_validation_hint.setText("Selecciona la modalidad para comenzar.")
+            elif not getattr(self, '_tipo_doc', None):
+                self._lbl_validation_hint.setText("Selecciona el tipo de documento.")
+            elif faltantes:
+                self._lbl_validation_hint.setText(f"Falta completar: {', '.join(faltantes)}")
+                self._lbl_validation_hint.setStyleSheet(
+                    "font-size: 12px; font-weight: 600; color: #C8102E; background: transparent; border: none;"
+                )
+            else:
+                self._lbl_validation_hint.setText("Listo para generar y asignar folios.")
+                self._lbl_validation_hint.setStyleSheet(
+                    "font-size: 12px; font-weight: 600; color: #16A34A; background: transparent; border: none;"
+                )
         if hasattr(self, 'btn_ejecutar'):
             self.btn_ejecutar.setEnabled(valido)
 
