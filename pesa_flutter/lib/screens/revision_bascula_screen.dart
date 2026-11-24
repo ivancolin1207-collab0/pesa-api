@@ -24,7 +24,10 @@ import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
+import '../theme/foldable_layout.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/nombre_recibe.dart';
+import '../widgets/signature_shield.dart';
 
 class RevisionBasculaScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
@@ -768,28 +771,32 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: const Color(0xFFF3F4F6),
+      backgroundColor: PesaColors.canvas,
       appBar: AppBar(
-        backgroundColor: _pesaRed,
-        foregroundColor: Colors.white,
-        elevation: 2,
+        backgroundColor: PesaColors.surface,
+        foregroundColor: PesaColors.textPrimary,
+        elevation: 0,
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: PesaColors.border),
+        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Ficha Técnica Diagnóstica · $folio',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
             ),
             Text(
-              'REVISIÓN DE CELDAS DE CARGA Y BÁSCULA · $cliente',
-              style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+              'REVISIÓN DE CELDAS Y BÁSCULA · $cliente',
+              style: const TextStyle(fontSize: 11, color: PesaColors.textSecondary),
             ),
           ],
         ),
         actions: [
           IconButton(
             tooltip: 'Guardar avance local',
-            icon: const Icon(Icons.save_outlined),
+            icon: const Icon(Icons.save_outlined, color: PesaColors.textPrimary),
             onPressed: () async {
               await _guardarBorradorSilencioso();
               if (!mounted) return;
@@ -803,53 +810,61 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
           ),
         ],
       ),
-      body: ListView(
-        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-        padding: EdgeInsets.fromLTRB(14, 14, 14, bottomInset + 36),
-        children: [
-          // ── SECCIÓN 1 Y 2: CLIENTE, INDICADOR, CELDAS Y SELECTOR N CELDAS ──
-          _buildSeccion1y2Card(cliente, direccion),
-          const SizedBox(height: 14),
+      body: SigningScrollLock(
+        builder: (ctx, physics, _) => ListView(
+          physics: physics,
+          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+          padding: EdgeInsets.fromLTRB(
+            foldableHorizontalPadding(ctx),
+            14,
+            foldableHorizontalPadding(ctx),
+            bottomInset + 36,
+          ),
+          children: [
+            // ── SECCIÓN 1 Y 2: CLIENTE, INDICADOR, CELDAS Y SELECTOR N CELDAS ──
+            _buildSeccion1y2Card(cliente, direccion),
+            const SizedBox(height: 14),
 
-          // ── SECCIÓN 3: LECTURAS SIN CARGA — N CELDAS (OHMS / MV) ───────────
-          _buildSeccion3OhmsCard(),
-          const SizedBox(height: 14),
+            // ── SECCIÓN 3: LECTURAS SIN CARGA — N CELDAS (OHMS / MV) ───────────
+            _buildSeccion3OhmsCard(),
+            const SizedBox(height: 14),
 
-          // ── SECCIÓN 4: FUNCIONALIDAD DE CELDAS E INDICADOR ─────────────────
-          _buildSeccion4FuncionalidadCard(),
-          const SizedBox(height: 14),
+            // ── SECCIÓN 4: FUNCIONALIDAD DE CELDAS E INDICADOR ─────────────────
+            _buildSeccion4FuncionalidadCard(),
+            const SizedBox(height: 14),
 
-          // ── SECCIÓN 5: OBSERVACIONES Y FIRMAS ──────────────────────────────
-          _buildSeccion5ObservacionesFirmasCard(cliente),
-          const SizedBox(height: 20),
+            // ── SECCIÓN 5: OBSERVACIONES Y FIRMAS ──────────────────────────────
+            _buildSeccion5ObservacionesFirmasCard(cliente),
+            const SizedBox(height: 20),
 
-          // ── BOTÓN FINALIZAR Y GENERAR PDF OFICIAL ──────────────────────────
-          SizedBox(
-            height: 54,
-            child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _pesaRed,
-                foregroundColor: Colors.white,
-                elevation: 3,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: _guardando ? null : _finalizar,
-              icon: _guardando
-                  ? const SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                    )
-                  : const Icon(Icons.picture_as_pdf_rounded, size: 24),
-              label: Text(
-                _guardando
-                    ? 'GENERANDO FICHA TÉCNICA PDF...'
-                    : 'FINALIZAR REVISIÓN Y GENERAR PDF OFICIAL',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+            // ── BOTÓN FINALIZAR Y GENERAR PDF OFICIAL ──────────────────────────
+            SizedBox(
+              height: 52,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: PesaColors.brand,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: _guardando ? null : _finalizar,
+                icon: _guardando
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                      )
+                    : const Icon(Icons.picture_as_pdf_rounded, size: 22),
+                label: Text(
+                  _guardando
+                      ? 'GENERANDO FICHA TÉCNICA PDF...'
+                      : 'FINALIZAR REVISIÓN Y GENERAR PDF OFICIAL',
+                  style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, letterSpacing: 0.3),
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -1772,31 +1787,12 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                 ),
                 const SizedBox(height: 16),
 
-                // Pads de Firma Cliente y Técnico
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final isWide = constraints.maxWidth >= 600;
-                    final padCliente = _buildFirmaClienteBlock();
-                    final padTecnico = _buildFirmaTecnicoBlock();
-                    if (isWide) {
-                      return Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(child: padCliente),
-                          const SizedBox(width: 16),
-                          Expanded(child: padTecnico),
-                        ],
-                      );
-                    }
-                    return Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        padCliente,
-                        const SizedBox(height: 14),
-                        padTecnico,
-                      ],
-                    );
-                  },
+                // Pads de Firma Cliente y Técnico (conciencia de bisagra + 2 cols desplegado)
+                FoldableTwoColumn(
+                  horizontalGap: 16,
+                  verticalGap: 14,
+                  first: _buildFirmaClienteBlock(),
+                  second: _buildFirmaTecnicoBlock(),
                 ),
               ],
             ),
@@ -1825,10 +1821,15 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
           height: 145,
           decoration: BoxDecoration(
             color: Colors.white,
-            border: Border.all(color: Colors.grey.shade400),
+            border: Border.all(color: PesaColors.borderStrong),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Signature(controller: _sigClienteCtrl, backgroundColor: Colors.white),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: SignatureGestureShield(
+              child: Signature(controller: _sigClienteCtrl, backgroundColor: Colors.white),
+            ),
+          ),
         ),
       ],
     );
@@ -1878,10 +1879,15 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
             height: 145,
             decoration: BoxDecoration(
               color: Colors.white,
-              border: Border.all(color: Colors.grey.shade400),
+              border: Border.all(color: PesaColors.borderStrong),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Signature(controller: _sigTecnicoCtrl, backgroundColor: Colors.white),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: SignatureGestureShield(
+                child: Signature(controller: _sigTecnicoCtrl, backgroundColor: Colors.white),
+              ),
+            ),
           ),
       ],
     );

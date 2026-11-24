@@ -16,6 +16,8 @@ import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
 import '../services/rma_pdf_service.dart';
 import '../services/sync_service.dart';
+import '../theme/foldable_layout.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/signature_shield.dart';
 import 'observaciones_bascula_screen.dart';
 import 'observaciones_celda_screen.dart';
@@ -557,21 +559,149 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     final direccion = (widget.orden['direccion'] ?? widget.orden['sucursal'] ?? '').toString();
     final tecnico = (widget.orden['tecnico'] ?? widget.orden['tecnico_nombre'] ?? '').toString();
 
+    final bool cover = isCoverScreen(context);
+
+    Widget buildFirmaTecContent() {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Entregado por: ${tecnico.isNotEmpty ? tecnico : "Técnico PESA"}',
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          ),
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 150,
+            width: double.infinity,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: PesaColors.borderStrong),
+                borderRadius: BorderRadius.circular(8),
+                color: Colors.white,
+              ),
+              child: _firmaTecnicoExistente != null && _ctrlFirmaTecnico.isEmpty
+                  ? Stack(
+                      children: [
+                        Center(child: Image.memory(_firmaTecnicoExistente!)),
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              minimumSize: const Size(0, 32),
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            ),
+                            onPressed: () {
+                              setState(() => _firmaTecnicoExistente = null);
+                            },
+                            child: const Text('Re-firmar', style: TextStyle(fontSize: 11)),
+                          ),
+                        ),
+                      ],
+                    )
+                  : ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SignatureGestureShield(
+                        child: Signature(
+                          controller: _ctrlFirmaTecnico,
+                          backgroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => _ctrlFirmaTecnico.clear(),
+              icon: const Icon(Icons.clear, size: 16),
+              label: const Text('Limpiar Trazo'),
+            ),
+          ),
+        ],
+      );
+    }
+
+    Widget buildFirmaCliContent() {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          FoldableTwoColumn(
+            horizontalGap: 8,
+            verticalGap: 8,
+            first: TextFormField(
+              controller: _nombreReceptorCtrl,
+              onChanged: (_) {
+                if (_errNombreRecibe) setState(() => _errNombreRecibe = false);
+              },
+              decoration: InputDecoration(
+                errorText: _errNombreRecibe ? kMsgNombreRecibeObligatorio : null,
+                labelText: 'Nombre de quien recibe *',
+                isDense: true,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            second: TextFormField(
+              controller: _puestoReceptorCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Puesto / Cargo',
+                isDense: true,
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 150,
+            width: double.infinity,
+            child: Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: PesaColors.borderStrong),
+                borderRadius: BorderRadius.circular(8),
+                color: Colors.white,
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SignatureGestureShield(
+                  child: Signature(
+                    controller: _ctrlFirmaCliente,
+                    backgroundColor: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: () => _ctrlFirmaCliente.clear(),
+              icon: const Icon(Icons.clear, size: 16),
+              label: const Text('Limpiar Trazo'),
+            ),
+          ),
+        ],
+      );
+    }
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6F9),
+      backgroundColor: PesaColors.canvas,
       appBar: AppBar(
-        backgroundColor: _dark,
-        foregroundColor: Colors.white,
+        backgroundColor: PesaColors.surface,
+        foregroundColor: PesaColors.textPrimary,
         elevation: 0,
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: PesaColors.border),
+        ),
         title: Text(
           'Remisión de Material ($folio)',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: PesaColors.textPrimary),
         ),
         actions: [
           TextButton.icon(
             onPressed: _saving ? null : _guardarBorrador,
-            icon: const Icon(Icons.save_outlined, color: Colors.white70, size: 18),
-            label: const Text('Borrador', style: TextStyle(color: Colors.white70)),
+            icon: const Icon(Icons.save_outlined, color: PesaColors.textSecondary, size: 18),
+            label: const Text('Borrador', style: TextStyle(color: PesaColors.textPrimary)),
           ),
           const SizedBox(width: 8),
         ],
@@ -579,11 +709,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
       bottomNavigationBar: SafeArea(
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             color: Colors.white,
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 10, offset: const Offset(0, -3)),
-            ],
+            border: Border(top: BorderSide(color: PesaColors.border)),
           ),
           child: ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
@@ -603,9 +731,11 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
           ),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
+      body: SigningScrollLock(
+        builder: (ctx, physics, _) => ListView(
+          physics: physics,
+          padding: EdgeInsets.all(foldableHorizontalPadding(ctx)),
+          children: [
           // ── Tarjeta de Datos Generales ──────────────────────────────────
           Card(
             elevation: 0,
@@ -811,152 +941,42 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                     ],
                   ),
                   const SizedBox(height: 12),
-                  TabBar(
-                    controller: _tabFirmasCtrl,
-                    labelColor: _red,
-                    unselectedLabelColor: Colors.grey.shade600,
-                    indicatorColor: _red,
-                    tabs: const [
-                      Tab(icon: Icon(Icons.engineering_rounded), text: '1. Técnico Asignado *'),
-                      Tab(icon: Icon(Icons.person_pin_rounded), text: '2. Cliente / Receptor *'),
-                    ],
-                  ),
-                  SizedBox(
-                    height: 280,
-                    child: TabBarView(
+                  if (cover) ...[
+                    TabBar(
                       controller: _tabFirmasCtrl,
-                      children: [
-                        // Tab Técnico
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Entregado por: ${tecnico.isNotEmpty ? tecnico : "Técnico PESA"}',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                              ),
-                              const SizedBox(height: 6),
-                              Expanded(
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.grey.shade300),
-                                    borderRadius: BorderRadius.circular(8),
-                                    color: Colors.white,
-                                  ),
-                                  child: _firmaTecnicoExistente != null && _ctrlFirmaTecnico.isEmpty
-                                      ? Stack(
-                                          children: [
-                                            Center(child: Image.memory(_firmaTecnicoExistente!)),
-                                            Positioned(
-                                              top: 4,
-                                              right: 4,
-                                              child: ElevatedButton(
-                                                style: ElevatedButton.styleFrom(
-                                                  backgroundColor: Colors.grey.shade200,
-                                                  foregroundColor: Colors.black87,
-                                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                                ),
-                                                onPressed: () {
-                                                  setState(() => _firmaTecnicoExistente = null);
-                                                },
-                                                child: const Text('Re-firmar', style: TextStyle(fontSize: 11)),
-                                              ),
-                                            ),
-                                          ],
-                                        )
-                                      : SignatureGestureShield(
-                                          child: Signature(
-                                            controller: _ctrlFirmaTecnico,
-                                            backgroundColor: Colors.white,
-                                          ),
-                                        ),
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton.icon(
-                                  onPressed: () => _ctrlFirmaTecnico.clear(),
-                                  icon: const Icon(Icons.clear, size: 16),
-                                  label: const Text('Limpiar Trazo'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // Tab Cliente
-                        Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: Column(
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: _nombreReceptorCtrl,
-                                      onChanged: (_) {
-                                        if (_errNombreRecibe) setState(() => _errNombreRecibe = false);
-                                      },
-                                      decoration: InputDecoration(
-                                        errorText: _errNombreRecibe ? kMsgNombreRecibeObligatorio : null,
-                                        labelText: 'Nombre de quien recibe *',
-                                        isDense: true,
-                                        border: OutlineInputBorder(),
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 8),
-                                  Expanded(
-                                    child: TextFormField(
-                                      controller: _puestoReceptorCtrl,
-                                      decoration: const InputDecoration(
-                                        labelText: 'Puesto / Cargo',
-                                        isDense: true,
-                                        border: OutlineInputBorder(),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Expanded(
-                                child: Container(
-                                  decoration: BoxDecoration(
-                                    border: Border.all(color: Colors.grey.shade300),
-                                    borderRadius: BorderRadius.circular(8),
-                                    color: Colors.white,
-                                  ),
-                                  child: SignatureGestureShield(
-                                    child: Signature(
-                                      controller: _ctrlFirmaCliente,
-                                      backgroundColor: Colors.white,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(height: 6),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: TextButton.icon(
-                                  onPressed: () => _ctrlFirmaCliente.clear(),
-                                  icon: const Icon(Icons.clear, size: 16),
-                                  label: const Text('Limpiar Trazo'),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
+                      labelColor: _red,
+                      unselectedLabelColor: PesaColors.textSecondary,
+                      indicatorColor: _red,
+                      tabs: const [
+                        Tab(icon: Icon(Icons.engineering_rounded), text: '1. Técnico *'),
+                        Tab(icon: Icon(Icons.person_pin_rounded), text: '2. Cliente *'),
                       ],
                     ),
-                  ),
+                    SizedBox(
+                      height: 330,
+                      child: TabBarView(
+                        controller: _tabFirmasCtrl,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          Padding(padding: const EdgeInsets.only(top: 12), child: buildFirmaTecContent()),
+                          Padding(padding: const EdgeInsets.only(top: 12), child: buildFirmaCliContent()),
+                        ],
+                      ),
+                    ),
+                  ] else
+                    FoldableTwoColumn(
+                      horizontalGap: 16,
+                      verticalGap: 12,
+                      first: buildFirmaTecContent(),
+                      second: buildFirmaCliContent(),
+                    ),
                 ],
               ),
             ),
           ),
           const SizedBox(height: 30),
         ],
+        ),
       ),
     );
   }

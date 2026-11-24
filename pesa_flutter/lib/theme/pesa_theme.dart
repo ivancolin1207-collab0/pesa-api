@@ -184,6 +184,39 @@ class PesaTheme {
           );
         }),
       ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: PesaColors.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 2,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: PesaColors.border),
+        ),
+      ),
+      bottomSheetTheme: const BottomSheetThemeData(
+        backgroundColor: PesaColors.surface,
+        surfaceTintColor: Colors.transparent,
+        constraints: BoxConstraints(maxWidth: 520),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+      ),
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: PesaColors.surface,
+        indicatorColor: PesaColors.surfaceMuted,
+        selectedIconTheme: const IconThemeData(color: PesaColors.brand, size: 22),
+        unselectedIconTheme: const IconThemeData(color: PesaColors.textSecondary, size: 22),
+        selectedLabelTextStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: PesaColors.brand,
+        ),
+        unselectedLabelTextStyle: const TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w500,
+          color: PesaColors.textSecondary,
+        ),
+      ),
       snackBarTheme: SnackBarThemeData(
         backgroundColor: PesaColors.textPrimary,
         contentTextStyle: const TextStyle(

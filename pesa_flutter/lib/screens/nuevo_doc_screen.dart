@@ -6,6 +6,8 @@ import '../services/api_service.dart';
 import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/sync_service.dart';
+import '../theme/foldable_layout.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/app_shell.dart';
 
 class NuevoDocScreen extends StatefulWidget {
@@ -16,9 +18,9 @@ class NuevoDocScreen extends StatefulWidget {
 }
 
 class _NuevoDocScreenState extends State<NuevoDocScreen> {
-  static const _red = Color(0xFFB81D24);
-  static const _border = Color(0xFFE5E7EB);
-  static const _bg = Color(0xFFF9FAFB);
+  static const _red = PesaColors.brand;
+  static const _border = PesaColors.border;
+  static const _bg = PesaColors.canvas;
 
   final _formKey = GlobalKey<FormState>();
   bool _loading = false;
@@ -256,13 +258,8 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
   }
 
   Future<void> _abrirBuscadorClientes() async {
-    final selected = await showModalBottomSheet<Map<String, dynamic>>(
+    final selected = await showFoldableBottomSheet<Map<String, dynamic>>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
-      ),
       builder: (ctx) => _ClienteSearchSheet(clientes: _clientes),
     );
     if (selected != null) {
@@ -391,9 +388,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEF2F2),
+                    color: PesaColors.surfaceMuted,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFFCA5A5)),
+                    border: Border.all(color: PesaColors.borderStrong),
                   ),
                   child: Row(children: [
                     const Icon(Icons.assignment_turned_in, color: _red, size: 22),
@@ -443,8 +440,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final isMobile = media.size.width < 768 && media.orientation != Orientation.landscape;
+    final bool cover = isCoverScreen(context);
 
     return AppShell(
       currentRoute: '/nuevo-doc',
@@ -455,13 +451,13 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
           child: Column(children: [
             // Header
             Container(
-              color: Colors.white,
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+              padding: EdgeInsets.fromLTRB(cover ? 12 : 16, 12, cover ? 12 : 16, 12),
               decoration: const BoxDecoration(
+                color: Colors.white,
                 border: Border(bottom: BorderSide(color: _border)),
               ),
               child: Row(children: [
-                if (isMobile)
+                if (cover)
                   IconButton(
                     icon: const Icon(Icons.menu_rounded, color: Color(0xFF111827), size: 24),
                     tooltip: 'Menú principal',
@@ -473,15 +469,17 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                     color: _red,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.assignment_add, color: Colors.white, size: 22),
+                  child: const Icon(Icons.assignment_add, color: Colors.white, size: 20),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 const Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Generar y Asignar Formatos (Admin)',
+                        'Generar y Asignar Formatos',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: Color(0xFF111827),
                           fontWeight: FontWeight.w800,
@@ -489,7 +487,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         ),
                       ),
                       Text(
-                        'OS, RMA, RE, LP, LV, OSOB y OSOCC • Catálogo completo sincronizado',
+                        'OS, RMA, RE, LP, LV, OSOB y OSOCC · Catálogo sincronizado',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: TextStyle(color: Color(0xFF6B7280), fontSize: 11),
                       ),
                     ],
@@ -499,6 +499,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                   style: OutlinedButton.styleFrom(
                     foregroundColor: const Color(0xFF374151),
                     side: const BorderSide(color: _border),
+                    minimumSize: const Size(0, 40),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   ),
                   onPressed: _syncingCat ? null : () => _loadCatalogos(forceRemote: true),
@@ -510,8 +511,8 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         )
                       : const Icon(Icons.sync_rounded, size: 16),
                   label: Text(
-                    isMobile ? 'Catálogos' : 'Sincronizar Catálogos',
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                    cover ? 'Sync' : 'Sincronizar Catálogos',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
                   ),
                 ),
                 const SizedBox(width: 4),
@@ -524,7 +525,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
             Expanded(
               child: _loadingCat
                   ? const Center(child: CircularProgressIndicator(color: _red))
-                  : _buildForm(),
+                  : _buildForm(context),
             ),
           ]),
         ),
@@ -532,15 +533,16 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     );
   }
 
-  Widget _buildForm() {
+  Widget _buildForm(BuildContext context) {
+    final bool cover = isCoverScreen(context);
     const docs = [
-      {'key': 'OS', 'label': 'Orden de Servicio (OS)'},
-      {'key': 'RMA', 'label': 'Remisión Material (RMA)'},
-      {'key': 'RE', 'label': 'Revisión Báscula (RE)'},
-      {'key': 'LP', 'label': 'Levantamiento Proy. (LP)'},
-      {'key': 'LV', 'label': 'Levantamiento Met. (LV)'},
-      {'key': 'OSOB', 'label': 'Observaciones Báscula (OSOB)'},
-      {'key': 'OSOCC', 'label': 'Observaciones Celda (OSOCC)'},
+      {'key': 'OS', 'label': 'Orden de Servicio'},
+      {'key': 'RMA', 'label': 'Remisión Material'},
+      {'key': 'RE', 'label': 'Revisión Báscula'},
+      {'key': 'LP', 'label': 'Levantamiento Proy.'},
+      {'key': 'LV', 'label': 'Levantamiento Met.'},
+      {'key': 'OSOB', 'label': 'Obs. Báscula'},
+      {'key': 'OSOCC', 'label': 'Obs. Celda'},
     ];
 
     final bool pideTipoServicio = _tipoDoc == 'OS';
@@ -556,7 +558,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     });
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(cover ? 12 : 20),
       child: Form(
         key: _formKey,
         child: Column(
@@ -566,17 +568,17 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.red.shade50,
-                  border: Border.all(color: Colors.red.shade200),
+                  color: PesaColors.surface,
+                  border: Border.all(color: _red),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Row(children: [
-                  Icon(Icons.error_outline, color: Colors.red.shade700, size: 18),
+                  const Icon(Icons.error_outline, color: _red, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       _error!,
-                      style: TextStyle(color: Colors.red.shade700, fontSize: 12),
+                      style: const TextStyle(color: _red, fontSize: 12),
                     ),
                   ),
                 ]),
@@ -584,92 +586,135 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               const SizedBox(height: 16),
             ],
 
-            // ── 1. Selector de los 7 Formatos ───────────────────────────────
+            // ── 1. Selector de los 7 Formatos (Rejilla 4 cols en desplegado / Wrap en cover) ─
             const _SectionTitle('1. Formato a Generar'),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                for (final d in docs)
-                  ChoiceChip(
-                    label: Text(
-                      '${d['key']} — ${d['label']!.split(' (').first}',
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        color: _tipoDoc == d['key'] ? Colors.white : const Color(0xFF374151),
+            if (!cover)
+              FoldableFormGrid(
+                unfoldedColumns: isWideScreen(context) ? 4 : 3,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final d in docs)
+                    InkWell(
+                      borderRadius: BorderRadius.circular(9),
+                      onTap: () => setState(() => _tipoDoc = d['key']!),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                        decoration: BoxDecoration(
+                          color: _tipoDoc == d['key'] ? _red : Colors.white,
+                          borderRadius: BorderRadius.circular(9),
+                          border: Border.all(
+                            color: _tipoDoc == d['key'] ? _red : _border,
+                            width: _tipoDoc == d['key'] ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              d['key']!,
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: _tipoDoc == d['key'] ? Colors.white : PesaColors.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              d['label']!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                color: _tipoDoc == d['key'] ? Colors.white70 : PesaColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
-                    selected: _tipoDoc == d['key'],
-                    selectedColor: _red,
-                    backgroundColor: Colors.white,
-                    side: BorderSide(color: _tipoDoc == d['key'] ? _red : _border),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    onSelected: (val) {
-                      if (val) setState(() => _tipoDoc = d['key']!);
-                    },
-                  ),
-              ],
-            ),
-            const SizedBox(height: 20),
+                ],
+              )
+            else
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: [
+                  for (final d in docs)
+                    ChoiceChip(
+                      label: Text(
+                        '${d['key']} · ${d['label']}',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: _tipoDoc == d['key'] ? Colors.white : PesaColors.textPrimary,
+                        ),
+                      ),
+                      selected: _tipoDoc == d['key'],
+                      showCheckmark: false,
+                      selectedColor: _red,
+                      backgroundColor: Colors.white,
+                      side: BorderSide(color: _tipoDoc == d['key'] ? _red : _border),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      onSelected: (val) {
+                        if (val) setState(() => _tipoDoc = d['key']!);
+                      },
+                    ),
+                ],
+              ),
+            const SizedBox(height: 18),
 
-            // ── 2. Cantidad y Modalidad ─────────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _SectionTitle('2. Tipo de Asignación'),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        for (final t in ['Individual', 'Lote'])
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: _RadioCard(
-                                label: t,
-                                icon: t == 'Individual'
-                                    ? Icons.assignment_outlined
-                                    : Icons.layers_outlined,
-                                selected: _tipo == t,
-                                onTap: () => setState(() => _tipo = t),
-                              ),
-                            ),
+            // ── 2. Cantidad y Modalidad (apilados en cover, 2 cols en desplegado) ──
+            FoldableTwoColumn(
+              horizontalGap: 14,
+              verticalGap: 14,
+              first: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle('2. Tipo de Asignación'),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    for (final t in ['Individual', 'Lote'])
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(right: t == 'Individual' ? 8 : 0),
+                          child: _RadioCard(
+                            label: t,
+                            icon: t == 'Individual'
+                                ? Icons.assignment_outlined
+                                : Icons.layers_outlined,
+                            selected: _tipo == t,
+                            onTap: () => setState(() => _tipo = t),
                           ),
-                      ]),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _SectionTitle('3. Modalidad'),
-                      const SizedBox(height: 8),
-                      Row(children: [
-                        for (final m in ['Digital', 'Físico'])
-                          Expanded(
-                            child: Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: _RadioCard(
-                                label: m,
-                                icon: m == 'Digital'
-                                    ? Icons.tablet_android_rounded
-                                    : Icons.print_outlined,
-                                selected: _modalidad == m,
-                                onTap: () => setState(() => _modalidad = m),
-                              ),
-                            ),
+                        ),
+                      ),
+                  ]),
+                ],
+              ),
+              second: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle('3. Modalidad'),
+                  const SizedBox(height: 8),
+                  Row(children: [
+                    for (final m in ['Digital', 'Físico'])
+                      Expanded(
+                        child: Padding(
+                          padding: EdgeInsets.only(right: m == 'Digital' ? 8 : 0),
+                          child: _RadioCard(
+                            label: m,
+                            icon: m == 'Digital'
+                                ? Icons.tablet_android_rounded
+                                : Icons.print_outlined,
+                            selected: _modalidad == m,
+                            onTap: () => setState(() => _modalidad = m),
                           ),
-                      ]),
-                    ],
-                  ),
-                ),
-              ],
+                        ),
+                      ),
+                  ]),
+                ],
+              ),
             ),
 
             if (_tipo == 'Lote') ...[
@@ -849,63 +894,56 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               ),
               const SizedBox(height: 10),
             ],
-            Row(children: [
-              Expanded(
-                child: _InputField(
-                  label: 'Sucursal / Planta',
-                  controller: _sucursalCtrl,
-                ),
+            FoldableTwoColumn(
+              firstFlex: 1,
+              secondFlex: 2,
+              horizontalGap: 10,
+              verticalGap: 10,
+              first: _InputField(
+                label: 'Sucursal / Planta',
+                controller: _sucursalCtrl,
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                flex: 2,
-                child: _InputField(
-                  label: 'Dirección completa de planta',
-                  controller: _direccionCtrl,
-                ),
+              second: _InputField(
+                label: 'Dirección completa de planta',
+                controller: _direccionCtrl,
               ),
-            ]),
+            ),
 
             const SizedBox(height: 16),
 
             // ── 6. Técnico Asignado y Fecha ─────────────────────────────────
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _SectionTitle('6. Técnico Asignado'),
-                      const SizedBox(height: 8),
-                      _CatalogDropdown(
-                        hint: 'Seleccionar técnico...',
-                        items: _tecnicos,
-                        labelKeys: const ['nombre', 'nombre_completo'],
-                        idKey: 'id',
-                        value: _tecnicoId,
-                        onChanged: (v) => setState(() => _tecnicoId = v),
-                        validator: (v) => v == null ? 'Selecciona un técnico asignado' : null,
-                      ),
-                    ],
+            FoldableTwoColumn(
+              firstFlex: 2,
+              secondFlex: 1,
+              horizontalGap: 12,
+              verticalGap: 12,
+              first: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle('6. Técnico Asignado'),
+                  const SizedBox(height: 8),
+                  _CatalogDropdown(
+                    hint: 'Seleccionar técnico...',
+                    items: _tecnicos,
+                    labelKeys: const ['nombre', 'nombre_completo'],
+                    idKey: 'id',
+                    value: _tecnicoId,
+                    onChanged: (v) => setState(() => _tecnicoId = v),
+                    validator: (v) => v == null ? 'Selecciona un técnico asignado' : null,
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const _SectionTitle('Fecha Programada'),
-                      const SizedBox(height: 8),
-                      _InputField(
-                        label: 'YYYY-MM-DD',
-                        controller: _fechaCtrl,
-                      ),
-                    ],
+                ],
+              ),
+              second: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle('Fecha Programada'),
+                  const SizedBox(height: 8),
+                  _InputField(
+                    label: 'YYYY-MM-DD',
+                    controller: _fechaCtrl,
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
 
             const SizedBox(height: 16),
@@ -1041,10 +1079,13 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Marca + Modelo con Autocomplete de historial
-                  Row(children: [
-                    Expanded(
-                      child: _InstrumentoAutocompleteField(
+                  // Datos de Instrumento en rejilla adaptativa (1 col en cover < 600dp, 2 cols en desplegado)
+                  FoldableFormGrid(
+                    unfoldedColumns: 2,
+                    spacing: 10,
+                    runSpacing: 12,
+                    children: [
+                      _InstrumentoAutocompleteField(
                         label: 'Marca',
                         controller: _marcaCtrl,
                         historial: _historialInstrumentos,
@@ -1052,10 +1093,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         onChanged: (_) => setState(() {}),
                         onSelectedInstrument: _aplicarInstrumentoSugerido,
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _InstrumentoAutocompleteField(
+                      _InstrumentoAutocompleteField(
                         label: 'Modelo',
                         controller: _modeloCtrl,
                         historial: _historialInstrumentos,
@@ -1063,14 +1101,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         onChanged: (_) => setState(() {}),
                         onSelectedInstrument: _aplicarInstrumentoSugerido,
                       ),
-                    ),
-                  ]),
-                  const SizedBox(height: 12),
-
-                  // Serie + ID Indicador con Autocomplete de historial
-                  Row(children: [
-                    Expanded(
-                      child: _InstrumentoAutocompleteField(
+                      _InstrumentoAutocompleteField(
                         label: 'N° de Serie (S/N)',
                         controller: _serieCtrl,
                         historial: _historialInstrumentos,
@@ -1078,10 +1109,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         onChanged: (_) => setState(() {}),
                         onSelectedInstrument: _aplicarInstrumentoSugerido,
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _InstrumentoAutocompleteField(
+                      _InstrumentoAutocompleteField(
                         label: 'ID Indicador / Equipo',
                         controller: _idEquipoCtrl,
                         historial: _historialInstrumentos,
@@ -1089,54 +1117,31 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         onChanged: (_) => setState(() {}),
                         onSelectedInstrument: _aplicarInstrumentoSugerido,
                       ),
-                    ),
-                  ]),
-                  const SizedBox(height: 12),
-
-                  // Capacidad + División Mínima + Ubicación
-                  Row(children: [
-                    Expanded(
-                      child: _InputField(
+                      _InputField(
                         label: 'Capacidad Máxima',
                         controller: _capacidadCtrl,
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _InputField(
+                      _InputField(
                         label: 'División Mínima',
                         controller: _divisionCtrl,
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _InputField(
+                      _InputField(
                         label: 'Ubicación / Área',
                         controller: _ubicacionCtrl,
                         onChanged: (_) => setState(() {}),
                       ),
-                    ),
-                  ]),
-                  const SizedBox(height: 12),
-
-                  // Números Regulatorios independientes: CCA y DVE
-                  Row(children: [
-                    Expanded(
-                      child: _InputField(
+                      _InputField(
                         label: 'Número CCA (ej. CCA.26.02163)',
                         controller: _ccaCtrl,
                         onChanged: (_) => setState(() {}),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: _InputField(
+                      _InputField(
                         label: 'Número DVE (ej. DVE.26.00412)',
                         controller: _dveCtrl,
                         onChanged: (_) => setState(() {}),
                       ),
-                    ),
-                  ]),
+                    ],
+                  ),
                   const SizedBox(height: 10),
 
                   // Switch Aplica Excentricidad + Selector Motivo No Apto
@@ -1537,10 +1542,10 @@ class _RadioCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFFFEE2E2) : Colors.white,
+          color: selected ? PesaColors.surfaceMuted : Colors.white,
           border: Border.all(
             color: selected ? red : const Color(0xFFE5E7EB),
-            width: 2,
+            width: selected ? 1.8 : 1,
           ),
           borderRadius: BorderRadius.circular(10),
         ),

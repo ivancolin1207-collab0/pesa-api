@@ -10,6 +10,7 @@ import '../services/local_db_service.dart';
 import '../services/sync_service.dart';
 import '../services/tipo_servicio_rules.dart';
 import '../services/metrology_helper.dart';
+import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/pesa_components.dart';
 import '../widgets/repetibilidad_table.dart';
@@ -1206,176 +1207,175 @@ class _CapturaScreenState extends State<CapturaScreen>
           ],
         ),
         const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: _EquipoHistorialAutocomplete(
-            label: 'Marca',
-            ctrl: _marcaCtrl,
-            focusNode: _marcaFocusNode,
-            fieldKey: 'marca',
-            historial: _historialInstrumentos,
-            fallbackStrings: _marcasSugeridas,
-            hint: 'Rice Lake, Mettler...',
-            required: true,
-            hasError: _mostrarErroresInstrumento && _marcaCtrl.text.trim().isEmpty,
-            onChanged: (val) {
-              _actualizarModelosParaMarca(val);
-              if (_mostrarErroresInstrumento) setState(() {});
-            },
-            onSelectedInstrument: _aplicarInstrumentoDelHistorial,
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: _EquipoHistorialAutocomplete(
-            label: 'Modelo',
-            ctrl: _modeloCtrl,
-            focusNode: _modeloFocusNode,
-            fieldKey: 'modelo',
-            historial: _historialInstrumentos,
-            fallbackStrings: _modelosSugeridos,
-            hint: '920i-4A, IND560...',
-            required: true,
-            hasError: _mostrarErroresInstrumento && _modeloCtrl.text.trim().isEmpty,
-            onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
-            onSelectedInstrument: _aplicarInstrumentoDelHistorial,
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: _EquipoHistorialAutocomplete(
-            label: 'N° de Serie',
-            ctrl: _nsCtrl,
-            focusNode: _nsFocusNode,
-            fieldKey: 'serie',
-            historial: _historialInstrumentos,
-            fallbackStrings: const [],
-            hint: '1318400062',
-            onSelectedInstrument: _aplicarInstrumentoDelHistorial,
-          )),
-        ]),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(child: _EquipoHistorialAutocomplete(
-            label: 'ID Indicador / Equipo',
-            ctrl: _idEquipoCtrl,
-            focusNode: _idEquipoFocusNode,
-            fieldKey: 'id_indicador',
-            historial: _historialInstrumentos,
-            fallbackStrings: const [],
-            hint: 'Trailer A, Báscula 3...',
-            required: true,
-            hasError: _mostrarErroresInstrumento && _idEquipoCtrl.text.trim().isEmpty,
-            onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
-            onSelectedInstrument: _aplicarInstrumentoDelHistorial,
-          )),
-          const SizedBox(width: 12),
-          Expanded(child: _Field(
-            'Ubicación',
-            _ubicCtrl,
-            hint: 'Taller, Planta Norte...',
-            required: true,
-            hasError: _mostrarErroresInstrumento && _ubicCtrl.text.trim().isEmpty,
-            onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
-          )),
-        ]),
-        const SizedBox(height: 10),
-        DropdownButtonFormField<String>(
-          value: _tipoInstrumento,
-          decoration: _kInputDeco('Tipo de Instrumento'),
-          hint: const Text('Seleccionar...', style: TextStyle(fontSize: 13)),
-          items: _tiposInstrumento.map((t) =>
-              DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 13))))
-              .toList(),
-          onChanged: (v) => setState(() {
-            _tipoInstrumento = v;
-            _os['tipo_instrumento'] = v;
-            final vLow = (v ?? '').toLowerCase();
-            final isSilo     = vLow.contains('silo') && !vLow.contains('tanque');
-            final isTanque   = vLow.contains('tanque');
-            final isColgante = vLow.contains('colgante') || vLow.contains('grúa') || vLow.contains('grua') || vLow.contains('gancho');
-            final isPatin    = vLow.contains('patin') || vLow.contains('patín') || vLow.contains('transpaleta');
-            final isTolva    = vLow.contains('tolva');
+        FoldableFormGrid(
+          unfoldedColumns: 2,
+          spacing: 12,
+          runSpacing: 10,
+          children: [
+            _EquipoHistorialAutocomplete(
+              label: 'Marca',
+              ctrl: _marcaCtrl,
+              focusNode: _marcaFocusNode,
+              fieldKey: 'marca',
+              historial: _historialInstrumentos,
+              fallbackStrings: _marcasSugeridas,
+              hint: 'Rice Lake, Mettler...',
+              required: true,
+              hasError: _mostrarErroresInstrumento && _marcaCtrl.text.trim().isEmpty,
+              onChanged: (val) {
+                _actualizarModelosParaMarca(val);
+                if (_mostrarErroresInstrumento) setState(() {});
+              },
+              onSelectedInstrument: _aplicarInstrumentoDelHistorial,
+            ),
+            _EquipoHistorialAutocomplete(
+              label: 'Modelo',
+              ctrl: _modeloCtrl,
+              focusNode: _modeloFocusNode,
+              fieldKey: 'modelo',
+              historial: _historialInstrumentos,
+              fallbackStrings: _modelosSugeridos,
+              hint: '920i-4A, IND560...',
+              required: true,
+              hasError: _mostrarErroresInstrumento && _modeloCtrl.text.trim().isEmpty,
+              onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
+              onSelectedInstrument: _aplicarInstrumentoDelHistorial,
+            ),
+            _EquipoHistorialAutocomplete(
+              label: 'N° de Serie',
+              ctrl: _nsCtrl,
+              focusNode: _nsFocusNode,
+              fieldKey: 'serie',
+              historial: _historialInstrumentos,
+              fallbackStrings: const [],
+              hint: '1318400062',
+              onSelectedInstrument: _aplicarInstrumentoDelHistorial,
+            ),
+            _EquipoHistorialAutocomplete(
+              label: 'ID Indicador / Equipo',
+              ctrl: _idEquipoCtrl,
+              focusNode: _idEquipoFocusNode,
+              fieldKey: 'id_indicador',
+              historial: _historialInstrumentos,
+              fallbackStrings: const [],
+              hint: 'Trailer A, Báscula 3...',
+              required: true,
+              hasError: _mostrarErroresInstrumento && _idEquipoCtrl.text.trim().isEmpty,
+              onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
+              onSelectedInstrument: _aplicarInstrumentoDelHistorial,
+            ),
+            _Field(
+              'Ubicación',
+              _ubicCtrl,
+              hint: 'Taller, Planta Norte...',
+              required: true,
+              hasError: _mostrarErroresInstrumento && _ubicCtrl.text.trim().isEmpty,
+              onChanged: (_) { if (_mostrarErroresInstrumento) setState(() {}); },
+            ),
+            DropdownButtonFormField<String>(
+              value: _tipoInstrumento,
+              decoration: _kInputDeco('Tipo de Instrumento'),
+              hint: const Text('Seleccionar...', style: TextStyle(fontSize: 13)),
+              items: _tiposInstrumento.map((t) =>
+                  DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 13))))
+                  .toList(),
+              onChanged: (v) => setState(() {
+                _tipoInstrumento = v;
+                _os['tipo_instrumento'] = v;
+                final vLow = (v ?? '').toLowerCase();
+                final isSilo     = vLow.contains('silo') && !vLow.contains('tanque');
+                final isTanque   = vLow.contains('tanque');
+                final isColgante = vLow.contains('colgante') || vLow.contains('grúa') || vLow.contains('grua') || vLow.contains('gancho');
+                final isPatin    = vLow.contains('patin') || vLow.contains('patín') || vLow.contains('transpaleta');
+                final isTolva    = vLow.contains('tolva');
 
-            if (isTanque || isSilo) {
-              _usaSustitucion = isTanque;
-              _aplExcOverride = false;
-              _os['aplica_excentricidad'] = false;
-              _motivoNoExcentricidad = isSilo ? 'Silo' : 'Tanque';
-              _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
-              _os['tipo_no_apto']            = _motivoNoExcentricidad;
-              _os['motivo_no_aplica']        = _motivoNoExcentricidad;
-              _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
-              _os['usa_sustitucion'] = isTanque;
-              _os['es_sustitucion'] = isTanque;
-              _os['es_enlace_sustitucion'] = isTanque;
-            } else if (isColgante || isPatin || isTolva) {
-              _usaSustitucion = false;
-              _aplExcOverride = false;
-              _os['aplica_excentricidad'] = false;
-              _motivoNoExcentricidad = isColgante
-                  ? 'Grúa'
-                  : isPatin
-                      ? 'Patín'
-                      : 'Tolva';
-              _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
-              _os['tipo_no_apto']            = _motivoNoExcentricidad;
-              _os['motivo_no_aplica']        = _motivoNoExcentricidad;
-              _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
-              _os['usa_sustitucion'] = false;
-              _os['aplica_sustitucion'] = false;
-              _os['es_sustitucion'] = false;
-              _os['es_enlace_sustitucion'] = false;
-            } else {
-              // Cualquier instrumento que sí aplica excentricidad:
-              _usaSustitucion = false;
-              _aplExcOverride = true;
-              _os['aplica_excentricidad'] = true;
-              _os['motivo_no_excentricidad'] = '';
-              _os['tipo_no_apto'] = '';
-              _os['motivo_no_aplica'] = '';
-              _os['tipo_no_aplica_exc'] = null;
-              _os['usa_sustitucion'] = false;
-              _os['aplica_sustitucion'] = false;
-              _os['es_sustitucion'] = false;
-              _os['es_enlace_sustitucion'] = false;
-            }
+                if (isTanque || isSilo) {
+                  _usaSustitucion = isTanque;
+                  _aplExcOverride = false;
+                  _os['aplica_excentricidad'] = false;
+                  _motivoNoExcentricidad = isSilo ? 'Silo' : 'Tanque';
+                  _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
+                  _os['tipo_no_apto']            = _motivoNoExcentricidad;
+                  _os['motivo_no_aplica']        = _motivoNoExcentricidad;
+                  _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
+                  _os['usa_sustitucion'] = isTanque;
+                  _os['es_sustitucion'] = isTanque;
+                  _os['es_enlace_sustitucion'] = isTanque;
+                } else if (isColgante || isPatin || isTolva) {
+                  _usaSustitucion = false;
+                  _aplExcOverride = false;
+                  _os['aplica_excentricidad'] = false;
+                  _motivoNoExcentricidad = isColgante
+                      ? 'Grúa'
+                      : isPatin
+                          ? 'Patín'
+                          : 'Tolva';
+                  _os['motivo_no_excentricidad'] = _motivoNoExcentricidad;
+                  _os['tipo_no_apto']            = _motivoNoExcentricidad;
+                  _os['motivo_no_aplica']        = _motivoNoExcentricidad;
+                  _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
+                  _os['usa_sustitucion'] = false;
+                  _os['aplica_sustitucion'] = false;
+                  _os['es_sustitucion'] = false;
+                  _os['es_enlace_sustitucion'] = false;
+                } else {
+                  _usaSustitucion = false;
+                  _aplExcOverride = true;
+                  _os['aplica_excentricidad'] = true;
+                  _os['motivo_no_excentricidad'] = '';
+                  _os['tipo_no_apto'] = '';
+                  _os['motivo_no_aplica'] = '';
+                  _os['tipo_no_aplica_exc'] = null;
+                  _os['usa_sustitucion'] = false;
+                  _os['aplica_sustitucion'] = false;
+                  _os['es_sustitucion'] = false;
+                  _os['es_enlace_sustitucion'] = false;
+                }
 
-            _puntosApoyo = getPuntosApoyoPorDefecto(v, fallback: (_puntosApoyo > 1 ? _puntosApoyo : 5));
-            if (_aplExc && _puntosApoyo < 4) {
-              _puntosApoyo = (vLow.contains('camion') || vLow.contains('ferro') || vLow.contains('puente')) ? 4 : 5;
-            }
-            _os['puntos_apoyo'] = _puntosApoyo;
-            _geometriaExcentricidad = getGeometriaPorDefecto(v);
-            _os['geometria_excentricidad'] = _geometriaExcentricidad;
-            _os['geometria_plataforma']    = _geometriaExcentricidad;
-            if (_geometriaExcentricidad == 'Camionera' && _numSeccionesExc < 2) {
-              _numSeccionesExc = 4;
-            }
-            _os['num_secciones']       = _numSeccionesExc;
-            _os['secciones_camionera'] = _numSeccionesExc;
+                _puntosApoyo = getPuntosApoyoPorDefecto(v, fallback: (_puntosApoyo > 1 ? _puntosApoyo : 5));
+                if (_aplExc && _puntosApoyo < 4) {
+                  _puntosApoyo = (vLow.contains('camion') || vLow.contains('ferro') || vLow.contains('puente')) ? 4 : 5;
+                }
+                _os['puntos_apoyo'] = _puntosApoyo;
+                _geometriaExcentricidad = getGeometriaPorDefecto(v);
+                _os['geometria_excentricidad'] = _geometriaExcentricidad;
+                _os['geometria_plataforma']    = _geometriaExcentricidad;
+                if (_geometriaExcentricidad == 'Camionera' && _numSeccionesExc < 2) {
+                  _numSeccionesExc = 4;
+                }
+                _os['num_secciones']       = _numSeccionesExc;
+                _os['secciones_camionera'] = _numSeccionesExc;
 
-            if (_aplExc) {
-              final numPos = _geometriaExcentricidad == 'Camionera' ? _numSeccionesExc.clamp(2, 50) : 5;
-              if (_excRows.isEmpty) {
-                _excRows = List.generate(numPos, (i) => {
-                  'posicion_id': i + 1,
-                  'carga': _cargaExcAutoCalculada,
-                  'lectura_inicial': null,
-                  'lectura_final': null,
-                  'error': null,
-                  'valido_d': true,
-                });
-              }
-              _actualizarCargasSugeridas(force: false);
-            }
-            _dataVersion++;
-          }),
+                if (_aplExc) {
+                  final numPos = _geometriaExcentricidad == 'Camionera' ? _numSeccionesExc.clamp(2, 50) : 5;
+                  if (_excRows.isEmpty) {
+                    _excRows = List.generate(numPos, (i) => {
+                      'posicion_id': i + 1,
+                      'carga': _cargaExcAutoCalculada,
+                      'lectura_inicial': null,
+                      'lectura_final': null,
+                      'error': null,
+                      'valido_d': true,
+                    });
+                  }
+                  _actualizarCargasSugeridas(force: false);
+                }
+                _dataVersion++;
+              }),
+            ),
+          ],
         ),
         const SizedBox(height: 16),
 
         // ── Parámetros metrológicos base (Cap + Div + Unidad) ────────
         _SectionTitle('Parámetros Metrológicos'),
         const SizedBox(height: 10),
-        Row(children: [
-          Expanded(
-            flex: 3,
-            child: _NumField(
+        FoldableFormGrid(
+          unfoldedColumns: 2,
+          spacing: 12,
+          runSpacing: 10,
+          children: [
+            _NumField(
               'Capacidad Máx. ($_unidadMedida) *',
               _capMaxCtrl,
               hasError: _mostrarErroresInstrumento && _capMaxCtrl.text.trim().isEmpty,
@@ -1384,39 +1384,42 @@ class _CapturaScreenState extends State<CapturaScreen>
                 if (_mostrarErroresInstrumento) setState(() {});
               },
             ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            flex: 3,
-            child: _NumField(
-              'División Mín. ($_unidadMedida) *',
-              _divMinCtrl,
-              hasError: _mostrarErroresInstrumento && _divMinCtrl.text.trim().isEmpty,
-              onChanged: (_) {
-                _actualizarCargasSugeridas();
-                if (_mostrarErroresInstrumento) setState(() {});
-              },
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            flex: 2,
-            child: DropdownButtonFormField<String>(
-              value: _unidadMedida,
-              decoration: _kInputDeco('Unidad'),
-              items: const [
-                DropdownMenuItem(value: 'kg', child: Text('kg', style: TextStyle(fontWeight: FontWeight.bold))),
-                DropdownMenuItem(value: 'g',  child: Text('g',  style: TextStyle(fontWeight: FontWeight.bold))),
+            Row(
+              children: [
+                Expanded(
+                  flex: 3,
+                  child: _NumField(
+                    'División Mín. ($_unidadMedida) *',
+                    _divMinCtrl,
+                    hasError: _mostrarErroresInstrumento && _divMinCtrl.text.trim().isEmpty,
+                    onChanged: (_) {
+                      _actualizarCargasSugeridas();
+                      if (_mostrarErroresInstrumento) setState(() {});
+                    },
+                  ),
+                ),
+                const SizedBox(width: 10),
+                SizedBox(
+                  width: 96,
+                  child: DropdownButtonFormField<String>(
+                    value: _unidadMedida,
+                    decoration: _kInputDeco('Unidad'),
+                    items: const [
+                      DropdownMenuItem(value: 'kg', child: Text('kg', style: TextStyle(fontWeight: FontWeight.bold))),
+                      DropdownMenuItem(value: 'g',  child: Text('g',  style: TextStyle(fontWeight: FontWeight.bold))),
+                    ],
+                    onChanged: (v) => setState(() {
+                      _unidadMedida = v ?? 'kg';
+                      _os['unidad_medida'] = _unidadMedida;
+                      _dataVersion++;
+                      _actualizarCargasSugeridas();
+                    }),
+                  ),
+                ),
               ],
-              onChanged: (v) => setState(() {
-                _unidadMedida = v ?? 'kg';
-                _os['unidad_medida'] = _unidadMedida;
-                _dataVersion++;
-                _actualizarCargasSugeridas();
-              }),
             ),
-          ),
-        ]),
+          ],
+        ),
         const SizedBox(height: 12),
 
         // ¿Aplica Excentricidad? — SIEMPRE editable por el técnico en campo
@@ -1614,29 +1617,26 @@ class _CapturaScreenState extends State<CapturaScreen>
         // ── Sección Números Regulatorios Independientes (CCA y DVE) ───────
         _SectionTitle('Números Regulatorios (CCA y/o DVE)'),
         const SizedBox(height: 8),
-        Row(children: [
-          Expanded(
-            child: _Field(
-              'Número CCA',
-              _ccaCtrl,
-              hint: '${_prefijoCca}02163',
-              required: rules.tieneCalibracion,
-              keyboardType: TextInputType.text,
-              textCapitalization: TextCapitalization.characters,
-            ),
+        FoldableTwoColumn(
+          horizontalGap: 12,
+          verticalGap: 10,
+          first: _Field(
+            'Número CCA',
+            _ccaCtrl,
+            hint: '${_prefijoCca}02163',
+            required: rules.tieneCalibracion,
+            keyboardType: TextInputType.text,
+            textCapitalization: TextCapitalization.characters,
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: _Field(
-              'Número DVE',
-              _numeroDveCtrl,
-              hint: '${_prefijoDve}00412',
-              required: rules.tieneInspeccion && !rules.tieneCalibracion,
-              keyboardType: TextInputType.text,
-              textCapitalization: TextCapitalization.characters,
-            ),
+          second: _Field(
+            'Número DVE',
+            _numeroDveCtrl,
+            hint: '${_prefijoDve}00412',
+            required: rules.tieneInspeccion && !rules.tieneCalibracion,
+            keyboardType: TextInputType.text,
+            textCapitalization: TextCapitalization.characters,
           ),
-        ]),
+        ),
         if (rules.tieneCalibracion) ...[
           const SizedBox(height: 10),
           const Text('Inicial del Calibrador (NOM-010-SCFI-2020):',
@@ -1668,13 +1668,14 @@ class _CapturaScreenState extends State<CapturaScreen>
           const SizedBox(height: 10),
           _NumField('Div. Verificación e (kg)', _divVerCtrl),
           const SizedBox(height: 10),
-          Row(children: [
-            Expanded(child: _Field('Holograma Anterior', _holoAntCtrl,
-                hint: '2025-XXXX', required: true)),
-            const SizedBox(width: 12),
-            Expanded(child: _Field('Holograma Actualizado', _holoActCtrl,
-                hint: '2026-XXXX', required: true)),
-          ]),
+          FoldableTwoColumn(
+            horizontalGap: 12,
+            verticalGap: 10,
+            first: _Field('Holograma Anterior', _holoAntCtrl,
+                hint: '2025-XXXX', required: true),
+            second: _Field('Holograma Actualizado', _holoActCtrl,
+                hint: '2026-XXXX', required: true),
+          ),
           const SizedBox(height: 16),
         ],
 
@@ -1734,74 +1735,71 @@ class _CapturaScreenState extends State<CapturaScreen>
         // ── Nuevos campos: Funcionamiento y Puntos de Apoyo ────────────────────
         _SectionTitle('Parámetros del Instrumento'),
         const SizedBox(height: 10),
-        Row(children: [
-          Expanded(
-            child: DropdownButtonFormField<String>(
-              value: _funcionamiento,
-              decoration: _kInputDeco('Funcionamiento'),
-              items: ['Electrónico', 'Mecánico', 'Electromecánico']
-                  .map((f) => DropdownMenuItem(value: f, child: Text(f, style: const TextStyle(fontSize: 13))))
-                  .toList(),
-              onChanged: (v) => setState(() => _funcionamiento = v ?? _funcionamiento),
-            ),
+        FoldableTwoColumn(
+          horizontalGap: 12,
+          verticalGap: 12,
+          first: DropdownButtonFormField<String>(
+            value: _funcionamiento,
+            decoration: _kInputDeco('Funcionamiento'),
+            items: ['Electrónico', 'Mecánico', 'Electromecánico']
+                .map((f) => DropdownMenuItem(value: f, child: Text(f, style: const TextStyle(fontSize: 13))))
+                .toList(),
+            onChanged: (v) => setState(() => _funcionamiento = v ?? _funcionamiento),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Padding(
-                  padding: EdgeInsets.only(bottom: 6),
-                  child: Text('Puntos de Apoyo',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+          second: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(bottom: 6),
+                child: Text('Puntos de Apoyo',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+              ),
+              Row(children: [
+                IconButton(
+                  icon: const Icon(Icons.remove_circle_outline),
+                  color: _kRed,
+                  onPressed: () => setState(() {
+                    if (_puntosApoyo > 1) {
+                      _puntosApoyo--;
+                      _os['puntos_apoyo'] = _puntosApoyo;
+                    }
+                  }),
                 ),
-                Row(children: [
-                  IconButton(
-                    icon: const Icon(Icons.remove_circle_outline),
-                    color: _kRed,
-                    onPressed: () => setState(() {
-                      if (_puntosApoyo > 1) {
-                        _puntosApoyo--;
-                        _os['puntos_apoyo'] = _puntosApoyo;
-                      }
-                    }),
-                  ),
-                  Text('$_puntosApoyo',
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                  IconButton(
-                    icon: const Icon(Icons.add_circle_outline),
-                    color: _kRed,
-                    onPressed: () => setState(() {
-                      if (_puntosApoyo < 30) {
-                        _puntosApoyo++;
-                        _os['puntos_apoyo'] = _puntosApoyo;
-                      }
-                    }),
-                  ),
-                ]),
-              ],
-            ),
+                Text('$_puntosApoyo',
+                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                IconButton(
+                  icon: const Icon(Icons.add_circle_outline),
+                  color: _kRed,
+                  onPressed: () => setState(() {
+                    if (_puntosApoyo < 30) {
+                      _puntosApoyo++;
+                      _os['puntos_apoyo'] = _puntosApoyo;
+                    }
+                  }),
+                ),
+              ]),
+            ],
           ),
-        ]),
+        ),
         const SizedBox(height: 20),
 
         // ── Botón Guardar Datos de Equipo (Sin Finalizar) ──────────────────
         SizedBox(
           width: double.infinity,
-          height: 46,
+          height: 48,
           child: OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF1D4ED8),
-              backgroundColor: const Color(0xFFEFF6FF),
-              side: const BorderSide(color: Color(0xFF93C5FD), width: 1.5),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              foregroundColor: PesaColors.textPrimary,
+              backgroundColor: PesaColors.surface,
+              side: const BorderSide(color: PesaColors.borderStrong, width: 1.2),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: _savingParcial ? null : _guardarEquipoSinFinalizar,
             icon: _savingParcial
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1D4ED8)),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: _kRed),
                   )
                 : const Icon(Icons.cloud_upload_outlined, size: 19),
             label: Text(

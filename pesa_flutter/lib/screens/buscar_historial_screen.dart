@@ -1,4 +1,4 @@
-// lib/screens/buscar_historial_screen.dart — Buscador e Historial Dinámico de Órdenes e Instrumentos
+// lib/screens/buscar_historial_screen.dart — Buscador e Historial Dinámico (Adaptativo Galaxy Z Fold8 Ultra)
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -9,7 +9,10 @@ import '../services/auth_service.dart';
 import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/sync_service.dart';
+import '../theme/foldable_layout.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/app_shell.dart';
+import '../widgets/pesa_components.dart';
 import 'os_list_screen.dart';
 
 class BuscarHistorialScreen extends StatefulWidget {
@@ -20,15 +23,16 @@ class BuscarHistorialScreen extends StatefulWidget {
 }
 
 class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
-  static const _red = Color(0xFFB81D24);
-  static const _border = Color(0xFFE5E7EB);
-  static const _bg = Color(0xFFF9FAFB);
+  static const _red = PesaColors.brand;
+  static const _border = PesaColors.border;
+  static const _bg = PesaColors.canvas;
 
   final _searchCtrl = TextEditingController();
   String _query = '';
   String _filtroFormato = 'TODOS';
   List<Map<String, dynamic>> _all = [];
   bool _loading = true;
+  String? _selectedKey;
 
   @override
   void initState() {
@@ -41,6 +45,9 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
     _searchCtrl.dispose();
     super.dispose();
   }
+
+  String _rowKey(Map<String, dynamic> os) =>
+      (os['folio_os'] ?? os['folio'] ?? os['local_id'] ?? '').toString().trim();
 
   Future<void> _load() async {
     setState(() => _loading = true);
@@ -93,6 +100,14 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
     }).toList();
   }
 
+  bool _isCerrada(Map<String, dynamic> os) {
+    final est = (os['estatus'] ?? os['estado'] ?? '').toString().toUpperCase();
+    return est.contains('CERRAD') ||
+        est.contains('COMPLET') ||
+        os['has_pdf'] == 1 ||
+        (os['pdf_path_local'] ?? '').toString().isNotEmpty;
+  }
+
   Future<void> _abrirPdfDirecto(Map<String, dynamic> os) async {
     final folio = (os['folio_os'] ?? os['folio'] ?? '').toString().trim();
     if (folio.isEmpty) return;
@@ -126,11 +141,519 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
     }
   }
 
+  Widget _buildHeader(BuildContext context, List<Map<String, dynamic>> rows, bool cover) {
+    return Container(
+      padding: EdgeInsets.fromLTRB(cover ? 12 : 18, 12, cover ? 12 : 18, 12),
+      decoration: const BoxDecoration(
+        color: PesaColors.surface,
+        border: Border(bottom: BorderSide(color: _border)),
+      ),
+      child: Column(
+        children: [
+          Row(children: [
+            if (cover)
+              IconButton(
+                icon: const Icon(Icons.menu_rounded, color: PesaColors.textPrimary),
+                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                onPressed: () => AppShell.toggleMenu(context),
+              ),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _red,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.manage_search_rounded, color: Colors.white, size: 19),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Buscar / Historial de Órdenes',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                      color: PesaColors.textPrimary,
+                    ),
+                  ),
+                  Text(
+                    '${rows.length} de ${_all.length} registros · Folio, Marca, Modelo, S/N, ID, CCA o DVE',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Sincronizar y actualizar',
+              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+              icon: const Icon(Icons.sync_rounded, color: PesaColors.textPrimary),
+              onPressed: () async {
+                await context.read<SyncService>().performSync();
+                await _load();
+              },
+            ),
+          ]),
+          const SizedBox(height: 10),
+          SizedBox(
+            height: 46,
+            child: TextField(
+              controller: _searchCtrl,
+              decoration: InputDecoration(
+                hintText: 'Buscar folio, Rice Lake, modelo, serie, ID, CCA, DVE, cliente…',
+                prefixIcon: const Icon(Icons.search_rounded, size: 19, color: PesaColors.textSecondary),
+                suffixIcon: _query.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 17, color: PesaColors.textSecondary),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _query = '');
+                        },
+                      )
+                    : null,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                filled: true,
+                fillColor: PesaColors.surfaceMuted,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: PesaColors.border),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: PesaColors.border),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: const BorderSide(color: _red, width: 1.5),
+                ),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: [
+                  for (final fmt in const ['TODOS', 'OS', 'OSOB', 'OSOCC', 'RMA', 'RE', 'LP', 'LV'])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 6),
+                      child: ChoiceChip(
+                        label: Text(fmt, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                        selected: _filtroFormato == fmt,
+                        showCheckmark: false,
+                        selectedColor: _red,
+                        backgroundColor: Colors.white,
+                        side: BorderSide(color: _filtroFormato == fmt ? _red : _border),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        labelStyle: TextStyle(
+                          color: _filtroFormato == fmt ? Colors.white : PesaColors.textPrimary,
+                        ),
+                        onSelected: (_) => setState(() => _filtroFormato = fmt),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildListItem(BuildContext context, Map<String, dynamic> os, {required bool isMasterDetail, required bool isSelected}) {
+    final folioTxt = (os['folio_os'] ?? os['folio'] ?? '—').toString().trim();
+    final specs = construirEspecificacionesInstrumento(os);
+    final cca = extraerNumeroCca(os);
+    final dve = extraerNumeroDve(os);
+    final fecha = (os['fecha'] ?? '').toString().split('T').first;
+    final cerrada = _isCerrada(os);
+    final infoCorreo = formatearInfoEnvioCorreo(os);
+
+    final cardContent = Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isSelected ? PesaColors.surfaceMuted : PesaColors.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border(
+          left: BorderSide(
+            color: isSelected ? _red : _border,
+            width: isSelected ? 3.5 : 1,
+          ),
+          top: const BorderSide(color: _border),
+          right: const BorderSide(color: _border),
+          bottom: const BorderSide(color: _border),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  folioTxt.isNotEmpty ? folioTxt : '—',
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: PesaColors.textPrimary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              PesaStatusBadge(
+                label: cerrada ? 'Cerrada' : 'En proceso',
+                dotColor: cerrada ? PesaColors.dotGreen : PesaColors.dotAmber,
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              ),
+            ],
+          ),
+          if (cca.isNotEmpty || dve.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                if (cca.isNotEmpty)
+                  _pill(cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca'),
+                if (dve.isNotEmpty)
+                  _pill(dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve'),
+              ],
+            ),
+          ],
+          if (specs.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Text(
+              specs,
+              softWrap: true,
+              maxLines: isMasterDetail ? 2 : 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 12,
+                color: PesaColors.textSecondary,
+                height: 1.35,
+              ),
+            ),
+          ],
+          const SizedBox(height: 5),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  [
+                    if ((os['cliente'] ?? '').toString().isNotEmpty) os['cliente'],
+                    if ((os['sucursal'] ?? '').toString().isNotEmpty) os['sucursal'],
+                    if ((os['tecnico'] ?? '').toString().isNotEmpty) 'Téc: ${os['tecnico']}',
+                  ].join(' · '),
+                  softWrap: true,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11.5, color: PesaColors.textPrimary, height: 1.3),
+                ),
+              ),
+              if (fecha.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Text(
+                  fecha,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: PesaColors.textSecondary,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+              ],
+            ],
+          ),
+          if (!isMasterDetail) ...[
+            if (infoCorreo.isNotEmpty)
+              buildEmailAuditBanner(infoCorreo, margin: const EdgeInsets.only(top: 6)),
+            const SizedBox(height: 10),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (cerrada) ...[
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size(0, 40),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    onPressed: () => _abrirPdfDirecto(os),
+                    icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
+                    label: const Text('Ver PDF', style: TextStyle(fontSize: 12)),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(0, 40),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    backgroundColor: cerrada ? PesaColors.textPrimary : _red,
+                    foregroundColor: Colors.white,
+                  ),
+                  onPressed: () async {
+                    await navegarCapturaSegunTipo(context, Map<String, dynamic>.from(os));
+                    await _load();
+                  },
+                  icon: Icon(cerrada ? Icons.edit_note_rounded : Icons.edit, size: 15),
+                  label: Text(
+                    cerrada ? 'Abrir / Editar' : 'Capturar Equipo',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+
+    if (!isMasterDetail) return cardContent;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => setState(() => _selectedKey = _rowKey(os)),
+      child: cardContent,
+    );
+  }
+
+  Widget _buildDetailPane(BuildContext context, Map<String, dynamic>? os) {
+    if (os == null) {
+      return const PesaEmptyState(
+        icon: Icons.manage_search_rounded,
+        title: 'Selecciona un registro del historial',
+        subtitle: 'Toca cualquier orden en el panel izquierdo para inspeccionar su equipo, estado de correo y acciones rápidas.',
+      );
+    }
+
+    final folioTxt = (os['folio_os'] ?? os['folio'] ?? '—').toString().trim();
+    final specs = construirEspecificacionesInstrumento(os);
+    final cca = extraerNumeroCca(os);
+    final dve = extraerNumeroDve(os);
+    final fecha = (os['fecha'] ?? '').toString().split('T').first;
+    final cerrada = _isCerrada(os);
+    final infoCorreo = formatearInfoEnvioCorreo(os);
+
+    Widget metaItem(String label, String value) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            label.toUpperCase(),
+            style: const TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w700,
+              color: PesaColors.textSecondary,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            value.isNotEmpty ? value : '—',
+            style: const TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+              color: PesaColors.textPrimary,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          PesaCard(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            folioTxt.isNotEmpty ? folioTxt : '—',
+                            style: const TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: PesaColors.textPrimary,
+                              letterSpacing: -0.3,
+                            ),
+                          ),
+                          if (fecha.isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              'Fecha de servicio: $fecha',
+                              style: const TextStyle(fontSize: 12.5, color: PesaColors.textSecondary),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    PesaStatusBadge(
+                      label: cerrada ? 'Cerrada' : 'En proceso',
+                      dotColor: cerrada ? PesaColors.dotGreen : PesaColors.dotAmber,
+                    ),
+                  ],
+                ),
+                if (cca.isNotEmpty || dve.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 4,
+                    children: [
+                      if (cca.isNotEmpty)
+                        _pill(cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca'),
+                      if (dve.isNotEmpty)
+                        _pill(dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve'),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _red,
+                        foregroundColor: Colors.white,
+                      ),
+                      onPressed: () async {
+                        await navegarCapturaSegunTipo(context, Map<String, dynamic>.from(os));
+                        await _load();
+                      },
+                      icon: Icon(cerrada ? Icons.edit_note_rounded : Icons.edit, size: 17),
+                      label: Text(cerrada ? 'Abrir / Editar Captura' : 'Capturar Equipo'),
+                    ),
+                    if (cerrada)
+                      OutlinedButton.icon(
+                        onPressed: () => _abrirPdfDirecto(os),
+                        icon: const Icon(Icons.picture_as_pdf_outlined, size: 17),
+                        label: const Text('Ver PDF Oficial'),
+                      ),
+                  ],
+                ),
+                if (infoCorreo.isNotEmpty)
+                  buildEmailAuditBanner(infoCorreo, margin: const EdgeInsets.only(top: 14)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          PesaCard(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'DATOS DEL SERVICIO Y CLIENTE',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: PesaColors.textSecondary,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                FoldableFormGrid(
+                  unfoldedColumns: 2,
+                  spacing: 14,
+                  runSpacing: 12,
+                  children: [
+                    metaItem('Cliente', (os['cliente'] ?? '').toString().trim()),
+                    metaItem('Sucursal / Planta', (os['sucursal'] ?? os['direccion'] ?? '').toString().trim()),
+                    metaItem('Técnico asignado', (os['tecnico_nombre'] ?? os['tecnico'] ?? '').toString().trim()),
+                    metaItem('Tipo de servicio', (os['tipo_servicio'] ?? '').toString().trim()),
+                    metaItem('Modalidad', (os['modalidad'] ?? 'Digital').toString().trim()),
+                    metaItem('Folio / Lote', (os['id_lote'] ?? os['lote'] ?? 'Individual').toString().trim()),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          if (specs.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            PesaCard(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'ESPECIFICACIONES DEL INSTRUMENTO',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: PesaColors.textSecondary,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    specs,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      color: PesaColors.textPrimary,
+                      height: 1.45,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final isMobile = media.size.width < 768 && media.orientation != Orientation.landscape;
+    final cover = isCoverScreen(context);
     final rows = _filtered;
+
+    Map<String, dynamic>? selectedOs;
+    if (!cover && rows.isNotEmpty) {
+      if (_selectedKey != null) {
+        for (final r in rows) {
+          if (_rowKey(r) == _selectedKey) {
+            selectedOs = r;
+            break;
+          }
+        }
+      }
+      selectedOs ??= rows.first;
+    }
+
+    final listBody = _loading
+        ? const Center(child: CircularProgressIndicator(color: _red))
+        : rows.isEmpty
+            ? const PesaEmptyState(
+                icon: Icons.search_off_rounded,
+                title: 'Sin coincidencias en el historial',
+                subtitle: 'Prueba con otro folio, cliente, serie, CCA o filtro de formato.',
+              )
+            : ListView.separated(
+                padding: EdgeInsets.all(cover ? 12 : 14),
+                itemCount: rows.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (ctx, i) {
+                  final os = rows[i];
+                  final isSel = !cover && selectedOs != null && _rowKey(os) == _rowKey(selectedOs);
+                  return _buildListItem(ctx, os, isMasterDetail: !cover, isSelected: isSel);
+                },
+              );
 
     return AppShell(
       currentRoute: '/historial',
@@ -140,268 +663,17 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
           bottom: false,
           child: Column(
             children: [
-              Container(
-                color: Colors.white,
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-                decoration: const BoxDecoration(
-                  border: Border(bottom: BorderSide(color: _border)),
-                ),
-                child: Column(
-                  children: [
-                    Row(children: [
-                      if (isMobile)
-                        IconButton(
-                          icon: const Icon(Icons.menu_rounded, color: Color(0xFF111827)),
-                          onPressed: () => AppShell.toggleMenu(context),
-                        ),
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: _red,
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.manage_search_rounded, color: Colors.white, size: 20),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Buscar / Historial de Equipos y Órdenes',
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                            ),
-                            Text(
-                              '${rows.length} de ${_all.length} registros · Búsqueda por Folio, Marca, Modelo, S/N, ID, CCA o DVE',
-                              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Sincronizar y actualizar',
-                        icon: const Icon(Icons.sync_rounded),
-                        onPressed: () async {
-                          await context.read<SyncService>().performSync();
-                          await _load();
-                        },
-                      ),
-                    ]),
-                    const SizedBox(height: 10),
-                    TextField(
-                      controller: _searchCtrl,
-                      decoration: InputDecoration(
-                        hintText: 'Buscar folio, Rice Lake, modelo, serie, ID indicador, CCA.26, DVE.26, cliente...',
-                        prefixIcon: const Icon(Icons.search_rounded, size: 19),
-                        suffixIcon: _query.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, size: 17),
-                                onPressed: () {
-                                  _searchCtrl.clear();
-                                  setState(() => _query = '');
-                                },
-                              )
-                            : null,
-                        isDense: true,
-                        filled: true,
-                        fillColor: const Color(0xFFF3F4F6),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(10),
-                          borderSide: BorderSide.none,
-                        ),
-                      ),
-                      onChanged: (v) => setState(() => _query = v),
-                    ),
-                    const SizedBox(height: 8),
-                    SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: Row(
-                        children: [
-                          for (final fmt in const ['TODOS', 'OS', 'OSOB', 'OSOCC', 'RMA', 'RE', 'LP', 'LV'])
-                            Padding(
-                              padding: const EdgeInsets.only(right: 6),
-                              child: ChoiceChip(
-                                label: Text(fmt, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
-                                selected: _filtroFormato == fmt,
-                                selectedColor: _red,
-                                labelStyle: TextStyle(
-                                  color: _filtroFormato == fmt ? Colors.white : const Color(0xFF374151),
-                                ),
-                                onSelected: (_) => setState(() => _filtroFormato = fmt),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              _buildHeader(context, rows, cover),
               Expanded(
-                child: _loading
-                    ? const Center(child: CircularProgressIndicator(color: _red))
-                    : rows.isEmpty
-                        ? const Center(
-                            child: Text(
-                              'Sin coincidencias en el historial',
-                              style: TextStyle(color: Color(0xFF6B7280)),
-                            ),
-                          )
-                        : ListView.separated(
-                            padding: const EdgeInsets.all(12),
-                            itemCount: rows.length,
-                            separatorBuilder: (_, __) => const SizedBox(height: 8),
-                            itemBuilder: (ctx, i) {
-                              final os = rows[i];
-                              final folioTxt = (os['folio_os'] ?? os['folio'] ?? '—').toString().trim();
-                              final specs = construirEspecificacionesInstrumento(os);
-                              final cca = extraerNumeroCca(os);
-                              final dve = extraerNumeroDve(os);
-                              final fecha = (os['fecha'] ?? '').toString().split('T').first;
-                              final est = (os['estatus'] ?? os['estado'] ?? '').toString().toUpperCase();
-                              final cerrada = est.contains('CERRAD') ||
-                                  est.contains('COMPLET') ||
-                                  os['has_pdf'] == 1 ||
-                                  (os['pdf_path_local'] ?? '').toString().isNotEmpty;
-
-                              return Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: _border),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Row(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Expanded(
-                                          child: Text(
-                                            folioTxt.isNotEmpty ? folioTxt : '—',
-                                            style: const TextStyle(
-                                              fontSize: 13.5,
-                                              fontWeight: FontWeight.w800,
-                                              color: Color(0xFF111827),
-                                            ),
-                                          ),
-                                        ),
-                                        const SizedBox(width: 8),
-                                        Text(
-                                          fecha,
-                                          style: const TextStyle(fontSize: 11.5, color: Color(0xFF6B7280)),
-                                        ),
-                                      ],
-                                    ),
-                                    if (cca.isNotEmpty || dve.isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Wrap(
-                                        spacing: 6,
-                                        runSpacing: 4,
-                                        children: [
-                                          if (cca.isNotEmpty)
-                                            _pill(
-                                              cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca',
-                                              const Color(0xFF0F172A),
-                                              const Color(0xFFF8FAFC),
-                                            ),
-                                          if (dve.isNotEmpty)
-                                            _pill(
-                                              dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve',
-                                              const Color(0xFF0F172A),
-                                              const Color(0xFFF8FAFC),
-                                            ),
-                                        ],
-                                      ),
-                                    ],
-                                    if (specs.isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Text(
-                                        specs,
-                                        softWrap: true,
-                                        maxLines: 3,
-                                        style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Color(0xFF475569),
-                                          height: 1.35,
-                                        ),
-                                      ),
-                                    ],
-                                    const SizedBox(height: 5),
-                                    Text(
-                                      [
-                                        if ((os['cliente'] ?? '').toString().isNotEmpty) os['cliente'],
-                                        if ((os['sucursal'] ?? '').toString().isNotEmpty) os['sucursal'],
-                                        if ((os['tecnico'] ?? '').toString().isNotEmpty) 'Téc: ${os['tecnico']}',
-                                      ].join(' • '),
-                                      softWrap: true,
-                                      maxLines: 3,
-                                      style: const TextStyle(fontSize: 12, color: Color(0xFF334155), height: 1.3),
-                                    ),
-                                    if (formatearInfoEnvioCorreo(os).isNotEmpty) ...[
-                                      const SizedBox(height: 6),
-                                      Container(
-                                        width: double.infinity,
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        decoration: const BoxDecoration(
-                                          color: Color(0xFFF8FAFC),
-                                          border: Border(
-                                            left: BorderSide(color: Color(0xFF0F172A), width: 3),
-                                            top: BorderSide(color: Color(0xFFE2E8F0)),
-                                            right: BorderSide(color: Color(0xFFE2E8F0)),
-                                            bottom: BorderSide(color: Color(0xFFE2E8F0)),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          formatearInfoEnvioCorreo(os),
-                                          softWrap: true,
-                                          style: const TextStyle(
-                                            fontSize: 10.5,
-                                            fontWeight: FontWeight.w600,
-                                            color: Color(0xFF334155),
-                                            height: 1.3,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      mainAxisAlignment: MainAxisAlignment.end,
-                                      children: [
-                                        if (cerrada)
-                                          OutlinedButton.icon(
-                                            style: OutlinedButton.styleFrom(
-                                              visualDensity: VisualDensity.compact,
-                                              foregroundColor: const Color(0xFF1D4ED8),
-                                            ),
-                                            onPressed: () => _abrirPdfDirecto(os),
-                                            icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
-                                            label: const Text('Ver PDF', style: TextStyle(fontSize: 11.5)),
-                                          ),
-                                        const SizedBox(width: 8),
-                                        ElevatedButton.icon(
-                                          style: ElevatedButton.styleFrom(
-                                            visualDensity: VisualDensity.compact,
-                                            backgroundColor: cerrada ? const Color(0xFFF57C00) : _red,
-                                            foregroundColor: Colors.white,
-                                          ),
-                                          onPressed: () async {
-                                            await navegarCapturaSegunTipo(context, Map<String, dynamic>.from(os));
-                                            await _load();
-                                          },
-                                          icon: Icon(cerrada ? Icons.edit_note_rounded : Icons.edit, size: 15),
-                                          label: Text(
-                                            cerrada ? 'Abrir / Editar' : 'Capturar Equipo',
-                                            style: const TextStyle(fontSize: 11.5),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              );
-                            },
-                          ),
+                child: cover
+                    ? listBody
+                    : FoldableTwoPane(
+                        startFraction: 0.42,
+                        minStartWidth: 280,
+                        maxStartWidth: 440,
+                        startPane: listBody,
+                        endPane: _buildDetailPane(context, selectedOs),
+                      ),
               ),
             ],
           ),
@@ -410,9 +682,20 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
     );
   }
 
-  Widget _pill(String label, Color fg, Color bg) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-        decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(5)),
-        child: Text(label, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: fg)),
+  Widget _pill(String label) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+        decoration: BoxDecoration(
+          color: PesaColors.surfaceMuted,
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: PesaColors.borderStrong),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            fontSize: 10.5,
+            fontWeight: FontWeight.w700,
+            color: PesaColors.textPrimary,
+          ),
+        ),
       );
 }

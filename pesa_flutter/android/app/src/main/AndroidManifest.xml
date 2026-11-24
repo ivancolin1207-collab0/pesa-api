@@ -37,7 +37,8 @@
             android:launchMode="singleTop"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
-            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
+            android:screenOrientation="unspecified"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
@@ -51,6 +52,14 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Soporte nativo para plegables (Samsung Galaxy Z Fold) y relaciones de aspecto altas -->
+        <meta-data
+            android:name="android.max_aspect"
+            android:value="2.4" />
+        <meta-data
+            android:name="android.supports_size_changes"
+            android:value="true" />
 
         <!-- WorkManager: Sync en background -->
         <provider
@@ -69,11 +78,13 @@
 
     </application>
 
-    <!-- Tablet optimizado: 10" min -->
+    <!-- Soporte adaptativo: smartphones, pantalla externa e interna Samsung Galaxy Z Fold y tablets -->
     <supports-screens
-        android:smallScreens="false"
+        android:smallScreens="true"
         android:normalScreens="true"
         android:largeScreens="true"
-        android:xlargeScreens="true" />
+        android:xlargeScreens="true"
+        android:resizeable="true"
+        android:anyDensity="true" />
 
 </manifest>

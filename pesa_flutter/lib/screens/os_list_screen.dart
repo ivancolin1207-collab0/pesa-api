@@ -19,6 +19,7 @@ import '../services/metrology_helper.dart';
 import '../services/pdf_storage_service.dart';
 import '../services/sync_service.dart';
 import '../services/tipo_servicio_rules.dart';
+import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
@@ -206,6 +207,9 @@ class _OsListScreenState extends State<OsListScreen> {
   // ── Vista: Mis Órdenes vs Repositorio de Calibraciones (solo supervisión) ──
   bool _vistaRepositorio = false;
   int _seqCorreosVisto = 0;
+
+  // ── Selección Master–Detail en Samsung Galaxy Z Fold8 Ultra (>= 600dp) ────
+  String? _selectedGroupKey;
 
   void _actualizarListasFiltros() {
     final empresasSet = <String>{};
@@ -2159,14 +2163,14 @@ class _OsListScreenState extends State<OsListScreen> {
 
     final dashboard = LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 650) {
+        if (constraints.maxWidth < kFoldableCoverBreakpoint) {
           return _MobilePhoneDashboard(
             state: this,
             sync: sync,
             hideTecnico: hideTecnico,
           );
         } else {
-          return _TabletDesktopDashboard(
+          return _FoldableMasterDetailDashboard(
             state: this,
             sync: sync,
             hideTecnico: hideTecnico,
@@ -2220,7 +2224,7 @@ class _OsListScreenState extends State<OsListScreen> {
 
   Widget _selectorVista(bool repoActivo) {
     return LayoutBuilder(builder: (context, c) {
-      final compacto = c.maxWidth < 650;
+      final compacto = c.maxWidth < kFoldableCoverBreakpoint;
       return Container(
         color: _kBgColor,
         padding: EdgeInsets.fromLTRB(compacto ? 12 : 24, 10, compacto ? 12 : 24, 4),
@@ -3648,7 +3652,1143 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// VISTA PARA TABLETS Y PANTALLAS ANCHAS (TabletDesktopDashboard - >= 650px)
+// VISTA MASTER–DETAIL PARA SAMSUNG GALAXY Z FOLD8 ULTRA / TABLETS (>= 600dp)
+// Panel izquierdo (42%): búsqueda, filtros y lista de órdenes/lotes
+// Panel derecho (58%): detalle instantáneo con acciones o resumen KPI 2x2
+// Conciencia de bisagra nativa vía FoldableTwoPane
+// ═══════════════════════════════════════════════════════════════════════════
+class _FoldableMasterDetailDashboard extends StatelessWidget {
+  final _OsListScreenState state;
+  final SyncService sync;
+  final bool hideTecnico;
+
+  const _FoldableMasterDetailDashboard({
+    required this.state,
+    required this.sync,
+    required this.hideTecnico,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = state._groupByLote(state._filtered);
+    _OsGroup? selectedGroup;
+    if (state._selectedGroupKey != null) {
+      for (final g in groups) {
+        if (g.loteKey == state._selectedGroupKey) {
+          selectedGroup = g;
+          break;
+        }
+      }
+    }
+
+    return Column(
+      children: [
+        _Header(
+          sync: sync,
+          onSync: state._sincronizarOrdenesServidor,
+          onLongPressSync: () => state._mostrarMenuSincronizacion(context),
+          onRefresh: state._loadLocal,
+        ),
+        Expanded(
+          child: FoldableTwoPane(
+            startFraction: 0.42,
+            minStartWidth: 280,
+            maxStartWidth: 440,
+            startPane: _buildMasterPane(context, groups, selectedGroup),
+            endPane: _buildDetailPane(context, selectedGroup),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMasterPane(
+    BuildContext context,
+    List<_OsGroup> groups,
+    _OsGroup? selectedGroup,
+  ) {
+    return Container(
+      color: _kBgColor,
+      child: Column(
+        children: [
+          // ── Barra de búsqueda y filtros rápidos ─────────────────────────
+          Container(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: const BoxDecoration(
+              color: _kCardBg,
+              border: Border(bottom: BorderSide(color: _kBorder)),
+            ),
+            child: Column(
+              children: [
+                SizedBox(
+                  height: 44,
+                  child: TextField(
+                    controller: state._searchCtrl,
+                    style: const TextStyle(fontSize: 13, color: _kTextPrim),
+                    decoration: InputDecoration(
+                      hintText: 'Buscar folio, cliente, serie, CCA/DVE…',
+                      hintStyle: const TextStyle(color: PesaColors.textTertiary, fontSize: 12.5),
+                      prefixIcon: const Icon(Icons.search_rounded, size: 19, color: _kTextSec),
+                      suffixIcon: state._query.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.close_rounded, size: 17, color: _kTextSec),
+                              onPressed: () {
+                                state._searchCtrl.clear();
+                                state.setState(() => state._query = '');
+                                state._applyFilters();
+                              },
+                            )
+                          : null,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      filled: true,
+                      fillColor: PesaColors.surfaceMuted,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(9),
+                        borderSide: const BorderSide(color: _kBorder),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(9),
+                        borderSide: const BorderSide(color: _kBorder),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(9),
+                        borderSide: const BorderSide(color: _kCarmineRed, width: 1.5),
+                      ),
+                    ),
+                    onChanged: (v) {
+                      state.setState(() => state._query = v);
+                      state._applyFilters();
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: Row(
+                    children: [
+                      for (final st in const ['Todas', 'Pendientes', 'En Proceso', 'Cerradas']) ...[
+                        ChoiceChip(
+                          label: Text(st),
+                          selected: state._quickStatus == st,
+                          showCheckmark: false,
+                          selectedColor: _kCarmineRed,
+                          backgroundColor: Colors.white,
+                          side: BorderSide(
+                            color: state._quickStatus == st ? _kCarmineRed : _kBorder,
+                          ),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                          labelStyle: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                            color: state._quickStatus == st ? Colors.white : _kTextPrim,
+                          ),
+                          onSelected: (_) {
+                            state.setState(() => state._quickStatus = st);
+                            state._applyFilters();
+                          },
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      _compactFilterPill(
+                        label: state._periodo == 'Todo' ? 'Periodo' : state._periodo,
+                        items: const ['Todo', 'Hoy', 'Semana', 'Mes'],
+                        onSelected: (v) {
+                          state.setState(() => state._periodo = v);
+                          state._applyFilters();
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _compactFilterPill(
+                        label: state._modalidad == 'Todas las Modalidades' ? 'Modalidad' : state._modalidad,
+                        items: const ['Todas las Modalidades', 'Solo Físicos', 'Solo Digitales'],
+                        onSelected: (v) {
+                          state.setState(() => state._modalidad = v);
+                          state._applyFilters();
+                        },
+                      ),
+                      const SizedBox(width: 6),
+                      _compactFilterPill(
+                        label: state._filtroEmpresa == 'Todas las Empresas' ? 'Cliente' : state._filtroEmpresa,
+                        items: state._listaEmpresas,
+                        onSelected: (v) {
+                          state.setState(() => state._filtroEmpresa = v);
+                          state._applyFilters();
+                        },
+                      ),
+                      if (!hideTecnico && state._tecnicos.isNotEmpty) ...[
+                        const SizedBox(width: 6),
+                        _compactFilterPill(
+                          label: state._tecnico ?? 'Técnico',
+                          items: ['Todos los Técnicos', ...state._tecnicos],
+                          onSelected: (v) {
+                            state.setState(() => state._tecnico = v == 'Todos los Técnicos' ? null : v);
+                            state._applyFilters();
+                          },
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Contador discreto + acceso rápido a Resumen KPI ─────────────
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: const BoxDecoration(
+              color: _kBgColor,
+              border: Border(bottom: BorderSide(color: _kBorder)),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  '${groups.length} ${groups.length == 1 ? "registro" : "registros"} (${state._filtered.length} OS)',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: _kTextSec,
+                    fontFeatures: [FontFeature.tabularFigures()],
+                  ),
+                ),
+                const Spacer(),
+                if (selectedGroup != null)
+                  InkWell(
+                    borderRadius: BorderRadius.circular(6),
+                    onTap: () => state.setState(() => state._selectedGroupKey = null),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      child: Text(
+                        'Ver resumen KPI',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _kCarmineRed,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // ── Lista Master de Órdenes y Lotes ──────────────────────────────
+          Expanded(
+            child: state._loading
+                ? const Center(child: CircularProgressIndicator(color: _kCarmineRed))
+                : groups.isEmpty
+                    ? _EmptyState(onSync: () => context.read<SyncService>().performSync())
+                    : ListView.separated(
+                        padding: const EdgeInsets.all(10),
+                        itemCount: groups.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (ctx, i) {
+                          final group = groups[i];
+                          final isSel = selectedGroup?.loteKey == group.loteKey;
+                          return RepaintBoundary(
+                            key: ValueKey('md_${group.loteKey}'),
+                            child: _buildMasterTile(ctx, group, isSelected: isSel),
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _compactFilterPill({
+    required String label,
+    required List<String> items,
+    required ValueChanged<String> onSelected,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9),
+      height: 30,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: _kBorder),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          hint: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 120),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 11.5, color: _kTextPrim, fontWeight: FontWeight.w500),
+            ),
+          ),
+          isDense: true,
+          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSec),
+          items: items.map((item) {
+            return DropdownMenuItem<String>(
+              value: item,
+              child: Text(item, style: const TextStyle(fontSize: 12, color: _kTextPrim)),
+            );
+          }).toList(),
+          onChanged: (v) {
+            if (v != null) onSelected(v);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMasterTile(BuildContext context, _OsGroup group, {required bool isSelected}) {
+    final first = group.items.first;
+    final cliente = (first['cliente'] ?? 'Sin cliente').toString().trim();
+    final sucursal = (first['sucursal'] ?? '').toString().trim();
+    final fechaStr = (first['fecha'] as String? ?? '').split('T').first.split(' ').first;
+    final tec = (first['tecnico_nombre'] ?? first['tecnico'] ?? '').toString().trim();
+
+    if (group.isLote) {
+      final count = group.items.length;
+      final done = group.items.where(_OsListScreenState.tienePdfReal).length;
+      final rango = (first['rango_lote'] ?? '').toString().trim();
+      final estLote = estadoCorreoLote(group.items);
+
+      return InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => state.setState(() => state._selectedGroupKey = group.loteKey),
+        child: Container(
+          padding: const EdgeInsets.all(11),
+          decoration: BoxDecoration(
+            color: isSelected ? PesaColors.surfaceMuted : _kCardBg,
+            borderRadius: BorderRadius.circular(10),
+            border: Border(
+              left: BorderSide(color: isSelected ? _kCarmineRed : _kTextPrim, width: 3.5),
+              top: const BorderSide(color: _kBorder),
+              right: const BorderSide(color: _kBorder),
+              bottom: const BorderSide(color: _kBorder),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: PesaColors.surfaceMuted,
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: PesaColors.borderStrong),
+                    ),
+                    child: Text(
+                      'LOTE · $count OS',
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: _kTextPrim),
+                    ),
+                  ),
+                  if (rango.isNotEmpty) ...[
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        rango,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _kTextPrim),
+                      ),
+                    ),
+                  ] else
+                    const Spacer(),
+                  Text(fechaStr, style: const TextStyle(fontSize: 10.5, color: _kTextSec)),
+                ],
+              ),
+              const SizedBox(height: 5),
+              Text(
+                cliente,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _kTextPrim),
+              ),
+              if (sucursal.isNotEmpty)
+                Text(
+                  sucursal,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: _kTextSec),
+                ),
+              if (tec.isNotEmpty) ...[
+                const SizedBox(height: 2),
+                Text(
+                  'Técnico: $tec',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 10.5, color: _kTextSec),
+                ),
+              ],
+              const SizedBox(height: 7),
+              PesaBatchProgressBar(completed: done, total: count),
+              if (estLote == 'enviado') ...[
+                const SizedBox(height: 5),
+                const PesaStatusBadge(
+                  label: 'Correo de lote enviado',
+                  dotColor: PesaColors.dotGreen,
+                  padding: EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Orden individual
+    final os = first;
+    final folioStr = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
+    final isCerrado = _OsListScreenState.tienePdfReal(os);
+    final noIniciada = _OsListScreenState.sinIniciar(os);
+    final ccaVal = extraerNumeroCca(os);
+    final dveVal = extraerNumeroDve(os);
+    final specsStr = construirEspecificacionesInstrumento(os);
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => state.setState(() => state._selectedGroupKey = group.loteKey),
+      child: Container(
+        padding: const EdgeInsets.all(11),
+        decoration: BoxDecoration(
+          color: isSelected ? PesaColors.surfaceMuted : _kCardBg,
+          borderRadius: BorderRadius.circular(10),
+          border: Border(
+            left: BorderSide(
+              color: isSelected ? _kCarmineRed : _kBorder,
+              width: isSelected ? 3.5 : 1,
+            ),
+            top: const BorderSide(color: _kBorder),
+            right: const BorderSide(color: _kBorder),
+            bottom: const BorderSide(color: _kBorder),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    folioStr.isNotEmpty ? folioStr : '—',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w800,
+                      color: _kTextPrim,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                PesaStatusBadge(
+                  label: isCerrado ? 'Cerrado' : (noIniciada ? 'Sin Formato' : 'En Proceso'),
+                  dotColor: isCerrado
+                      ? PesaColors.dotGreen
+                      : (noIniciada ? PesaColors.dotRed : PesaColors.dotAmber),
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                ),
+              ],
+            ),
+            if (ccaVal.isNotEmpty || dveVal.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 5,
+                runSpacing: 4,
+                children: [
+                  if (ccaVal.isNotEmpty)
+                    _RegPillChip(
+                      prefix: 'CCA',
+                      value: ccaVal,
+                      fg: const Color(0xFF0F172A),
+                      bg: const Color(0xFFF8FAFC),
+                      border: const Color(0xFFCBD5E1),
+                    ),
+                  if (dveVal.isNotEmpty)
+                    _RegPillChip(
+                      prefix: 'DVE',
+                      value: dveVal,
+                      fg: const Color(0xFF0F172A),
+                      bg: const Color(0xFFF8FAFC),
+                      border: const Color(0xFFCBD5E1),
+                    ),
+                ],
+              ),
+            ],
+            if (specsStr.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                specsStr,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11.5, color: _kTextSec, height: 1.3),
+              ),
+            ],
+            const SizedBox(height: 5),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    cliente,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _kTextPrim),
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(fechaStr, style: const TextStyle(fontSize: 10.5, color: _kTextSec)),
+              ],
+            ),
+            if (sucursal.isNotEmpty)
+              Text(
+                sucursal,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontSize: 11, color: _kTextSec),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailPane(BuildContext context, _OsGroup? selectedGroup) {
+    if (selectedGroup == null) {
+      return _buildOverviewPane(context);
+    }
+    if (selectedGroup.isLote) {
+      return _buildLoteDetailPane(context, selectedGroup);
+    }
+    return _buildSingleOsDetailPane(context, selectedGroup.items.first);
+  }
+
+  Widget _buildOverviewPane(BuildContext context) {
+    return Container(
+      color: _kBgColor,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Resumen Operativo del Período',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: _kTextPrim,
+                letterSpacing: -0.2,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Toca cualquier tarjeta para filtrar o selecciona una orden en el panel izquierdo para abrir su detalle inmediato.',
+              style: TextStyle(fontSize: 12.5, color: _kTextSec),
+            ),
+            const SizedBox(height: 16),
+            // Rejilla KPI 2x2 corporativa
+            FoldableFormGrid(
+              unfoldedColumns: 2,
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                _overviewKpiCard(
+                  label: 'TOTAL PERÍODO',
+                  value: state._kpiTotal,
+                  subtitle: 'Registros visibles con filtros actuales',
+                  active: state._quickStatus == 'Todas',
+                  onTap: () {
+                    state.setState(() => state._quickStatus = 'Todas');
+                    state._applyFilters();
+                  },
+                ),
+                _overviewKpiCard(
+                  label: 'EN PROCESO',
+                  value: state._kpiProceso,
+                  subtitle: 'Órdenes pendientes de captura o cierre',
+                  dotColor: PesaColors.dotAmber,
+                  active: state._quickStatus == 'En Proceso',
+                  onTap: () {
+                    state.setState(() => state._quickStatus =
+                        state._quickStatus == 'En Proceso' ? 'Todas' : 'En Proceso');
+                    state._applyFilters();
+                  },
+                ),
+                _overviewKpiCard(
+                  label: 'CERRADAS',
+                  value: state._kpiCerrado,
+                  subtitle: 'Con PDF oficial firmado y disponible',
+                  dotColor: PesaColors.dotGreen,
+                  active: state._quickStatus == 'Cerradas',
+                  onTap: () {
+                    state.setState(() => state._quickStatus =
+                        state._quickStatus == 'Cerradas' ? 'Todas' : 'Cerradas');
+                    state._applyFilters();
+                  },
+                ),
+                _overviewKpiCard(
+                  label: 'FORMATOS FÍSICOS',
+                  value: state._kpiFisico,
+                  subtitle: 'Pendientes o con escaneo adjunto',
+                  dotColor: PesaColors.dotNeutral,
+                  active: state._modalidad == 'Solo Físicos',
+                  onTap: () {
+                    state.setState(() => state._modalidad =
+                        state._modalidad == 'Solo Físicos'
+                            ? 'Todas las Modalidades'
+                            : 'Solo Físicos');
+                    state._applyFilters();
+                  },
+                ),
+              ],
+            ),
+            const SizedBox(height: 18),
+            PesaCard(
+              padding: const EdgeInsets.all(18),
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: PesaColors.surfaceMuted,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: _kBorder),
+                    ),
+                    child: const Icon(Icons.touch_app_outlined, color: _kTextPrim, size: 22),
+                  ),
+                  const SizedBox(width: 14),
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Vista Master–Detail activa',
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _kTextPrim),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          'Selecciona una orden individual o un lote en el panel izquierdo para iniciar captura, abrir el PDF o despachar correos sin perder tu lugar en la lista.',
+                          style: TextStyle(fontSize: 12, color: _kTextSec, height: 1.4),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _overviewKpiCard({
+    required String label,
+    required int value,
+    required String subtitle,
+    Color? dotColor,
+    bool active = false,
+    required VoidCallback onTap,
+  }) {
+    return PesaCard(
+      onTap: onTap,
+      borderColor: active ? _kCarmineRed : _kBorder,
+      borderWidth: active ? 1.5 : 1,
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (dotColor != null) ...[
+                PesaSemanticDot(color: dotColor, size: 6),
+                const SizedBox(width: 6),
+              ],
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w700,
+                    color: _kTextSec,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value.toString(),
+            style: const TextStyle(
+              fontSize: 30,
+              fontWeight: FontWeight.w800,
+              color: _kTextPrim,
+              height: 1.0,
+              fontFeatures: [FontFeature.tabularFigures()],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            subtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 11.5, color: _kTextSec),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSingleOsDetailPane(BuildContext context, Map<String, dynamic> os) {
+    final folioStr = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
+    final isCerrado = _OsListScreenState.tienePdfReal(os);
+    final noIniciada = _OsListScreenState.sinIniciar(os);
+    final isFisico = esModalidadFisica(os['modalidad'] as String?);
+    final ccaVal = extraerNumeroCca(os);
+    final dveVal = extraerNumeroDve(os);
+    final specsStr = construirEspecificacionesInstrumento(os);
+    final fechaStr = (os['fecha'] as String? ?? '').split('T').first.split(' ').first;
+    final infoCorreo = formatearInfoEnvioCorreo(os);
+    final estCorreo = estadoCorreoOs(os);
+    final enviando = state._estaEnviandoEmail;
+
+    final syncSt = (os['sync_status'] as String? ?? '');
+    final isSincronizado = syncSt == 'SINCRONIZADO' ||
+        syncSt == 'SINCRONIZADO_RENDER' ||
+        os['is_synced'] == 1 ||
+        os['is_synced'] == '1' ||
+        os['sync_check_status'] == 'SUBIDA_SERVIDOR' ||
+        os['sync_check_status'] == 'AUDITADA_ADMIN' ||
+        os['sync_check_status'] == 'ABIERTO' ||
+        (isCerrado && syncSt != 'PENDIENTE_ACTUALIZAR');
+
+    Widget metaField(String k, String v) => Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              k.toUpperCase(),
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: _kTextSec,
+                letterSpacing: 0.5,
+              ),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              v.isNotEmpty ? v : '—',
+              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: _kTextPrim),
+            ),
+          ],
+        );
+
+    return Container(
+      color: _kBgColor,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // ── Tarjeta Principal + Acciones Directas ─────────────────────
+            PesaCard(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              folioStr.isNotEmpty ? folioStr : '—',
+                              style: const TextStyle(
+                                fontSize: 22,
+                                fontWeight: FontWeight.w800,
+                                color: _kTextPrim,
+                                letterSpacing: -0.3,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                PesaStatusBadge(
+                                  label: isCerrado ? 'Cerrado' : (noIniciada ? 'Sin Formato' : 'En Proceso'),
+                                  dotColor: isCerrado
+                                      ? PesaColors.dotGreen
+                                      : (noIniciada ? PesaColors.dotRed : PesaColors.dotAmber),
+                                ),
+                                TipoServicioBadge(os: os),
+                                SyncCheckBadge(
+                                  status: (os['sync_check_status'] as String?)?.isNotEmpty == true
+                                      ? os['sync_check_status'] as String
+                                      : (isSincronizado ? 'SUBIDA_SERVIDOR' : 'RECIBIDA_TABLET'),
+                                  showLabel: true,
+                                ),
+                                EmailStatusBadge(
+                                  enviado: estCorreo == 'enviado',
+                                  enCola: estCorreo == 'cola',
+                                  correo: (os['correo_cliente'] ?? '').toString(),
+                                  onTap: () => state._manejarAccionEmail(context, os),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (ccaVal.isNotEmpty || dveVal.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        if (ccaVal.isNotEmpty)
+                          _RegPillChip(
+                            prefix: 'CCA',
+                            value: ccaVal,
+                            fg: const Color(0xFF0F172A),
+                            bg: const Color(0xFFF8FAFC),
+                            border: const Color(0xFFCBD5E1),
+                          ),
+                        if (dveVal.isNotEmpty)
+                          _RegPillChip(
+                            prefix: 'DVE',
+                            value: dveVal,
+                            fg: const Color(0xFF0F172A),
+                            bg: const Color(0xFFF8FAFC),
+                            border: const Color(0xFFCBD5E1),
+                          ),
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  // Botonera ergonómica 48dp
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (!isCerrado) ...[
+                        if (isFisico)
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _kCarmineRed,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () => context.push('/escaneo', extra: {'folio_os': folioStr}),
+                            icon: const Icon(Icons.camera_alt_rounded, size: 18),
+                            label: const Text('Adjuntar PDF / Escaneo'),
+                          )
+                        else
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _kCarmineRed,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () async {
+                              await navegarCapturaSegunTipo(context, Map<String, dynamic>.from(os));
+                              await state._loadLocal();
+                            },
+                            icon: Icon(noIniciada ? Icons.edit : Icons.edit_document, size: 18),
+                            label: Text(noIniciada ? 'Iniciar Captura' : 'Continuar Toma de Datos'),
+                          ),
+                        OutlinedButton.icon(
+                          onPressed: () => state._subirPdfManual(context, os),
+                          icon: const Icon(Icons.upload_file_rounded, size: 17),
+                          label: const Text('Subir PDF manual'),
+                        ),
+                        if (!noIniciada)
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _kCarmineRed,
+                              side: const BorderSide(color: _kCarmineRed),
+                            ),
+                            onPressed: () => state._mostrarDialogoEliminarDatosDesdeCero(context, os),
+                            icon: const Icon(Icons.delete_forever_rounded, size: 17),
+                            label: const Text('Eliminar datos'),
+                          ),
+                      ] else ...[
+                        ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _kCarmineRed,
+                            foregroundColor: Colors.white,
+                          ),
+                          onPressed: () => state._abrirPdf(context, os),
+                          icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                          label: const Text('Ver PDF'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => state._descargarPdfConNomenclatura(context, os),
+                          icon: const Icon(Icons.download_outlined, size: 17),
+                          label: const Text('Descargar'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: enviando ? null : () => state._manejarAccionEmail(context, os),
+                          icon: Icon(
+                            enviando
+                                ? Icons.hourglass_top_rounded
+                                : (estCorreo == 'enviado'
+                                    ? Icons.mark_email_read_outlined
+                                    : Icons.mail_outline),
+                            size: 17,
+                          ),
+                          label: Text(
+                            enviando
+                                ? 'Enviando…'
+                                : (estCorreo == 'enviado' ? 'Reenviar Correo' : 'Enviar Correo'),
+                          ),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => state._mostrarDialogoRehacerToma(context, os),
+                          icon: const Icon(Icons.refresh_rounded, size: 17),
+                          label: const Text('Rehacer'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => state._subirPdfManual(context, os),
+                          icon: const Icon(Icons.upload_file_rounded, size: 17),
+                          label: const Text('Subir PDF'),
+                        ),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: _kCarmineRed,
+                            side: const BorderSide(color: _kCarmineRed),
+                          ),
+                          onPressed: () => state._mostrarDialogoEliminarDatosDesdeCero(context, os),
+                          icon: const Icon(Icons.delete_forever_rounded, size: 17),
+                          label: const Text('Eliminar'),
+                        ),
+                      ],
+                    ],
+                  ),
+                  if (infoCorreo.isNotEmpty)
+                    buildEmailAuditBanner(infoCorreo, margin: const EdgeInsets.only(top: 14)),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 14),
+
+            // ── Tarjeta de Datos Operativos (2 columnas) ──────────────────
+            PesaCard(
+              padding: const EdgeInsets.all(18),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'INFORMACIÓN DEL SERVICIO',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _kTextSec,
+                      letterSpacing: 0.6,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  FoldableFormGrid(
+                    unfoldedColumns: 2,
+                    spacing: 14,
+                    runSpacing: 12,
+                    children: [
+                      metaField('Cliente', (os['cliente'] ?? '').toString().trim()),
+                      metaField('Sucursal / Planta', (os['sucursal'] ?? os['direccion'] ?? '').toString().trim()),
+                      metaField('Técnico', (os['tecnico_nombre'] ?? os['tecnico'] ?? 'Sin asignar').toString().trim()),
+                      metaField('Fecha', fechaStr),
+                      metaField('Tipo de servicio', (os['tipo_servicio'] ?? 'Servicio').toString().trim()),
+                      metaField('Modalidad', isFisico ? 'Físico' : 'Digital'),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            if (specsStr.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              PesaCard(
+                padding: const EdgeInsets.all(18),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'INSTRUMENTO / EQUIPO',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: _kTextSec,
+                        letterSpacing: 0.6,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      specsStr,
+                      style: const TextStyle(fontSize: 13.5, color: _kTextPrim, height: 1.45),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLoteDetailPane(BuildContext context, _OsGroup group) {
+    final first = group.items.first;
+    final count = group.items.length;
+    final done = group.items.where(_OsListScreenState.tienePdfReal).length;
+    final cliente = (first['cliente'] ?? 'Cliente del Lote').toString().trim();
+    final sucursal = (first['sucursal'] ?? '').toString().trim();
+    final tec = (first['tecnico_nombre'] ?? first['tecnico'] ?? 'Sin asignar').toString().trim();
+    final rango = (first['rango_lote'] ?? '').toString().trim();
+    final estLote = estadoCorreoLote(group.items);
+    final infoLote = formatearInfoEnvioCorreoLote(group.items);
+    final enviando = state._estaEnviandoEmail;
+
+    return Container(
+      color: _kBgColor,
+      child: ListView(
+        padding: const EdgeInsets.all(18),
+        children: [
+          PesaCard(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: PesaColors.surfaceMuted,
+                                  borderRadius: BorderRadius.circular(5),
+                                  border: Border.all(color: PesaColors.borderStrong),
+                                ),
+                                child: Text(
+                                  'LOTE · $count OS',
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: _kTextPrim,
+                                  ),
+                                ),
+                              ),
+                              if (rango.isNotEmpty)
+                                Text(
+                                  rango,
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w800,
+                                    color: _kTextPrim,
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            cliente,
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _kTextPrim),
+                          ),
+                          if (sucursal.isNotEmpty)
+                            Text(sucursal, style: const TextStyle(fontSize: 12.5, color: _kTextSec)),
+                          const SizedBox(height: 3),
+                          Text('Técnico: $tec', style: const TextStyle(fontSize: 12, color: _kTextSec)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                PesaBatchProgressBar(completed: done, total: count),
+                const SizedBox(height: 14),
+                SizedBox(
+                  height: 46,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: done > 0 ? _kCarmineRed : PesaColors.surfaceMuted,
+                      foregroundColor: done > 0 ? Colors.white : _kTextSec,
+                      elevation: 0,
+                    ),
+                    icon: Icon(
+                      enviando
+                          ? Icons.hourglass_top_rounded
+                          : (estLote == 'enviado'
+                              ? Icons.mark_email_read_outlined
+                              : (estLote == 'cola' ? Icons.schedule_send : Icons.mail_outline)),
+                      size: 18,
+                    ),
+                    label: Text(
+                      enviando
+                          ? 'Enviando correo del lote…'
+                          : (estLote == 'enviado'
+                              ? 'Reenviar Lote ($done PDFs)'
+                              : (estLote == 'cola'
+                                  ? 'Lote en cola (Offline)'
+                                  : 'Finalizar y Enviar Lote ($done/$count)')),
+                    ),
+                    onPressed: enviando ? null : () => state._procesarEnvioCorreo(item: group, esLote: true),
+                  ),
+                ),
+                if (infoLote.isNotEmpty)
+                  buildEmailAuditBanner(infoLote, margin: const EdgeInsets.only(top: 12)),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+          Padding(
+            padding: const EdgeInsets.only(left: 2, bottom: 8),
+            child: Text(
+              'ÓRDENES DEL LOTE ($count)',
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: _kTextSec,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+          for (final os in group.items)
+            _MobileOsCard(
+              os: os,
+              onCaptura: () async {
+                await navegarCapturaSegunTipo(context, Map<String, dynamic>.from(os));
+                await state._loadLocal();
+              },
+              onAbrirPdf: state._abrirPdf,
+              onDescargarPdf: state._descargarPdfConNomenclatura,
+              onRehacer: state._mostrarDialogoRehacerToma,
+              onEliminarDatos: state._mostrarDialogoEliminarDatosDesdeCero,
+              onSubirPdfManual: state._subirPdfManual,
+              onEmail: state._manejarAccionEmail,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// VISTA PARA TABLETS Y PANTALLAS ANCHAS (TabletDesktopDashboard - respaldo)
 // ═══════════════════════════════════════════════════════════════════════════
 class _TabletDesktopDashboard extends StatelessWidget {
   final _OsListScreenState state;
@@ -4109,9 +5249,9 @@ class _FilterBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: _kCardBg,
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
       decoration: const BoxDecoration(
+        color: _kCardBg,
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
       child: Column(
@@ -4282,9 +5422,9 @@ class _TableHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: _kTableHead,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
       decoration: const BoxDecoration(
+        color: _kTableHead,
         border: Border(bottom: BorderSide(color: _kBorder)),
       ),
       child: Row(
@@ -4563,12 +5703,12 @@ class _OsRow extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.person, size: 13, color: Colors.blueAccent),
+                              const Icon(Icons.person_outline, size: 13, color: _kTextSec),
                               const SizedBox(width: 3),
                               Flexible(
                                 child: Text(
                                   'Técnico: $tecnicoNombre',
-                                  style: const TextStyle(fontSize: 10.5, color: Colors.blueGrey, fontWeight: FontWeight.w500),
+                                  style: const TextStyle(fontSize: 10.5, color: _kTextSec, fontWeight: FontWeight.w500),
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 1,
                                 ),

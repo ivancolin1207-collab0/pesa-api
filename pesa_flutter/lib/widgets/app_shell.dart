@@ -1,4 +1,7 @@
-// lib/widgets/app_shell.dart — Layout shell con sidebar corporativo BLANCO (light theme) y modo colapsable
+// lib/widgets/app_shell.dart — Layout shell adaptativo Samsung Galaxy Z Fold8 Ultra & Tablet
+// Pantalla externa (< 600dp): Barra inferior corporativa + Drawer de perfil/overflow
+// Pantalla desplegada (>= 600dp): NavigationRail compacto (72dp) expandible a barra lateral (232dp)
+// Mantiene un ÚNICO árbol de Scaffold/Row para que widget.child NUNCA se desmonte al plegar/desplegar.
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -7,38 +10,34 @@ import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../services/sync_service.dart';
+import '../theme/foldable_layout.dart';
 
 // ── Tokens corporativos minimalistas Básculas PESA v3.2 ─────────────────────
-const _red         = Color(0xFFC8102E);
-const _redLight    = Color(0xFFF8FAFC); // fondo ítem activo neutro (sin tintes rosados)
-const _sidebarBg   = Color(0xFFFFFFFF);
-const _sidebarW    = 240.0;
-const _textActive  = Color(0xFFC8102E);
-const _textInact   = Color(0xFF6B7280);
-const _divider     = Color(0xFFE5E7EB);
-const _bgGeneral   = Color(0xFFF6F7F9);
+const _red        = Color(0xFFC8102E);
+const _redLight   = Color(0xFFF8FAFC);
+const _sidebarBg  = Color(0xFFFFFFFF);
+const _sidebarW   = 232.0;
+const _railW      = 72.0;
+const _textActive = Color(0xFFC8102E);
+const _textInact  = Color(0xFF6B7280);
+const _divider    = Color(0xFFE5E7EB);
+const _bgGeneral  = Color(0xFFF6F7F9);
 
-/// Items del menú lateral — todos los roles (iconos vectoriales limpios, sin duplicados)
+/// Items del menú lateral — todos los roles
 const _navItemsAll = [
-  _NavItem(icon: Icons.dashboard_outlined,        label: 'Dashboard',          route: '/os'),
-  _NavItem(icon: Icons.add_box_outlined,          label: 'Generar Formatos',   route: '/nuevo-doc'),
-  _NavItem(icon: Icons.history_outlined,          label: 'Buscar / Historial', route: '/historial'),
-  _NavItem(icon: Icons.document_scanner_outlined, label: 'Adjuntar Escaneo',   route: '/escaneo'),
-  _NavItem(icon: Icons.draw_outlined,             label: 'Mi Firma',           route: '/mi-firma'),
-  _NavItem(icon: Icons.category_outlined,         label: 'Catálogos',          route: '/catalogos'),
-  _NavItem(icon: Icons.settings_outlined,         label: 'Configuración',      route: '/settings'),
+  _NavItem(icon: Icons.dashboard_outlined,        label: 'Dashboard',          shortLabel: 'Órdenes',   route: '/os'),
+  _NavItem(icon: Icons.add_box_outlined,          label: 'Generar Formatos',   shortLabel: 'Generar',   route: '/nuevo-doc'),
+  _NavItem(icon: Icons.history_outlined,          label: 'Buscar / Historial', shortLabel: 'Historial', route: '/historial'),
+  _NavItem(icon: Icons.document_scanner_outlined, label: 'Adjuntar Escaneo',   shortLabel: 'Escaneo',   route: '/escaneo'),
+  _NavItem(icon: Icons.draw_outlined,             label: 'Mi Firma',           shortLabel: 'Mi Firma',  route: '/mi-firma'),
+  _NavItem(icon: Icons.category_outlined,         label: 'Catálogos',          shortLabel: 'Catálogos', route: '/catalogos'),
+  _NavItem(icon: Icons.settings_outlined,         label: 'Configuración',      shortLabel: 'Ajustes',   route: '/settings'),
 ];
 
-/// Labels de ítems exclusivos de administrador (nunca visibles para técnicos)
 const _adminOnlyLabels = {'Generar Formatos', 'Generar / Asignar'};
-
-/// Rutas que solo admin puede ver
 const _adminOnlyRoutes = {'/catalogos', '/settings', '/nuevo-doc'};
-
-/// Items visibles SOLO para técnicos (ocultos para admin)
 const _tecnicoOnlyRoutes = {'/mi-firma'};
 
-/// Determina si un rol corresponde a un técnico operativo de campo
 bool _isTecnicoRole(String? role) {
   if (role == null || role.isEmpty) return false;
   final r = role.toLowerCase().trim()
@@ -48,24 +47,21 @@ bool _isTecnicoRole(String? role) {
       .replaceAll('ó', 'o')
       .replaceAll('ú', 'u');
   return r.contains('tec') ||
-         r == 'servicio' ||
-         r == 'calibrador' ||
-         r == 'inspector' ||
-         r == 'operativo';
+      r == 'servicio' ||
+      r == 'calibrador' ||
+      r == 'inspector' ||
+      r == 'operativo';
 }
 
-/// Devuelve los items del menú filtrados según el rol del usuario
 List<_NavItem> _navItemsForRole(String? role) {
   final isTecnico = _isTecnicoRole(role);
   if (isTecnico) {
-    // Los técnicos NUNCA ven ítems de admin ni las rutas admin
     return _navItemsAll
         .where((i) =>
             !_adminOnlyRoutes.contains(i.route) &&
             !_adminOnlyLabels.contains(i.label))
         .toList();
   }
-  // Admin / Logística / Recepción: todo excepto ítems exclusivos de técnico
   return _navItemsAll
       .where((i) => !_tecnicoOnlyRoutes.contains(i.route))
       .toList();
@@ -73,9 +69,15 @@ List<_NavItem> _navItemsForRole(String? role) {
 
 class _NavItem {
   final IconData icon;
-  final String   label;
-  final String   route;
-  const _NavItem({required this.icon, required this.label, required this.route});
+  final String label;
+  final String shortLabel;
+  final String route;
+  const _NavItem({
+    required this.icon,
+    required this.label,
+    required this.shortLabel,
+    required this.route,
+  });
 }
 
 class AppShell extends StatefulWidget {
@@ -83,9 +85,8 @@ class AppShell extends StatefulWidget {
   final String currentRoute;
   const AppShell({super.key, required this.child, required this.currentRoute});
 
-  /// Dispara la apertura del Drawer nativo (móvil) o alterna el estado del menú (tablet/desktop)
+  /// Abre el Drawer en pantalla externa (< 600dp) o alterna Rail compacto ↔ Sidebar expandido (>= 600dp)
   static void toggleMenu(BuildContext context) {
-    // Preferir el AppShell: abre el Drawer flotante (< 700dp) o colapsa la barra lateral (≥ 700dp).
     final shell = context.findAncestorStateOfType<_AppShellState>();
     if (shell != null) {
       shell.alternarMenu();
@@ -107,14 +108,10 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   StreamSubscription? _sessionSub;
-  bool _isSidebarOpen = true;
+  bool _isSidebarExpanded = false;
   bool _sidebarAutoAjustado = false;
   bool _usaDrawer = false;
   final GlobalKey<ScaffoldState> _shellScaffoldKey = GlobalKey<ScaffoldState>();
-
-  /// < 720dp (teléfono / Fold cerrado) → Barra inferior corporativa + Drawer.
-  /// ≥ 720dp (Tablet / Fold desplegado) → Barra lateral blanca colapsable.
-  static const double kBreakpointDrawer = 720;
 
   void alternarMenu() {
     if (_usaDrawer) {
@@ -132,7 +129,7 @@ class _AppShellState extends State<AppShell> {
 
   void toggleSidebar() {
     setState(() {
-      _isSidebarOpen = !_isSidebarOpen;
+      _isSidebarExpanded = !_isSidebarExpanded;
     });
   }
 
@@ -195,112 +192,112 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final bool esPantallaAngosta = media.size.width < kBreakpointDrawer;
-    _usaDrawer = esPantallaAngosta;
-    final isTabletOrDesktop = !esPantallaAngosta;
-    // Pantallas intermedias (Fold desplegado): iniciar con la barra colapsada para dar ancho a la tabla.
+    final bool coverMode = isCoverScreen(context);
+    final bool wideMode = isWideScreen(context);
+    _usaDrawer = coverMode;
+
+    // En tablets muy anchas (>= 960dp) iniciar expandido; en Z Fold desplegado (600-959dp)
+    // iniciar en NavigationRail compacto (72dp) para maximizar el área Master–Detail.
     if (!_sidebarAutoAjustado) {
       _sidebarAutoAjustado = true;
-      if (media.size.width < 900) _isSidebarOpen = false;
+      _isSidebarExpanded = wideMode;
     }
 
-    if (isTabletOrDesktop) {
-      return Scaffold(
-        backgroundColor: _bgGeneral,
-        body: Row(children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            curve: Curves.easeInOut,
-            width: _isSidebarOpen ? _sidebarW : 0.0,
-            decoration: const BoxDecoration(
-              color: _sidebarBg,
-              border: Border(right: BorderSide(color: _divider)),
-            ),
-            child: Visibility(
-              visible: _isSidebarOpen,
-              maintainState: true,
-              child: ClipRect(
-                child: OverflowBox(
-                  maxWidth: _sidebarW,
-                  minWidth: _sidebarW,
-                  alignment: Alignment.topLeft,
-                  child: _SidebarContent(
-                    currentRoute: widget.currentRoute,
-                    collapsed: false,
-                    onToggle: toggleSidebar,
-                  ),
+    final auth = context.watch<AuthService>();
+    final bool isTec = _isTecnicoRole(auth.role);
+    final List<_NavItem> bottomItems = isTec
+        ? const [
+            _NavItem(icon: Icons.dashboard_outlined,        label: 'Dashboard', shortLabel: 'Órdenes',   route: '/os'),
+            _NavItem(icon: Icons.history_outlined,          label: 'Historial', shortLabel: 'Historial', route: '/historial'),
+            _NavItem(icon: Icons.document_scanner_outlined, label: 'Escaneo',   shortLabel: 'Escaneo',   route: '/escaneo'),
+            _NavItem(icon: Icons.draw_outlined,             label: 'Mi Firma',  shortLabel: 'Mi Firma',  route: '/mi-firma'),
+          ]
+        : const [
+            _NavItem(icon: Icons.dashboard_outlined, label: 'Dashboard', shortLabel: 'Órdenes',   route: '/os'),
+            _NavItem(icon: Icons.add_box_outlined,   label: 'Generar',   shortLabel: 'Generar',   route: '/nuevo-doc'),
+            _NavItem(icon: Icons.history_outlined,   label: 'Historial', shortLabel: 'Historial', route: '/historial'),
+            _NavItem(icon: Icons.category_outlined,  label: 'Catálogos', shortLabel: 'Catálogos', route: '/catalogos'),
+          ];
+    int selectedIdx = bottomItems.indexWhere((i) => widget.currentRoute.startsWith(i.route));
+    if (selectedIdx < 0) selectedIdx = 0;
+
+    // ÚNICO Scaffold + Row persistente → widget.child mantiene 100% su State al plegar/desplegar el Z Fold.
+    return Scaffold(
+      key: _shellScaffoldKey,
+      backgroundColor: _bgGeneral,
+      drawer: coverMode
+          ? Drawer(
+              backgroundColor: Colors.white,
+              child: _SidebarContent(
+                currentRoute: widget.currentRoute,
+                collapsed: false,
+              ),
+            )
+          : null,
+      body: SafeArea(
+        bottom: !coverMode,
+        child: Row(
+          children: [
+            if (!coverMode)
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeInOut,
+                width: _isSidebarExpanded ? _sidebarW : _railW,
+                decoration: const BoxDecoration(
+                  color: _sidebarBg,
+                  border: Border(right: BorderSide(color: _divider)),
+                ),
+                child: _SidebarContent(
+                  currentRoute: widget.currentRoute,
+                  collapsed: !_isSidebarExpanded,
+                  onToggle: toggleSidebar,
                 ),
               ),
+            Expanded(
+              child: Container(
+                color: _bgGeneral,
+                child: widget.child,
+              ),
             ),
-          ),
-          Expanded(
-            child: Container(color: _bgGeneral, child: widget.child),
-          ),
-        ]),
-      );
-    } else {
-      final auth = context.watch<AuthService>();
-      final bool isTec = _isTecnicoRole(auth.role);
-      final List<_NavItem> bottomItems = isTec
-          ? const [
-              _NavItem(icon: Icons.dashboard_outlined,        label: 'Órdenes',   route: '/os'),
-              _NavItem(icon: Icons.history_outlined,          label: 'Historial', route: '/historial'),
-              _NavItem(icon: Icons.document_scanner_outlined, label: 'Escaneo',   route: '/escaneo'),
-              _NavItem(icon: Icons.draw_outlined,             label: 'Mi Firma',  route: '/mi-firma'),
-            ]
-          : const [
-              _NavItem(icon: Icons.dashboard_outlined, label: 'Órdenes',   route: '/os'),
-              _NavItem(icon: Icons.add_box_outlined,   label: 'Generar',   route: '/nuevo-doc'),
-              _NavItem(icon: Icons.history_outlined,   label: 'Historial', route: '/historial'),
-              _NavItem(icon: Icons.category_outlined,  label: 'Catálogos', route: '/catalogos'),
-            ];
-      int selectedIdx = bottomItems.indexWhere((i) => widget.currentRoute.startsWith(i.route));
-      if (selectedIdx < 0) selectedIdx = 0;
-
-      return Scaffold(
-        key: _shellScaffoldKey,
-        backgroundColor: _bgGeneral,
-        drawer: Drawer(
-          backgroundColor: Colors.white,
-          child: _SidebarContent(
-            currentRoute: widget.currentRoute,
-            collapsed: false,
-          ),
+          ],
         ),
-        body: widget.child,
-        bottomNavigationBar: Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            border: Border(top: BorderSide(color: _divider, width: 1)),
-          ),
-          child: NavigationBar(
-            selectedIndex: selectedIdx,
-            backgroundColor: Colors.white,
-            surfaceTintColor: Colors.transparent,
-            indicatorColor: _redLight,
-            height: 64,
-            onDestinationSelected: (idx) {
-              final target = bottomItems[idx].route;
-              if (!widget.currentRoute.startsWith(target)) {
-                context.go(target);
-              }
-            },
-            destinations: bottomItems
-                .map((item) => NavigationDestination(
-                      icon: Icon(item.icon, size: 22),
-                      selectedIcon: Icon(item.icon, size: 22, color: _red),
-                      label: item.label,
-                    ))
-                .toList(),
-          ),
-        ),
-      );
-    }
+      ),
+      bottomNavigationBar: coverMode
+          ? Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: _divider, width: 1)),
+              ),
+              child: SafeArea(
+                top: false,
+                child: NavigationBar(
+                  selectedIndex: selectedIdx,
+                  backgroundColor: Colors.white,
+                  surfaceTintColor: Colors.transparent,
+                  indicatorColor: _redLight,
+                  height: 62,
+                  onDestinationSelected: (idx) {
+                    final target = bottomItems[idx].route;
+                    if (!widget.currentRoute.startsWith(target)) {
+                      context.go(target);
+                    }
+                  },
+                  destinations: bottomItems
+                      .map((item) => NavigationDestination(
+                            icon: Icon(item.icon, size: 22),
+                            selectedIcon: Icon(item.icon, size: 22, color: _red),
+                            label: item.shortLabel,
+                          ))
+                      .toList(),
+                ),
+              ),
+            )
+          : null,
+    );
   }
 }
 
-// ── Contenido del sidebar ───────────────────────────────────────────────────
+// ── Contenido del NavigationRail / Sidebar expandible ──────────────────────────
 class _SidebarContent extends StatelessWidget {
   final String currentRoute;
   final bool collapsed;
@@ -316,85 +313,142 @@ class _SidebarContent extends StatelessWidget {
   Widget build(BuildContext context) {
     return SafeArea(
       child: Column(children: [
-        // ── Brand + Hamburguesa ─────────────────────────────────────────────
+        // ── Brand + Toggle Rail/Sidebar ────────────────────────────────────
         Padding(
-          padding: EdgeInsets.fromLTRB(collapsed ? 8 : 14, 16, collapsed ? 8 : 14, 14),
-          child: Row(
-            mainAxisAlignment: collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
-            children: [
-              if (onToggle != null)
-                IconButton(
-                  icon: const Icon(Icons.menu_open_rounded, color: Color(0xFF374151), size: 22),
-                  tooltip: 'Cerrar menú lateral',
-                  onPressed: onToggle,
+          padding: EdgeInsets.fromLTRB(collapsed ? 8 : 14, 14, collapsed ? 8 : 14, 12),
+          child: collapsed
+              ? Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    GestureDetector(
+                      onTap: onToggle,
+                      child: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: _red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: const Icon(Icons.scale, color: Colors.white, size: 20),
+                      ),
+                    ),
+                    if (onToggle != null) ...[
+                      const SizedBox(height: 6),
+                      Tooltip(
+                        message: 'Expandir menú',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(8),
+                          onTap: onToggle,
+                          child: const Padding(
+                            padding: EdgeInsets.all(6),
+                            child: Icon(Icons.chevron_right_rounded,
+                                color: Color(0xFF6B7280), size: 18),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                )
+              : Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(7),
+                      decoration: BoxDecoration(
+                        color: _red,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.scale, color: Colors.white, size: 18),
+                    ),
+                    const SizedBox(width: 9),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Básculas PESA',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Color(0xFF111827),
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13.5,
+                            ),
+                          ),
+                          Text(
+                            'Sistema Metrológico',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(color: Color(0xFF6B7280), fontSize: 10),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (onToggle != null)
+                      IconButton(
+                        icon: const Icon(Icons.menu_open_rounded,
+                            color: Color(0xFF6B7280), size: 20),
+                        tooltip: 'Compactar menú',
+                        onPressed: onToggle,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                  ],
                 ),
-              if (!collapsed) ...[
-                const SizedBox(width: 4),
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: _red, borderRadius: BorderRadius.circular(8)),
-                  child: const Icon(Icons.scale, color: Colors.white, size: 18),
-                ),
-                const SizedBox(width: 8),
-                const Expanded(
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Text('Básculas PESA',
-                        style: TextStyle(color: Color(0xFF0F172A),
-                            fontWeight: FontWeight.w800, fontSize: 13.5)),
-                    Text('Sistema Metrológico',
-                        style: TextStyle(color: Color(0xFF64748B), fontSize: 9.5)),
-                  ]),
-                ),
-              ],
-            ],
-          ),
         ),
         const Divider(color: _divider, height: 1),
 
-        // ── Label MENÚ ───────────────────────────────────────────────────
+        // ── Label MENÚ ─────────────────────────────────────────────────────
         if (!collapsed)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 12, 16, 6),
             child: Align(
               alignment: Alignment.centerLeft,
-              child: Text('MENÚ', style: TextStyle(
-                  color: Colors.grey.shade400, fontSize: 9,
-                  fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+              child: Text(
+                'MENÚ',
+                style: TextStyle(
+                  color: Color(0xFF9CA3AF),
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.1,
+                ),
+              ),
             ),
+          )
+        else
+          const SizedBox(height: 8),
+
+        // ── Ítems desplazables si la altura es reducida (ej. modo horizontal) ──
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.symmetric(vertical: 2),
+            child: Builder(builder: (ctx) {
+              final auth = ctx.watch<AuthService>();
+              final items = _navItemsForRole(auth.role);
+              return Column(
+                children: items
+                    .map((item) => _NavTile(
+                          item: item,
+                          isActive: currentRoute.startsWith(item.route),
+                          collapsed: collapsed,
+                        ))
+                    .toList(),
+              );
+            }),
           ),
-        if (collapsed) const SizedBox(height: 8),
+        ),
 
-        // ── Ítems ────────────────────────────────────────────────────────
-        Builder(builder: (ctx) {
-          final auth = ctx.watch<AuthService>();
-          final items = _navItemsForRole(auth.role);
-          return Column(
-            children: items.map((item) =>
-              _NavTile(
-                item: item,
-                isActive: currentRoute.startsWith(item.route),
-                collapsed: collapsed,
-              )
-            ).toList(),
-          );
-        }),
-
-        const Spacer(),
         const Divider(color: _divider, height: 1),
 
-        // ── Perfil usuario ───────────────────────────────────────────────
+        // ── Perfil usuario ─────────────────────────────────────────────────
         _UserProfile(collapsed: collapsed),
       ]),
     );
   }
 }
 
-// ── Nav tile ────────────────────────────────────────────────────────────────
+// ── Nav tile (NavigationRail compacto o Sidebar completo) ───────────────────
 class _NavTile extends StatelessWidget {
   final _NavItem item;
-  final bool     isActive;
-  final bool     collapsed;
+  final bool isActive;
+  final bool collapsed;
   const _NavTile({
     required this.item,
     required this.isActive,
@@ -403,38 +457,79 @@ class _NavTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tile = GestureDetector(
+    final tile = InkWell(
+      borderRadius: BorderRadius.circular(10),
       onTap: () {
-        if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+        final scaffold = Scaffold.maybeOf(context);
+        if (scaffold != null && scaffold.isDrawerOpen) {
+          Navigator.of(context).pop();
+        }
         if (!isActive) context.go(item.route);
       },
       child: Container(
-        margin: EdgeInsets.fromLTRB(collapsed ? 6 : 8, 3, collapsed ? 6 : 8, 3),
-        padding: EdgeInsets.symmetric(horizontal: collapsed ? 8 : 12, vertical: 10),
+        margin: EdgeInsets.fromLTRB(collapsed ? 8 : 8, 3, collapsed ? 8 : 8, 3),
+        padding: EdgeInsets.symmetric(
+          horizontal: collapsed ? 4 : 12,
+          vertical: collapsed ? 9 : 11,
+        ),
         decoration: BoxDecoration(
           color: isActive ? _redLight : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
+          border: isActive
+              ? Border.all(color: _divider, width: 1)
+              : Border.all(color: Colors.transparent, width: 1),
         ),
-        child: Row(
-          mainAxisAlignment: collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
-          children: [
-            if (isActive && !collapsed)
-              Container(width: 3, height: 18, margin: const EdgeInsets.only(right: 8),
-                  decoration: BoxDecoration(color: _red,
-                      borderRadius: BorderRadius.circular(2))),
-            Icon(item.icon, size: 20,
-                color: isActive ? _textActive : _textInact),
-            if (!collapsed) ...[
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(item.label, style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                    color: isActive ? _textActive : _textInact)),
+        child: collapsed
+            ? Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Icon(item.icon, size: 22, color: isActive ? _textActive : _textInact),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    item.shortLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                      color: isActive ? _textActive : _textInact,
+                    ),
+                  ),
+                ],
+              )
+            : Row(
+                children: [
+                  if (isActive)
+                    Container(
+                      width: 3,
+                      height: 18,
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: BoxDecoration(
+                        color: _red,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  Icon(item.icon, size: 20, color: isActive ? _textActive : _textInact),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      item.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                        color: isActive ? _textActive : _textInact,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ],
-        ),
       ),
     );
 
@@ -450,69 +545,117 @@ class _UserProfile extends StatelessWidget {
   final bool collapsed;
   const _UserProfile({this.collapsed = false});
 
+  Future<void> _confirmLogout(BuildContext context) async {
+    final ok = await showFoldableDialog<bool>(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        title: const Text('Cerrar Sesión'),
+        content: const Text('¿Confirmas que deseas cerrar sesión?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _red,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(dialogCtx, true),
+            child: const Text('Salir'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && context.mounted) {
+      await context.read<AuthService>().logout();
+      if (context.mounted) context.go('/login');
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final auth     = context.watch<AuthService>();
-    final nombre   = auth.displayName;
-    final rol      = auth.role ?? 'Técnico';
+    final auth = context.watch<AuthService>();
+    final nombre = auth.displayName;
+    final rol = auth.role ?? 'Técnico';
     final initials = auth.initials;
 
     return Padding(
-      padding: EdgeInsets.fromLTRB(collapsed ? 6 : 12, 10, collapsed ? 6 : 12, 16),
+      padding: EdgeInsets.fromLTRB(collapsed ? 6 : 12, 10, collapsed ? 6 : 12, 14),
       child: collapsed
-          ? Center(
-              child: Tooltip(
-                message: '$nombre ($rol)',
-                child: CircleAvatar(
-                  radius: 16,
-                  backgroundColor: _red,
-                  child: Text(initials,
-                      style: const TextStyle(color: Colors.white,
-                          fontWeight: FontWeight.w800, fontSize: 11)),
+          ? Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Tooltip(
+                  message: '$nombre ($rol)',
+                  child: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: _red,
+                    child: Text(
+                      initials,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 6),
+                Tooltip(
+                  message: 'Cerrar Sesión',
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _confirmLogout(context),
+                    child: const Padding(
+                      padding: EdgeInsets.all(6),
+                      child: Icon(Icons.logout, size: 17, color: Color(0xFF9CA3AF)),
+                    ),
+                  ),
+                ),
+              ],
             )
           : Row(children: [
               CircleAvatar(
                 radius: 17,
                 backgroundColor: _red,
-                child: Text(initials,
-                    style: const TextStyle(color: Colors.white,
-                        fontWeight: FontWeight.w800, fontSize: 12)),
+                child: Text(
+                  initials,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                  ),
+                ),
               ),
               const SizedBox(width: 10),
-              Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(nombre, style: const TextStyle(
-                    color: Color(0xFF111827), fontWeight: FontWeight.w600, fontSize: 12),
-                    overflow: TextOverflow.ellipsis),
-                Text(_cap(rol), style: const TextStyle(
-                    color: Color(0xFF6B7280), fontSize: 10)),
-              ])),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      nombre,
+                      style: const TextStyle(
+                        color: Color(0xFF111827),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      _cap(rol),
+                      style: const TextStyle(
+                        color: Color(0xFF6B7280),
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               IconButton(
                 icon: const Icon(Icons.logout, size: 17, color: Color(0xFF9CA3AF)),
                 tooltip: 'Cerrar Sesión',
-                onPressed: () async {
-                  final ok = await showDialog<bool>(
-                    context: context,
-                    builder: (_) => AlertDialog(
-                      title: const Text('Cerrar Sesión'),
-                      content: const Text('¿Confirmas que deseas cerrar sesión?'),
-                      actions: [
-                        TextButton(onPressed: () => Navigator.pop(context, false),
-                            child: const Text('Cancelar')),
-                        ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                                backgroundColor: _red, foregroundColor: Colors.white),
-                            onPressed: () => Navigator.pop(context, true),
-                            child: const Text('Salir')),
-                      ],
-                    ),
-                  );
-                  if (ok == true && context.mounted) {
-                    await context.read<AuthService>().logout();
-                    context.go('/login');
-                  }
-                },
+                onPressed: () => _confirmLogout(context),
               ),
             ]),
     );

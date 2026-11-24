@@ -28,6 +28,7 @@ import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
+import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/nombre_recibe.dart';
 import '../widgets/pesa_components.dart';
@@ -1164,48 +1165,56 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
           ],
         ),
         body: _cargandoInicial
-            ? const Center(child: CircularProgressIndicator(color: _osoccBlue))
-            : ListView(
-                padding: const EdgeInsets.fromLTRB(14, 12, 14, 32),
-                children: [
-                  _buildHeaderControlCard(folio, fechaRaw),
-                  const SizedBox(height: 12),
-                  _buildSeccion1Card(),
-                  const SizedBox(height: 12),
-                  _buildSeccion2Card(),
-                  const SizedBox(height: 12),
-                  _buildSeccion3Card(),
-                  const SizedBox(height: 12),
-                  _buildSeccion4Card(),
-                  const SizedBox(height: 12),
-                  _buildSeccion5Card(),
-                  const SizedBox(height: 22),
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _pesaRed,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        elevation: 2,
-                      ),
-                      onPressed: _guardando ? null : _finalizar,
-                      icon: _guardando
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                            )
-                          : const Icon(Icons.assignment_turned_in_rounded),
-                      label: Text(
-                        _guardando
-                            ? 'Generando PDF Oficial...'
-                            : 'Finalizar y Generar PDF Oficial (OSOCC)',
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+            ? const Center(child: CircularProgressIndicator(color: _pesaRed))
+            : SigningScrollLock(
+                builder: (ctx, physics, _) => ListView(
+                  physics: physics,
+                  padding: EdgeInsets.fromLTRB(
+                    foldableHorizontalPadding(ctx),
+                    12,
+                    foldableHorizontalPadding(ctx),
+                    32,
+                  ),
+                  children: [
+                    _buildHeaderControlCard(folio, fechaRaw),
+                    const SizedBox(height: 12),
+                    _buildSeccion1Card(),
+                    const SizedBox(height: 12),
+                    _buildSeccion2Card(),
+                    const SizedBox(height: 12),
+                    _buildSeccion3Card(),
+                    const SizedBox(height: 12),
+                    _buildSeccion4Card(),
+                    const SizedBox(height: 12),
+                    _buildSeccion5Card(),
+                    const SizedBox(height: 22),
+                    SizedBox(
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _pesaRed,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          elevation: 0,
+                        ),
+                        onPressed: _guardando ? null : _finalizar,
+                        icon: _guardando
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              )
+                            : const Icon(Icons.assignment_turned_in_rounded),
+                        label: Text(
+                          _guardando
+                              ? 'Generando PDF Oficial...'
+                              : 'Finalizar y Generar PDF Oficial (OSOCC)',
+                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
       ),
     );
@@ -1259,7 +1268,10 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1277,7 +1289,6 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
@@ -1290,7 +1301,6 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
                   ),
                 ),
-                const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
@@ -1310,73 +1320,71 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: _buildTextField(
-                    _ordenServicioRefCtrl,
-                    'Ref. / Orden',
-                    hint: 'Opcional (ej. OS-26-750)',
+            FoldableTwoColumn(
+              firstFlex: 2,
+              secondFlex: 3,
+              horizontalGap: 12,
+              verticalGap: 10,
+              first: _buildTextField(
+                _ordenServicioRefCtrl,
+                'Ref. / Orden',
+                hint: 'Opcional (ej. OS-26-750)',
+              ),
+              second: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Destino:',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _pesaDark),
                   ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  flex: 3,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  const SizedBox(height: 4),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
                     children: [
-                      const Text(
-                        'Destino:',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _pesaDark),
+                      ChoiceChip(
+                        label: const Text('Stock / Laboratorio Interno'),
+                        selected: _destinoTipo == 'Stock',
+                        showCheckmark: false,
+                        selectedColor: const Color(0xFFC8102E),
+                        backgroundColor: const Color(0xFFF8FAFC),
+                        labelStyle: TextStyle(
+                          fontSize: 12,
+                          fontWeight: _destinoTipo == 'Stock' ? FontWeight.bold : FontWeight.normal,
+                          color: _destinoTipo == 'Stock' ? Colors.white : const Color(0xFF0F172A),
+                        ),
+                        onSelected: (_) {
+                          setState(() {
+                            _destinoTipo = 'Stock';
+                            if (_clienteDestinoCtrl.text.trim().isEmpty) {
+                              _clienteDestinoCtrl.text = 'Stock / Taller Básculas PESA';
+                            }
+                          });
+                          _programarAutoGuardado();
+                        },
                       ),
-                      const SizedBox(height: 4),
-                      Wrap(
-                        spacing: 8,
-                        children: [
-                          ChoiceChip(
-                            label: const Text('Stock / Laboratorio Interno'),
-                            selected: _destinoTipo == 'Stock',
-                            selectedColor: const Color(0xFFC8102E),
-                            backgroundColor: const Color(0xFFF8FAFC),
-                            labelStyle: TextStyle(
-                              fontSize: 12,
-                              fontWeight: _destinoTipo == 'Stock' ? FontWeight.bold : FontWeight.normal,
-                              color: _destinoTipo == 'Stock' ? Colors.white : const Color(0xFF0F172A),
-                            ),
-                            onSelected: (_) {
-                              setState(() {
-                                _destinoTipo = 'Stock';
-                                if (_clienteDestinoCtrl.text.trim().isEmpty) {
-                                  _clienteDestinoCtrl.text = 'Stock / Taller Básculas PESA';
-                                }
-                              });
-                              _programarAutoGuardado();
-                            },
-                          ),
-                          ChoiceChip(
-                            label: const Text('Cliente'),
-                            selected: _destinoTipo == 'Cliente',
-                            selectedColor: const Color(0xFFC8102E),
-                            backgroundColor: const Color(0xFFF8FAFC),
-                            labelStyle: TextStyle(
-                              fontSize: 12,
-                              fontWeight: _destinoTipo == 'Cliente' ? FontWeight.bold : FontWeight.normal,
-                              color: _destinoTipo == 'Cliente' ? Colors.white : const Color(0xFF0F172A),
-                            ),
-                            onSelected: (_) {
-                              setState(() {
-                                _destinoTipo = 'Cliente';
-                              });
-                              _programarAutoGuardado();
-                            },
-                          ),
-                        ],
+                      ChoiceChip(
+                        label: const Text('Cliente'),
+                        selected: _destinoTipo == 'Cliente',
+                        showCheckmark: false,
+                        selectedColor: const Color(0xFFC8102E),
+                        backgroundColor: const Color(0xFFF8FAFC),
+                        labelStyle: TextStyle(
+                          fontSize: 12,
+                          fontWeight: _destinoTipo == 'Cliente' ? FontWeight.bold : FontWeight.normal,
+                          color: _destinoTipo == 'Cliente' ? Colors.white : const Color(0xFF0F172A),
+                        ),
+                        onSelected: (_) {
+                          setState(() {
+                            _destinoTipo = 'Cliente';
+                          });
+                          _programarAutoGuardado();
+                        },
                       ),
                     ],
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ],
         ),
@@ -1405,68 +1413,59 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               hint: 'Stock / Taller Básculas PESA o Razón Social del Cliente',
             ),
             const SizedBox(height: 10),
-            Row(
+            FoldableFormGrid(
+              unfoldedColumns: 2,
+              spacing: 10,
+              runSpacing: 10,
               children: [
-                Expanded(child: _buildTextField(_marcaCtrl, 'Marca')),
-                const SizedBox(width: 10),
-                Expanded(child: _buildTextField(_modeloCtrl, 'Modelo')),
-                const SizedBox(width: 10),
-                Expanded(child: _buildTextField(_serieCtrl, 'Número de Serie')),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Row(
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: _buildTextField(
-                    _capMaxCtrl,
-                    'Capacidad Nominal (Max)',
-                    hint: 'Ej. 50000',
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 90,
-                  child: DropdownButtonFormField<String>(
-                    value: _unidadCap,
-                    decoration: InputDecoration(
-                      labelText: 'Unidad',
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                _buildTextField(_marcaCtrl, 'Marca'),
+                _buildTextField(_modeloCtrl, 'Modelo'),
+                _buildTextField(_serieCtrl, 'Número de Serie'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: _buildTextField(
+                        _capMaxCtrl,
+                        'Capacidad Nominal (Max)',
+                        hint: 'Ej. 50000',
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      ),
                     ),
-                    items: const [
-                      DropdownMenuItem(value: 'kg', child: Text('kg')),
-                      DropdownMenuItem(value: 'lb', child: Text('lb')),
-                      DropdownMenuItem(value: 't', child: Text('t')),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() => _unidadCap = v);
-                        _programarAutoGuardado();
-                      }
-                    },
-                  ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 88,
+                      child: DropdownButtonFormField<String>(
+                        value: _unidadCap,
+                        decoration: InputDecoration(
+                          labelText: 'Unidad',
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        items: const [
+                          DropdownMenuItem(value: 'kg', child: Text('kg')),
+                          DropdownMenuItem(value: 'lb', child: Text('lb')),
+                          DropdownMenuItem(value: 't', child: Text('t')),
+                        ],
+                        onChanged: (v) {
+                          if (v != null) {
+                            setState(() => _unidadCap = v);
+                            _programarAutoGuardado();
+                          }
+                        },
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 2,
-                  child: _buildTextField(
-                    _sensibilidadCtrl,
-                    'Sensibilidad Nominal (mV/V)',
-                    hint: 'Ej. 2.0 mV/V, 3.0 mV/V',
-                  ),
+                _buildTextField(
+                  _sensibilidadCtrl,
+                  'Sensibilidad Nominal (mV/V)',
+                  hint: 'Ej. 2.0 mV/V, 3.0 mV/V',
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  flex: 2,
-                  child: _buildTextField(
-                    _resistenciaNomCtrl,
-                    'Resistencia Nominal Ent./Sal. (Ohms)',
-                    hint: 'Ej. 350 Ω / 700 Ω',
-                  ),
+                _buildTextField(
+                  _resistenciaNomCtrl,
+                  'Resistencia Nominal Ent./Sal. (Ohms)',
+                  hint: 'Ej. 350 Ω / 700 Ω',
                 ),
               ],
             ),
@@ -1476,51 +1475,46 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _pesaDark),
             ),
             const SizedBox(height: 8),
-            Row(
+            FoldableFormGrid(
+              unfoldedColumns: 3,
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                Expanded(child: _buildTextField(_colorExcPosCtrl, 'Exc+')),
-                const SizedBox(width: 8),
-                Expanded(child: _buildTextField(_colorExcNegCtrl, 'Exc-')),
-                const SizedBox(width: 8),
-                Expanded(child: _buildTextField(_colorSigPosCtrl, 'Sig+')),
-                const SizedBox(width: 8),
-                Expanded(child: _buildTextField(_colorSigNegCtrl, 'Sig-')),
-                const SizedBox(width: 8),
-                Expanded(child: _buildTextField(_colorBlindajeCtrl, 'Blindaje')),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 100,
-                  child: DropdownButtonFormField<String>(
-                    value: _senseOption,
-                    decoration: InputDecoration(
-                      labelText: 'Sense',
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 'No', child: Text('No')),
-                      DropdownMenuItem(value: 'Sí', child: Text('Sí')),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) {
-                        setState(() => _senseOption = v);
-                        _programarAutoGuardado();
-                      }
-                    },
+                _buildTextField(_colorExcPosCtrl, 'Exc+'),
+                _buildTextField(_colorExcNegCtrl, 'Exc-'),
+                _buildTextField(_colorSigPosCtrl, 'Sig+'),
+                _buildTextField(_colorSigNegCtrl, 'Sig-'),
+                _buildTextField(_colorBlindajeCtrl, 'Blindaje'),
+                DropdownButtonFormField<String>(
+                  value: _senseOption,
+                  decoration: InputDecoration(
+                    labelText: 'Sense',
+                    isDense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                   ),
+                  items: const [
+                    DropdownMenuItem(value: 'No', child: Text('No')),
+                    DropdownMenuItem(value: 'Sí', child: Text('Sí')),
+                  ],
+                  onChanged: (v) {
+                    if (v != null) {
+                      setState(() => _senseOption = v);
+                      _programarAutoGuardado();
+                    }
+                  },
                 ),
               ],
             ),
             const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
-              height: 40,
+              height: 46,
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF1D4ED8),
-                  backgroundColor: const Color(0xFFEFF6FF),
-                  side: const BorderSide(color: Color(0xFF93C5FD), width: 1.4),
+                  foregroundColor: PesaColors.textPrimary,
+                  backgroundColor: PesaColors.surface,
+                  side: const BorderSide(color: PesaColors.borderStrong, width: 1.2),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () async {
@@ -1674,12 +1668,13 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildSeccion3Card() {
+    final cover = isCoverScreen(context);
     return Card(
       elevation: 0,
       color: Colors.white,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Color(0xFFE5E5EA)),
+        side: const BorderSide(color: PesaColors.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1691,70 +1686,156 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               subtitle: '1 Celda Unitaria',
             ),
             const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE5E7EB),
-                borderRadius: BorderRadius.circular(6),
+            if (!cover) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                decoration: BoxDecoration(
+                  color: PesaColors.tableHeader,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: PesaColors.border),
+                ),
+                child: const Row(
+                  children: [
+                    Expanded(
+                      flex: 4,
+                      child: Text(
+                        'PARÁMETRO ELÉCTRICO',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 55,
+                      child: Text(
+                        'UND',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        'VALOR MEDIDO',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                      ),
+                    ),
+                    Expanded(
+                      flex: 3,
+                      child: Text(
+                        'ESTADO',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: const Row(
-                children: [
-                  Expanded(
-                    flex: 4,
-                    child: Text(
-                      'PARÁMETRO ELÉCTRICO',
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 55,
-                    child: Text(
-                      'UND',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      'VALOR MEDIDO',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Expanded(
-                    flex: 3,
-                    child: Text(
-                      'ESTADO (OK / FALLA)',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 6),
-            for (final spec in _pruebasElectricasSpec) _buildPruebaElectricaRow(spec),
+              const SizedBox(height: 6),
+            ],
+            for (final spec in _pruebasElectricasSpec) _buildPruebaElectricaRow(spec, cover: cover),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildPruebaElectricaRow(Map<String, String> spec) {
+  Widget _buildPruebaElectricaRow(Map<String, String> spec, {bool cover = false}) {
     final int idx = int.parse(spec['idx']!);
     final String label = spec['label']!;
     final String unidad = spec['unidad']!;
     final List<String> opciones = idx == 12 ? ['> 5000 MΩ (OK)', 'Fuga'] : ['OK', 'Falla'];
     final String currentEst = _pruebasEstado[idx] ?? opciones.first;
 
+    final valueInput = SizedBox(
+      height: cover ? 44 : 38,
+      child: TextField(
+        controller: _pruebasValorCtrls[idx],
+        focusNode: _pruebasFocusNodes[idx],
+        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
+        textInputAction: idx < 12 ? TextInputAction.next : TextInputAction.done,
+        onSubmitted: (_) {
+          if (idx < 12) {
+            _pruebasFocusNodes[idx + 1]?.requestFocus();
+          } else {
+            FocusScope.of(context).unfocus();
+          }
+        },
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          fontFeatures: [FontFeature.tabularFigures()],
+        ),
+        decoration: InputDecoration(
+          hintText: 'Valor ($unidad)',
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        ),
+      ),
+    );
+
+    final statusControl = PesaSegmentedSelector<String>(
+      options: opciones,
+      selected: currentEst,
+      labelBuilder: (opt) => opt,
+      onChanged: (opt) {
+        setState(() => _pruebasEstado[idx] = opt);
+        _programarAutoGuardado();
+      },
+    );
+
+    if (cover) {
+      return Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: idx.isEven ? PesaColors.surfaceMuted : Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: PesaColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '$idx. $label',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: PesaColors.borderStrong),
+                  ),
+                  child: Text(
+                    unidad,
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textSecondary),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            valueInput,
+            const SizedBox(height: 8),
+            statusControl,
+          ],
+        ),
+      );
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: idx.isEven ? const Color(0xFFF9FAFB) : Colors.white,
+        color: idx.isEven ? PesaColors.surfaceMuted : Colors.white,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(color: PesaColors.border),
       ),
       child: Row(
         children: [
@@ -1777,68 +1858,12 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
             flex: 3,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 6),
-              child: SizedBox(
-                height: 36,
-                child: TextField(
-                  controller: _pruebasValorCtrls[idx],
-                  focusNode: _pruebasFocusNodes[idx],
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                  textInputAction: idx < 12 ? TextInputAction.next : TextInputAction.done,
-                  onSubmitted: (_) {
-                    if (idx < 12) {
-                      _pruebasFocusNodes[idx + 1]?.requestFocus();
-                    } else {
-                      FocusScope.of(context).unfocus();
-                    }
-                  },
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
-                  decoration: InputDecoration(
-                    hintText: 'Valor ($unidad)',
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
-                  ),
-                ),
-              ),
+              child: valueInput,
             ),
           ),
           Expanded(
             flex: 3,
-            child: Wrap(
-              alignment: WrapAlignment.center,
-              spacing: 6,
-              children: opciones.map((opt) {
-                final bool selected = currentEst == opt;
-                final bool isFail = opt.toLowerCase().contains('falla') || opt.toLowerCase().contains('fuga');
-                final Color activeColor = isFail ? _pesaRed : const Color(0xFF15803D);
-                return InkWell(
-                  onTap: () {
-                    setState(() => _pruebasEstado[idx] = opt);
-                    _programarAutoGuardado();
-                  },
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: selected ? activeColor : const Color(0xFFF3F4F6),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                        color: selected ? activeColor : const Color(0xFFD1D5DB),
-                      ),
-                    ),
-                    child: Text(
-                      opt,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: selected ? Colors.white : const Color(0xFF374151),
-                      ),
-                    ),
-                  ),
-                );
-              }).toList(),
-            ),
+            child: statusControl,
           ),
         ],
       ),
@@ -1957,154 +1982,146 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
           children: [
             _buildSectionHeader('5. FIRMAS DE RESPONSABILIDAD'),
             const SizedBox(height: 12),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Columna Técnico
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFE5E7EB)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Evaluó / Técnico Responsable',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _pesaDark),
-                        ),
-                        const SizedBox(height: 8),
-                        _buildTextField(_tecNombreCtrl, 'Nombre del Técnico'),
-                        const SizedBox(height: 8),
-                        _buildTextField(_tecPuestoCtrl, 'Puesto'),
-                        const SizedBox(height: 10),
-                        if (_firmaTecPre != null && _usarFirmaPre) ...[
-                          Container(
-                            height: 120,
-                            width: double.infinity,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0xFFD1D5DB)),
-                            ),
-                            child: Image.memory(_firmaTecPre!, fit: BoxFit.contain),
-                          ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              onPressed: () => setState(() => _usarFirmaPre = false),
-                              icon: const Icon(Icons.edit_outlined, size: 16),
-                              label: const Text('Firmar manualmente', style: TextStyle(fontSize: 12)),
-                            ),
-                          ),
-                        ] else ...[
-                          Container(
-                            height: 120,
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0xFFD1D5DB)),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(8),
-                              child: SignatureGestureShield(
-                                child: Signature(
-                                  controller: _sigTecnicoCtrl,
-                                  height: 120,
-                                  backgroundColor: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton.icon(
-                              onPressed: () => _sigTecnicoCtrl.clear(),
-                              icon: const Icon(Icons.clear, size: 16),
-                              label: const Text('Limpiar firma', style: TextStyle(fontSize: 12)),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+            FoldableTwoColumn(
+              horizontalGap: 14,
+              verticalGap: 12,
+              first: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF9FAFB),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
                 ),
-                const SizedBox(width: 12),
-                // Columna Recibió / Almacén o Cliente
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF9FAFB),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFFE5E7EB)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Evaluó / Técnico Responsable',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _pesaDark),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          esStock
-                              ? 'Recibió / Almacén o Laboratorio (Opcional en Stock)'
-                              : 'Recibió / Cliente (Obligatorio)',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _pesaDark),
+                    const SizedBox(height: 8),
+                    _buildTextField(_tecNombreCtrl, 'Nombre del Técnico'),
+                    const SizedBox(height: 8),
+                    _buildTextField(_tecPuestoCtrl, 'Puesto'),
+                    const SizedBox(height: 10),
+                    if (_firmaTecPre != null && _usarFirmaPre) ...[
+                      Container(
+                        height: 120,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFD1D5DB)),
                         ),
-                        const SizedBox(height: 8),
-                        _buildTextField(
-                          _cliNombreCtrl,
-                          esStock ? 'Nombre de quien recibe (opcional)' : 'Nombre de quien recibe *',
+                        child: Image.memory(_firmaTecPre!, fit: BoxFit.contain),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () => setState(() => _usarFirmaPre = false),
+                          icon: const Icon(Icons.edit_outlined, size: 16),
+                          label: const Text('Firmar manualmente', style: TextStyle(fontSize: 12)),
                         ),
-                        if (_contactosSugeridos.isNotEmpty) ...[
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 6,
-                            children: _contactosSugeridos.take(4).map((c) {
-                              return ActionChip(
-                                label: Text(c, style: const TextStyle(fontSize: 11)),
-                                onPressed: () {
-                                  setState(() => _cliNombreCtrl.text = c);
-                                  _programarAutoGuardado();
-                                },
-                              );
-                            }).toList(),
-                          ),
-                        ],
-                        const SizedBox(height: 8),
-                        _buildTextField(_cliPuestoCtrl, 'Puesto / Área'),
-                        const SizedBox(height: 10),
-                        Container(
-                          height: 120,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFD1D5DB)),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: SignatureGestureShield(
-                              child: Signature(
-                                controller: _sigClienteCtrl,
-                                height: 120,
-                                backgroundColor: Colors.white,
-                              ),
+                      ),
+                    ] else ...[
+                      Container(
+                        height: 120,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: SignatureGestureShield(
+                            child: Signature(
+                              controller: _sigTecnicoCtrl,
+                              height: 120,
+                              backgroundColor: Colors.white,
                             ),
                           ),
                         ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: TextButton.icon(
-                            onPressed: () => _sigClienteCtrl.clear(),
-                            icon: const Icon(Icons.clear, size: 16),
-                            label: const Text('Limpiar firma', style: TextStyle(fontSize: 12)),
+                      ),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          onPressed: () => _sigTecnicoCtrl.clear(),
+                          icon: const Icon(Icons.clear, size: 16),
+                          label: const Text('Limpiar firma', style: TextStyle(fontSize: 12)),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              second: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF9FAFB),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      esStock
+                          ? 'Recibió / Almacén o Laboratorio (Opcional en Stock)'
+                          : 'Recibió / Cliente (Obligatorio)',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _pesaDark),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildTextField(
+                      _cliNombreCtrl,
+                      esStock ? 'Nombre de quien recibe (opcional)' : 'Nombre de quien recibe *',
+                    ),
+                    if (_contactosSugeridos.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        children: _contactosSugeridos.take(4).map((c) {
+                          return ActionChip(
+                            label: Text(c, style: const TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              setState(() => _cliNombreCtrl.text = c);
+                              _programarAutoGuardado();
+                            },
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    _buildTextField(_cliPuestoCtrl, 'Puesto / Área'),
+                    const SizedBox(height: 10),
+                    Container(
+                      height: 120,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFD1D5DB)),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: SignatureGestureShield(
+                          child: Signature(
+                            controller: _sigClienteCtrl,
+                            height: 120,
+                            backgroundColor: Colors.white,
                           ),
                         ),
-                      ],
+                      ),
                     ),
-                  ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: TextButton.icon(
+                        onPressed: () => _sigClienteCtrl.clear(),
+                        icon: const Icon(Icons.clear, size: 16),
+                        label: const Text('Limpiar firma', style: TextStyle(fontSize: 12)),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
           ],
         ),

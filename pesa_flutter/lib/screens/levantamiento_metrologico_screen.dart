@@ -16,6 +16,8 @@ import '../services/api_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
 import '../services/sync_service.dart';
+import '../theme/foldable_layout.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/signature_shield.dart';
 
 class LevantamientoMetrologicoScreen extends StatefulWidget {
@@ -269,14 +271,24 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
     final folio = (widget.orden['folio_os'] ?? 'LV-00-000').toString();
 
     return Scaffold(
+      backgroundColor: PesaColors.canvas,
       appBar: AppBar(
-        backgroundColor: _dark,
-        foregroundColor: Colors.white,
-        title: Text('Levantamiento Metrológico ($folio)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+        backgroundColor: PesaColors.surface,
+        foregroundColor: PesaColors.textPrimary,
+        elevation: 0,
+        bottom: const PreferredSize(
+          preferredSize: Size.fromHeight(1),
+          child: Divider(height: 1, color: PesaColors.border),
+        ),
+        title: Text('Levantamiento Metrológico ($folio)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: PesaColors.textPrimary)),
       ),
       bottomNavigationBar: SafeArea(
-        child: Padding(
+        child: Container(
           padding: const EdgeInsets.all(12),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            border: Border(top: BorderSide(color: PesaColors.border)),
+          ),
           child: ElevatedButton.icon(
             style: ElevatedButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white, minimumSize: const Size.fromHeight(48)),
             onPressed: _saving ? null : _finalizarLV,
@@ -285,31 +297,41 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
           ),
         ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          TextFormField(controller: _pesoTotalCtrl, decoration: const InputDecoration(labelText: 'Masa Patrón Total Requerida', border: OutlineInputBorder())),
-          const SizedBox(height: 10),
-          TextFormField(controller: _clasePesasCtrl, decoration: const InputDecoration(labelText: 'Clase de Exactitud de Pesas (M1 / F1)', border: OutlineInputBorder())),
-          const SizedBox(height: 10),
-          TextFormField(controller: _maniobraCtrl, decoration: const InputDecoration(labelText: 'Tipo de Transporte y Maniobra (Camión Grúa / Montacargas)', border: OutlineInputBorder())),
-          const SizedBox(height: 10),
-          TextFormField(controller: _accesibilidadCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Accesibilidad a Báscula y Permisos de Seguridad', border: OutlineInputBorder())),
-          const SizedBox(height: 10),
-          TextFormField(controller: _inventarioBasculasCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Inventario Preliminar de Básculas a Calibrar', border: OutlineInputBorder())),
-          const SizedBox(height: 10),
-          TextFormField(controller: _observacionesCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Observaciones Metrológicas del Sitio', border: OutlineInputBorder())),
-          const SizedBox(height: 14),
-          const Text('FIRMA DE CONFORMIDAD', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark)),
-          const SizedBox(height: 6),
-          TextFormField(controller: _nombreClienteCtrl, onChanged: (_) { if (_errNombreRecibe) setState(() => _errNombreRecibe = false); }, decoration: InputDecoration(labelText: 'Nombre del Responsable en Planta *', errorText: _errNombreRecibe ? kMsgNombreRecibeObligatorio : null, border: const OutlineInputBorder())),
-          const SizedBox(height: 8),
-          Container(
-            height: 160,
-            decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade400), borderRadius: BorderRadius.circular(8)),
-            child: SignatureGestureShield(child: Signature(controller: _ctrlFirmaCli, backgroundColor: Colors.white)),
-          ),
-        ],
+      body: SigningScrollLock(
+        builder: (ctx, physics, _) => ListView(
+          physics: physics,
+          padding: EdgeInsets.all(foldableHorizontalPadding(ctx)),
+          children: [
+            FoldableFormGrid(
+              unfoldedColumns: 2,
+              spacing: 12,
+              runSpacing: 12,
+              children: [
+                TextFormField(controller: _pesoTotalCtrl, decoration: const InputDecoration(labelText: 'Masa Patrón Total Requerida', border: OutlineInputBorder())),
+                TextFormField(controller: _clasePesasCtrl, decoration: const InputDecoration(labelText: 'Clase de Exactitud de Pesas (M1 / F1)', border: OutlineInputBorder())),
+                TextFormField(controller: _maniobraCtrl, decoration: const InputDecoration(labelText: 'Tipo de Transporte y Maniobra (Camión Grúa / Montacargas)', border: OutlineInputBorder())),
+                TextFormField(controller: _accesibilidadCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Accesibilidad a Báscula y Permisos de Seguridad', border: OutlineInputBorder())),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextFormField(controller: _inventarioBasculasCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Inventario Preliminar de Básculas a Calibrar', border: OutlineInputBorder())),
+            const SizedBox(height: 12),
+            TextFormField(controller: _observacionesCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Observaciones Metrológicas del Sitio', border: OutlineInputBorder())),
+            const SizedBox(height: 16),
+            const Text('FIRMA DE CONFORMIDAD', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: PesaColors.textPrimary)),
+            const SizedBox(height: 8),
+            TextFormField(controller: _nombreClienteCtrl, onChanged: (_) { if (_errNombreRecibe) setState(() => _errNombreRecibe = false); }, decoration: InputDecoration(labelText: 'Nombre del Responsable en Planta *', errorText: _errNombreRecibe ? kMsgNombreRecibeObligatorio : null, border: const OutlineInputBorder())),
+            const SizedBox(height: 10),
+            Container(
+              height: 165,
+              decoration: BoxDecoration(color: Colors.white, border: Border.all(color: PesaColors.borderStrong), borderRadius: BorderRadius.circular(8)),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: SignatureGestureShield(child: Signature(controller: _ctrlFirmaCli, backgroundColor: Colors.white)),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

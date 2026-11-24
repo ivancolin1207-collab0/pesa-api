@@ -18,6 +18,7 @@ import '../services/sync_service.dart';
 import '../services/pdf_service.dart';
 import '../services/auth_service.dart';
 import '../services/firma_tecnico_service.dart';
+import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/pesa_components.dart';
 import '../widgets/signature_shield.dart';
@@ -162,6 +163,8 @@ class _FirmaScreenState extends State<FirmaScreen>
   @override
   Widget build(BuildContext context) {
     final folio = widget.capturaData['folio_os'] as String? ?? 'OS';
+    final bool cover = isCoverScreen(context);
+
     return Scaffold(
       backgroundColor: PesaColors.canvas,
       appBar: AppBar(
@@ -180,55 +183,67 @@ class _FirmaScreenState extends State<FirmaScreen>
               ),
           ],
         ),
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(50),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: PesaColors.surface,
-              border: Border(
-                top: BorderSide(color: PesaColors.divider),
-                bottom: BorderSide(color: PesaColors.border),
+        bottom: cover
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(50),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: PesaColors.surface,
+                    border: Border(
+                      top: BorderSide(color: PesaColors.divider),
+                      bottom: BorderSide(color: PesaColors.border),
+                    ),
+                  ),
+                  child: TabBar(
+                    controller: _tabCtrl,
+                    indicatorColor: _red,
+                    indicatorWeight: 2.5,
+                    labelColor: _red,
+                    unselectedLabelColor: PesaColors.textSecondary,
+                    labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+                    tabs: const [
+                      Tab(
+                        text: 'Firma Técnico',
+                        icon: Icon(Icons.engineering_outlined, size: 18),
+                      ),
+                      Tab(
+                        text: 'Firma Cliente',
+                        icon: Icon(Icons.person_outline, size: 18),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            : const PreferredSize(
+                preferredSize: Size.fromHeight(1),
+                child: Divider(height: 1, color: PesaColors.border),
               ),
-            ),
-            child: TabBar(
-              controller: _tabCtrl,
-              indicatorColor: _red,
-              indicatorWeight: 2.5,
-              labelColor: _red,
-              unselectedLabelColor: PesaColors.textSecondary,
-              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-              tabs: const [
-                Tab(
-                  text: 'Firma Técnico',
-                  icon: Icon(Icons.engineering_outlined, size: 18),
-                ),
-                Tab(
-                  text: 'Firma Cliente',
-                  icon: Icon(Icons.person_outline, size: 18),
-                ),
-              ],
-            ),
-          ),
-        ),
       ),
       body: SafeArea(
         top: false,
         bottom: true,
         child: Column(
           children: [
-            // Resumen limpio de dictamen
             _buildResumenBar(),
             Expanded(
               child: Form(
                 key: _formKey,
-                child: TabBarView(
-                  controller: _tabCtrl,
-                  physics: const NeverScrollableScrollPhysics(),
-                  children: [
-                    _buildTabTecnico(),
-                    _buildTabCliente(),
-                  ],
-                ),
+                child: cover
+                    ? TabBarView(
+                        controller: _tabCtrl,
+                        physics: const NeverScrollableScrollPhysics(),
+                        children: [
+                          _buildTabTecnico(),
+                          _buildTabCliente(),
+                        ],
+                      )
+                    : FoldableTwoPane(
+                        startFraction: 0.48,
+                        minStartWidth: 280,
+                        maxStartWidth: 640,
+                        startPane: _buildTabTecnico(),
+                        endPane: _buildTabCliente(),
+                      ),
               ),
             ),
             _buildActionBar(),
@@ -384,40 +399,37 @@ class _FirmaScreenState extends State<FirmaScreen>
           ]),
           const SizedBox(height: 12),
 
-          // Campos de nombre y puesto
-          Row(children: [
-            Expanded(
-              flex: 3,
-              child: TextFormField(
-                controller: _nombreIngCtrl,
-                textCapitalization: TextCapitalization.words,
-                autovalidateMode: AutovalidateMode.onUserInteraction,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre de quien recibe *',
-                  hintText: 'Ing. Juan Pérez',
-                  prefixIcon: Icon(Icons.badge_outlined),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-                validator: validarNombreRecibe,
+          // Campos de nombre y puesto (apilados en cover < 600dp, 2 cols en desplegado)
+          FoldableTwoColumn(
+            firstFlex: 3,
+            secondFlex: 2,
+            horizontalGap: 10,
+            verticalGap: 10,
+            first: TextFormField(
+              controller: _nombreIngCtrl,
+              textCapitalization: TextCapitalization.words,
+              autovalidateMode: AutovalidateMode.onUserInteraction,
+              decoration: const InputDecoration(
+                labelText: 'Nombre de quien recibe *',
+                hintText: 'Ing. Juan Pérez',
+                prefixIcon: Icon(Icons.badge_outlined),
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+              validator: validarNombreRecibe,
+            ),
+            second: TextFormField(
+              controller: _puestoIngCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(
+                labelText: 'Puesto / Cargo',
+                hintText: 'Jefe de Produccion',
+                prefixIcon: Icon(Icons.work_outline),
+                border: OutlineInputBorder(),
+                isDense: true,
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: TextFormField(
-                controller: _puestoIngCtrl,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Puesto / Cargo',
-                  hintText: 'Jefe de Produccion',
-                  prefixIcon: Icon(Icons.work_outline),
-                  border: OutlineInputBorder(),
-                  isDense: true,
-                ),
-              ),
-            ),
-          ]),
+          ),
           // Chip de sugerencia de sesión de lote (si otra orden del mismo lote ya registró responsable)
           Builder(
             builder: (context) {
@@ -654,15 +666,9 @@ class _FirmaScreenState extends State<FirmaScreen>
       animation: ctrl,
       builder: (_, __) {
         final ok = isPrecargada || ctrl.isNotEmpty;
-        return Chip(
-          avatar: Icon(
-            ok ? Icons.check_circle : Icons.radio_button_unchecked,
-            size: 16,
-            color: ok ? Colors.green : Colors.grey,
-          ),
-          label: Text(label, style: const TextStyle(fontSize: 12)),
-          backgroundColor:
-              ok ? Colors.green.shade50 : Colors.grey.shade100,
+        return PesaStatusBadge(
+          label: '$label: ${ok ? "Lista" : "Pendiente"}',
+          dotColor: ok ? PesaColors.dotGreen : PesaColors.dotAmber,
         );
       },
     );

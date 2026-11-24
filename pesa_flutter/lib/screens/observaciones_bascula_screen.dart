@@ -28,6 +28,7 @@ import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
+import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/nombre_recibe.dart';
 import '../widgets/pesa_components.dart';
@@ -1269,49 +1270,57 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
             ),
           ],
         ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(14, 12, 14, 32),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildControlHeaderCard(folio, fechaHoyFmt),
-            const SizedBox(height: 12),
-            _buildSeccion1Card(),
-            const SizedBox(height: 12),
-            _buildSeccion2Card(),
-            const SizedBox(height: 12),
-            _buildSeccion3Card(),
-            const SizedBox(height: 12),
-            _buildSeccion4Card(),
-            const SizedBox(height: 12),
-            _buildSeccion5Card(),
-            const SizedBox(height: 20),
-            SizedBox(
-              height: 52,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _pesaRed,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 3,
-                ),
-                onPressed: _guardando ? null : _finalizar,
-                icon: _guardando
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                      )
-                    : const Icon(Icons.verified_rounded, size: 22),
-                label: Text(
-                  _guardando
-                      ? 'GENERANDO PDF Y SINCRONIZANDO...'
-                      : 'FINALIZAR Y GENERAR FORMATO ($folio)',
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.4),
+      body: SigningScrollLock(
+        builder: (ctx, physics, _) => SingleChildScrollView(
+          physics: physics,
+          padding: EdgeInsets.fromLTRB(
+            foldableHorizontalPadding(ctx),
+            12,
+            foldableHorizontalPadding(ctx),
+            32,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildControlHeaderCard(folio, fechaHoyFmt),
+              const SizedBox(height: 12),
+              _buildSeccion1Card(),
+              const SizedBox(height: 12),
+              _buildSeccion2Card(),
+              const SizedBox(height: 12),
+              _buildSeccion3Card(),
+              const SizedBox(height: 12),
+              _buildSeccion4Card(),
+              const SizedBox(height: 12),
+              _buildSeccion5Card(),
+              const SizedBox(height: 20),
+              SizedBox(
+                height: 52,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _pesaRed,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 0,
+                  ),
+                  onPressed: _guardando ? null : _finalizar,
+                  icon: _guardando
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                        )
+                      : const Icon(Icons.verified_rounded, size: 22),
+                  label: Text(
+                    _guardando
+                        ? 'GENERANDO PDF Y SINCRONIZANDO...'
+                        : 'FINALIZAR Y GENERAR FORMATO ($folio)',
+                    style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, letterSpacing: 0.3),
+                  ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
       ),
@@ -1430,142 +1439,88 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
         children: [
           _buildSectionTitleBanner('SECCIÓN 1. Datos del Cliente y del Equipo'),
           Padding(
-            padding: const EdgeInsets.all(12),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final bool isWide = constraints.maxWidth >= 560;
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FoldableFormGrid(
+                  unfoldedColumns: 2,
+                  spacing: 12,
+                  runSpacing: 10,
                   children: [
-                    if (isWide) ...[
-                      Row(
-                        children: [
-                          Expanded(child: _textInput('Cliente / Empresa', _clienteCtrl)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _textInput('Planta / Ubicación', _plantaCtrl)),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(child: _autocompleteInput('ID Interno / Tag', _idTagCtrl, 'id_indicador')),
-                          const SizedBox(width: 10),
-                          Expanded(child: _autocompleteInput('Marca', _marcaCtrl, 'marca')),
-                          const SizedBox(width: 10),
-                          Expanded(child: _autocompleteInput('Modelo', _modeloCtrl, 'modelo')),
-                          const SizedBox(width: 10),
-                          Expanded(child: _autocompleteInput('Número de Serie', _serieCtrl, 'serie')),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(child: _textInput('Capacidad Máx. (Max)', _capMaxCtrl)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _textInput('División Mínima (d / e)', _divMinCtrl)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _textInput('Número CCA (Opcional)', _numeroCcaCtrl)),
-                          const SizedBox(width: 10),
-                          Expanded(child: _textInput('Número DVE (Opcional)', _numeroDveCtrl)),
-                        ],
-                      ),
-                    ] else ...[
-                      _textInput('Cliente / Empresa', _clienteCtrl),
-                      const SizedBox(height: 10),
-                      _textInput('Planta / Ubicación', _plantaCtrl),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(child: _autocompleteInput('ID Interno / Tag', _idTagCtrl, 'id_indicador')),
-                          const SizedBox(width: 8),
-                          Expanded(child: _autocompleteInput('Marca', _marcaCtrl, 'marca')),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(child: _autocompleteInput('Modelo', _modeloCtrl, 'modelo')),
-                          const SizedBox(width: 8),
-                          Expanded(child: _autocompleteInput('Número de Serie', _serieCtrl, 'serie')),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(child: _textInput('Capacidad Máx. (Max)', _capMaxCtrl)),
-                          const SizedBox(width: 8),
-                          Expanded(child: _textInput('División Mínima (d / e)', _divMinCtrl)),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(child: _textInput('Número CCA (Opcional)', _numeroCcaCtrl)),
-                          const SizedBox(width: 8),
-                          Expanded(child: _textInput('Número DVE (Opcional)', _numeroDveCtrl)),
-                        ],
-                      ),
-                    ],
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Tipo de Instrumento:',
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                    ),
-                    const SizedBox(height: 6),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 6,
-                      children: tipos.map((t) {
-                        final sel = _tipoInstrumento == t;
-                        return ChoiceChip(
-                          label: Text(t == 'Otro' ? 'Otro (especifique)' : t),
-                          selected: sel,
-                          selectedColor: const Color(0xFFFCE8E9),
-                          labelStyle: TextStyle(
-                            color: sel ? _pesaRed : Colors.black87,
-                            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-                          ),
-                          onSelected: (_) {
-                            setState(() => _tipoInstrumento = t);
-                            _programarAutoGuardado();
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    if (_tipoInstrumento == 'Otro') ...[
-                      const SizedBox(height: 8),
-                      _textInput('Especifique', _tipoInstOtroCtrl),
-                    ],
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 42,
-                      child: OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF1D4ED8),
-                          backgroundColor: const Color(0xFFEFF6FF),
-                          side: const BorderSide(color: Color(0xFF93C5FD), width: 1.4),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: _guardandoParcial ? null : _guardarEquipoSinFinalizar,
-                        icon: _guardandoParcial
-                            ? const SizedBox(
-                                width: 15,
-                                height: 15,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1D4ED8)),
-                              )
-                            : const Icon(Icons.cloud_upload_outlined, size: 18),
-                        label: Text(
-                          _guardandoParcial
-                              ? 'Guardando y sincronizando equipo...'
-                              : 'Guardar Datos de Equipo (Sin Finalizar)',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                    ),
+                    _textInput('Cliente / Empresa', _clienteCtrl),
+                    _textInput('Planta / Ubicación', _plantaCtrl),
+                    _autocompleteInput('ID Interno / Tag', _idTagCtrl, 'id_indicador'),
+                    _autocompleteInput('Marca', _marcaCtrl, 'marca'),
+                    _autocompleteInput('Modelo', _modeloCtrl, 'modelo'),
+                    _autocompleteInput('Número de Serie', _serieCtrl, 'serie'),
+                    _textInput('Capacidad Máx. (Max)', _capMaxCtrl),
+                    _textInput('División Mínima (d / e)', _divMinCtrl),
+                    _textInput('Número CCA (Opcional)', _numeroCcaCtrl),
+                    _textInput('Número DVE (Opcional)', _numeroDveCtrl),
                   ],
-                );
-              },
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Tipo de Instrumento:',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: tipos.map((t) {
+                    final sel = _tipoInstrumento == t;
+                    return ChoiceChip(
+                      label: Text(t == 'Otro' ? 'Otro (especifique)' : t),
+                      selected: sel,
+                      showCheckmark: false,
+                      selectedColor: _pesaRed,
+                      backgroundColor: Colors.white,
+                      side: BorderSide(color: sel ? _pesaRed : PesaColors.borderStrong),
+                      labelStyle: TextStyle(
+                        color: sel ? Colors.white : PesaColors.textPrimary,
+                        fontWeight: sel ? FontWeight.bold : FontWeight.w500,
+                      ),
+                      onSelected: (_) {
+                        setState(() => _tipoInstrumento = t);
+                        _programarAutoGuardado();
+                      },
+                    );
+                  }).toList(),
+                ),
+                if (_tipoInstrumento == 'Otro') ...[
+                  const SizedBox(height: 8),
+                  _textInput('Especifique', _tipoInstOtroCtrl),
+                ],
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: PesaColors.textPrimary,
+                      backgroundColor: PesaColors.surface,
+                      side: const BorderSide(color: PesaColors.borderStrong, width: 1.2),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: _guardandoParcial ? null : _guardarEquipoSinFinalizar,
+                    icon: _guardandoParcial
+                        ? const SizedBox(
+                            width: 15,
+                            height: 15,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: _pesaRed),
+                          )
+                        : const Icon(Icons.cloud_upload_outlined, size: 18),
+                    label: Text(
+                      _guardandoParcial
+                          ? 'Guardando y sincronizando equipo...'
+                          : 'Guardar Datos de Equipo (Sin Finalizar)',
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -1635,69 +1590,65 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     final label = _checklistLabels[num] ?? '';
     final cur = _chkEstado[num] ?? 'B';
     const opts = ['B', 'R', 'M', 'N/A'];
+    final cover = isCoverScreen(context);
+
+    final obsField = TextField(
+      controller: _chkObsCtrls[num],
+      decoration: const InputDecoration(
+        labelText: 'Observaciones',
+        isDense: true,
+        contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        border: OutlineInputBorder(),
+      ),
+      style: const TextStyle(fontSize: 12.5),
+    );
+
+    final segmented = PesaSegmentedSelector<String>(
+      options: opts,
+      selected: cur,
+      labelBuilder: (op) => op,
+      onChanged: (op) {
+        setState(() => _chkEstado[num] = op);
+        _programarAutoGuardado();
+      },
+    );
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: num.isEven ? const Color(0xFFF9FAFB) : Colors.white,
         border: const Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.8)),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$num. $label',
-            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _pesaDark),
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              Wrap(
-                spacing: 6,
-                children: opts.map((op) {
-                  final active = cur == op;
-                  return InkWell(
-                    onTap: () {
-                      setState(() => _chkEstado[num] = op);
-                      _programarAutoGuardado();
-                    },
-                    borderRadius: BorderRadius.circular(6),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: active ? _pesaRed : Colors.white,
-                        borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: active ? _pesaRed : Colors.grey.shade400),
-                      ),
-                      child: Text(
-                        '[ $op ]',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          color: active ? Colors.white : Colors.black87,
-                        ),
-                      ),
-                    ),
-                  );
-                }).toList(),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  controller: _chkObsCtrls[num],
-                  decoration: const InputDecoration(
-                    labelText: 'Observaciones',
-                    isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    border: OutlineInputBorder(),
-                  ),
-                  style: const TextStyle(fontSize: 12.5),
+      child: cover
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  '$num. $label',
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _pesaDark),
                 ),
-              ),
-            ],
-          ),
-        ],
-      ),
+                const SizedBox(height: 8),
+                segmented,
+                const SizedBox(height: 8),
+                obsField,
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  flex: 4,
+                  child: Text(
+                    '$num. $label',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _pesaDark),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                SizedBox(width: 224, child: segmented),
+                const SizedBox(width: 12),
+                Expanded(flex: 3, child: obsField),
+              ],
+            ),
     );
   }
 
@@ -1802,37 +1753,25 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     required ValueChanged<String> onChangedEstado,
     required Widget extraField,
   }) {
+    final selector = PesaSegmentedSelector<String>(
+      options: const ['Cumple', 'No cumple'],
+      selected: estado,
+      labelBuilder: (s) => s,
+      onChanged: onChangedEstado,
+    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('• $label:', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-        const SizedBox(height: 6),
-        Row(
-          children: [
-            ChoiceChip(
-              label: const Text('Cumple'),
-              selected: estado == 'Cumple',
-              selectedColor: Colors.green.shade100,
-              labelStyle: TextStyle(
-                color: estado == 'Cumple' ? Colors.green.shade900 : Colors.black87,
-                fontWeight: estado == 'Cumple' ? FontWeight.bold : FontWeight.normal,
-              ),
-              onSelected: (_) => onChangedEstado('Cumple'),
-            ),
-            const SizedBox(width: 8),
-            ChoiceChip(
-              label: const Text('No cumple'),
-              selected: estado == 'No cumple',
-              selectedColor: const Color(0xFFFCE8E9),
-              labelStyle: TextStyle(
-                color: estado == 'No cumple' ? _pesaRed : Colors.black87,
-                fontWeight: estado == 'No cumple' ? FontWeight.bold : FontWeight.normal,
-              ),
-              onSelected: (_) => onChangedEstado('No cumple'),
-            ),
-            const SizedBox(width: 14),
-            Expanded(child: extraField),
-          ],
+        Text('• $label', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        const SizedBox(height: 8),
+        FoldableTwoColumn(
+          firstFlex: 4,
+          secondFlex: 6,
+          horizontalGap: 12,
+          verticalGap: 8,
+          rowCrossAxisAlignment: CrossAxisAlignment.center,
+          first: selector,
+          second: extraField,
         ),
       ],
     );
@@ -2134,27 +2073,11 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
           _buildSectionTitleBanner('SECCIÓN 5. Firmas de Conformidad'),
           Padding(
             padding: const EdgeInsets.all(12),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                if (constraints.maxWidth >= 560) {
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: buildTecBox()),
-                      const SizedBox(width: 12),
-                      Expanded(child: buildCliBox()),
-                    ],
-                  );
-                }
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    buildTecBox(),
-                    const SizedBox(height: 12),
-                    buildCliBox(),
-                  ],
-                );
-              },
+            child: FoldableTwoColumn(
+              horizontalGap: 14,
+              verticalGap: 12,
+              first: buildTecBox(),
+              second: buildCliBox(),
             ),
           ),
         ],
