@@ -35,6 +35,9 @@ jobs:
 
       - name: Install dependencies and build release APK
         run: |
+          if [ -f "$FLUTTER_ROOT/packages/flutter_tools/gradle/build.gradle.kts" ]; then
+            sed -i 's/getOrElse("9\.[0-9]\+\.[0-9]\+")/getOrElse("8.11.1")/g' "$FLUTTER_ROOT/packages/flutter_tools/gradle/build.gradle.kts"
+          fi
           flutter pub get
           flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation
           cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.1+141.apk
