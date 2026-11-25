@@ -206,19 +206,19 @@ class _LoginScreenState extends State<LoginScreen> {
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color: _loginedOffline
-                                ? const Color(0xFFEFF6FF)
-                                : const Color(0xFFFEF2F2),
+                                ? const Color(0xFFF8FAFC)
+                                : const Color(0xFFFFF5F6),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                                 color: _loginedOffline
-                                    ? const Color(0xFFBFDBFE)
-                                    : const Color(0xFFFCA5A5)),
+                                    ? const Color(0xFFCBD5E1)
+                                    : const Color(0xFFC8102E)),
                           ),
                           child: Text(_error!,
                               style: TextStyle(
                                   color: _loginedOffline
-                                      ? const Color(0xFF1E40AF)
-                                      : const Color(0xFF991B1B),
+                                      ? const Color(0xFF111827)
+                                      : const Color(0xFFC8102E),
                                   fontSize: 12.5)),
                         ),
                       ],

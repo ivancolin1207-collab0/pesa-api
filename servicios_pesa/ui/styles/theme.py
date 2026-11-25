@@ -118,23 +118,35 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 }
 
 /* ─── Campos de texto ────────────────────────────────────────────────────── */
-QLineEdit, QTextEdit, QPlainTextEdit {
+QLineEdit, QSpinBox, QDoubleSpinBox {
     background-color: #FFFFFF;
-    color: #0F172A;
-    border: 1px solid #E2E8F0;
-    border-radius: 7px;
-    padding: 7px 12px;
-    selection-background-color: #FFE4E6;
-    selection-color: #0F172A;
+    color: #111827;
+    border: 1px solid #D1D5DB;
+    border-radius: 6px;
+    padding: 0px 12px;
+    min-height: 36px;
+    max-height: 38px;
+    selection-background-color: #E5E7EB;
+    selection-color: #111827;
     font-size: 13px;
 }
-QLineEdit:hover, QTextEdit:hover, QPlainTextEdit:hover {
-    border-color: #CBD5E1;
+QTextEdit, QPlainTextEdit {
+    background-color: #FFFFFF;
+    color: #111827;
+    border: 1px solid #D1D5DB;
+    border-radius: 6px;
+    padding: 8px 12px;
+    min-height: 76px;
+    selection-background-color: #E5E7EB;
+    selection-color: #111827;
+    font-size: 13px;
 }
-QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {
+QLineEdit:hover, QTextEdit:hover, QPlainTextEdit:hover, QSpinBox:hover, QDoubleSpinBox:hover {
+    border-color: #9CA3AF;
+}
+QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus {
     border: 1.5px solid #C8102E;
     background-color: #FFFFFF;
-    padding: 6px 11px;
 }
 QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled {
     background-color: #F8FAFC;
@@ -142,16 +154,6 @@ QLineEdit:disabled, QTextEdit:disabled, QPlainTextEdit:disabled {
     border-color: #E2E8F0;
 }
 QLineEdit::placeholder, QTextEdit::placeholder { color: #94A3B8; }
-
-/* ─── SpinBox ─────────────────────────────────────────────────────────────── */
-QSpinBox, QDoubleSpinBox {
-    background-color: #FFFFFF;
-    color: #0F172A;
-    border: 1px solid #CBD5E1;
-    border-radius: 6px;
-    padding: 6px 10px;
-}
-QSpinBox:focus, QDoubleSpinBox:focus { border: 1.5px solid #C8102E; }
 QSpinBox::up-button, QDoubleSpinBox::up-button,
 QSpinBox::down-button, QDoubleSpinBox::down-button {
     background: transparent; border: none; width: 18px; border-radius: 3px;
@@ -165,11 +167,12 @@ QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
 QComboBox {
     background-color: #FFFFFF;
     border: 1px solid #D1D5DB;
-    border-radius: 8px;
-    padding: 6px 12px;
+    border-radius: 6px;
+    padding: 0px 28px 0px 12px;
     color: #111827;
     font-size: 13px;
-    min-height: 32px;
+    min-height: 36px;
+    max-height: 38px;
 }
 QComboBox:hover {
     border-color: #9CA3AF;
@@ -181,7 +184,14 @@ QComboBox::drop-down {
     border: none;
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width: 25px;
+    width: 26px;
+    background: transparent;
+}
+QComboBox::down-arrow {
+    image: url(assets/images/chevron_down.png);
+    width: 12px;
+    height: 12px;
+    border: none;
 }
 QComboBox QAbstractItemView {
     background-color: #FFFFFF;
@@ -211,16 +221,22 @@ QComboBox QLineEdit {
     color: #111827;
     background: transparent;
     border: none;
+    padding: 0px 2px;
+    margin: 0px;
+    min-height: 0px;
+    max-height: 36px;
     font-size: 13px;
 }
 
 /* ─── DateEdit ────────────────────────────────────────────────────────────── */
 QDateEdit {
     background-color: #FFFFFF;
-    color: #0F172A;
-    border: 1px solid #CBD5E1;
+    color: #111827;
+    border: 1px solid #D1D5DB;
     border-radius: 6px;
-    padding: 7px 12px;
+    padding: 0px 12px;
+    min-height: 36px;
+    max-height: 38px;
 }
 QDateEdit:focus { border: 1.5px solid #C8102E; }
 QDateEdit::drop-down {

@@ -182,18 +182,20 @@ class ConfiguracionWidget(QWidget):
         )
         row.addWidget(self._lbl_conn_status, stretch=1)
 
-        btn_reconectar = QPushButton("↺  Reconectar")
+        btn_reconectar = QPushButton("Reconectar")
         btn_reconectar.setFixedHeight(32)
-        btn_reconectar.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {_BLUE};
-                border: 1px solid rgba(0,122,255,0.3);
+        btn_reconectar.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #111827;
+                border: 1px solid #CBD5E1;
                 border-radius: 7px;
                 font-size: 12px;
+                font-weight: 600;
                 padding: 0 14px;
-            }}
-            QPushButton:hover {{ background: rgba(0,122,255,0.07); }}
+                min-height: 30px;
+            }
+            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
         """)
         btn_reconectar.clicked.connect(self._check_connection)
         row.addWidget(btn_reconectar)
@@ -258,8 +260,8 @@ class ConfiguracionWidget(QWidget):
         card.setStyleSheet("""
             QFrame {
                 background: #FFFFFF;
-                border: 1.5px solid rgba(230, 57, 70, 0.35);
-                border-radius: 14px;
+                border: 1.5px solid #C8102E;
+                border-radius: 12px;
             }
         """)
         lay = QVBoxLayout(card)
@@ -268,10 +270,10 @@ class ConfiguracionWidget(QWidget):
 
         # Encabezado
         header_row = QHBoxLayout()
-        badge = QLabel("⚠️  ZONA DE ADMINISTRADOR")
-        badge.setStyleSheet(f"""
+        badge = QLabel("ZONA DE ADMINISTRADOR")
+        badge.setStyleSheet("""
             font-size: 11px; font-weight: 700;
-            color: {_RED}; background: rgba(230,57,70,0.08);
+            color: #C8102E; background: #FFF5F6; border: 1px solid #C8102E;
             border-radius: 6px; padding: 4px 10px;
         """)
         header_row.addWidget(badge)
@@ -387,35 +389,35 @@ class ConfiguracionWidget(QWidget):
         col_desc.addWidget(lbl_action_sub)
         action_row.addLayout(col_desc, stretch=1)
 
-        self.btn_reset = QPushButton("🗑️  Reiniciar Folios y Pruebas")
+        self.btn_reset = QPushButton("Reiniciar Folios y Pruebas")
         self.btn_reset.setFixedHeight(40)
         self.btn_reset.setFixedWidth(230)
         self.btn_reset.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_reset.setStyleSheet(f"""
-            QPushButton {{
-                background: transparent;
-                color: {_RED};
-                border: 1.5px solid rgba(230, 57, 70, 0.5);
-                border-radius: 9px;
+        self.btn_reset.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #C8102E;
+                border: 1.5px solid #C8102E;
+                border-radius: 8px;
                 font-size: 13px;
                 font-weight: 700;
                 padding: 0 16px;
-            }}
-            QPushButton:hover {{
-                background: rgba(230, 57, 70, 0.07);
-                border-color: {_RED};
-            }}
-            QPushButton:pressed {{
-                background: rgba(230, 57, 70, 0.14);
-            }}
-            QPushButton:disabled {{
-                color: #C7C7CC;
-                border-color: #E5E5EA;
-            }}
+            }
+            QPushButton:hover {
+                background: #FFF5F6;
+                border-color: #A60D26;
+            }
+            QPushButton:pressed {
+                background: #F3F4F6;
+            }
+            QPushButton:disabled {
+                color: #9CA3AF;
+                border-color: #E5E7EB;
+                background: #F8FAFC;
+            }
         """)
         self.btn_reset.clicked.connect(self._on_reset_clicked)
         action_row.addWidget(self.btn_reset)
-        lay.addLayout(action_row)
 
         # Barra de progreso del reset
         self._reset_progress = QProgressBar()
@@ -423,8 +425,8 @@ class ConfiguracionWidget(QWidget):
         self._reset_progress.setFixedHeight(3)
         self._reset_progress.setVisible(False)
         self._reset_progress.setStyleSheet("""
-            QProgressBar { border: none; background: #F5F5F7; border-radius: 2px; }
-            QProgressBar::chunk { background: #E63946; border-radius: 2px; }
+            QProgressBar { border: none; background: #E5E7EB; border-radius: 2px; }
+            QProgressBar::chunk { background: #C8102E; border-radius: 2px; }
         """)
         lay.addWidget(self._reset_progress)
 

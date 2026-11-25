@@ -193,24 +193,24 @@ class EquipoSearchWidget(QWidget):
                 font-size: 14px;
             }}
             QPushButton#btn_limpiar_equipo:hover {{
-                background: #FEE2E2;
+                background: #FFF5F6;
                 border-color: {_RED};
                 color: {_RED};
             }}
 
             /* Chip del equipo encontrado */
             QFrame#equipo_chip {{
-                background: #F0FDF4;
-                border: 1.5px solid #86EFAC;
+                background: #F8FAFC;
+                border: 1px solid #CBD5E1;
                 border-radius: 8px;
             }}
             QLabel#chip_icon {{
                 font-size: 16px;
-                color: #16A34A;
+                color: #111827;
             }}
             QLabel#chip_text {{
                 font-size: 11px;
-                color: #15803D;
+                color: #111827;
                 font-family: 'Segoe UI', Arial, sans-serif;
                 font-weight: 600;
             }}

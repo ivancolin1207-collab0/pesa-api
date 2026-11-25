@@ -1777,21 +1777,19 @@ class DashboardWidget(QWidget):
         "QPushButton:hover{background:#E5E5EA;}QPushButton:pressed{background:#D1D1D6;}"
     )
     _BTN_CAPTURAR_STYLE = (
-        "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-        "stop:0 #1A7F64,stop:1 #0E6E53);color:white;border:none;border-radius:4px;"
+        "QPushButton{background:#C8102E;color:#FFFFFF;border:1px solid #C8102E;border-radius:6px;"
         "font-size:8.5pt;font-weight:700;padding:0 10px;min-height:26px;}"
-        "QPushButton:hover{background:#145C48;}"
+        "QPushButton:hover{background:#A60D26;border-color:#A60D26;}"
     )
     _BTN_PDF_FINAL_STYLE = (
-        "QPushButton{background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-        "stop:0 #0A5C9E,stop:1 #0869B8);color:white;border:none;border-radius:4px;"
+        "QPushButton{background:#111827;color:#FFFFFF;border:1px solid #111827;border-radius:6px;"
         "font-size:8.5pt;font-weight:700;padding:0 10px;min-height:26px;}"
-        "QPushButton:hover{background:#0747A6;}"
+        "QPushButton:hover{background:#1F2937;border-color:#1F2937;}"
     )
     _BTN_DESCARGAR_STYLE = (
-        "QPushButton{background:#EBF5FF;color:#007AFF;border:1px solid #B9DBFF;"
-        "border-radius:4px;font-size:8.5pt;font-weight:700;padding:0 8px;min-height:26px;}"
-        "QPushButton:hover{background:#D0E8FF;}QPushButton:pressed{background:#B9DBFF;}"
+        "QPushButton{background:#FFFFFF;color:#111827;border:1px solid #CBD5E1;"
+        "border-radius:6px;font-size:8.5pt;font-weight:700;padding:0 8px;min-height:26px;}"
+        "QPushButton:hover{background:#F8FAFC;border-color:#9CA3AF;}QPushButton:pressed{background:#F3F4F6;}"
     )
 
     # -- Indices de columna de la QTableWidget (0-based) ----------------------
@@ -2487,6 +2485,25 @@ class DashboardWidget(QWidget):
         btn_ver_todas.clicked.connect(lambda: self._navigate_to("buscar_os"))
 
         self._show_all_rows = False
+        self._visible_limit = 60
+        self._btn_cargar_mas = QPushButton("Cargar más (+60)")
+        self._btn_cargar_mas.setVisible(False)
+        self._btn_cargar_mas.setFixedHeight(28)
+        self._btn_cargar_mas.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_cargar_mas.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #111827;
+                border: 1px solid #CBD5E1;
+                border-radius: 6px;
+                font-size: 9pt;
+                font-weight: 600;
+                padding: 0 12px;
+            }
+            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
+        """)
+        self._btn_cargar_mas.clicked.connect(self._on_cargar_mas_clicked)
+
         self._btn_mostrar_todos = QPushButton("Mostrar todos")
         self._btn_mostrar_todos.setVisible(False)
         self._btn_mostrar_todos.setFixedHeight(28)
@@ -2504,6 +2521,7 @@ class DashboardWidget(QWidget):
             QPushButton:hover { background: #F1F5F9; border-color: #CBD5E1; }
         """)
         self._btn_mostrar_todos.clicked.connect(self._on_mostrar_todos_clicked)
+        thead_lay.addWidget(self._btn_cargar_mas)
         thead_lay.addWidget(self._btn_mostrar_todos)
         thead_lay.addWidget(btn_ver_todas)
 
@@ -2665,8 +2683,14 @@ class DashboardWidget(QWidget):
     # =========================================================================
     # Filtros y datos de periodo
     # =========================================================================
+    def _on_cargar_mas_clicked(self) -> None:
+        self._visible_limit = int(getattr(self, "_visible_limit", 60) or 60) + 60
+        self._fill_table_rows(self._all_loaded_rows)
+
     def _on_mostrar_todos_clicked(self) -> None:
         self._show_all_rows = True
+        if hasattr(self, "_btn_cargar_mas"):
+            self._btn_cargar_mas.setVisible(False)
         if hasattr(self, "_btn_mostrar_todos"):
             self._btn_mostrar_todos.setVisible(False)
         self._fill_table_rows(self._all_loaded_rows)
@@ -2700,6 +2724,8 @@ class DashboardWidget(QWidget):
         # Invalidar caché: el usuario cambió filtros, necesita datos frescos
         self._cache_valid = False
         self._data_cache.clear()
+        self._show_all_rows = False
+        self._visible_limit = 60
         self._async_refresh(load_filters=False, force=True)
 
     def _on_search_changed(self, text: str = None) -> None:
@@ -2708,8 +2734,18 @@ class DashboardWidget(QWidget):
                 text = self._search_global.text()
             elif hasattr(self, "search_input"):
                 text = self.search_input.text()
-        text = (text or "").strip()
+        self._pending_search_text = (text or "").strip()
 
+        if not hasattr(self, "_search_debounce_timer") or self._search_debounce_timer is None:
+            self._search_debounce_timer = QTimer(self)
+            self._search_debounce_timer.setSingleShot(True)
+            self._search_debounce_timer.setInterval(250)
+            self._search_debounce_timer.timeout.connect(self._execute_debounced_search)
+
+        self._search_debounce_timer.start()
+
+    def _execute_debounced_search(self) -> None:
+        text = getattr(self, "_pending_search_text", "")
         # Aplicar filtro visual sobre las filas ya cargadas
         self._apply_search_filter()
 
@@ -2717,15 +2753,14 @@ class DashboardWidget(QWidget):
             return
 
         # ── Si no hay coincidencias en los datos ya cargados, relanzar la
-        # consulta SQL con ILIKE para superar el LIMIT 200 ─────────────────
-        # Ejemplo: OS-26-688 podría estar fuera del top-200 por fecha/consecutivo.
+        # consulta SQL con ILIKE para superar el caché local ─────────────────
         root = self._table.invisibleRootItem()
         any_visible = any(
             not root.child(i).isHidden()
             for i in range(root.childCount())
         )
         if not any_visible:
-            QTimer.singleShot(0, lambda t=text: self._search_refresh_from_db(t))
+            self._search_refresh_from_db(text)
 
     def _search_refresh_from_db(self, search_text: str) -> None:
         """Lanza una query SQL con ILIKE cuando el texto no se encontró en el
@@ -4158,14 +4193,19 @@ class DashboardWidget(QWidget):
                 hl.addWidget(c)
                 return w, c
 
-            # Limitar carga inicial de widgets pesados a 80 elementos de primer nivel (cuando no hay búsqueda activa)
+            # Limitar carga inicial de widgets pesados a 60 elementos de primer nivel (con botón "Cargar más")
             _q_active = hasattr(self, "_search_global") and bool(self._search_global.text().strip())
             _show_all = bool(getattr(self, "_show_all_rows", False)) or _q_active
-            _RENDER_CAP = 80
+            _RENDER_CAP = int(getattr(self, "_visible_limit", 60) or 60)
             _top_rendered = 0
             _total_top = len(all_groups) + len(singles)
+            _ocultos = max(0, _total_top - _RENDER_CAP) if not _show_all else 0
+            if hasattr(self, "_btn_cargar_mas"):
+                self._btn_cargar_mas.setVisible(_ocultos > 0)
+                if _ocultos > 0:
+                    _next_step = min(60, _ocultos)
+                    self._btn_cargar_mas.setText(f"Cargar más (+{_next_step})")
             if hasattr(self, "_btn_mostrar_todos"):
-                _ocultos = max(0, _total_top - _RENDER_CAP) if not _show_all else 0
                 self._btn_mostrar_todos.setVisible(_ocultos > 0)
                 if _ocultos > 0:
                     self._btn_mostrar_todos.setText(f"Mostrar todos ({_total_top})")
@@ -5427,21 +5467,23 @@ class DashboardWidget(QWidget):
             last_error = str(e_smtp)
 
         # 2. Respaldo HTTP hacia Render si el firewall local bloquea puertos SMTP
-        data_bytes = json.dumps({"correo": correo, "forzar": True}).encode("utf-8")
+        from services.http_client import http_request
         render_url = f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/enviar-email"
         try:
-            req = urllib.request.Request(
-                render_url, data=data_bytes, method="POST",
-                headers={"User-Agent": "PesaWindowsERP/1.0", "Content-Type": "application/json"}
+            status, _hdrs, _body = http_request(
+                "POST",
+                render_url,
+                json_body={"correo": correo, "forzar": True},
+                headers={"User-Agent": "PesaWindowsERP/1.0"},
+                timeout=15.0,
             )
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                if resp.status in (200, 201):
-                    self._actualizar_email_db_local_os(clean_folio, correo, True)
-                    return True, "Enviado correctamente por servidor"
+            if status in (200, 201):
+                self._actualizar_email_db_local_os(clean_folio, correo, True)
+                return True, "Enviado correctamente por servidor"
         except urllib.error.HTTPError as he:
             try:
-                err_body = he.read().decode("utf-8")
-                err_json = json.loads(err_body)
+                err_body = he.read().decode("utf-8") if he.fp else ""
+                err_json = json.loads(err_body) if err_body else {}
                 last_error += f" | Render: {err_json.get('detail', str(he))}"
             except Exception:
                 last_error += f" | Render HTTP {he.code}: {he.reason}"
@@ -5455,9 +5497,7 @@ class DashboardWidget(QWidget):
         Envía el lote consultando los registros completos de cada folio en BD y construyendo
         la Tabla HTML Institucional oficial vía SMTP directo; si la red bloquea SMTP, recurre a Render.
         """
-        import json
-        import urllib.request
-        import urllib.error
+        from services.http_client import http_request
 
         clean_lote = str(lote_id or "").strip()
         folios_clean = [str(f).strip() for f in (all_folios or []) if str(f).strip()]
@@ -5474,7 +5514,6 @@ class DashboardWidget(QWidget):
 
         # 2. Respaldo HTTP hacia Render
         payload = {"correo": correo, "forzar": True, "folios": folios_clean}
-        data_bytes = json.dumps(payload).encode("utf-8")
         urls_intentar = []
         if not clean_lote.startswith("RETRO-") and clean_lote != "None" and clean_lote:
             urls_intentar.append(f"https://pesa-api-za9i.onrender.com/api/v1/lotes/{clean_lote}/enviar-email")
@@ -5483,14 +5522,16 @@ class DashboardWidget(QWidget):
 
         for url in urls_intentar:
             try:
-                req = urllib.request.Request(
-                    url, data=data_bytes, method="POST",
-                    headers={"User-Agent": "PesaWindowsERP/1.0", "Content-Type": "application/json"}
+                status, _hdrs, _body = http_request(
+                    "POST",
+                    url,
+                    json_body=payload,
+                    headers={"User-Agent": "PesaWindowsERP/1.0"},
+                    timeout=20.0,
                 )
-                with urllib.request.urlopen(req, timeout=20) as resp:
-                    if resp.status in (200, 201):
-                        self._actualizar_email_db_local_lote(clean_lote, folios_clean, correo, True)
-                        return True, "Lote enviado correctamente por el servidor"
+                if status in (200, 201):
+                    self._actualizar_email_db_local_lote(clean_lote, folios_clean, correo, True)
+                    return True, "Lote enviado correctamente por el servidor"
             except Exception as e_render:
                 last_error += f" | Render ({url}): {e_render}"
 
@@ -6181,10 +6222,10 @@ class DashboardWidget(QWidget):
             except Exception as exc:
                 logger.warning("No se pudo obtener pdf_b64 de la BD para %s: %s", clean_folio, exc)
 
-        # Si aún no existe, intentar descarga directa desde Render vía HTTP
+        # Si aún no existe, intentar descarga directa desde Render vía HTTP (pool persistente)
         if not pdf_src or not _os.path.exists(pdf_src):
-            import urllib.request
             import tempfile
+            from services.http_client import http_request
             render_endpoints = [
                 f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/pdf",
                 f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/download-pdf",
@@ -6193,16 +6234,18 @@ class DashboardWidget(QWidget):
             ]
             for render_url in render_endpoints:
                 try:
-                    req = urllib.request.Request(render_url, headers={"User-Agent": "PesaDesktop/1.0", "Accept": "application/pdf"})
-                    with urllib.request.urlopen(req, timeout=12) as resp:
-                        if resp.status == 200:
-                            content = resp.read()
-                            if len(content) > 500:
-                                temp_pdf = _os.path.join(tempfile.gettempdir(), f"{clean_folio}.pdf")
-                                with open(temp_pdf, "wb") as f_out:
-                                    f_out.write(content)
-                                pdf_src = temp_pdf
-                                break
+                    status, _hdrs, content = http_request(
+                        "GET",
+                        render_url,
+                        headers={"User-Agent": "PesaDesktop/1.0", "Accept": "application/pdf"},
+                        timeout=12.0,
+                    )
+                    if status == 200 and len(content) > 500:
+                        temp_pdf = _os.path.join(tempfile.gettempdir(), f"{clean_folio}.pdf")
+                        with open(temp_pdf, "wb") as f_out:
+                            f_out.write(content)
+                        pdf_src = temp_pdf
+                        break
                 except Exception as exc_render:
                     logger.debug("No se pudo descargar PDF desde Render (%s) en _descargar_pdf_os para %s: %s", render_url, clean_folio, exc_render)
 
@@ -6828,15 +6871,13 @@ class DashboardWidget(QWidget):
             except Exception as exc_db:
                 logger.debug("No se pudo obtener pdf_b64 para %s: %s", clean_folio, exc_db)
 
-        # 3. HTTP GET desde Render API
+        # 3. HTTP GET desde Render API (pool persistente)
         try:
+            from services.http_client import http_request
             render_url = f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/pdf"
-            req = urllib.request.Request(render_url, headers={"User-Agent": "PesaDesktop/1.0"})
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                if resp.status == 200:
-                    raw = resp.read()
-                    if len(raw) > 100:
-                        return raw
+            status, _hdrs, raw = http_request("GET", render_url, headers={"User-Agent": "PesaDesktop/1.0"}, timeout=12.0)
+            if status == 200 and len(raw) > 100:
+                return raw
         except Exception as exc_render:
             logger.debug("No se pudo descargar PDF desde Render para %s: %s", clean_folio, exc_render)
 
@@ -7381,14 +7422,15 @@ class DashboardWidget(QWidget):
 
             # Notificar al endpoint de auditoría de Render
             try:
-                import urllib.request
+                from services.http_client import http_request
                 url = f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/auditar"
-                req = urllib.request.Request(
-                    url, data=b"", method="POST",
-                    headers={"User-Agent": "PesaWindowsERP/1.0", "Content-Type": "application/json"}
+                http_request(
+                    "POST",
+                    url,
+                    data=b"",
+                    headers={"User-Agent": "PesaWindowsERP/1.0", "Content-Type": "application/json"},
+                    timeout=5.0,
                 )
-                with urllib.request.urlopen(req, timeout=5) as resp:
-                    pass
             except Exception:
                 pass
 
@@ -7478,7 +7520,8 @@ class DashboardWidget(QWidget):
         except Exception as exc_db:
             logger.warning("Error leyendo pdf_b64 de BD para %s: %s", clean_folio, exc_db)
 
-        # 2. Estrategia: Descarga HTTP GET directa desde la API de Render
+        # 2. Estrategia: Descarga HTTP GET directa desde la API de Render (pool persistente)
+        from services.http_client import http_request
         render_endpoints = [
             f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/download-pdf",
             f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/pdf",
@@ -7489,19 +7532,18 @@ class DashboardWidget(QWidget):
         for url in render_endpoints:
             try:
                 logger.info("Descargando PDF desde Render: %s", url)
-                req = urllib.request.Request(
+                status, hdrs, content = http_request(
+                    "GET",
                     url,
-                    headers={"User-Agent": "PesaWindowsApp/1.0", "Accept": "application/pdf"}
+                    headers={"User-Agent": "PesaWindowsApp/1.0", "Accept": "application/pdf"},
+                    timeout=12.0,
                 )
-                with urllib.request.urlopen(req, timeout=12) as resp:
-                    c_type = resp.headers.get("Content-Type", "").lower()
-                    if resp.status == 200:
-                        content = resp.read()
-                        if len(content) > 500 and (content.startswith(b"%PDF") or b"%PDF" in content[:1024] or "pdf" in c_type):
-                            target_path.write_bytes(content)
-                            logger.info("PDF descargado exitosamente de Render → %s", target_path)
-                            _open_file(str(target_path))
-                            return True
+                c_type = hdrs.get("content-type", "").lower()
+                if status == 200 and len(content) > 500 and (content.startswith(b"%PDF") or b"%PDF" in content[:1024] or "pdf" in c_type):
+                    target_path.write_bytes(content)
+                    logger.info("PDF descargado exitosamente de Render → %s", target_path)
+                    _open_file(str(target_path))
+                    return True
             except Exception as exc_http:
                 logger.debug("Fallo descarga HTTP desde %s: %s", url, exc_http)
 

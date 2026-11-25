@@ -302,7 +302,7 @@ class REFormWidget(QWidget):
 
         self._form_container = QWidget()
         self._form_layout = QVBoxLayout(self._form_container)
-        self._form_layout.setContentsMargins(24, 16, 24, 16)
+        self._form_layout.setContentsMargins(24, 16, 24, 28)
         self._form_layout.setSpacing(12)
 
         self._build_encabezado()

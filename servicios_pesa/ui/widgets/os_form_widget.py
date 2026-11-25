@@ -115,7 +115,7 @@ class OSFormWidget(QWidget):
 
         form_container = QWidget()
         form_layout = QVBoxLayout(form_container)
-        form_layout.setContentsMargins(28, 20, 28, 20)
+        form_layout.setContentsMargins(28, 20, 28, 28)
         form_layout.setSpacing(20)
 
         # Secciones del formulario

@@ -14,12 +14,12 @@ import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/pdf_storage_service.dart';
 
-const _kMetroPurple = Color(0xFF5B3FD6);
-const _kMetroBlue   = Color(0xFF1E5AA8);
-const _kBorder      = Color(0xFFE5E5EA);
-const _kTextPrim    = Color(0xFF1D1D1F);
-const _kTextSec     = Color(0xFF86868B);
-const _kTableHead   = Color(0xFFF1EEFC);
+const _kBrand       = Color(0xFFC8102E);
+const _kDarkInk     = Color(0xFF111827);
+const _kBorder      = Color(0xFFE5E7EB);
+const _kTextPrim    = Color(0xFF111827);
+const _kTextSec     = Color(0xFF6B7280);
+const _kTableHead   = Color(0xFFF9FAFB);
 
 class CalibracionesRepositorioView extends StatefulWidget {
   const CalibracionesRepositorioView({super.key});
@@ -35,6 +35,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   String? _aviso;
   String _query = '';
   final _searchCtrl = TextEditingController();
+  Timer? _searchDebounce;
   final Set<String> _busy = {};
 
   @override
@@ -45,8 +46,16 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged(String v) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _query = v);
+    });
   }
 
   Future<void> _cargarLocal() async {
@@ -229,7 +238,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   void _snack(String msg, {bool error = false}) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg),
-      backgroundColor: error ? const Color(0xFFC8102E) : _kMetroBlue,
+      backgroundColor: error ? _kBrand : _kDarkInk,
     ));
   }
 
@@ -241,16 +250,16 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
       final mobile = c.maxWidth < 650;
       final rows = _filtered;
       return Padding(
-        padding: EdgeInsets.fromLTRB(mobile ? 12 : 24, 8, mobile ? 12 : 24, 12),
+        padding: EdgeInsets.fromLTRB(mobile ? 16 : 20, 8, mobile ? 16 : 20, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _header(mobile),
             if (_aviso != null) _avisoBanner(),
-            const SizedBox(height: 10),
+            const SizedBox(height: 12),
             Expanded(
               child: _loading
-                  ? const Center(child: CircularProgressIndicator(color: _kMetroPurple))
+                  ? const Center(child: CircularProgressIndicator(color: _kBrand))
                   : rows.isEmpty
                       ? _vacio()
                       : (mobile ? _listaMobile(rows) : _tabla(rows)),
@@ -267,10 +276,11 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.18),
-            borderRadius: BorderRadius.circular(10),
+            color: const Color(0xFFF8FAFC),
+            border: Border.all(color: _kBorder),
+            borderRadius: BorderRadius.circular(8),
           ),
-          child: const Icon(Icons.verified_outlined, color: Colors.white, size: 22),
+          child: const Icon(Icons.verified_outlined, color: _kBrand, size: 22),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -278,9 +288,9 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text('Repositorio de Calibraciones',
-                  style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+                  style: TextStyle(color: _kTextPrim, fontSize: 17, fontWeight: FontWeight.w700)),
               Text('Histórico / PDFs · Solo lectura · ${_all.length} órdenes concluidas',
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12)),
+                  style: const TextStyle(color: _kTextSec, fontSize: 12)),
             ],
           ),
         ),
@@ -291,29 +301,40 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
           icon: _refreshing
               ? const SizedBox(
                   width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.refresh_rounded, color: Colors.white),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: _kBrand))
+              : const Icon(Icons.refresh_rounded, color: _kTextPrim),
         ),
       ],
     );
 
     final buscador = SizedBox(
-      height: 40,
       width: mobile ? double.infinity : 320,
-      child: TextField(
-        key: const Key('calib_repo_search'),
-        controller: _searchCtrl,
-        onChanged: (v) => setState(() => _query = v),
-        style: const TextStyle(fontSize: 13),
-        decoration: InputDecoration(
-          hintText: 'Buscar folio, cliente, técnico…',
-          prefixIcon: const Icon(Icons.search, size: 18),
-          filled: true,
-          fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide.none,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 40),
+        child: TextField(
+          key: const Key('calib_repo_search'),
+          controller: _searchCtrl,
+          onChanged: _onSearchChanged,
+          style: const TextStyle(fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Buscar folio, cliente, técnico…',
+            prefixIcon: const Icon(Icons.search, size: 18),
+            isDense: true,
+            filled: true,
+            fillColor: Colors.white,
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: _kBrand, width: 1.5),
+            ),
           ),
         ),
       ),
@@ -322,22 +343,12 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [_kMetroPurple, _kMetroBlue],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: [
-          BoxShadow(
-            color: _kMetroPurple.withValues(alpha: 0.25),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        color: Colors.white,
+        border: Border.all(color: _kBorder),
+        borderRadius: BorderRadius.circular(10),
       ),
       child: mobile
-          ? Column(children: [titulo, const SizedBox(height: 10), buscador])
+          ? Column(children: [titulo, const SizedBox(height: 12), buscador])
           : Row(children: [Expanded(child: titulo), const SizedBox(width: 12), buscador]),
     );
   }
@@ -384,8 +395,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kMetroPurple.withValues(alpha: 0.35), width: 1.2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: _kBorder),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(children: [
@@ -401,14 +412,14 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.4,
-                              color: _kMetroPurple)),
+                              color: _kTextSec)),
                     ))
                 .toList(),
           ),
         ),
         Expanded(
           child: RefreshIndicator(
-            color: _kMetroPurple,
+            color: _kBrand,
             onRefresh: _refrescarServidor,
             child: ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
@@ -505,7 +516,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         Expanded(
           flex: 3,
           child: Row(children: [
-            const Icon(Icons.engineering_outlined, size: 14, color: _kMetroBlue),
+            const Icon(Icons.engineering_outlined, size: 14, color: _kTextSec),
             const SizedBox(width: 4),
             Expanded(
               child: Text((r['tecnico'] ?? '—').toString(),
@@ -659,24 +670,24 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
       OutlinedButton.icon(
         key: Key('calib_ver_pdf_$folio'),
         style: btnStyle.copyWith(
-          foregroundColor: const WidgetStatePropertyAll(_kMetroPurple),
-          side: const WidgetStatePropertyAll(BorderSide(color: _kMetroPurple)),
+          foregroundColor: const WidgetStatePropertyAll(_kDarkInk),
+          side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFCBD5E1))),
         ),
         onPressed: busy ? null : () => _verPdf(r),
         icon: busy
-            ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2))
-            : const Text('📄', style: TextStyle(fontSize: 13)),
+            ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: _kBrand))
+            : const Icon(Icons.picture_as_pdf_outlined, size: 15, color: _kBrand),
         label: const Text('Ver PDF'),
       ),
       const SizedBox(width: 6),
       OutlinedButton.icon(
         key: Key('calib_descargar_$folio'),
         style: btnStyle.copyWith(
-          foregroundColor: const WidgetStatePropertyAll(_kMetroBlue),
-          side: const WidgetStatePropertyAll(BorderSide(color: _kMetroBlue)),
+          foregroundColor: const WidgetStatePropertyAll(_kDarkInk),
+          side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFCBD5E1))),
         ),
         onPressed: busy ? null : () => _descargar(r),
-        icon: const Text('📥', style: TextStyle(fontSize: 13)),
+        icon: const Icon(Icons.download_outlined, size: 15, color: _kDarkInk),
         label: const Text('Descargar'),
       ),
       if (!tienePdf) ...[

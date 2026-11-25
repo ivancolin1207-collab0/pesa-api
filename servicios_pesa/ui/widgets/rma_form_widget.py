@@ -84,7 +84,7 @@ class RMAFormWidget(QWidget):
 
         container = QWidget()
         layout = QVBoxLayout(container)
-        layout.setContentsMargins(28, 20, 28, 16)
+        layout.setContentsMargins(28, 20, 28, 28)
         layout.setSpacing(16)
 
         # ── Encabezado: Folio + Fecha + Tipo ─────────────────────────────────

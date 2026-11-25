@@ -733,6 +733,7 @@ class LocalDbService {
       'CREATE INDEX IF NOT EXISTS idx_ordenes_estatus ON ordenes_servicio(estatus)',
       'CREATE INDEX IF NOT EXISTS idx_ordenes_fecha ON ordenes_servicio(fecha DESC)',
       'CREATE INDEX IF NOT EXISTS idx_ordenes_cliente ON ordenes_servicio(cliente)',
+      'CREATE INDEX IF NOT EXISTS idx_ordenes_updated_at ON ordenes_servicio(updated_at DESC)',
     ];
     for (final stmt in ddl) {
       try {

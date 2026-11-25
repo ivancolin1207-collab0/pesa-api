@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any
 
 from PyQt6.QtCore import QObject, QThread, pyqtSignal
@@ -83,9 +84,10 @@ class _CatalogWarmupWorker(QThread):
 
 
 class CatalogCache(QObject):
-    """Singleton thread-safe con acceso O(1) en memoria para la UI de escritorio."""
+    """Singleton thread-safe con acceso O(1) en memoria y TTL de 5 min para la UI de escritorio."""
 
     catalogs_updated = pyqtSignal()
+    _TTL_SECONDS = 300.0
 
     def __init__(self) -> None:
         super().__init__()
@@ -99,6 +101,7 @@ class CatalogCache(QObject):
         self._equipos_cache: dict[tuple, list[dict]] = {}
         self._worker: _CatalogWarmupWorker | None = None
         self._ready: bool = False
+        self._loaded_at: float = 0.0
         self._load_sqlite_fallback()
 
     def _load_sqlite_fallback(self) -> None:
@@ -163,11 +166,33 @@ class CatalogCache(QObject):
             if data.get("max_consecutivos"):
                 self._max_consecutivos = dict(data["max_consecutivos"])
             self._ready = True
+            self._loaded_at = time.monotonic()
         self.catalogs_updated.emit()
 
     @property
     def is_ready(self) -> bool:
         return self._ready or bool(self._clientes or self._tecnicos)
+
+    def is_stale(self) -> bool:
+        """Retorna True si el caché nunca se cargó desde PostgreSQL o expiró su TTL (5 min)."""
+        with self._lock:
+            if not self._ready or self._loaded_at <= 0.0:
+                return True
+            return (time.monotonic() - self._loaded_at) >= self._TTL_SECONDS
+
+    def invalidate(self, refresh: bool = False) -> None:
+        """Invalida el caché en memoria al crear/editar catálogos."""
+        with self._lock:
+            self._ready = False
+            self._loaded_at = 0.0
+            self._equipos_cache.clear()
+        if refresh:
+            self.warm_up_async()
+
+    def ensure_fresh_async(self) -> None:
+        """Recarga catálogos en segundo plano únicamente si expiró el TTL de 5 minutos."""
+        if self.is_stale():
+            self.warm_up_async()
 
     def get_clientes(self) -> list[tuple]:
         with self._lock:
@@ -184,6 +209,10 @@ class CatalogCache(QObject):
     def get_tipos_servicio(self) -> list[tuple]:
         with self._lock:
             return list(self._tipos_servicio)
+
+    def get_tipos_instrumento(self) -> list[tuple]:
+        with self._lock:
+            return list(self._tipos_instrumento)
 
     def get_max_consecutivo(self, tipo_doc: str) -> int:
         with self._lock:

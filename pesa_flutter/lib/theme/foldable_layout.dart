@@ -67,9 +67,9 @@ Rect? horizontalHingeBounds(BuildContext context) {
   return null;
 }
 
-/// Padding horizontal corporativo según estado plegado / desplegado.
+/// Padding horizontal corporativo según estado plegado / desplegado (16dp móvil, 20dp desplegado).
 double foldableHorizontalPadding(BuildContext context) =>
-    isCoverScreen(context) ? 12.0 : 20.0;
+    isCoverScreen(context) ? 16.0 : 20.0;
 
 /// Contenedor Master–Detail con conciencia real de bisagra para Z Fold.
 ///

@@ -309,9 +309,8 @@ class TouchTableWidget(QFrame):
         # Cabecera con color de sección
         header_w = QWidget()
         header_w.setStyleSheet(f"""
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 {self._color}, stop:1 {self._color}CC);
-            border-radius: 13px 13px 0 0;
+            background: {self._color};
+            border-radius: 10px 10px 0 0;
         """)
         header_w.setFixedHeight(44)
         hl = QHBoxLayout(header_w)
@@ -667,14 +666,13 @@ class EnlacesSustitucionWidget(QFrame):
         # Cabecera
         hdr = QWidget()
         hdr.setStyleSheet("""
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 #1D4ED8, stop:1 #1D4ED8CC);
-            border-radius: 13px 13px 0 0;
+            background: #111827;
+            border-radius: 10px 10px 0 0;
         """)
         hdr.setFixedHeight(44)
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(16, 0, 16, 0)
-        lbl_hdr = QLabel("🔗  Exactitud — Calibración por Enlaces de Sustitución (NOM-010-SCFI / OIML R 76)")
+        lbl_hdr = QLabel("Exactitud — Calibración por Enlaces de Sustitución (NOM-010-SCFI / OIML R 76)")
         lbl_hdr.setStyleSheet("color: white; font-size: 13px; font-weight: 700; background: transparent;")
         hl.addWidget(lbl_hdr)
         lay.addWidget(hdr)
@@ -1508,45 +1506,43 @@ class TomDigitalDialog(QDialog):
         lay.addStretch()
 
         # Botón secundario: guardar borrador
-        btn_draft = QPushButton("💾  Guardar Borrador")
+        btn_draft = QPushButton("Guardar Borrador")
         btn_draft.setFixedHeight(_TOUCH_BTN_H + 4)
         btn_draft.setMinimumWidth(180)
-        btn_draft.setStyleSheet(f"""
-            QPushButton {{
-                background: rgba(0,122,255,0.08);
-                color: {_BLUE};
-                border: 1.5px solid rgba(0,122,255,0.25);
-                border-radius: 12px;
+        btn_draft.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #111827;
+                border: 1px solid #CBD5E1;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: 600;
                 padding: 0 20px;
-            }}
-            QPushButton:hover {{ background: rgba(0,122,255,0.14); }}
+            }
+            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
         """)
         btn_draft.clicked.connect(lambda: self._on_guardar(draft=True))
         lay.addWidget(btn_draft)
 
         # Botón principal: guardar y generar PDF
-        self._btn_save = QPushButton("  💾   Guardar y Generar PDF en Tablet  ")
+        self._btn_save = QPushButton("  Guardar y Generar PDF en Tablet  ")
         self._btn_save.setFixedHeight(_TOUCH_BTN_H + 4)
         self._btn_save.setMinimumWidth(280)
         self._btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._btn_save.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 {_RED}, stop:1 {_DRED});
+        self._btn_save.setStyleSheet("""
+            QPushButton {
+                background: #C8102E;
                 color: white;
                 border: none;
-                border-radius: 12px;
+                border-radius: 8px;
                 font-size: 15px;
                 font-weight: 700;
                 padding: 0 24px;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 {_DRED}, stop:1 #A5262F);
-            }}
-            QPushButton:disabled {{ background: #C7C7CC; }}
+            }
+            QPushButton:hover {
+                background: #A60D26;
+            }
+            QPushButton:disabled { background: #CBD5E1; color: #9CA3AF; }
         """)
         self._btn_save.clicked.connect(lambda: self._on_guardar(draft=False))
         lay.addWidget(self._btn_save)

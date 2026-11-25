@@ -295,9 +295,8 @@ class MetrologicalTable(QFrame):
         # ── Cabecera de la tabla ───────────────────────────────────────────────
         header = QWidget()
         header.setStyleSheet(f"""
-            background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                stop:0 {self._color}, stop:1 {self._color}CC);
-            border-radius: 11px 11px 0 0;
+            background: {self._color};
+            border-radius: 10px 10px 0 0;
         """)
         h_lay = QHBoxLayout(header)
         h_lay.setContentsMargins(16, 10, 12, 10)
@@ -1222,17 +1221,16 @@ class DigitalServiceDialog(QDialog):
                 color: {_DARK};
             }}
             QPushButton#btn_save {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 {_RED}, stop:1 {_DRED});
+                background: #C8102E;
                 color: white;
                 border: none;
-                border-radius: 10px;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: 700;
                 letter-spacing: -0.2px;
             }}
             QPushButton#btn_save:hover {{
-                background: {_DRED};
+                background: #A60D26;
             }}
             QPushButton#btn_save:pressed {{
                 background: #AA1515;

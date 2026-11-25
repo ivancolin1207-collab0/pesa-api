@@ -596,8 +596,8 @@ class EquipoCard(QFrame):
         self._wgt_enlaces.setObjectName("wgt_enlaces_sustitucion")
         self._wgt_enlaces.setStyleSheet("""
             QFrame#wgt_enlaces_sustitucion {
-                background: rgba(0,122,255,0.06);
-                border: 1.5px solid rgba(0,122,255,0.30);
+                background: #F8FAFC;
+                border: 1px solid #CBD5E1;
                 border-radius: 10px;
             }
         """)
@@ -608,13 +608,9 @@ class EquipoCard(QFrame):
         # —— Título del bloque ——————————————————————————————————
         _enl_hdr_row = QHBoxLayout()
         _enl_hdr_row.setSpacing(8)
-        _lbl_enl_icon = QLabel("🔗")
-        _lbl_enl_icon.setStyleSheet("font-size: 17px; background: transparent;")
-        _lbl_enl_icon.setFixedWidth(24)
-        _enl_hdr_row.addWidget(_lbl_enl_icon)
         _lbl_enl_title = QLabel("Calibración por Enlaces de Sustitución  —  NOM-010-SCFI / OIML R 76")
         _lbl_enl_title.setStyleSheet(
-            "font-size: 11px; font-weight: 700; color: #1D4ED8; background: transparent;"
+            "font-size: 11.5px; font-weight: 700; color: #111827; background: transparent;"
         )
         _enl_hdr_row.addWidget(_lbl_enl_title, stretch=1)
         _enl_root.addLayout(_enl_hdr_row)
@@ -1180,7 +1176,7 @@ class EquipoCard(QFrame):
 class SelectCard(QPushButton):
     """
     Tarjeta seleccionable corporativa Básculas PESA (cero emojis, cero colores pastel/IA).
-    Muestra etiqueta de código sobria + título + descripción clara.
+    Muestra etiqueta de código sobria + título + descripción con cálculo real de altura.
     """
     def __init__(self, code: str, title: str, desc: str,
                  accent: str = _RED, parent=None):
@@ -1188,29 +1184,32 @@ class SelectCard(QPushButton):
         self._accent = _RED  # Único acento corporativo Básculas PESA
         self._selected = False
         self.setCheckable(True)
-        self.setMinimumHeight(92)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMinimumHeight(82)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(6)
 
-        top = QHBoxLayout()
-        top.setSpacing(8)
+        self._top_lay = QHBoxLayout()
+        self._top_lay.setContentsMargins(0, 0, 0, 0)
+        self._top_lay.setSpacing(6)
 
         self._lbl_badge = QLabel(code)
         self._lbl_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._lbl_badge.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         self._lbl_badge.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        top.addWidget(self._lbl_badge)
+        self._top_lay.addWidget(self._lbl_badge)
 
         self._lbl_title = QLabel(title)
+        self._lbl_title.setWordWrap(True)
         self._lbl_title.setStyleSheet(
-            "font-size: 13.5px; font-weight: 700; color: #111827; background: transparent; border: none;"
+            "font-size: 13px; font-weight: 700; color: #111827; background: transparent; border: none;"
         )
         self._lbl_title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        top.addWidget(self._lbl_title, stretch=1)
-        lay.addLayout(top)
+        self._top_lay.addWidget(self._lbl_title, stretch=1)
+        lay.addLayout(self._top_lay)
 
         self._lbl_desc = QLabel(desc)
         self._lbl_desc.setWordWrap(True)
@@ -1220,45 +1219,86 @@ class SelectCard(QPushButton):
         self._lbl_desc.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         lay.addWidget(self._lbl_desc)
 
+        lay.addStretch(1)
         self._apply_style(False)
         self.toggled.connect(self._apply_style)
 
+    def hasHeightForWidth(self) -> bool:
+        return True
+
+    def heightForWidth(self, width: int) -> int:
+        lay = self.layout()
+        if lay is None:
+            return 82
+        m = lay.contentsMargins()
+        w = max(width, 220)
+        inner_w = max(120, w - m.left() - m.right())
+        badge_sz = self._lbl_badge.sizeHint()
+        title_w = max(80, inner_w - badge_sz.width() - self._top_lay.spacing())
+        title_h = (
+            self._lbl_title.heightForWidth(title_w)
+            if self._lbl_title.hasHeightForWidth()
+            else self._lbl_title.sizeHint().height()
+        )
+        top_h = max(badge_sz.height(), title_h)
+        desc_h = (
+            self._lbl_desc.heightForWidth(inner_w)
+            if self._lbl_desc.hasHeightForWidth()
+            else self._lbl_desc.sizeHint().height()
+        )
+        total = m.top() + top_h + lay.spacing() + desc_h + m.bottom() + 4
+        return max(82, int(total))
+
+    def sizeHint(self):
+        from PyQt6.QtCore import QSize
+        w = max(self.width(), 240)
+        return QSize(w, self.heightForWidth(w))
+
+    def minimumSizeHint(self):
+        from PyQt6.QtCore import QSize
+        return QSize(200, self.heightForWidth(max(self.width(), 240)))
+
     def _apply_style(self, checked: bool) -> None:
+        self._selected = checked
         if checked:
             self.setStyleSheet("""
-                QPushButton {
-                    background: #FFFFFF;
+                SelectCard, QPushButton {
+                    background-color: #FFF5F6;
                     border: 2px solid #C8102E;
-                    border-radius: 12px;
+                    border-radius: 10px;
+                    min-height: 82px;
+                    padding: 0px;
                     text-align: left;
                 }
             """)
             self._lbl_badge.setStyleSheet(
-                "background: #C8102E; color: #FFFFFF; border: none; "
-                "border-radius: 5px; padding: 2px 7px; font-size: 10.5px; font-weight: 700;"
+                "background-color: #C8102E; color: #FFFFFF; border: none; "
+                "border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700;"
             )
             self._lbl_title.setStyleSheet(
-                "font-size: 13.5px; font-weight: 700; color: #C8102E; background: transparent; border: none;"
+                "font-size: 13px; font-weight: 700; color: #C8102E; background: transparent; border: none;"
             )
         else:
             self.setStyleSheet("""
-                QPushButton {
-                    background: #FFFFFF;
+                SelectCard, QPushButton {
+                    background-color: #FFFFFF;
                     border: 1px solid #E5E7EB;
-                    border-radius: 12px;
+                    border-radius: 10px;
+                    min-height: 82px;
+                    padding: 0px;
                     text-align: left;
                 }
-                QPushButton:hover {
+                SelectCard:hover, QPushButton:hover {
                     border-color: #CBD5E1;
-                    background: #F8FAFC;
+                    background-color: #F8FAFC;
                 }
             """)
             self._lbl_badge.setStyleSheet(
-                "background: #F8FAFC; color: #6B7280; border: 1px solid #E5E7EB; "
-                "border-radius: 5px; padding: 2px 7px; font-size: 10.5px; font-weight: 700;"
+                "background-color: #F8FAFC; color: #6B7280; border: 1px solid #E5E7EB; "
+                "border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700;"
             )
             self._lbl_title.setStyleSheet(
-                "font-size: 13.5px; font-weight: 700; color: #111827; background: transparent; border: none;"
+                "font-size: 13px; font-weight: 700; color: #111827; background: transparent; border: none;"
             )
 
 
@@ -1324,75 +1364,102 @@ def _field_label(text: str, required: bool = False) -> QLabel:
 
 
 def _input_style() -> str:
-    return """
-        QComboBox {
+    chevron_path = ""
+    try:
+        import os as _os
+        import sys as _sys
+        base = getattr(_sys, "_MEIPASS", _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
+        cand = _os.path.join(base, "assets", "images", "chevron_down.png").replace("\\", "/")
+        if _os.path.exists(cand):
+            chevron_path = cand
+    except Exception:
+        pass
+    arrow_rule = (
+        f"image: url({chevron_path}); width: 12px; height: 12px; border: none;"
+        if chevron_path
+        else "border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #6B7280;"
+    )
+    return f"""
+        QComboBox {{
             background-color: #FFFFFF;
             border: 1px solid #D1D5DB;
-            border-radius: 8px;
-            padding: 6px 12px;
+            border-radius: 6px;
+            padding: 0px 28px 0px 12px;
             color: #111827;
             font-size: 13px;
             min-height: 36px;
-        }
-        QComboBox:hover {
+            max-height: 38px;
+        }}
+        QComboBox:hover {{
             border-color: #9CA3AF;
-        }
-        QComboBox:focus {
-            border-color: #C8102E;
+        }}
+        QComboBox:focus {{
+            border: 1.5px solid #C8102E;
             background-color: #FFFFFF;
-        }
-        QComboBox::drop-down {
+        }}
+        QComboBox::drop-down {{
             border: none;
             subcontrol-origin: padding;
             subcontrol-position: top right;
-            width: 25px;
-        }
-        QComboBox QAbstractItemView {
+            width: 26px;
+            background: transparent;
+        }}
+        QComboBox::down-arrow {{
+            {arrow_rule}
+        }}
+        QComboBox QAbstractItemView {{
             background-color: #FFFFFF;
             border: 1px solid #E5E7EB;
             border-radius: 8px;
-            selection-background-color: #FEE2E2;
-            selection-color: #991B1B;
-            color: #1F2937;
+            selection-background-color: #F8FAFC;
+            selection-color: #111827;
+            color: #111827;
             outline: none;
             padding: 4px;
-        }
-        QComboBox QAbstractItemView::item {
-            min-height: 32px;
-            padding-left: 8px;
-            color: #1F2937;
-            background-color: #FFFFFF;
-        }
-        QComboBox QAbstractItemView::item:selected {
-            background-color: #FEE2E2;
-            color: #991B1B;
-        }
-        QComboBox QAbstractItemView::item:hover {
-            background-color: #F3F4F6;
+        }}
+        QComboBox QAbstractItemView::item {{
+            min-height: 30px;
+            padding: 4px 10px;
             color: #111827;
-        }
-        QComboBox QLineEdit {
+            background-color: #FFFFFF;
+            border-radius: 5px;
+        }}
+        QComboBox QAbstractItemView::item:selected {{
+            background-color: #F8FAFC;
+            color: #111827;
+            font-weight: 600;
+        }}
+        QComboBox QAbstractItemView::item:hover {{
+            background-color: #F8FAFC;
+            color: #111827;
+        }}
+        QComboBox QLineEdit {{
             color: #111827;
             background: transparent;
             border: none;
+            padding: 0px 2px;
+            margin: 0px;
+            min-height: 0px;
+            max-height: 36px;
             font-size: 13px;
-        }
-        QSpinBox, QDateEdit {
+        }}
+        QSpinBox, QDateEdit {{
             background-color: #FFFFFF;
             border: 1px solid #D1D5DB;
-            border-radius: 8px;
-            padding: 6px 12px;
+            border-radius: 6px;
+            padding: 0px 12px;
             color: #111827;
             font-size: 13px;
             min-height: 36px;
-        }
-        QSpinBox:hover, QDateEdit:hover {
+            max-height: 38px;
+        }}
+        QSpinBox:hover, QDateEdit:hover {{
             border-color: #9CA3AF;
-        }
-        QSpinBox:focus, QDateEdit:focus {
-            border-color: #C8102E;
+        }}
+        QSpinBox:focus, QDateEdit:focus {{
+            border: 1.5px solid #C8102E;
             background-color: #FFFFFF;
-        }
+        }}
     """
 
 
@@ -1419,6 +1486,28 @@ class _CatalogLoader(QThread):
     error            = pyqtSignal(str)
 
     def run(self) -> None:
+        try:
+            from services.catalog_cache import catalog_cache
+            if not catalog_cache.is_stale():
+                clientes = catalog_cache.get_clientes()
+                suc_map = {
+                    int(cid): catalog_cache.get_sucursales(int(cid))
+                    for cid, *_ in clientes if cid is not None
+                }
+                tecnicos = catalog_cache.get_tecnicos()
+                tipos_srv = catalog_cache.get_tipos_servicio()
+                tipos_inst = catalog_cache.get_tipos_instrumento()
+                if clientes and tecnicos and tipos_srv:
+                    self.clientes_ready.emit([(cid, nom) for cid, nom, *_ in clientes])
+                    self.sucursales_ready.emit(suc_map)
+                    self.tecnicos_ready.emit([(int(tid), str(tnom)) for tid, tnom, *_ in tecnicos])
+                    self.tipos_srv_ready.emit(list(tipos_srv))
+                    if tipos_inst:
+                        self.tipos_inst_ready.emit([(int(iid), str(inom)) for iid, inom, *_ in tipos_inst])
+                    return
+        except Exception:
+            pass
+
         if not _HAS_DB or not _db_pool:
             self.error.emit("Sin conexion a BD")
             return
@@ -2326,19 +2415,20 @@ class BatchGeneratorWidget(QWidget):
         self._rma_item_rows: list[dict] = []   # lista de dicts con los QLineEdit de cada fila
 
         # Botón agregar fila
-        _btn_add_item = QPushButton("➕  Agregar Refacción")
+        _btn_add_item = QPushButton("+  Agregar Refacción")
         _btn_add_item.setFixedHeight(32)
         _btn_add_item.setStyleSheet("""
             QPushButton {
-                background: transparent;
-                color: #1D4ED8;
+                background: #FFFFFF;
+                color: #111827;
                 font-size: 12px;
                 font-weight: 600;
-                border: 1.5px dashed #93C5FD;
+                border: 1px solid #CBD5E1;
                 border-radius: 6px;
                 padding: 0 14px;
+                min-height: 30px;
             }
-            QPushButton:hover { background: rgba(37,99,235,0.06); }
+            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
         """)
         _btn_add_item.clicked.connect(self._rma_add_item_row)
         _rma_vlay.addWidget(_btn_add_item)
@@ -2356,18 +2446,18 @@ class BatchGeneratorWidget(QWidget):
         self._frame_lv_basculas.setObjectName("frame_lv_basculas")
         self._frame_lv_basculas.setStyleSheet("""
             QFrame#frame_lv_basculas {
-                background: rgba(230,126,34,0.05);
-                border: 1.5px solid rgba(230,126,34,0.35);
-                border-radius: 12px;
+                background: #F8FAFC;
+                border: 1px solid #CBD5E1;
+                border-radius: 10px;
             }
         """)
         _lv_vlay = QVBoxLayout(self._frame_lv_basculas)
         _lv_vlay.setContentsMargins(16, 12, 16, 12)
         _lv_vlay.setSpacing(10)
 
-        _lbl_lv_title = QLabel("\U0001f4cf  B\u00e1sculas e Instrumentos a Levantar")
+        _lbl_lv_title = QLabel("B\u00e1sculas e Instrumentos a Levantar")
         _lbl_lv_title.setStyleSheet(
-            "font-size: 13px; font-weight: 700; color: #C0500A; background: transparent;"
+            "font-size: 13px; font-weight: 700; color: #111827; background: transparent;"
         )
         _lv_vlay.addWidget(_lbl_lv_title)
 
@@ -2375,7 +2465,7 @@ class BatchGeneratorWidget(QWidget):
         _lv_ctrl = QHBoxLayout()
         _lv_ctrl.setSpacing(12)
         _lbl_cant_basc = QLabel("Cantidad de B\u00e1sculas a Levantar:")
-        _lbl_cant_basc.setStyleSheet("font-size: 12px; color: #7C3F00; background: transparent;")
+        _lbl_cant_basc.setStyleSheet("font-size: 12px; color: #6B7280; background: transparent;")
         _lv_ctrl.addWidget(_lbl_cant_basc)
         self.spn_lv_basculas = QSpinBox()
         self.spn_lv_basculas.setRange(1, 20)
@@ -2383,18 +2473,19 @@ class BatchGeneratorWidget(QWidget):
         self.spn_lv_basculas.setFixedWidth(90)
         self.spn_lv_basculas.setToolTip("N\u00famero de b\u00e1sculas o instrumentos a levantar en este pre-visita")
         _lv_ctrl.addWidget(self.spn_lv_basculas)
-        _btn_add_basc = QPushButton("\u2795  Agregar B\u00e1scula")
-        _btn_add_basc.setFixedHeight(30)
+        _btn_add_basc = QPushButton("+  Agregar B\u00e1scula")
+        _btn_add_basc.setFixedHeight(32)
         _btn_add_basc.setStyleSheet("""
             QPushButton {
-                background: transparent;
-                color: #C0500A;
-                font-size: 11px; font-weight: 600;
-                border: 1.5px dashed rgba(230,126,34,0.7);
+                background: #FFFFFF;
+                color: #111827;
+                font-size: 11.5px; font-weight: 600;
+                border: 1px solid #CBD5E1;
                 border-radius: 6px;
                 padding: 0 12px;
+                min-height: 30px;
             }
-            QPushButton:hover { background: rgba(230,126,34,0.08); }
+            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
         """)
         _btn_add_basc.clicked.connect(self._lv_add_bascula_row)
         _lv_ctrl.addWidget(_btn_add_basc)
@@ -2403,9 +2494,9 @@ class BatchGeneratorWidget(QWidget):
 
         # Cabecera de tabla de básculas
         _lv_hdr = QWidget()
-        _lv_hdr.setStyleSheet("background: #2C1810; border-radius: 6px;")
+        _lv_hdr.setStyleSheet("background: #F1F5F9; border: 1px solid #E5E7EB; border-radius: 6px;")
         _lv_hdr_lay = QHBoxLayout(_lv_hdr)
-        _lv_hdr_lay.setContentsMargins(8, 5, 8, 5)
+        _lv_hdr_lay.setContentsMargins(8, 6, 8, 6)
         _lv_hdr_lay.setSpacing(0)
         for _htxt, _hstretch in [
             ("Tag / ID", 1), ("Tipo de Instrumento", 2),
@@ -2415,7 +2506,7 @@ class BatchGeneratorWidget(QWidget):
         ]:
             _hl = QLabel(_htxt)
             _hl.setStyleSheet(
-                "color: #FED7AA; font-size: 9px; font-weight: 700; background: transparent;"
+                "color: #6B7280; font-size: 10px; font-weight: 700; background: transparent;"
             )
             _hl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             _lv_hdr_lay.addWidget(_hl, stretch=_hstretch)
@@ -2439,9 +2530,9 @@ class BatchGeneratorWidget(QWidget):
         _sep.setStyleSheet("color: rgba(230,126,34,0.4);")
         _lv_vlay.addWidget(_sep)
 
-        _lbl_log = QLabel("\U0001f4e6  Log\u00edstica de Pesas Patr\u00f3n y Maniobras")
+        _lbl_log = QLabel("Log\u00edstica de Pesas Patr\u00f3n y Maniobras")
         _lbl_log.setStyleSheet(
-            "font-size: 12px; font-weight: 700; color: #C0500A; background: transparent;"
+            "font-size: 12px; font-weight: 700; color: #111827; background: transparent;"
         )
         _lv_vlay.addWidget(_lbl_log)
 
@@ -3272,29 +3363,31 @@ class BatchGeneratorWidget(QWidget):
         row_lay.setContentsMargins(0, 2, 0, 2)
         row_lay.setSpacing(0)
 
-        le_cant   = QLineEdit(); le_cant.setPlaceholderText("1");   le_cant.setFixedHeight(28)
-        le_parte  = QLineEdit(); le_parte.setPlaceholderText("RL-000");  le_parte.setFixedHeight(28)
-        le_desc   = QLineEdit(); le_desc.setPlaceholderText("Descripción del material"); le_desc.setFixedHeight(28)
-        le_serie  = QLineEdit(); le_serie.setPlaceholderText("N° Serie (opcional)");  le_serie.setFixedHeight(28)
+        le_cant   = QLineEdit(); le_cant.setPlaceholderText("1");   le_cant.setMinimumHeight(34)
+        le_parte  = QLineEdit(); le_parte.setPlaceholderText("RL-000");  le_parte.setMinimumHeight(34)
+        le_desc   = QLineEdit(); le_desc.setPlaceholderText("Descripción del material"); le_desc.setMinimumHeight(34)
+        le_serie  = QLineEdit(); le_serie.setPlaceholderText("N° Serie (opcional)");  le_serie.setMinimumHeight(34)
 
         for _le in (le_cant, le_parte, le_desc, le_serie):
             _le.setStyleSheet("""
                 QLineEdit {
                     background: #FFFFFF; border: 1px solid #D1D5DB;
-                    border-radius: 5px; padding: 2px 6px;
-                    font-size: 12px; color: #1D1D1F;
+                    border-radius: 6px; padding: 4px 8px;
+                    min-height: 34px; max-height: 38px;
+                    font-size: 12px; color: #111827;
                 }
-                QLineEdit:focus { border-color: #2563EB; }
+                QLineEdit:focus { border: 1.5px solid #C8102E; }
             """)
 
-        btn_del = QPushButton("✖")
-        btn_del.setFixedSize(26, 26)
+        btn_del = QPushButton("×")
+        btn_del.setFixedSize(28, 28)
+        btn_del.setToolTip("Quitar fila")
         btn_del.setStyleSheet("""
             QPushButton {
                 background: transparent; color: #9CA3AF;
-                border: none; font-size: 12px;
+                border: none; font-size: 14px; font-weight: 700; min-height: 26px; padding: 0;
             }
-            QPushButton:hover { color: #EF4444; }
+            QPushButton:hover { color: #C8102E; background: #F8FAFC; border-radius: 6px; }
         """)
 
         row_lay.addWidget(le_cant,  stretch=1)
@@ -3325,9 +3418,10 @@ class BatchGeneratorWidget(QWidget):
 
     # ─── Helpers para el panel LV de básculas ────────────────────────────────
     _LE_STYLE = (
-        "QLineEdit { background: #FFFBF5; border: 1px solid rgba(230,126,34,0.5); "
-        "border-radius: 5px; padding: 2px 5px; font-size: 11px; color: #1D1D1F; } "
-        "QLineEdit:focus { border-color: #E67E22; }"
+        "QLineEdit { background: #FFFFFF; border: 1px solid #D1D5DB; "
+        "border-radius: 6px; padding: 4px 8px; min-height: 34px; max-height: 38px; "
+        "font-size: 11.5px; color: #111827; } "
+        "QLineEdit:focus { border: 1.5px solid #C8102E; }"
     )
     _TIPOS_BASCULA = [
         "", "Camionera", "Plataforma", "Tolva / Tanque",
@@ -3346,11 +3440,11 @@ class BatchGeneratorWidget(QWidget):
         # Número de báscula (etiqueta)
         lbl_n = QLabel(f"{idx}.")
         lbl_n.setFixedWidth(20)
-        lbl_n.setStyleSheet("font-size: 11px; font-weight: 700; color: #C0500A; background: transparent;")
+        lbl_n.setStyleSheet("font-size: 11px; font-weight: 700; color: #111827; background: transparent;")
         row_lay.addWidget(lbl_n)
 
         # Tag / ID
-        le_tag = QLineEdit(); le_tag.setPlaceholderText("Tag/ID"); le_tag.setFixedHeight(27)
+        le_tag = QLineEdit(); le_tag.setPlaceholderText("Tag/ID"); le_tag.setMinimumHeight(34)
         le_tag.setStyleSheet(self._LE_STYLE)
         # Tipo de instrumento (combo)
         cmb_tipo = QComboBox()
@@ -3360,32 +3454,33 @@ class BatchGeneratorWidget(QWidget):
                 cmb_tipo.addItem(str(tnom), int(tid))
         else:
             cmb_tipo.addItems(self._TIPOS_BASCULA)
-        cmb_tipo.setFixedHeight(27); cmb_tipo.setMinimumWidth(130)
+        cmb_tipo.setMinimumHeight(34); cmb_tipo.setMinimumWidth(130)
         # Marca
-        le_marca = QLineEdit(); le_marca.setPlaceholderText("Marca"); le_marca.setFixedHeight(27)
+        le_marca = QLineEdit(); le_marca.setPlaceholderText("Marca"); le_marca.setMinimumHeight(34)
         le_marca.setStyleSheet(self._LE_STYLE)
         # Modelo
-        le_modelo = QLineEdit(); le_modelo.setPlaceholderText("Modelo"); le_modelo.setFixedHeight(27)
+        le_modelo = QLineEdit(); le_modelo.setPlaceholderText("Modelo"); le_modelo.setMinimumHeight(34)
         le_modelo.setStyleSheet(self._LE_STYLE)
         # N° Serie
-        le_serie = QLineEdit(); le_serie.setPlaceholderText("Serie"); le_serie.setFixedHeight(27)
+        le_serie = QLineEdit(); le_serie.setPlaceholderText("Serie"); le_serie.setMinimumHeight(34)
         le_serie.setStyleSheet(self._LE_STYLE)
         # Cap. Máx.
-        le_cap = QLineEdit(); le_cap.setPlaceholderText("Cap. Máx."); le_cap.setFixedHeight(27)
+        le_cap = QLineEdit(); le_cap.setPlaceholderText("Cap. Máx."); le_cap.setMinimumHeight(34)
         le_cap.setStyleSheet(self._LE_STYLE)
         # Div. Mín.
-        le_div = QLineEdit(); le_div.setPlaceholderText("Div. Mín."); le_div.setFixedHeight(27)
+        le_div = QLineEdit(); le_div.setPlaceholderText("Div. Mín."); le_div.setMinimumHeight(34)
         le_div.setStyleSheet(self._LE_STYLE)
         # Ubicación
-        le_ubic = QLineEdit(); le_ubic.setPlaceholderText("Ubicación en Planta"); le_ubic.setFixedHeight(27)
+        le_ubic = QLineEdit(); le_ubic.setPlaceholderText("Ubicación en Planta"); le_ubic.setMinimumHeight(34)
         le_ubic.setStyleSheet(self._LE_STYLE)
 
         # Botón eliminar
-        btn_del = QPushButton("✖")
-        btn_del.setFixedSize(24, 24)
+        btn_del = QPushButton("×")
+        btn_del.setFixedSize(26, 26)
+        btn_del.setToolTip("Quitar báscula")
         btn_del.setStyleSheet(
-            "QPushButton { background: transparent; color: #9CA3AF; border: none; font-size: 11px; } "
-            "QPushButton:hover { color: #EF4444; }"
+            "QPushButton { background: transparent; color: #9CA3AF; border: none; font-size: 13px; font-weight: 700; min-height: 24px; padding: 0; } "
+            "QPushButton:hover { color: #C8102E; background: #F8FAFC; border-radius: 6px; }"
         )
 
         for _w, _stretch in [

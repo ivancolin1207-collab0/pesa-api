@@ -67,7 +67,7 @@ class PesaTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           side: const BorderSide(color: PesaColors.border, width: 1),
         ),
       ),
@@ -87,9 +87,10 @@ class PesaTheme {
         iconTheme: IconThemeData(color: PesaColors.textPrimary),
       ),
       inputDecorationTheme: InputDecorationTheme(
+        isDense: true,
         filled: true,
         fillColor: PesaColors.surface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         hintStyle: const TextStyle(color: PesaColors.textTertiary, fontSize: 14),
         labelStyle: const TextStyle(color: PesaColors.textSecondary, fontSize: 13),
         border: OutlineInputBorder(

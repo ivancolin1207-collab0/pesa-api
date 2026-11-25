@@ -160,7 +160,7 @@ class _SignatureGestureShieldState extends State<SignatureGestureShield> {
             (HorizontalDragGestureRecognizer r) => r.onUpdate = (_) {},
           ),
         },
-        child: widget.child,
+        child: RepaintBoundary(child: widget.child),
       ),
     );
   }

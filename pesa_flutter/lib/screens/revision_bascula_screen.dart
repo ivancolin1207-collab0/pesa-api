@@ -1117,9 +1117,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                   height: 40,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF1D4ED8),
-                      backgroundColor: const Color(0xFFEFF6FF),
-                      side: const BorderSide(color: Color(0xFF93C5FD), width: 1.4),
+                      foregroundColor: const Color(0xFF111827),
+                      backgroundColor: Colors.white,
+                      side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _guardandoParcial

@@ -255,8 +255,8 @@ class LoteEditDialog(QDialog):
         root.addWidget(grp2)
 
         # ── REGLA ESTRICTA ────────────────────────────────────────────────────
-        grp3 = QGroupBox("⚠  REGLA ESTRICTA — Entrega de Documento Físico")
-        grp3.setStyleSheet(self._group_style("#E63946"))
+        grp3 = QGroupBox("REGLA ESTRICTA — Entrega de Documento Físico")
+        grp3.setStyleSheet(self._group_style("#C8102E"))
         lay3 = QVBoxLayout(grp3)
 
         aviso = QLabel(
@@ -264,16 +264,16 @@ class LoteEditDialog(QDialog):
             "con firmas físicas y datos completos. Una OS no puede marcarse\n"
             "COMPLETADA hasta que se confirme la entrega de la copia impresa."
         )
-        aviso.setStyleSheet("font-size: 12px; color: #7F1D1D; background: #FEE2E2; "
+        aviso.setStyleSheet("font-size: 12px; color: #111827; background: #FFF5F6; border: 1px solid #C8102E; "
                             "padding: 10px; border-radius: 6px; line-height: 1.5;")
         aviso.setWordWrap(True)
         lay3.addWidget(aviso)
 
         self._chk_impresa = QCheckBox(
-            "  ✅  Entrega Impresa Recibida (documento físico firmado entregado en recepción)"
+            "  Entrega Impresa Recibida (documento físico firmado entregado en recepción)"
         )
         self._chk_impresa.setStyleSheet(
-            "font-size: 13px; font-weight: 600; color: #E63946; padding: 6px 0;"
+            "font-size: 13px; font-weight: 600; color: #C8102E; padding: 6px 0;"
         )
         lay3.addWidget(self._chk_impresa)
 
@@ -521,29 +521,23 @@ class BloqueFecha(QFrame):
             fecha_fmt = self._fecha
 
         n = len(self._lotes)
-        texto = f"  📅  Fecha: {fecha_fmt}    ({n} registro{'s' if n != 1 else ''})    {arrow}"
+        texto = f"  Fecha: {fecha_fmt}    ({n} registro{'s' if n != 1 else ''})    {arrow}"
         self._header_btn.setText(texto)
-        self._header_btn.setStyleSheet(f"""
-            QPushButton {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #0A2342, stop:1 #1A3F6F
-                );
-                color: white;
+        self._header_btn.setStyleSheet("""
+            QPushButton {
+                background: #111827;
+                color: #FFFFFF;
                 border: none;
-                border-radius: 12px 12px 0 0;
-                font-size: 14px;
+                border-radius: 10px 10px 0 0;
+                font-size: 13.5px;
                 font-weight: 700;
                 text-align: left;
                 padding: 10px 20px;
                 letter-spacing: 0.3px;
-            }}
-            QPushButton:hover {{
-                background: qlineargradient(
-                    x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #0D2D52, stop:1 #1F4A7A
-                );
-            }}
+            }
+            QPushButton:hover {
+                background: #1F2937;
+            }
         """)
 
     def _populate_table(self):
@@ -599,12 +593,12 @@ class BloqueFecha(QFrame):
             txt_imp, bg_imp, fg_imp = _bool_icon(impresa if impresa is not None else None)
             item_imp = CeldaEstado(txt_imp, bg_imp, fg_imp)
             if impresa:
-                item_imp.setBackground(QColor("#DCFCE7"))
-                item_imp.setForeground(QColor("#166534"))
+                item_imp.setBackground(QColor("#F8FAFC"))
+                item_imp.setForeground(QColor("#111827"))
                 item_imp.setText("  ✓ Entregado  ")
             else:
-                item_imp.setBackground(QColor("#FEE2E2"))
-                item_imp.setForeground(QColor("#991B1B"))
+                item_imp.setBackground(QColor("#FFFFFF"))
+                item_imp.setForeground(QColor("#C8102E"))
                 item_imp.setText("  ✗ Pendiente  ")
             self._table.setItem(row, _IDX_IMPRESA, item_imp)
 
@@ -708,8 +702,8 @@ class BloqueFecha(QFrame):
                 padding: 4px 8px;
             }
             QTableWidget::item:selected {
-                background: rgba(0,122,255,0.12);
-                color: #1D1D1F;
+                background: #F8FAFC;
+                color: #111827;
             }
             QTableWidget::item:alternate {
                 background: #F8FAFC;
@@ -916,7 +910,7 @@ class RecepcionWidget(QWidget):
         self._scroll_content = QWidget()
         self._scroll_content.setStyleSheet("background: transparent;")
         self._bloques_layout = QVBoxLayout(self._scroll_content)
-        self._bloques_layout.setContentsMargins(0, 0, 0, 0)
+        self._bloques_layout.setContentsMargins(0, 0, 0, 24)
         self._bloques_layout.setSpacing(16)
         self._bloques_layout.addStretch()
 

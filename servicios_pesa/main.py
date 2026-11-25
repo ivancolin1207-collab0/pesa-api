@@ -169,10 +169,11 @@ def _setup_logging() -> logging.Logger:
 def _load_qss_safe(logger: logging.Logger) -> str:
     """
     Carga la hoja de estilos QSS de forma segura.
-    - Omite el QSS si tiene errores de lectura.
+    - Resuelve rutas relativas de assets (chevron_down.png) tanto en desarrollo como en PyInstaller.
     - Nunca lanza excepción.
     - Retorna "" si no puede cargar nada (Qt usará estilos por defecto).
     """
+    content = ""
     qss_path = _PROJECT_ROOT / "ui" / "styles" / "theme_apple.qss"
 
     # Intentar leer el archivo .qss
@@ -180,18 +181,28 @@ def _load_qss_safe(logger: logging.Logger) -> str:
         try:
             content = qss_path.read_text(encoding="utf-8")
             logger.info("QSS cargado: %s (%d bytes)", qss_path.name, len(content))
-            return content
         except Exception as exc:
             logger.warning("No se pudo leer %s: %s", qss_path, exc)
 
-    # Fallback al módulo Python
+    if not content:
+        try:
+            from ui.styles.theme import STYLESHEET  # type: ignore
+            logger.info("QSS: usando fallback de theme.py")
+            content = STYLESHEET
+        except ImportError:
+            logger.info("QSS: sin hoja de estilos (usando Qt por defecto)")
+            return ""
+
     try:
-        from ui.styles.theme import STYLESHEET  # type: ignore
-        logger.info("QSS: usando fallback de theme.py")
-        return STYLESHEET
-    except ImportError:
-        logger.info("QSS: sin hoja de estilos (usando Qt por defecto)")
-        return ""
+        chevron_path = _PROJECT_ROOT / "assets" / "images" / "chevron_down.png"
+        if chevron_path.exists():
+            content = content.replace(
+                "url(assets/images/chevron_down.png)",
+                f"url({chevron_path.as_posix()})",
+            )
+    except Exception:
+        pass
+    return content
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -368,8 +379,8 @@ def main() -> int:
         pal.setColor(QPalette.ColorRole.ButtonText,      QColor("#0F172A"))
         pal.setColor(QPalette.ColorRole.BrightText,      QColor("#C8102E"))
         pal.setColor(QPalette.ColorRole.Link,            QColor("#C8102E"))
-        pal.setColor(QPalette.ColorRole.Highlight,       QColor("#FEE2E2"))   # seleccion rojo tenue
-        pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#C8102E"))   # texto seleccionado rojo
+        pal.setColor(QPalette.ColorRole.Highlight,       QColor("#E5E7EB"))   # seleccion neutra corporativa
+        pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#111827"))   # texto seleccionado oscuro
         pal.setColor(QPalette.ColorRole.PlaceholderText, QColor("#94A3B8"))
         # Disabled
         pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text,       QColor("#CBD5E1"))

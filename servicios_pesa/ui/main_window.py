@@ -43,60 +43,22 @@ except ImportError:
     _HAS_SESSION = False
     _session = None
 
-# ─── Precarga de widgets para garantizar resolución en PyInstaller ───────────
+# ─── Carga diferida (Lazy Loading) de pestañas secundarias ────────────────────
+# Evita importar todos los módulos de UI pesados al arranque; se importan bajo demanda en _create_page.
 try:
     from ui.widgets.dashboard_widget import DashboardWidget
 except Exception as _e_dash:
     logger.debug("DashboardWidget precarga: %s", _e_dash)
     DashboardWidget = None
 
-try:
-    from ui.widgets.batch_generator_widget import BatchGeneratorWidget
-except Exception as _e_batch:
-    logger.debug("BatchGeneratorWidget precarga: %s", _e_batch)
-    BatchGeneratorWidget = None
-
-try:
-    from ui.widgets.os_form_widget import OSFormWidget
-except Exception as _e_os:
-    logger.debug("OSFormWidget precarga: %s", _e_os)
-    OSFormWidget = None
-
-try:
-    from ui.widgets.lp_form_widget import LPFormWidget
-except Exception as _e_lp:
-    logger.debug("LPFormWidget precarga: %s", _e_lp)
-    LPFormWidget = None
-
-try:
-    from ui.widgets.lv_form_widget import LVFormWidget
-except Exception as _e_lv:
-    logger.debug("LVFormWidget precarga: %s", _e_lv)
-    LVFormWidget = None
-
-try:
-    from ui.widgets.recepcion_widget import RecepcionWidget
-except Exception as _e_rec:
-    logger.debug("RecepcionWidget precarga: %s", _e_rec)
-    RecepcionWidget = None
-
-try:
-    from ui.widgets.scanner_widget import ScannerWidget
-except Exception as _e_scan:
-    logger.debug("ScannerWidget precarga: %s", _e_scan)
-    ScannerWidget = None
-
-try:
-    from ui.widgets.catalogos_widget import CatalogosWidget
-except Exception as _e_cat:
-    logger.debug("CatalogosWidget precarga: %s", _e_cat)
-    CatalogosWidget = None
-
-try:
-    from ui.widgets.configuracion_widget import ConfiguracionWidget
-except Exception as _e_cfg:
-    logger.debug("ConfiguracionWidget precarga: %s", _e_cfg)
-    ConfiguracionWidget = None
+BatchGeneratorWidget = None
+OSFormWidget = None
+LPFormWidget = None
+LVFormWidget = None
+RecepcionWidget = None
+ScannerWidget = None
+CatalogosWidget = None
+ConfiguracionWidget = None
 
 
 # ─── Definición del menú corporativo (iconos vectoriales QPainter, sin emojis) ─
@@ -759,6 +721,8 @@ class MainWindow(QMainWindow):
 
         # Indicador de rol discreto
         self._header_role_chip = QLabel("")
+        self._header_role_chip.setFixedHeight(30)
+        self._header_role_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._header_role_chip.setStyleSheet("""
             background-color: #F8FAFC;
             color: #6B7280;
@@ -766,11 +730,11 @@ class MainWindow(QMainWindow):
             font-size: 10.5px;
             font-weight: 700;
             border-radius: 6px;
-            padding: 4px 9px;
+            padding: 0 12px;
             letter-spacing: 0.5px;
         """)
         self._header_role_chip.setVisible(False)
-        lay.addWidget(self._header_role_chip)
+        lay.addWidget(self._header_role_chip, 0, Qt.AlignmentFlag.AlignVCenter)
 
         # Botón primario global [+ Nuevo Documento] (visible para admin/logística fuera de Generar Formatos)
         self._btn_header_nuevo = QPushButton("+ Nuevo Documento")
@@ -791,7 +755,7 @@ class MainWindow(QMainWindow):
         """)
         self._btn_header_nuevo.clicked.connect(lambda: self.ir_a_generar_formato("OS"))
         self._btn_header_nuevo.setVisible(False)
-        lay.addWidget(self._btn_header_nuevo)
+        lay.addWidget(self._btn_header_nuevo, 0, Qt.AlignmentFlag.AlignVCenter)
 
         return header
 

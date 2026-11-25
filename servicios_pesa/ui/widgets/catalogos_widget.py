@@ -345,7 +345,12 @@ class _EditDialog(QDialog):
 
 # ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 def _broadcast_catalogs_update() -> None:
-    """Refresca todos los widgets con _load_catalogs o _load_catalogos en la aplicación."""
+    """Invalida el caché TTL y refresca todos los widgets con _load_catalogs en la aplicación."""
+    try:
+        from services.catalog_cache import catalog_cache
+        catalog_cache.invalidate(refresh=True)
+    except Exception:
+        pass
     for widget in QApplication.topLevelWidgets():
         for fn_name in ("_load_catalogs", "_load_catalogos", "load_catalogo_tipos_instrumento"):
             if hasattr(widget, fn_name) and callable(getattr(widget, fn_name)):
@@ -547,14 +552,14 @@ class _FusionClientesDialog(QDialog):
         )
         lbl_inst.setWordWrap(True)
         lbl_inst.setStyleSheet(
-            "background:#EBF8FF; color:#1A5276; border:1px solid #AED6F1;"
-            " border-radius:6px; padding:10px; font-size:12px;"
+            "background:#F8FAFC; color:#111827; border:1px solid #CBD5E1;"
+            " border-radius:8px; padding:10px; font-size:12px;"
         )
         root.addWidget(lbl_inst)
 
         # Búsqueda rápida
         self._inp_search = QLineEdit()
-        self._inp_search.setPlaceholderText("🔍  Filtrar lista por nombre...")
+        self._inp_search.setPlaceholderText("Filtrar lista por nombre...")
         self._inp_search.setClearButtonEnabled(True)
         self._inp_search.textChanged.connect(self._filter_list)
         root.addWidget(self._inp_search)
@@ -1894,19 +1899,19 @@ class CatalogosWidget(QWidget):
 
     def _setup_ui(self) -> None:
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 16)
+        root.setContentsMargins(20, 16, 20, 24)
         root.setSpacing(12)
 
-        title = QLabel("\U0001f5c2\ufe0f  Administraci\u00f3n de Cat\u00e1logos")
-        title.setStyleSheet("font-size:18px; font-weight:800; color:#1D1D1F;")
+        title = QLabel("Administración de Catálogos")
+        title.setStyleSheet("font-size:18px; font-weight:700; color:#111827;")
         root.addWidget(title)
 
         note = QLabel(
-            "\u26a0\ufe0f  Acceso restringido \u2014 Los cambios aqu\u00ed afectan todas las \u00d3rdenes de Servicio"
+            "Acceso restringido — Los cambios aquí afectan todas las Órdenes de Servicio"
         )
         note.setStyleSheet(
-            "background:#FFF6E5; color:#FF9F0A; border:1px solid #9E6A03;"
-            " border-radius:6px; padding:8px 12px; font-size:12px;"
+            "background:#F8FAFC; color:#111827; border:1px solid #CBD5E1;"
+            " border-radius:8px; padding:8px 12px; font-size:12px;"
         )
         root.addWidget(note)
 

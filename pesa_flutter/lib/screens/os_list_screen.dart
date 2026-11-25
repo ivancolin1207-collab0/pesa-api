@@ -203,6 +203,7 @@ class _OsListScreenState extends State<OsListScreen> {
   List<String> _listaTiposServicio = ['Todos los Servicios'];
   String  _query     = '';
   final   _searchCtrl = TextEditingController();
+  Timer?  _searchDebounceTimer;
 
   // ── Vista: Mis Órdenes vs Repositorio de Calibraciones (solo supervisión) ──
   bool _vistaRepositorio = false;
@@ -490,9 +491,19 @@ class _OsListScreenState extends State<OsListScreen> {
 
   @override
   void dispose() {
+    _searchDebounceTimer?.cancel();
     context.read<SyncService>().removeListener(_onSyncChanged);
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _onSearchQueryChanged(String value) {
+    _searchDebounceTimer?.cancel();
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 250), () {
+      if (!mounted) return;
+      setState(() => _query = value);
+      _applyFilters();
+    });
   }
 
   void _onSyncChanged() {
@@ -2774,8 +2785,8 @@ class _MobilePhoneDashboard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                SizedBox(
-                  height: 48,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 44),
                   child: TextField(
                     controller: state._searchCtrl,
                     style: const TextStyle(fontSize: 13.5, color: _kTextPrim),
@@ -2787,32 +2798,31 @@ class _MobilePhoneDashboard extends StatelessWidget {
                           ? IconButton(
                               icon: const Icon(Icons.close_rounded, size: 18, color: _kTextSec),
                               onPressed: () {
+                                state._searchDebounceTimer?.cancel();
                                 state._searchCtrl.clear();
                                 state.setState(() => state._query = '');
                                 state._applyFilters();
                               },
                             )
                           : null,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       filled: true,
                       fillColor: Colors.white,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: const BorderSide(color: PesaColors.borderStrong),
                       ),
                       enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: const BorderSide(color: PesaColors.borderStrong),
                       ),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: const BorderSide(color: _kCarmineRed, width: 1.5),
                       ),
                     ),
-                    onChanged: (v) {
-                      state.setState(() => state._query = v);
-                      state._applyFilters();
-                    },
+                    onChanged: state._onSearchQueryChanged,
                   ),
                 ),
               ],
@@ -3720,8 +3730,8 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
             ),
             child: Column(
               children: [
-                SizedBox(
-                  height: 44,
+                ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 42),
                   child: TextField(
                     controller: state._searchCtrl,
                     style: const TextStyle(fontSize: 13, color: _kTextPrim),
@@ -3733,32 +3743,31 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                           ? IconButton(
                               icon: const Icon(Icons.close_rounded, size: 17, color: _kTextSec),
                               onPressed: () {
+                                state._searchDebounceTimer?.cancel();
                                 state._searchCtrl.clear();
                                 state.setState(() => state._query = '');
                                 state._applyFilters();
                               },
                             )
                           : null,
-                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       filled: true,
                       fillColor: PesaColors.surfaceMuted,
                       border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(9),
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: const BorderSide(color: _kBorder),
                       ),
                       enabledBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(9),
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: const BorderSide(color: _kBorder),
                       ),
                       focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(9),
+                        borderRadius: BorderRadius.circular(8),
                         borderSide: const BorderSide(color: _kCarmineRed, width: 1.5),
                       ),
                     ),
-                    onChanged: (v) {
-                      state.setState(() => state._query = v);
-                      state._applyFilters();
-                    },
+                    onChanged: state._onSearchQueryChanged,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -4842,8 +4851,8 @@ class _TabletDesktopDashboard extends StatelessWidget {
           onEstado:       (v) { state.setState(() => state._estado = v); state._applyFilters(); },
           onTipoServicio: (v) { state.setState(() => state._filtroTipoServicio = v); state._applyFilters(); },
           onEmpresa:      (v) { state.setState(() => state._filtroEmpresa = v); state._applyFilters(); },
-          onSearch:       (v) { state.setState(() => state._query = v); state._applyFilters(); },
-          onClear:        ()  { state._searchCtrl.clear(); state.setState(() => state._query = ''); state._applyFilters(); },
+          onSearch:       state._onSearchQueryChanged,
+          onClear:        ()  { state._searchDebounceTimer?.cancel(); state._searchCtrl.clear(); state.setState(() => state._query = ''); state._applyFilters(); },
         ),
         // Table Header & Rows con Scroll Horizontal y Ancho Mínimo Garantizado
         Expanded(
@@ -5337,7 +5346,6 @@ class _FilterBar extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           SizedBox(
-            height: 36,
             child: TextField(
               controller: searchCtrl,
               style: const TextStyle(fontSize: 13),
@@ -5349,7 +5357,7 @@ class _FilterBar extends StatelessWidget {
                     ? IconButton(icon: const Icon(Icons.close, size: 14), onPressed: onClear)
                     : null,
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(vertical: 6),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: _kBorder),

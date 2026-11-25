@@ -1,4 +1,5 @@
 // lib/screens/buscar_historial_screen.dart — Buscador e Historial Dinámico (Adaptativo Galaxy Z Fold8 Ultra)
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -28,6 +29,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
   static const _bg = PesaColors.canvas;
 
   final _searchCtrl = TextEditingController();
+  Timer? _searchDebounce;
   String _query = '';
   String _filtroFormato = 'TODOS';
   List<Map<String, dynamic>> _all = [];
@@ -42,8 +44,16 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  void _onSearchChanged(String v) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) setState(() => _query = v);
+    });
   }
 
   String _rowKey(Map<String, dynamic> os) =>
@@ -200,8 +210,8 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
             ),
           ]),
           const SizedBox(height: 10),
-          SizedBox(
-            height: 46,
+          ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 44),
             child: TextField(
               controller: _searchCtrl,
               decoration: InputDecoration(
@@ -211,28 +221,30 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                     ? IconButton(
                         icon: const Icon(Icons.clear, size: 17, color: PesaColors.textSecondary),
                         onPressed: () {
+                          _searchDebounce?.cancel();
                           _searchCtrl.clear();
                           setState(() => _query = '');
                         },
                       )
                     : null,
-                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                 filled: true,
                 fillColor: PesaColors.surfaceMuted,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: PesaColors.border),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: PesaColors.border),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(10),
+                  borderRadius: BorderRadius.circular(8),
                   borderSide: const BorderSide(color: _red, width: 1.5),
                 ),
               ),
-              onChanged: (v) => setState(() => _query = v),
+              onChanged: _onSearchChanged,
             ),
           ),
           const SizedBox(height: 8),
