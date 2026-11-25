@@ -301,6 +301,24 @@ def extraer_cca_dve(orden: dict) -> tuple[str, str]:
         if div_ver and div_ver.upper().startswith("DVE") and not _es_placeholder_regulatorio(div_ver):
             dve = div_ver
 
+    # Respetar regla estricta si tipo_servicio viene explícito sin calibración / inspección
+    ts_raw = str(fuente.get("tipo_servicio_nombre") or fuente.get("tipo_servicio") or "").strip()
+    if ts_raw:
+        import unicodedata as _ud_e
+        ts_norm = "".join(
+            ch for ch in _ud_e.normalize("NFKD", ts_raw.lower()) if not _ud_e.combining(ch)
+        )
+        tiene_calib = "calibraci" in ts_norm or bool(re.search(r"\bcca\b", ts_norm))
+        tiene_insp = (
+            "inspecc" in ts_norm
+            or "verifica" in ts_norm
+            or bool(re.search(r"\bdve\b", ts_norm))
+        )
+        if not tiene_calib:
+            cca = ""
+        if not tiene_insp:
+            dve = ""
+
     return cca, dve
 
 

@@ -1293,6 +1293,108 @@ class _OsListScreenState extends State<OsListScreen> {
     }
   }
 
+  Future<void> _mostrarDialogoReasignarOrden(BuildContext context, Map<String, dynamic> os) async {
+    final folio = ((os['folio_os'] ?? os['folio']) as String? ?? '').trim();
+    if (folio.isEmpty) return;
+    final tecnicos = await LocalDbService.instance.getCatalogoTecnicos();
+    if (!context.mounted) return;
+    if (tecnicos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sincroniza catálogos para ver la lista de técnicos.')),
+      );
+      return;
+    }
+
+    int? tecSel = int.tryParse('${os['id_tecnico'] ?? ''}');
+    if (tecSel == null || !tecnicos.any((t) => int.tryParse('${t['id']}') == tecSel)) {
+      tecSel = int.tryParse('${tecnicos.first['id']}');
+    }
+    String modSel = (os['modalidad'] ?? 'Digital').toString().trim();
+    if (modSel.toUpperCase().contains('FISIC')) {
+      modSel = 'Físico';
+    } else if (modSel.toUpperCase().contains('HIBRID')) {
+      modSel = 'Híbrido';
+    } else {
+      modSel = 'Digital';
+    }
+    bool saving = false;
+
+    final updated = await showDialog<bool>(
+      context: context,
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (ctx, setDlg) => AlertDialog(
+          backgroundColor: PesaColors.surface,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: PesaColors.border),
+          ),
+          title: Text('Reasignar $folio', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<int>(
+                value: tecSel,
+                decoration: const InputDecoration(labelText: 'Técnico Asignado'),
+                items: tecnicos.map((t) {
+                  final id = int.tryParse('${t['id']}') ?? 0;
+                  final nom = (t['nombre'] ?? t['nombre_completo'] ?? 'Técnico').toString();
+                  return DropdownMenuItem<int>(value: id, child: Text(nom));
+                }).toList(),
+                onChanged: (v) => setDlg(() => tecSel = v),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: modSel,
+                decoration: const InputDecoration(labelText: 'Modalidad'),
+                items: const ['Digital', 'Físico', 'Híbrido']
+                    .map((m) => DropdownMenuItem<String>(value: m, child: Text(m)))
+                    .toList(),
+                onChanged: (v) {
+                  if (v != null) setDlg(() => modSel = v);
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: saving || tecSel == null
+                  ? null
+                  : () async {
+                      setDlg(() => saving = true);
+                      try {
+                        await ApiService.instance.asignarOrdenAdmin(
+                          folio,
+                          idTecnico: tecSel!,
+                          modalidad: modSel,
+                        );
+                        if (context.mounted) Navigator.of(dlgCtx).pop(true);
+                      } catch (e) {
+                        setDlg(() => saving = false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(backgroundColor: _kCarmineRed, content: Text('Error al reasignar: $e')),
+                          );
+                        }
+                      }
+                    },
+              child: Text(saving ? 'Guardando...' : 'Reasignar Orden'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (updated == true && context.mounted) {
+      await _sincronizarOrdenesServidor();
+      await _loadLocal();
+    }
+  }
+
   Future<void> _subirPdfManual(BuildContext context, Map<String, dynamic> os) async {
     final folio = ((os['folio_os'] ?? os['folio']) as String? ?? '').trim();
     if (folio.isEmpty) return;
@@ -4562,6 +4664,11 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                           onPressed: () => state._mostrarDialogoRehacerToma(context, os),
                           icon: const Icon(Icons.refresh_rounded, size: 17),
                           label: const Text('Rehacer'),
+                        ),
+                        OutlinedButton.icon(
+                          onPressed: () => state._mostrarDialogoReasignarOrden(context, os),
+                          icon: const Icon(Icons.swap_horiz_rounded, size: 17),
+                          label: const Text('Reasignar'),
                         ),
                         OutlinedButton.icon(
                           onPressed: () => state._subirPdfManual(context, os),

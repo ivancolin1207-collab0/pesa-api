@@ -351,10 +351,14 @@ class EquipoSearchWidget(QWidget):
 
         self.chip.setObjectName("equipo_chip")
         self.chip.setStyleSheet("""
-            QFrame {
-                background: #F0FDF4;
-                border: 1.5px solid #86EFAC;
+            QFrame#equipo_chip {
+                background: #F8FAFC;
+                border: 1px solid #CBD5E1;
                 border-radius: 8px;
+            }
+            QFrame#equipo_chip QLabel {
+                border: none;
+                background: transparent;
             }
         """)
         self.chip.setVisible(True)
@@ -372,11 +376,16 @@ class EquipoSearchWidget(QWidget):
         self.lbl_chip_text.setText(
             f"ID \"{id_eq}\" no encontrado — se creará al guardar esta OS"
         )
+        self.chip.setObjectName("equipo_chip")
         self.chip.setStyleSheet("""
-            QFrame {
-                background: #FFF7ED;
-                border: 1.5px solid #FCD34D;
+            QFrame#equipo_chip {
+                background: #F8FAFC;
+                border: 1px solid #CBD5E1;
                 border-radius: 8px;
+            }
+            QFrame#equipo_chip QLabel {
+                border: none;
+                background: transparent;
             }
         """)
         self.chip.setVisible(True)

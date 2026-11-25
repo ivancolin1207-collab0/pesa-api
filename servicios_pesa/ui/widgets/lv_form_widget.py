@@ -113,13 +113,15 @@ class BasculaCard(QFrame):
         self._build()
 
     def _build(self) -> None:
-        self.setObjectName(f"bascula_card_{self._index}")
-        self.setStyleSheet("""
-            QFrame {
+        card_id = f"bascula_card_{self._index}"
+        self.setObjectName(card_id)
+        self.setStyleSheet(f"""
+            QFrame#{card_id} {{
                 background: #FFFFFF;
-                border: 1px solid rgba(0,0,0,0.08);
+                border: 1px solid #E5E7EB;
                 border-radius: 12px;
-            }
+            }}
+            QFrame#{card_id} QLabel {{ border: none; background: transparent; }}
         """)
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 12, 16, 14)

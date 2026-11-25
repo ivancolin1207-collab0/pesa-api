@@ -21,11 +21,20 @@ class UsuarioActual {
     required this.username,
   });
 
-  bool get isAdmin {
+  static bool esRolAdmin(String? rol, [String? username]) {
+    final u = (username ?? '').toLowerCase().trim();
+    if (u == 'ivancolin1207') return true;
     final r = AuthService.normalizeRole(rol);
-    final u = username.toLowerCase().trim();
-    return r == 'administrador' || r == 'admin' || u == 'ivancolin1207';
+    return r == 'administrador' ||
+        r == 'admin' ||
+        r == 'superadmin' ||
+        r == 'jefe' ||
+        r == 'gerente' ||
+        r == 'gerencia' ||
+        r == 'direccion';
   }
+
+  bool get isAdmin => esRolAdmin(rol, username);
 
   bool get isTecnico {
     if (isAdmin) return false;
@@ -89,19 +98,20 @@ class AuthService extends ChangeNotifier {
         .replaceAll('í', 'i')
         .replaceAll('ó', 'o')
         .replaceAll('ú', 'u');
+    if (r.contains('admin') || r == 'jefe' || r == 'gerente' || r == 'gerencia' || r == 'direccion') {
+      return 'administrador';
+    }
     if (r.contains('tec')) return 'tecnico';
-    if (r.contains('admin')) return 'administrador';
     if (r.contains('recep')) return 'recepcion';
     if (r.contains('logist')) return 'logistica';
     return r;
   }
 
   /// Indica si el usuario es administrador
-  bool get isAdmin {
-    final r = normalizeRole(_role ?? usuarioActual?.rol);
-    final u = (_username ?? usuarioActual?.username ?? '').toLowerCase().trim();
-    return r == 'administrador' || r == 'admin' || u == 'ivancolin1207';
-  }
+  bool get isAdmin => UsuarioActual.esRolAdmin(
+        _role ?? usuarioActual?.rol,
+        _username ?? usuarioActual?.username,
+      );
 
   /// Indica si el usuario es técnico de campo
   bool get isTecnico {

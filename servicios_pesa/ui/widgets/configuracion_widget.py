@@ -63,11 +63,16 @@ _AMBER = "#FF9F0A"
 # ══════════════════════════════════════════════════════════════════════════════
 def _section_card() -> tuple[QFrame, QVBoxLayout]:
     card = QFrame()
+    card.setObjectName("cfg_section_card")
     card.setStyleSheet("""
-        QFrame {
+        QFrame#cfg_section_card {
             background: #FFFFFF;
-            border: 1px solid rgba(0,0,0,0.07);
-            border-radius: 14px;
+            border: 1px solid #E5E7EB;
+            border-radius: 12px;
+        }
+        QFrame#cfg_section_card QLabel {
+            border: none;
+            background: transparent;
         }
     """)
     lay = QVBoxLayout(card)
@@ -257,11 +262,16 @@ class ConfiguracionWidget(QWidget):
         Solo visible para usuarios con rol 'admin'.
         """
         card = QFrame()
+        card.setObjectName("cfg_admin_zone")
         card.setStyleSheet("""
-            QFrame {
+            QFrame#cfg_admin_zone {
                 background: #FFFFFF;
                 border: 1.5px solid #C8102E;
                 border-radius: 12px;
+            }
+            QFrame#cfg_admin_zone QLabel {
+                border: none;
+                background: transparent;
             }
         """)
         lay = QVBoxLayout(card)

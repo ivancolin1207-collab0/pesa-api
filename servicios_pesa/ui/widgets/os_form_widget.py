@@ -973,30 +973,34 @@ class OSFormWidget(QWidget):
 
     def _on_tipo_servicio_changed(self, _index: int) -> None:
         """
-        Actualiza la visibilidad de los campos CCA / Holograma Anterior /
+        Actualiza la visibilidad y limpieza de CCA / Holograma Anterior /
         Holograma Actualizado según el tipo de servicio seleccionado.
-        Implementa la matriz de reglas de negocios de tipo_servicio_rules.
         """
         try:
-            from services.tipo_servicio_rules import get_rules
+            from services.tipo_servicio_rules import get_rules_by_nombre_o_id
             id_tipo = self._combo_tipo_servicio.currentData()
-            rules = get_rules(id_tipo)
+            nombre_tipo = self._combo_tipo_servicio.currentText()
+            rules = get_rules_by_nombre_o_id(nombre=nombre_tipo, id_tipo=id_tipo)
         except Exception:
-            # Si no se pueden obtener las reglas, mostrar todo
             return
 
-        # Mostrar/ocultar campos según las reglas
+        # Mostrar/ocultar campos según las reglas y limpiar los ocultos
         self._wgt_cca.setVisible(rules.pide_cca)
         self._wgt_holo_ant.setVisible(rules.pide_holograma_anterior)
         self._wgt_holo_act.setVisible(rules.pide_holograma_actualizado)
 
-        # Si el tipo requiere CCA, agregar indicador visual (tooltip EMA)
         if rules.pide_cca:
             self._txt_numero_cca.setToolTip(
                 "Solo técnicos con acreditación EMA pueden ser signatarios del CCA."
             )
         else:
+            self._txt_numero_cca.clear()
             self._txt_numero_cca.setToolTip("")
+
+        if not rules.pide_holograma_anterior:
+            self._txt_holograma_anterior.clear()
+        if not rules.pide_holograma_actualizado:
+            self._txt_holograma_actualizado.clear()
 
     def _save(self) -> None:
         """Valida y guarda la OS en la base de datos."""
@@ -1017,6 +1021,11 @@ class OSFormWidget(QWidget):
         pruebas = self._pruebas_widget.get_all_data()
         fecha_qdate = self._date_edit.date()
 
+        from services.tipo_servicio_rules import get_rules_by_nombre_o_id
+        _reglas_srv = get_rules_by_nombre_o_id(
+            nombre=self._combo_tipo_servicio.currentText(),
+            id_tipo=self._combo_tipo_servicio.currentData(),
+        )
         data = {
             "fecha": date(fecha_qdate.year(), fecha_qdate.month(), fecha_qdate.day()),
             "id_tipo_servicio":    self._combo_tipo_servicio.currentData(),
@@ -1031,11 +1040,11 @@ class OSFormWidget(QWidget):
             "ubicacion":           self._txt_ubicacion.text().strip() or None,
             "alcance_max":         self._spin_alcance_max.value() or None,
             "div_minima":          self._spin_div_minima.value() or None,
-            "div_verificacion":    self._spin_div_verificacion.value() or None,
+            "div_verificacion":    (self._spin_div_verificacion.value() or None) if _reglas_srv.pide_dve else None,
             "id_equipo":           self._txt_id_equipo.lineEdit().text().strip() or None,
-            "numero_cca":          self._txt_numero_cca.text().strip() or None,
-            "holograma_anterior":  self._txt_holograma_anterior.text().strip() or None,
-            "holograma_actualizado": self._txt_holograma_actualizado.text().strip() or None,
+            "numero_cca":          (self._txt_numero_cca.text().strip() or None) if _reglas_srv.pide_cca else None,
+            "holograma_anterior":  (self._txt_holograma_anterior.text().strip() or None) if _reglas_srv.pide_holograma_anterior else None,
+            "holograma_actualizado": (self._txt_holograma_actualizado.text().strip() or None) if _reglas_srv.pide_holograma_actualizado else None,
             "observaciones":       self._txt_observaciones.toPlainText().strip() or None,
             "firma_cliente_nombre": self._txt_firma_cliente.text().strip() or None,
             "valor_repetibilidad":  pruebas.get("valor_repetibilidad"),

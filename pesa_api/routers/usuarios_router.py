@@ -28,7 +28,9 @@ def _verificar_propietario(current_user: dict, id_tecnico: int) -> None:
 
 
 class FirmaPayload(BaseModel):
-    firma_digital: str   # Base64 PNG del trazo del técnico
+    firma_digital: Optional[str] = None   # Base64 PNG del trazo del técnico
+    firma_base64:  Optional[str] = None   # Alias de compatibilidad
+    firma:         Optional[str] = None   # Alias de compatibilidad
 
 
 class FirmaStatus(BaseModel):
@@ -42,6 +44,11 @@ class FirmaStatus(BaseModel):
     summary="Guardar firma digital de perfil del técnico",
     response_model=FirmaStatus,
 )
+@router.post(
+    "/{id_tecnico}/firma",
+    summary="Guardar firma digital de perfil del técnico (alias POST)",
+    response_model=FirmaStatus,
+)
 async def guardar_firma_tecnico(
     id_tecnico: int,
     payload: FirmaPayload,
@@ -53,11 +60,18 @@ async def guardar_firma_tecnico(
     La firma se reutiliza en todos los PDFs que genere el técnico.
     """
     _verificar_propietario(current_user, id_tecnico)
-    firma_b64 = (payload.firma_digital or "").strip()
-    if not firma_b64:
+    firma_b64 = (
+        payload.firma_digital
+        or payload.firma_base64
+        or payload.firma
+        or ""
+    ).strip()
+    if firma_b64.startswith("data:image") and "base64," in firma_b64:
+        firma_b64 = firma_b64.split("base64,", 1)[-1].strip()
+    if not firma_b64 or len(firma_b64) < 32:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="firma_digital no puede estar vacía.",
+            detail="La firma digital no puede estar vacía o ser inválida.",
         )
 
     try:

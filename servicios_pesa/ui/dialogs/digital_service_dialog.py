@@ -167,6 +167,18 @@ class DrawingCanvas(QWidget):
         y_base = int(round(self.height() * 0.75))
         painter.drawLine(20, int(y_base), int(self.width() - 20), int(y_base))
 
+        if getattr(self, "_preloaded_pixmap", None) is not None and not self._preloaded_pixmap.isNull():
+            scaled = self._preloaded_pixmap.scaled(
+                max(10, self.width() - 24),
+                max(10, self.height() - 24),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x0 = int(round((self.width() - scaled.width()) / 2))
+            y0 = int(round((self.height() - scaled.height()) / 2))
+            painter.drawPixmap(x0, y0, scaled)
+            return
+
         # Ícono de firma (si está vacío)
         if not self._strokes and not self._current_stroke:
             painter.setPen(QColor("#C7C7CC"))
@@ -204,23 +216,53 @@ class DrawingCanvas(QWidget):
         painter.drawPath(path)
 
     # ── API pública ────────────────────────────────────────────────────────────
+    def set_base64_image(self, b64_data: str) -> bool:
+        import base64
+        clean = str(b64_data or "").strip()
+        if clean.startswith("data:image") and "base64," in clean:
+            clean = clean.split("base64,", 1)[-1].strip()
+        if not clean:
+            return False
+        try:
+            raw = base64.b64decode(clean)
+            pix = QPixmap()
+            if pix.loadFromData(raw) and not pix.isNull():
+                self._strokes.clear()
+                self._current_stroke.clear()
+                self._preloaded_pixmap = pix
+                self.update()
+                self.signature_changed.emit()
+                return True
+        except Exception:
+            pass
+        return False
+
     def clear(self) -> None:
         """Borra todos los trazos de la firma."""
         self._strokes.clear()
         self._current_stroke.clear()
+        self._preloaded_pixmap = None
         self._drawing = False
         self.update()
         self.signature_changed.emit()
 
     def is_empty(self) -> bool:
         """Retorna True si no hay ningún trazo."""
+        if getattr(self, "_preloaded_pixmap", None) is not None and not self._preloaded_pixmap.isNull():
+            return False
         return len(self._strokes) == 0
 
-    def to_pixmap(self, width: int = 400, height: int = 160) -> QPixmap:
+    def to_pixmap(self, width: int = 480, height: int = 180) -> QPixmap:
         """
         Renderiza la firma en un QPixmap de tamaño fijo (para incrustar en PDF).
         Fondo blanco transparente, trazos negros.
         """
+        if getattr(self, "_preloaded_pixmap", None) is not None and not self._strokes:
+            return self._preloaded_pixmap.scaled(
+                width, height,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
         pix = QPixmap(width, height)
         pix.fill(Qt.GlobalColor.white)
         if self.is_empty():
@@ -247,12 +289,20 @@ class DrawingCanvas(QWidget):
     def to_base64_png(self) -> str:
         """Retorna la firma como PNG en Base64 (para almacenar en BD)."""
         import base64
+        from PyQt6.QtCore import QBuffer, QByteArray, QIODevice
+        if getattr(self, "_preloaded_pixmap", None) is not None and not self._strokes:
+            buf = QBuffer()
+            buf.open(QIODevice.OpenModeFlag.WriteOnly)
+            self._preloaded_pixmap.toImage().save(buf, "PNG")
+            return base64.b64encode(buf.data().data()).decode("utf-8")
+        if self.is_empty():
+            return ""
         pix = self.to_pixmap()
         img = pix.toImage()
-        from PyQt6.QtCore import QBuffer, QByteArray, QIODevice
         buf = QBuffer()
         buf.open(QIODevice.OpenModeFlag.WriteOnly)
         img.save(buf, "PNG")
+        return base64.b64encode(buf.data().data()).decode("utf-8")
         return base64.b64encode(buf.data().data()).decode("utf-8")
 
 
@@ -281,12 +331,14 @@ class MetrologicalTable(QFrame):
         self._build()
 
     def _build(self) -> None:
+        self.setObjectName("ds_metro_table")
         self.setStyleSheet(f"""
-            QFrame {{
+            QFrame#ds_metro_table {{
                 background: {_WHITE};
-                border: 1px solid rgba(0,0,0,0.07);
+                border: 1px solid #E5E7EB;
                 border-radius: 12px;
             }}
+            QFrame#ds_metro_table QLabel {{ border: none; background: transparent; }}
         """)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -1248,12 +1300,14 @@ class DigitalServiceDialog(QDialog):
     @staticmethod
     def _make_card() -> QFrame:
         card = QFrame()
+        card.setObjectName("ds_section_card")
         card.setStyleSheet(f"""
-            QFrame {{
+            QFrame#ds_section_card {{
                 background: {_WHITE};
-                border: 1px solid rgba(0,0,0,0.07);
-                border-radius: 14px;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
             }}
+            QFrame#ds_section_card QLabel {{ border: none; background: transparent; }}
         """)
         return card
 
@@ -1299,6 +1353,32 @@ class DigitalServiceDialog(QDialog):
         if obs:
             self._txt_observaciones.setText(str(obs))
 
+        # Precargar firma del técnico desde orden o perfil (cat_tecnicos.firma_digital)
+        sig_b64 = str(d.get("firma_tecnico") or d.get("firma_tecnico_b64") or "").strip()
+        if (not sig_b64 or len(sig_b64) < 32) and _HAS_DB:
+            uid = d.get("id_tecnico")
+            if not uid:
+                try:
+                    from auth.session_context import session as _sess_ds
+                    uid = _sess_ds.id_tecnico or _sess_ds.user_id
+                except Exception:
+                    uid = None
+            if uid:
+                try:
+                    with _db_pool.get_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT firma_digital FROM cat_tecnicos WHERE id = %s",
+                                (int(uid),),
+                            )
+                            row = cur.fetchone()
+                            if row and row[0]:
+                                sig_b64 = str(row[0]).strip()
+                except Exception:
+                    pass
+        if sig_b64 and len(sig_b64) >= 32 and hasattr(self, "_canvas_tecnico"):
+            self._canvas_tecnico.set_base64_image(sig_b64)
+
         # ── Aplicar reglas metrológicas condicionales (Regla 6 / Tablet) ──────
         # Se ejecutan después de poblar el encabezado para que los widgets
         # de pruebas ya estén construidos y disponibles.
@@ -1317,16 +1397,15 @@ class DigitalServiceDialog(QDialog):
 
         # ── R1: CCA e Inicial condicional ─────────────────────────────────────
         try:
-            from services.tipo_servicio_rules import pide_cca
+            from services.tipo_servicio_rules import get_rules_by_nombre_o_id
             id_ts = d.get("id_tipo_servicio")
             nombre_ts = str(d.get("tipo_servicio_nombre") or d.get("tipo_servicio") or "")
-            if id_ts is not None:
-                _requiere_cca = pide_cca(int(id_ts))
-            else:
-                _norm = nombre_ts.lower()
-                for ch, rep in [("á","a"),("é","e"),("í","i"),("ó","o"),("ú","u")]:
-                    _norm = _norm.replace(ch, rep)
-                _requiere_cca = "calibraci" in _norm
+            _rules_r1 = get_rules_by_nombre_o_id(
+                nombre=nombre_ts,
+                id_tipo=int(id_ts) if id_ts is not None else None,
+                folio=str(getattr(self, "_folio_os", "") or ""),
+            )
+            _requiere_cca = _rules_r1.pide_cca
             logger.debug("[TABLET R1] tipo_servicio=%r id=%s → requiere_cca=%s",
                          nombre_ts, id_ts, _requiere_cca)
             # Si el widget de Exactitud expone set_cca_visible, usarlo

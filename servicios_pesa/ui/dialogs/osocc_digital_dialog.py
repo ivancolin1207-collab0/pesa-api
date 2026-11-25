@@ -155,7 +155,8 @@ class OsoccDigitalDialog(QDialog):
 
         # Header oscuro institucional
         hdr = QFrame()
-        hdr.setStyleSheet("QFrame { background: #1C1C1E; padding: 12px 18px; }")
+        hdr.setObjectName("osocc_hdr")
+        hdr.setStyleSheet("QFrame#osocc_hdr { background: #111827; padding: 12px 18px; } QFrame#osocc_hdr QLabel { border: none; background: transparent; }")
         hl = QHBoxLayout(hdr)
         lbl_title = QLabel(
             f"<span style='color:#FFFFFF; font-size:13pt; font-weight:800;'>"
@@ -364,15 +365,16 @@ class OsoccDigitalDialog(QDialog):
 
         # Barra inferior
         ftr = QFrame()
-        ftr.setStyleSheet("QFrame { background: #FFFFFF; border-top: 1px solid #D1D5DB; padding: 10px 18px; }")
+        ftr.setObjectName("osocc_ftr")
+        ftr.setStyleSheet("QFrame#osocc_ftr { background: #FFFFFF; border-top: 1px solid #E5E7EB; padding: 10px 18px; } QFrame#osocc_ftr QLabel { border: none; background: transparent; }")
         fl = QHBoxLayout(ftr)
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.clicked.connect(self.reject)
         btn_save = QPushButton("Finalizar y Generar PDF Oficial (OSOCC)")
         btn_save.setStyleSheet(
-            "QPushButton { background: #0284C7; color: white; font-weight: 800; "
-            "padding: 10px 24px; border-radius: 7px; font-size: 10.5pt; }"
-            "QPushButton:hover { background: #0369A1; }"
+            "QPushButton { background: #C8102E; color: white; font-weight: 700; "
+            "padding: 10px 24px; border-radius: 8px; font-size: 13px; border: none; }"
+            "QPushButton:hover { background: #A60D26; }"
         )
         btn_save.clicked.connect(self._on_guardar)
         fl.addStretch(1)

@@ -71,52 +71,48 @@ class ServiceRules:
         """True si el servicio requiere un técnico con acreditación EMA para el CCA."""
         return self.pide_cca
 
+    @property
+    def pide_dve(self) -> bool:
+        """True si el servicio requiere Número DVE / División de Verificación."""
+        return self.pide_holograma_anterior
 
-# ── Tabla de reglas por ID de tipo de servicio ────────────────────────────────
-# Los IDs 1-4 corresponden a cat_tipo_servicio en PostgreSQL y al fallback del UI:
-#   1 = Ajuste
-#   2 = Ajuste e Inspección
-#   3 = Ajuste y Calibración
-#   4 = Ajuste, Calibración e Inspección
-#
-#  Matriz de campos:
-#   ID | Nombre                             | CCA | Holo Ant. | Holo Act.
-#   ---|------------------------------------|-----|-----------|----------
-#    1 | Ajuste                             |  ❌ |     ❌    |     ❌
-#    2 | Ajuste e Inspección                |  ❌ |     ✅    |     ✅
-#    3 | Ajuste y Calibración               |  ✅ |     ❌    |     ❌
-#    4 | Ajuste, Calibración e Inspección   |  ✅ |     ✅    |     ✅
+    @property
+    def pide_inicial_jia(self) -> bool:
+        """True si requiere Inicial J/I/A del calibrador."""
+        return self.pide_cca
+
+
+# ── Tabla de reglas por ID de tipo de servicio (PostgreSQL cat_tipo_servicio) ─
+# Priorizamos el nombre normalizado mediante get_rules_by_nombre_o_id().
 _RULES: dict[int, ServiceRules] = {
-    # ── IDs canónicos del negocio (usados por el batch_generator y BD) ──
     1: ServiceRules(
         tipo_servicio_id=1,
-        nombre="Ajuste",
-        pide_cca=False,
+        nombre="Calibración",
+        pide_cca=True,
         pide_holograma_anterior=False,
         pide_holograma_actualizado=False,
     ),
     2: ServiceRules(
         tipo_servicio_id=2,
-        nombre="Ajuste e Inspección",
+        nombre="Ajuste",
+        pide_cca=False,
+        pide_holograma_anterior=False,
+        pide_holograma_actualizado=False,
+    ),
+    3: ServiceRules(
+        tipo_servicio_id=3,
+        nombre="Inspección",
         pide_cca=False,
         pide_holograma_anterior=True,
         pide_holograma_actualizado=True,
     ),
-    3: ServiceRules(
-        tipo_servicio_id=3,
-        nombre="Ajuste y Calibración",
+    4: ServiceRules(
+        tipo_servicio_id=4,
+        nombre="Calibración + Ajuste",
         pide_cca=True,
         pide_holograma_anterior=False,
         pide_holograma_actualizado=False,
     ),
-    4: ServiceRules(
-        tipo_servicio_id=4,
-        nombre="Ajuste, Calibración e Inspección",
-        pide_cca=True,
-        pide_holograma_anterior=True,
-        pide_holograma_actualizado=True,
-    ),
-    # ── Aliases históricos (IDs del esquema anterior) ────────────────────
     5: ServiceRules(
         tipo_servicio_id=5,
         nombre="Calibración + Inspección",
@@ -138,15 +134,22 @@ _RULES: dict[int, ServiceRules] = {
         pide_holograma_anterior=True,
         pide_holograma_actualizado=True,
     ),
+    8: ServiceRules(
+        tipo_servicio_id=8,
+        nombre="Entrega Refacciones",
+        pide_cca=False,
+        pide_holograma_anterior=False,
+        pide_holograma_actualizado=False,
+    ),
 }
 
-# Reglas por defecto si el tipo no está registrado (más permisivo: muestra todo)
+# Reglas por defecto fail-closed: si el tipo es desconocido/Ajuste no pide CCA ni DVE/Hologramas
 _DEFAULT_RULES = ServiceRules(
     tipo_servicio_id=0,
-    nombre="(desconocido)",
-    pide_cca=True,
-    pide_holograma_anterior=True,
-    pide_holograma_actualizado=True,
+    nombre="Ajuste",
+    pide_cca=False,
+    pide_holograma_anterior=False,
+    pide_holograma_actualizado=False,
 )
 
 # IDs de tipos que incluyen componente de calibración (para filtros RBAC Calibrador)
@@ -162,31 +165,70 @@ IDS_CON_INSPECCION: frozenset[int] = frozenset(
 
 # ── API pública ───────────────────────────────────────────────────────────────
 
-def get_rules(id_tipo_servicio: Optional[int]) -> ServiceRules:
+def get_rules(id_tipo_servicio: Optional[int], nombre_tipo: Optional[str] = None,
+              folio: Optional[str] = None) -> ServiceRules:
     """
-    Retorna las reglas de negocio para el tipo de servicio indicado.
-    Si el ID no existe en el mapa (None o desconocido), retorna _DEFAULT_RULES
-    que muestra todos los campos (comportamiento más permisivo).
+    Retorna las reglas de negocio estrictas dando prioridad al nombre/folio
+    normalizado y usando id_tipo_servicio como respaldo fail-closed.
     """
+    if nombre_tipo or folio:
+        return get_rules_by_nombre_o_id(nombre=nombre_tipo, id_tipo=id_tipo_servicio, folio=folio)
     if id_tipo_servicio is None:
         return _DEFAULT_RULES
-    return _RULES.get(int(id_tipo_servicio), _DEFAULT_RULES)
+    try:
+        return _RULES.get(int(id_tipo_servicio), _DEFAULT_RULES)
+    except (TypeError, ValueError):
+        return _DEFAULT_RULES
 
 
 def get_rules_by_nombre(nombre_tipo: str) -> ServiceRules:
     """
-    Retorna las reglas buscando por el nombre del tipo de servicio.
-    Búsqueda case-insensitive. Retorna _DEFAULT_RULES si no hay coincidencia.
-
-    Ejemplo:
-        rules = get_rules_by_nombre("Ajuste + Inspección")
-        # → ServiceRules(pide_cca=False, pide_holograma_anterior=True, ...)
+    Retorna las reglas evaluando por palabras clave normalizadas (sin tildes ni mayúsculas):
+      - CCA/Calibración: 'calibraci' o word 'cca'
+      - DVE/Hologramas: 'inspecc', 'verifica' o word 'dve'
     """
-    nombre_lower = (nombre_tipo or "").strip().lower()
-    for rule in _RULES.values():
-        if rule.nombre.lower() == nombre_lower:
-            return rule
-    return _DEFAULT_RULES
+    return get_rules_by_nombre_o_id(nombre=nombre_tipo)
+
+
+def get_rules_by_nombre_o_id(
+    nombre: Optional[str] = None,
+    id_tipo: Optional[int] = None,
+    folio: Optional[str] = None,
+) -> ServiceRules:
+    """Resuelve ServiceRules unificado por folio -> nombre -> id_tipo -> fail-closed."""
+    fmt, cca, dve, _aju = _clasificar(nombre, id_tipo, folio)
+    if fmt in ("rma", "re", "osob", "osocc"):
+        return ServiceRules(
+            tipo_servicio_id=int(id_tipo or 0),
+            nombre=str(nombre or fmt.upper()),
+            pide_cca=False,
+            pide_holograma_anterior=False,
+            pide_holograma_actualizado=False,
+        )
+    if fmt == "sin":
+        if id_tipo is not None:
+            try:
+                return _RULES.get(int(id_tipo), _DEFAULT_RULES)
+            except (TypeError, ValueError):
+                pass
+        return _DEFAULT_RULES
+    return ServiceRules(
+        tipo_servicio_id=int(id_tipo or 0),
+        nombre=str(nombre or _ID_A_NOMBRE_BD.get(int(id_tipo or 0), "Ajuste")),
+        pide_cca=cca,
+        pide_holograma_anterior=dve,
+        pide_holograma_actualizado=dve,
+    )
+
+
+def servicio_incluye_calibracion(nombre: Optional[str] = None, id_tipo: Optional[int] = None,
+                                 folio: Optional[str] = None) -> bool:
+    return get_rules_by_nombre_o_id(nombre=nombre, id_tipo=id_tipo, folio=folio).pide_cca
+
+
+def servicio_incluye_inspeccion(nombre: Optional[str] = None, id_tipo: Optional[int] = None,
+                                folio: Optional[str] = None) -> bool:
+    return get_rules_by_nombre_o_id(nombre=nombre, id_tipo=id_tipo, folio=folio).pide_dve
 
 
 def pide_cca(id_tipo_servicio: Optional[int]) -> bool:

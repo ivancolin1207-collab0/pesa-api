@@ -194,12 +194,20 @@ def _load_qss_safe(logger: logging.Logger) -> str:
             return ""
 
     try:
-        chevron_path = _PROJECT_ROOT / "assets" / "images" / "chevron_down.png"
-        if chevron_path.exists():
-            content = content.replace(
-                "url(assets/images/chevron_down.png)",
-                f"url({chevron_path.as_posix()})",
-            )
+        base_root = Path(getattr(sys, "_MEIPASS", _PROJECT_ROOT))
+        icon_map = {
+            "url(ui/assets/icons/chevron_down.svg)": (base_root / "ui" / "assets" / "icons" / "chevron_down.svg"),
+            "url(ui/assets/icons/arrow_up.svg)": (base_root / "ui" / "assets" / "icons" / "arrow_up.svg"),
+            "url(ui/assets/icons/arrow_down.svg)": (base_root / "ui" / "assets" / "icons" / "arrow_down.svg"),
+            "url(assets/images/chevron_down.png)": (base_root / "ui" / "assets" / "icons" / "chevron_down.svg"),
+        }
+        for needle, fpath in icon_map.items():
+            if not fpath.exists():
+                alt = _PROJECT_ROOT / fpath.relative_to(base_root)
+                if alt.exists():
+                    fpath = alt
+            if fpath.exists():
+                content = content.replace(needle, f"url({fpath.as_posix()})")
     except Exception:
         pass
     return content

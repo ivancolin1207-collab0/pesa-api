@@ -488,11 +488,15 @@ class MainWindow(QMainWindow):
     def _build_sidebar(self) -> QWidget:
         sb = QWidget()
         sb.setObjectName("sidebar")
-        sb.setFixedWidth(220)
+        sb.setFixedWidth(232)
         sb.setStyleSheet("""
             QWidget#sidebar {
                 background-color: #FFFFFF;
                 border-right: 1px solid #E5E7EB;
+            }
+            QWidget#sidebar QLabel {
+                border: none;
+                background-color: transparent;
             }
         """)
 
@@ -505,18 +509,19 @@ class MainWindow(QMainWindow):
         brand.setFixedHeight(72)
         brand.setStyleSheet("background-color: #FFFFFF;")
         bl = QVBoxLayout(brand)
-        bl.setContentsMargins(14, 18, 14, 8)
+        bl.setContentsMargins(16, 18, 14, 8)
         bl.setSpacing(2)
 
         brand_row = QHBoxLayout()
-        brand_row.setSpacing(8)
+        brand_row.setSpacing(10)
 
         icon_box = QFrame()
+        icon_box.setObjectName("sidebar_brand_box")
         icon_box.setStyleSheet("""
-            QFrame {
+            QFrame#sidebar_brand_box {
                 background: #C8102E;
                 border: 1px solid #C8102E;
-                border-radius: 7px;
+                border-radius: 8px;
             }
         """)
         icon_box.setFixedSize(34, 34)
@@ -690,11 +695,15 @@ class MainWindow(QMainWindow):
         """Header minimalista con título de vista, estado discreto de PostgreSQL y acción primaria."""
         header = QWidget()
         header.setObjectName("content_header")
-        header.setFixedHeight(56)
+        header.setFixedHeight(60)
         header.setStyleSheet("""
             QWidget#content_header {
                 background-color: #FFFFFF;
                 border-bottom: 1px solid #E5E7EB;
+            }
+            QWidget#content_header QLabel {
+                border: none;
+                background-color: transparent;
             }
         """)
 

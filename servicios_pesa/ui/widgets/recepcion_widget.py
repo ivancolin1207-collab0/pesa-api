@@ -446,13 +446,15 @@ class BloqueFecha(QFrame):
         self._build()
 
     def _build(self):
-        self.setObjectName(f"bloque_{self._fecha}")
-        self.setStyleSheet("""
-            QFrame {
+        bid = f"bloque_{self._fecha}"
+        self.setObjectName(bid)
+        self.setStyleSheet(f"""
+            QFrame#{bid} {{
                 background: #FFFFFF;
-                border: 1px solid rgba(0,0,0,0.08);
+                border: 1px solid #E5E7EB;
                 border-radius: 12px;
-            }
+            }}
+            QFrame#{bid} QLabel {{ border: none; background: transparent; }}
         """)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
@@ -1046,12 +1048,14 @@ class RecepcionWidget(QWidget):
 
     def _build_aviso_regla(self) -> QWidget:
         aviso = QFrame()
+        aviso.setObjectName("recepcion_aviso")
         aviso.setStyleSheet("""
-            QFrame {
-                background: #FFF7ED;
-                border: 1.5px solid #F97316;
+            QFrame#recepcion_aviso {
+                background: #F8FAFC;
+                border: 1px solid #C8102E;
                 border-radius: 8px;
             }
+            QFrame#recepcion_aviso QLabel { border: none; background: transparent; color: #111827; }
         """)
         aviso.setFixedHeight(44)
         lay = QHBoxLayout(aviso)

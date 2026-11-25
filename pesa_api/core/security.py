@@ -162,9 +162,26 @@ _ROL_MAP = {
     "tecnico_inspector":  "tecnico",
     "admin":              "admin",
     "administrador":      "admin",
+    "superadmin":         "admin",
+    "jefe":               "admin",
+    "gerente":            "admin",
+    "gerencia":           "admin",
+    "direccion":          "admin",
     "logistica":          "logistica",
     "recepcion":          "recepcion",
 }
+
+
+def es_rol_admin(user: Optional[dict]) -> bool:
+    """True para cualquier variante de rol administrativo (admin, administrador, superadmin, jefe, gerente)."""
+    if not user:
+        return False
+    username = str(user.get("username") or "").strip().lower()
+    if username in _USUARIOS_VISIBILIDAD_GLOBAL:
+        return True
+    rol = _normalizar_rol(str(user.get("role") or ""))
+    rol_canon = _ROL_MAP.get(rol, rol)
+    return rol_canon in {"admin", "superadmin", "jefe", "gerente", "gerencia", "direccion"} or "admin" in rol
 
 
 def require_roles(*roles: str):
@@ -205,7 +222,8 @@ def require_roles(*roles: str):
 # Roles con visibilidad GLOBAL de la papelería (consulta de todas las OS).
 # Cualquier otro rol (técnicos) solo accede a las OS con su propio id_tecnico.
 _ROLES_VISIBILIDAD_GLOBAL = frozenset({
-    "admin", "superadmin", "gerencia", "direccion", "logistica", "recepcion",
+    "admin", "administrador", "superadmin", "jefe", "gerente", "gerencia",
+    "direccion", "logistica", "recepcion",
 })
 _USUARIOS_VISIBILIDAD_GLOBAL = frozenset({"ivancolin1207"})
 

@@ -67,11 +67,17 @@ STYLESHEET = """
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ─── Raíz ──────────────────────────────────────────────────────────────── */
-QMainWindow, QDialog, QWidget {
-    background-color: #FFFFFF;
-    color: #0F172A;
+QMainWindow, QDialog {
+    background-color: #F5F6F8;
+    color: #111827;
     font-family: 'Segoe UI', 'Inter', -apple-system, 'Helvetica Neue', sans-serif;
     font-size: 13px;
+}
+
+QLabel {
+    border: none;
+    background-color: transparent;
+    color: #111827;
 }
 
 /* ─── Contenedores de Scroll ─────────────────────────────────────────────── */

@@ -180,7 +180,8 @@ class OsobDigitalDialog(QDialog):
 
         # Header oscuro institucional
         hdr = QFrame()
-        hdr.setStyleSheet("QFrame { background: #1C1C1E; padding: 12px 18px; }")
+        hdr.setObjectName("osob_hdr")
+        hdr.setStyleSheet("QFrame#osob_hdr { background: #111827; padding: 12px 18px; } QFrame#osob_hdr QLabel { border: none; background: transparent; }")
         hl = QHBoxLayout(hdr)
         lbl_title = QLabel(
             f"<span style='color:#FFFFFF; font-size:13pt; font-weight:800;'>"
@@ -381,7 +382,8 @@ class OsobDigitalDialog(QDialog):
 
         # Barra inferior de botones
         ftr = QFrame()
-        ftr.setStyleSheet("QFrame { background: #FFFFFF; border-top: 1px solid #D1D5DB; padding: 10px 18px; }")
+        ftr.setObjectName("osob_ftr")
+        ftr.setStyleSheet("QFrame#osob_ftr { background: #FFFFFF; border-top: 1px solid #E5E7EB; padding: 10px 18px; } QFrame#osob_ftr QLabel { border: none; background: transparent; }")
         fl = QHBoxLayout(ftr)
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.clicked.connect(self.reject)

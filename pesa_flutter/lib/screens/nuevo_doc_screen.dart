@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/sync_service.dart';
+import '../services/tipo_servicio_rules.dart';
 import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/app_shell.dart';
@@ -69,6 +71,34 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
   final _ubicacionCtrl = TextEditingController();
   final _ccaCtrl = TextEditingController();
   final _dveCtrl = TextEditingController();
+  final _holoAntCtrl = TextEditingController();
+  final _holoActCtrl = TextEditingController();
+
+  ServiceRules get _activeRules {
+    String? srvNombre;
+    if (_tipoServId != null) {
+      final hit = _tiposServ.where((t) => t['id'] == _tipoServId);
+      if (hit.isNotEmpty) {
+        srvNombre = (hit.first['nombre'] ?? '').toString();
+      }
+    }
+    return getRules(
+      id: _tipoServId,
+      nombre: srvNombre,
+      folio: '$_tipoDoc-26-000',
+    );
+  }
+
+  void _limpiarCamposPorReglas(ServiceRules rules) {
+    if (_tipoDoc != 'OS' || !rules.tieneCalibracion) {
+      _ccaCtrl.clear();
+    }
+    if (_tipoDoc != 'OS' || !rules.tieneInspeccion) {
+      _dveCtrl.clear();
+      _holoAntCtrl.clear();
+      _holoActCtrl.clear();
+    }
+  }
 
   @override
   void initState() {
@@ -92,6 +122,8 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     _ubicacionCtrl.dispose();
     _ccaCtrl.dispose();
     _dveCtrl.dispose();
+    _holoAntCtrl.dispose();
+    _holoActCtrl.dispose();
     super.dispose();
   }
 
@@ -210,6 +242,221 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     });
   }
 
+  Future<void> _crearNuevoClienteInline() async {
+    final razonCtrl = TextEditingController();
+    final rfcCtrl = TextEditingController();
+    final telCtrl = TextEditingController();
+    final dirCtrl = TextEditingController();
+    final fKey = GlobalKey<FormState>();
+    bool saving = false;
+    Map<String, dynamic>? created;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          backgroundColor: PesaColors.surface,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: PesaColors.border),
+          ),
+          title: const Text('Nuevo Cliente', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          content: SizedBox(
+            width: 440,
+            child: Form(
+              key: fKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: razonCtrl,
+                      decoration: const InputDecoration(labelText: 'Razón Social *'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: rfcCtrl,
+                      decoration: const InputDecoration(labelText: 'RFC (opcional)'),
+                      textCapitalization: TextCapitalization.characters,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: telCtrl,
+                      decoration: const InputDecoration(labelText: 'Teléfono'),
+                      keyboardType: TextInputType.phone,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: dirCtrl,
+                      decoration: const InputDecoration(labelText: 'Dirección Principal'),
+                      maxLines: 2,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (!(fKey.currentState?.validate() ?? false)) return;
+                      setDlgState(() => saving = true);
+                      try {
+                        created = await ApiService.instance.crearCliente(
+                          razonSocial: razonCtrl.text,
+                          rfc: rfcCtrl.text,
+                          telefono: telCtrl.text,
+                          direccion: dirCtrl.text,
+                        );
+                        if (mounted) Navigator.of(dlgCtx).pop();
+                      } catch (e) {
+                        setDlgState(() => saving = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: PesaColors.brand,
+                              content: Text('Error creando cliente: $e'),
+                            ),
+                          );
+                        }
+                      }
+                    },
+              child: Text(saving ? 'Guardando...' : 'Crear y Seleccionar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (created != null && mounted) {
+      await _loadCatalogos(forceRemote: true);
+      final cid = int.tryParse('${created!['id']}') ?? 0;
+      final cnom = (created!['razon_social'] ?? created!['nombre'] ?? '').toString().trim();
+      if (cid > 0 && mounted) {
+        setState(() {
+          _clienteId = cid;
+          _clienteNombre = cnom;
+        });
+        await _cargarSucursalesDeCliente(cid, cnom, autoSelectFirst: true);
+      }
+    }
+  }
+
+  Future<void> _crearNuevaSucursalInline() async {
+    final cid = _clienteId;
+    if (cid == null) return;
+    final nomCtrl = TextEditingController();
+    final dirCtrl = TextEditingController();
+    final conCtrl = TextEditingController();
+    final fKey = GlobalKey<FormState>();
+    bool saving = false;
+    Map<String, dynamic>? created;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          backgroundColor: PesaColors.surface,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+            side: const BorderSide(color: PesaColors.border),
+          ),
+          title: Text(
+            'Nueva Sucursal — $_clienteNombre',
+            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+          ),
+          content: SizedBox(
+            width: 440,
+            child: Form(
+              key: fKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextFormField(
+                      controller: nomCtrl,
+                      decoration: const InputDecoration(labelText: 'Nombre Sucursal / Planta *'),
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: dirCtrl,
+                      decoration: const InputDecoration(labelText: 'Dirección Completa *'),
+                      maxLines: 2,
+                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      controller: conCtrl,
+                      decoration: const InputDecoration(labelText: 'Contacto en Planta (opcional)'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      if (!(fKey.currentState?.validate() ?? false)) return;
+                      setDlgState(() => saving = true);
+                      try {
+                        created = await ApiService.instance.crearSucursal(
+                          cid,
+                          nombreSucursal: nomCtrl.text,
+                          direccion: dirCtrl.text,
+                          contactoNombre: conCtrl.text,
+                        );
+                        if (mounted) Navigator.of(dlgCtx).pop();
+                      } catch (e) {
+                        setDlgState(() => saving = false);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              backgroundColor: PesaColors.brand,
+                              content: Text('Error creando sucursal: $e'),
+                            ),
+                          );
+                        }
+                      }
+                    },
+              child: Text(saving ? 'Guardando...' : 'Guardar y Seleccionar'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (created != null && mounted) {
+      await _loadCatalogos(forceRemote: true);
+      final sid = int.tryParse('${created!['id']}');
+      final snom = (created!['nombre_sucursal'] ?? created!['nombre'] ?? '').toString().trim();
+      final sdir = (created!['direccion'] ?? '').toString().trim();
+      if (mounted) {
+        setState(() {
+          _sucursalId = sid;
+          _sucursalCtrl.text = snom.isNotEmpty ? snom : sdir;
+          _direccionCtrl.text = sdir.isNotEmpty ? sdir : snom;
+        });
+      }
+    }
+  }
+
   Future<void> _refrescarHistorialEquipo() async {
     final hist = await LocalDbService.instance.getHistorialInstrumentos(
       clienteId: _clienteId,
@@ -290,8 +537,14 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
           ? (int.tryParse(_cantidadCtrl.text.trim()) ?? 2)
           : 1;
 
-      final ccaClean = limpiarNumeroRegulatorio(_ccaCtrl.text);
-      final dveClean = limpiarNumeroRegulatorio(_dveCtrl.text);
+      final rules = _activeRules;
+      final allowCca = _tipoDoc == 'OS' && rules.tieneCalibracion;
+      final allowDve = _tipoDoc == 'OS' && rules.tieneInspeccion;
+
+      final ccaClean = allowCca ? limpiarNumeroRegulatorio(_ccaCtrl.text) : '';
+      final dveClean = allowDve ? limpiarNumeroRegulatorio(_dveCtrl.text) : '';
+      final holoAnt = allowDve ? _holoAntCtrl.text.trim() : '';
+      final holoAct = allowDve ? _holoActCtrl.text.trim() : '';
       final divNorm = formatearDivisionMinima(_divisionCtrl.text);
 
       final payload = <String, dynamic>{
@@ -322,6 +575,8 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
         if (_ubicacionCtrl.text.trim().isNotEmpty) 'ubicacion': _ubicacionCtrl.text.trim(),
         if (ccaClean.isNotEmpty) 'numero_cca': ccaClean,
         if (dveClean.isNotEmpty) 'numero_dve': dveClean,
+        if (holoAnt.isNotEmpty) 'holograma_anterior': holoAnt,
+        if (holoAct.isNotEmpty) 'holograma_actualizado': holoAct,
         'aplica_excentricidad': _aplicaExcentricidad,
         if (!_aplicaExcentricidad) 'motivo_no_excentricidad': _motivoNoExcentricidad,
       };
@@ -658,7 +913,12 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                       side: BorderSide(color: _tipoDoc == d['key'] ? _red : _border),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       onSelected: (val) {
-                        if (val) setState(() => _tipoDoc = d['key']!);
+                        if (val) {
+                          setState(() {
+                            _tipoDoc = d['key']!;
+                            _limpiarCamposPorReglas(_activeRules);
+                          });
+                        }
                       },
                     ),
                 ],
@@ -698,15 +958,17 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                   const _SectionTitle('3. Modalidad'),
                   const SizedBox(height: 8),
                   Row(children: [
-                    for (final m in ['Digital', 'Físico'])
+                    for (final m in ['Digital', 'Físico', 'Híbrido'])
                       Expanded(
                         child: Padding(
-                          padding: EdgeInsets.only(right: m == 'Digital' ? 8 : 0),
+                          padding: EdgeInsets.only(right: m == 'Híbrido' ? 0 : 6),
                           child: _RadioCard(
                             label: m,
                             icon: m == 'Digital'
                                 ? Icons.tablet_android_rounded
-                                : Icons.print_outlined,
+                                : (m == 'Físico'
+                                    ? Icons.print_outlined
+                                    : Icons.sync_alt_rounded),
                             selected: _modalidad == m,
                             onTap: () => setState(() => _modalidad = m),
                           ),
@@ -754,6 +1016,16 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                   ),
                 ),
               ),
+              const Spacer(),
+              if (context.read<AuthService>().isAdmin)
+                TextButton.icon(
+                  onPressed: _crearNuevoClienteInline,
+                  icon: const Icon(Icons.add_rounded, size: 16, color: _red),
+                  label: const Text(
+                    '+ Nuevo Cliente',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _red),
+                  ),
+                ),
             ]),
             const SizedBox(height: 8),
             InkWell(
@@ -814,6 +1086,16 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                   ),
                 ),
               ],
+              const Spacer(),
+              if (context.read<AuthService>().isAdmin && _clienteId != null)
+                TextButton.icon(
+                  onPressed: _crearNuevaSucursalInline,
+                  icon: const Icon(Icons.add_location_alt_outlined, size: 16, color: _red),
+                  label: const Text(
+                    '+ Nueva Sucursal',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _red),
+                  ),
+                ),
             ]),
             const SizedBox(height: 8),
             if (_sucursalesCliente.isNotEmpty) ...[
@@ -961,7 +1243,12 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               labelKeys: const ['nombre'],
               idKey: 'id',
               value: _tipoServId,
-              onChanged: (v) => setState(() => _tipoServId = v),
+              onChanged: (v) {
+                setState(() {
+                  _tipoServId = v;
+                  _limpiarCamposPorReglas(_activeRules);
+                });
+              },
               validator: pideTipoServicio
                   ? (v) => v == null ? 'Selecciona el tipo de servicio' : null
                   : null,
@@ -1035,14 +1322,18 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                             color: Color(0xFF0F172A),
                           ),
                         ),
-                        if (limpiarNumeroRegulatorio(_ccaCtrl.text).isNotEmpty)
+                        if (_tipoDoc == 'OS' &&
+                            _activeRules.tieneCalibracion &&
+                            limpiarNumeroRegulatorio(_ccaCtrl.text).isNotEmpty)
                           _RegBadge(
                             prefix: 'CCA',
                             value: limpiarNumeroRegulatorio(_ccaCtrl.text),
                             color: const Color(0xFF111827),
                             bg: const Color(0xFFF8FAFC),
                           ),
-                        if (limpiarNumeroRegulatorio(_dveCtrl.text).isNotEmpty)
+                        if (_tipoDoc == 'OS' &&
+                            _activeRules.tieneInspeccion &&
+                            limpiarNumeroRegulatorio(_dveCtrl.text).isNotEmpty)
                           _RegBadge(
                             prefix: 'DVE',
                             value: limpiarNumeroRegulatorio(_dveCtrl.text),
@@ -1130,16 +1421,29 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         controller: _ubicacionCtrl,
                         onChanged: (_) => setState(() {}),
                       ),
-                      _InputField(
-                        label: 'Número CCA (ej. CCA.26.02163)',
-                        controller: _ccaCtrl,
-                        onChanged: (_) => setState(() {}),
-                      ),
-                      _InputField(
-                        label: 'Número DVE (ej. DVE.26.00412)',
-                        controller: _dveCtrl,
-                        onChanged: (_) => setState(() {}),
-                      ),
+                      if (_tipoDoc == 'OS' && _activeRules.tieneCalibracion)
+                        _InputField(
+                          label: 'Número CCA (ej. CCA.26.02163)',
+                          controller: _ccaCtrl,
+                          onChanged: (_) => setState(() {}),
+                        ),
+                      if (_tipoDoc == 'OS' && _activeRules.tieneInspeccion) ...[
+                        _InputField(
+                          label: 'Número DVE (ej. DVE.26.00412)',
+                          controller: _dveCtrl,
+                          onChanged: (_) => setState(() {}),
+                        ),
+                        _InputField(
+                          label: 'Holograma Anterior',
+                          controller: _holoAntCtrl,
+                          onChanged: (_) => setState(() {}),
+                        ),
+                        _InputField(
+                          label: 'Holograma Actualizado',
+                          controller: _holoActCtrl,
+                          onChanged: (_) => setState(() {}),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 10),

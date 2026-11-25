@@ -814,11 +814,20 @@ class OsPdfGenerator:
         # CCA e Inicial J/I/A SOLO si el servicio contiene 'calibraci' explicitamente.
         # Servicios de Inspeccion pura, Mantenimiento, Revision o Entrega Refacciones
         # NO incluyen casillas de calibrador ni numero CCA.
-        tiene_calibracion = "calibraci" in servicio_norm
-        tiene_inspeccion  = "inspecci"  in servicio_norm
+        tiene_calibracion = "calibraci" in servicio_norm or bool(_re_reg.search(r"\bcca\b", servicio_norm))
+        tiene_inspeccion  = (
+            "inspecci" in servicio_norm
+            or "verifica" in servicio_norm
+            or bool(_re_reg.search(r"\bdve\b", servicio_norm))
+        )
 
-        mostrar_cca        = tiene_calibracion   # CCA solo con calibracion
-        mostrar_hologramas = tiene_inspeccion    # Hologramas solo con inspeccion
+        # Fallback solo cuando la orden heredada carece de tipo_servicio explícito
+        if not servicio_norm:
+            tiene_calibracion = bool(_numero_cca)
+            tiene_inspeccion  = bool(_numero_dve or _holo_ant or _holo_act)
+
+        mostrar_cca        = tiene_calibracion   # CCA solo con calibración
+        mostrar_hologramas = tiene_inspeccion    # Hologramas y DVE solo con inspección
 
         # ── Helpers de dibujo ────────────────────────────────────────────────
         cw     = self.CW
@@ -962,18 +971,18 @@ class OsPdfGenerator:
             os_data.get("numero_certificado") or
             os_data.get("cca") or
             ""
-        )
+        ) if mostrar_cca else ""
         _numero_dve = _limp_reg_pdf(
             os_data.get("numero_dve") or
             os_data.get("folio_dve") or
             ""
-        )
-        _holo_ant = str(os_data.get("holograma_anterior") or "").strip()
-        _holo_act = str(os_data.get("holograma_actualizado") or "").strip()
+        ) if mostrar_hologramas else ""
+        _holo_ant = str(os_data.get("holograma_anterior") or "").strip() if mostrar_hologramas else ""
+        _holo_act = str(os_data.get("holograma_actualizado") or "").strip() if mostrar_hologramas else ""
 
-        _show_cca = mostrar_cca or bool(_numero_cca)
-        _show_dve = mostrar_hologramas or bool(_numero_dve)
-        _show_holos = mostrar_hologramas or bool(_holo_ant) or bool(_holo_act)
+        _show_cca = mostrar_cca
+        _show_dve = mostrar_hologramas
+        _show_holos = mostrar_hologramas
 
         if not _show_cca and not _show_dve and not _show_holos:
             pass

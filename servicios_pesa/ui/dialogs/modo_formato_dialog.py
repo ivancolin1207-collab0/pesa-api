@@ -376,25 +376,29 @@ class ModoFormatoDialog(QDialog):
 
         # Resetear estilos de ambas tarjetas
         for card, m in [(self.card_fisico, "FISICO"), (self.card_digital, "DIGITAL")]:
+            cid = f"modo_card_{m.lower()}"
+            card.setObjectName(cid)
             if m == mode:
                 card.setStyleSheet(f"""
-                    QFrame {{
-                        border: 2.5px solid {_RED};
+                    QFrame#{cid} {{
+                        border: 2px solid {_RED};
                         border-radius: 10px;
-                        background: #FEF2F2;
+                        background: #FFF5F6;
                     }}
+                    QFrame#{cid} QLabel {{ border: none; background: transparent; }}
                 """)
             else:
                 card.setStyleSheet(f"""
-                    QFrame {{
-                        border: 2px solid #E5E7EB;
+                    QFrame#{cid} {{
+                        border: 1.5px solid #E5E7EB;
                         border-radius: 10px;
-                        background: {_BG};
+                        background: #FFFFFF;
                     }}
-                    QFrame:hover {{
+                    QFrame#{cid}:hover {{
                         border-color: {_RED};
-                        background: #FFF5F5;
+                        background: #F8FAFC;
                     }}
+                    QFrame#{cid} QLabel {{ border: none; background: transparent; }}
                 """)
 
         if mode == "FISICO":

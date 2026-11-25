@@ -119,10 +119,11 @@ class CapturaDigitalDialog(QDialog):
 
         # ── Barra superior (Encabezado oscuro) ──
         self._top_bar = QFrame()
+        self._top_bar.setObjectName("cap_top_bar")
         self._top_bar.setFixedHeight(70)
         self._top_bar.setStyleSheet("""
-            QFrame { background: #1E2230; border-bottom: 2px solid #E63946; }
-            QLabel { color: #FFFFFF; font-weight: 700; font-size: 14px; }
+            QFrame#cap_top_bar { background: #111827; border-bottom: 2px solid #C8102E; }
+            QFrame#cap_top_bar QLabel { border: none; background: transparent; color: #FFFFFF; font-weight: 700; font-size: 14px; }
         """)
         tb_lay = QHBoxLayout(self._top_bar)
         tb_lay.setContentsMargins(20, 0, 20, 0)

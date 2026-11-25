@@ -225,18 +225,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SizedBox(height: 10),
             OutlinedButton.icon(
               onPressed: () async {
-                final auth     = context.read<AuthService>();
-                final username = auth.username ?? '';
-                final nombre   = auth.nombreCompleto ?? username;
-                // Eliminar firma actual para forzar re-captura
-                await FirmaTecnicoService.instance.deleteFirma(username);
+                final auth      = context.read<AuthService>();
+                final username  = auth.username ?? '';
+                final nombre    = auth.nombreCompleto ?? username;
+                final idTecnico = auth.idTecnico ?? 0;
                 if (!mounted) return;
-                await CapturFirmaTecnicoDialog.mostrar(
+                final guardada = await CapturFirmaTecnicoDialog.mostrar(
                   context,
                   username: username,
                   nombreCompleto: nombre,
+                  idTecnico: idTecnico,
+                  permitirCancelar: true,
                 );
-                await _checkFirma();
+                if (guardada && mounted) {
+                  await _checkFirma();
+                }
               },
               icon: const Icon(Icons.draw),
               label: Text(_tieneFirma ? 'Actualizar mi firma' : 'Registrar mi firma'),

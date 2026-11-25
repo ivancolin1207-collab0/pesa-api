@@ -445,7 +445,7 @@ async def sync_pull(
 
     # Solo roles expresamente de control y administración ven todas las órdenes
     username_clean = str(current_user.get("username", "")).strip().lower()
-    _ADMIN_ROLES = {"admin", "administrador", "superadmin", "direccion", "gerencia"}
+    _ADMIN_ROLES = {"admin", "administrador", "superadmin", "jefe", "gerente", "direccion", "gerencia"}
     is_admin   = any(ar in role_norm for ar in _ADMIN_ROLES) or username_clean == "ivancolin1207"
 
     # [FIX-422] Parseo tolerante de since / updated_after (evita HTTP 422 si el formato difiere)
@@ -935,14 +935,10 @@ async def sync_push(
                 detail      = f"OS {payload.folio_os!r} no encontrada",
             )
 
-        import unicodedata
         from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
+        from pesa_api.core.security import tiene_visibilidad_global
         await _ensure_email_columns(db)
-        role = "".join(
-            c for c in unicodedata.normalize("NFKD", str(current_user.get("role", "")))
-            if not unicodedata.combining(c)
-        ).lower()
-        is_admin = "admin" in role or str(current_user.get("username", "")).strip().lower() == "ivancolin1207"
+        is_admin = tiene_visibilidad_global(current_user)
 
         # Verificar que la OS pertenece al técnico autenticado
         if not is_admin and row["id_tecnico"] != id_tecnico:
@@ -1407,14 +1403,10 @@ async def upload_firmas(
         if row is None:
             raise HTTPException(status_code=404, detail=f"OS {folio_os!r} no encontrada")
 
-        import unicodedata
         from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
+        from pesa_api.core.security import tiene_visibilidad_global
         await _ensure_email_columns(db)
-        role = "".join(
-            c for c in unicodedata.normalize("NFKD", str(current_user.get("role", "")))
-            if not unicodedata.combining(c)
-        ).lower()
-        is_admin = "admin" in role or str(current_user.get("username", "")).strip().lower() == "ivancolin1207"
+        is_admin = tiene_visibilidad_global(current_user)
 
         if not is_admin and row["id_tecnico"] != id_tecnico:
             raise HTTPException(status_code=403, detail="OS no asignada a este usuario")

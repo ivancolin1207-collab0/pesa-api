@@ -496,7 +496,30 @@ class ApiService {
     return resp;
   }
 
-  // ── Sync Pull ─────────────────────────────────────────────────────────────
+  /// Realiza PUT con interceptor 401 automático (_renovarSesionSilenciosa + retry).
+  Future<http.Response> _putWithRetry(Uri uri, String body,
+      {Duration? timeout}) async {
+    if (_token == null) {
+      await _renovarSesionSilenciosa();
+    }
+    var resp = await http.put(uri, headers: _headers, body: body)
+        .timeout(timeout ?? _connTimeout);
+
+    if (resp.statusCode == 401) {
+      debugPrint('[API] 401 en PUT $uri → invocando _renovarSesionSilenciosa()...');
+      bool ok = false;
+      try {
+        ok = await _renovarSesionSilenciosa()
+            .timeout(const Duration(seconds: 35), onTimeout: () => false);
+      } catch (_) {}
+      if (ok) {
+        resp = await http.put(uri, headers: _headers, body: body)
+            .timeout(timeout ?? _connTimeout);
+        debugPrint('[API] Retry PUT post-refresh → ${resp.statusCode}');
+      }
+    }
+    return resp;
+  }
 
   /// Repositorio de calibraciones concluidas (solo lectura, supervisión metrológica).
   /// El servidor valida que el usuario sea Alan Guevara (ID 8) o administrador.
@@ -1329,28 +1352,35 @@ class ApiService {
   /// Retorna true si se guardó correctamente.
   Future<bool> guardarFirmaPerfil(int idTecnico, String firmaBase64) async {
     debugPrint('[API] guardarFirmaPerfil → /api/v1/usuarios/$idTecnico/firma');
+    if (idTecnico <= 0) {
+      throw Exception('ID de técnico inválido ($idTecnico)');
+    }
+    final cleanB64 = firmaBase64.contains(',') ? firmaBase64.split(',').last.trim() : firmaBase64.trim();
+    if (cleanB64.length < 32) {
+      throw Exception('La imagen de firma está vacía o corrupta');
+    }
     final uri = Uri.parse('$_baseUrl/api/v1/usuarios/$idTecnico/firma');
     final body = jsonEncode({
-      'firma_digital': firmaBase64,
-      'firma_base64':  firmaBase64,
-      'firma':         firmaBase64,
+      'firma_digital': cleanB64,
+      'firma_base64':  cleanB64,
+      'firma':         cleanB64,
     });
 
-    Future<http.Response> doPost() =>
-        http.post(uri, headers: _authHeaders, body: body).timeout(_connTimeout);
     Future<http.Response> doPut() =>
         http.put(uri, headers: _authHeaders, body: body).timeout(_connTimeout);
+    Future<http.Response> doPost() =>
+        http.post(uri, headers: _authHeaders, body: body).timeout(_connTimeout);
 
-    var resp = await doPost();
+    var resp = await doPut();
     if (resp.statusCode == 405 || resp.statusCode == 404) {
-      debugPrint('[API] POST retornó ${resp.statusCode}, intentando PUT...');
-      resp = await doPut();
+      debugPrint('[API] PUT retornó ${resp.statusCode}, intentando POST...');
+      resp = await doPost();
     } else if (resp.statusCode == 401) {
       final ok = await silentRefresh();
       if (ok) {
-        resp = await doPost();
+        resp = await doPut();
         if (resp.statusCode == 405 || resp.statusCode == 404) {
-          resp = await doPut();
+          resp = await doPost();
         }
       }
     }
@@ -1360,7 +1390,152 @@ class ApiService {
       return true;
     }
     debugPrint('[API] ❌ guardarFirmaPerfil: HTTP ${resp.statusCode} — ${resp.body}');
-    return false;
+    throw Exception('Error servidor HTTP ${resp.statusCode}: ${resp.body}');
+  }
+
+  // ── CRUD Administrativo (Clientes, Sucursales y Asignación de OS) ────────
+
+  Future<Map<String, dynamic>> crearCliente({
+    required String razonSocial,
+    String? rfc,
+    String? telefono,
+    String? correo,
+    String? direccion,
+  }) async {
+    final payload = jsonEncode({
+      'razon_social': razonSocial.trim(),
+      'nombre': razonSocial.trim(),
+      if (rfc != null && rfc.trim().isNotEmpty) 'rfc': rfc.trim(),
+      if (telefono != null && telefono.trim().isNotEmpty) 'telefono': telefono.trim(),
+      if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
+      if (direccion != null && direccion.trim().isNotEmpty) 'direccion': direccion.trim(),
+    });
+    var resp = await _postWithRetry(Uri.parse('$_baseUrl/api/v1/clientes'), payload);
+    if (resp.statusCode == 404) {
+      resp = await _postWithRetry(Uri.parse('$_baseUrl/api/clientes'), payload);
+    }
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(utf8.decode(resp.bodyBytes)) as Map);
+    }
+    throw Exception('Error creando cliente (${resp.statusCode}): ${resp.body}');
+  }
+
+  Future<Map<String, dynamic>> actualizarCliente(
+    int clienteId, {
+    String? razonSocial,
+    String? rfc,
+    String? telefono,
+    String? direccion,
+  }) async {
+    final payload = jsonEncode({
+      if (razonSocial != null && razonSocial.trim().isNotEmpty) 'razon_social': razonSocial.trim(),
+      if (rfc != null) 'rfc': rfc.trim(),
+      if (telefono != null) 'telefono': telefono.trim(),
+      if (direccion != null) 'direccion': direccion.trim(),
+    });
+    var resp = await _putWithRetry(Uri.parse('$_baseUrl/api/v1/clientes/$clienteId'), payload);
+    if (resp.statusCode == 404) {
+      resp = await _putWithRetry(Uri.parse('$_baseUrl/api/clientes/$clienteId'), payload);
+    }
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(utf8.decode(resp.bodyBytes)) as Map);
+    }
+    throw Exception('Error actualizando cliente (${resp.statusCode}): ${resp.body}');
+  }
+
+  Future<List<Map<String, dynamic>>> getSucursalesCliente(int clienteId) async {
+    for (final p in ['/api/v1/clientes/$clienteId/sucursales', '/api/clientes/$clienteId/sucursales']) {
+      final resp = await _getWithRetry(Uri.parse('$_baseUrl$p'));
+      if (resp.statusCode == 200) {
+        final raw = jsonDecode(utf8.decode(resp.bodyBytes));
+        if (raw is List) {
+          return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+        }
+      }
+    }
+    return const [];
+  }
+
+  Future<Map<String, dynamic>> crearSucursal(
+    int clienteId, {
+    required String nombreSucursal,
+    required String direccion,
+    String? contactoNombre,
+    String? contactoTelefono,
+  }) async {
+    final payload = jsonEncode({
+      'nombre_sucursal': nombreSucursal.trim(),
+      'direccion': direccion.trim(),
+      if (contactoNombre != null && contactoNombre.trim().isNotEmpty) 'contacto_nombre': contactoNombre.trim(),
+      if (contactoTelefono != null && contactoTelefono.trim().isNotEmpty) 'contacto_telefono': contactoTelefono.trim(),
+    });
+    var resp = await _postWithRetry(
+      Uri.parse('$_baseUrl/api/v1/clientes/$clienteId/sucursales'),
+      payload,
+    );
+    if (resp.statusCode == 404) {
+      resp = await _postWithRetry(
+        Uri.parse('$_baseUrl/api/clientes/$clienteId/sucursales'),
+        payload,
+      );
+    }
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(utf8.decode(resp.bodyBytes)) as Map);
+    }
+    throw Exception('Error creando sucursal (${resp.statusCode}): ${resp.body}');
+  }
+
+  Future<Map<String, dynamic>> actualizarSucursal(
+    int clienteId,
+    int sucursalId, {
+    String? nombreSucursal,
+    String? direccion,
+    String? contactoNombre,
+    String? contactoTelefono,
+  }) async {
+    final payload = jsonEncode({
+      if (nombreSucursal != null && nombreSucursal.trim().isNotEmpty) 'nombre_sucursal': nombreSucursal.trim(),
+      if (direccion != null) 'direccion': direccion.trim(),
+      if (contactoNombre != null) 'contacto_nombre': contactoNombre.trim(),
+      if (contactoTelefono != null) 'contacto_telefono': contactoTelefono.trim(),
+    });
+    var resp = await _putWithRetry(
+      Uri.parse('$_baseUrl/api/v1/clientes/$clienteId/sucursales/$sucursalId'),
+      payload,
+    );
+    if (resp.statusCode == 404) {
+      resp = await _putWithRetry(
+        Uri.parse('$_baseUrl/api/clientes/$clienteId/sucursales/$sucursalId'),
+        payload,
+      );
+    }
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(utf8.decode(resp.bodyBytes)) as Map);
+    }
+    throw Exception('Error actualizando sucursal (${resp.statusCode}): ${resp.body}');
+  }
+
+  Future<Map<String, dynamic>> asignarOrdenAdmin(
+    String folio, {
+    required int idTecnico,
+    String? modalidad,
+  }) async {
+    final f = Uri.encodeComponent(folio.trim());
+    final payload = jsonEncode({
+      'id_tecnico': idTecnico,
+      if (modalidad != null && modalidad.trim().isNotEmpty) 'modalidad': modalidad.trim(),
+    });
+    var resp = await _patchWithRetry(Uri.parse('$_baseUrl/api/v1/ordenes/$f/asignar'), payload);
+    if (resp.statusCode == 404 || resp.statusCode == 405) {
+      resp = await _postWithRetry(Uri.parse('$_baseUrl/api/v1/ordenes/$f/asignar'), payload);
+    }
+    if (resp.statusCode == 404) {
+      resp = await _postWithRetry(Uri.parse('$_baseUrl/api/ordenes/$f/asignar'), payload);
+    }
+    if (resp.statusCode == 200 || resp.statusCode == 201) {
+      return Map<String, dynamic>.from(jsonDecode(utf8.decode(resp.bodyBytes)) as Map);
+    }
+    throw Exception('Error asignando orden (${resp.statusCode}): ${resp.body}');
   }
 
   /// Consulta al servidor si el técnico con [idTecnico] tiene firma registrada en cat_tecnicos.

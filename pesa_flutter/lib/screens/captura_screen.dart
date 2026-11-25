@@ -110,16 +110,15 @@ class _CapturaScreenState extends State<CapturaScreen>
     return esDve ? _prefijoDve : _prefijoCca;
   }
 
-  // Valores efectivos: CCA y DVE son números regulatorios independientes;
-  // si cualquiera fue capturado se conserva en SQLite, servidor y PDF.
-  String get _ccaEf       => limpiarNumeroRegulatorio(_ccaCtrl.text);
-  String get _numeroDveEf => limpiarNumeroRegulatorio(_numeroDveCtrl.text);
-  bool   get _jEf         => (_aplicaCCA || _ccaEf.isNotEmpty) && _jChecked;
-  bool   get _iEf         => (_aplicaCCA || _ccaEf.isNotEmpty) && _iChecked;
-  bool   get _aEf         => (_aplicaCCA || _ccaEf.isNotEmpty) && _aChecked;
+  // Valores efectivos: regla estricta — CCA solo con Calibración; DVE + Hologramas solo con Inspección/Verificación.
+  String get _ccaEf       => _aplicaCCA ? limpiarNumeroRegulatorio(_ccaCtrl.text) : '';
+  String get _numeroDveEf => _aplicaDVE ? limpiarNumeroRegulatorio(_numeroDveCtrl.text) : '';
+  bool   get _jEf         => _aplicaCCA && _jChecked;
+  bool   get _iEf         => _aplicaCCA && _iChecked;
+  bool   get _aEf         => _aplicaCCA && _aChecked;
   String get _dveEf       => _aplicaDVE ? _divVerCtrl.text.trim() : '';
-  String get _holoAntEf   => (_aplicaDVE || _numeroDveEf.isNotEmpty) ? _holoAntCtrl.text.trim() : '';
-  String get _holoActEf   => (_aplicaDVE || _numeroDveEf.isNotEmpty) ? _holoActCtrl.text.trim() : '';
+  String get _holoAntEf   => _aplicaDVE ? _holoAntCtrl.text.trim() : '';
+  String get _holoActEf   => _aplicaDVE ? _holoActCtrl.text.trim() : '';
 
   /// Carga de sustitución OPCIONAL: solo aplica si el técnico eligió "Sí"
   /// y capturó un valor > 0. Vacío / 0 / "No" ⇒ aplica_sustitucion = false.
@@ -404,8 +403,8 @@ class _CapturaScreenState extends State<CapturaScreen>
     _idEquipoCtrl.text   = _str('id_equipo').isNotEmpty ? _str('id_equipo') : _str('id_indicador');
     _ubicCtrl.text       = _str('ubicacion');
 
-    final rawCca = extraerNumeroCca(_os);
-    if (rawCca.isNotEmpty) {
+    final rawCca = _aplicaCCA ? extraerNumeroCca(_os) : '';
+    if (_aplicaCCA && rawCca.isNotEmpty) {
       _ccaCtrl.text = rawCca;
     } else if (_aplicaCCA) {
       _ccaCtrl.text = _prefijoCca;
@@ -414,8 +413,8 @@ class _CapturaScreenState extends State<CapturaScreen>
     }
     _ccaCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _ccaCtrl.text.length));
 
-    final rawNumDve = extraerNumeroDve(_os);
-    if (rawNumDve.isNotEmpty) {
+    final rawNumDve = _aplicaDVE ? extraerNumeroDve(_os) : '';
+    if (_aplicaDVE && rawNumDve.isNotEmpty) {
       _numeroDveCtrl.text = rawNumDve;
     } else if (_aplicaDVE && !_aplicaCCA) {
       _numeroDveCtrl.text = _prefijoDve;
@@ -424,8 +423,8 @@ class _CapturaScreenState extends State<CapturaScreen>
     }
     _numeroDveCtrl.selection = TextSelection.fromPosition(TextPosition(offset: _numeroDveCtrl.text.length));
 
-    _holoAntCtrl.text    = _str('holograma_anterior');
-    _holoActCtrl.text    = _str('holograma_actualizado');
+    _holoAntCtrl.text    = _aplicaDVE ? _str('holograma_anterior') : '';
+    _holoActCtrl.text    = _aplicaDVE ? _str('holograma_actualizado') : '';
 
     // Capacidad máxima, división mínima y tipo de instrumento prellenados desde logística
     dynamic dj;
@@ -1612,31 +1611,52 @@ class _CapturaScreenState extends State<CapturaScreen>
             ),
           ),
         ],
-        const SizedBox(height: 16),
+        if (rules.tieneCalibracion || rules.tieneInspeccion) ...[
+          const SizedBox(height: 16),
 
-        // ── Sección Números Regulatorios Independientes (CCA y DVE) ───────
-        _SectionTitle('Números Regulatorios (CCA y/o DVE)'),
-        const SizedBox(height: 8),
-        FoldableTwoColumn(
-          horizontalGap: 12,
-          verticalGap: 10,
-          first: _Field(
-            'Número CCA',
-            _ccaCtrl,
-            hint: '${_prefijoCca}02163',
-            required: rules.tieneCalibracion,
-            keyboardType: TextInputType.text,
-            textCapitalization: TextCapitalization.characters,
-          ),
-          second: _Field(
-            'Número DVE',
-            _numeroDveCtrl,
-            hint: '${_prefijoDve}00412',
-            required: rules.tieneInspeccion && !rules.tieneCalibracion,
-            keyboardType: TextInputType.text,
-            textCapitalization: TextCapitalization.characters,
-          ),
-        ),
+          // ── Números Regulatorios Condicionales (CCA / DVE) ─────────────
+          _SectionTitle('Números Regulatorios'),
+          const SizedBox(height: 8),
+          if (rules.tieneCalibracion && rules.tieneInspeccion)
+            FoldableTwoColumn(
+              horizontalGap: 12,
+              verticalGap: 10,
+              first: _Field(
+                'Número CCA',
+                _ccaCtrl,
+                hint: '${_prefijoCca}02163',
+                required: rules.tieneCalibracion,
+                keyboardType: TextInputType.text,
+                textCapitalization: TextCapitalization.characters,
+              ),
+              second: _Field(
+                'Número DVE',
+                _numeroDveCtrl,
+                hint: '${_prefijoDve}00412',
+                required: rules.tieneInspeccion && !rules.tieneCalibracion,
+                keyboardType: TextInputType.text,
+                textCapitalization: TextCapitalization.characters,
+              ),
+            )
+          else if (rules.tieneCalibracion)
+            _Field(
+              'Número CCA',
+              _ccaCtrl,
+              hint: '${_prefijoCca}02163',
+              required: true,
+              keyboardType: TextInputType.text,
+              textCapitalization: TextCapitalization.characters,
+            )
+          else if (rules.tieneInspeccion)
+            _Field(
+              'Número DVE',
+              _numeroDveCtrl,
+              hint: '${_prefijoDve}00412',
+              required: true,
+              keyboardType: TextInputType.text,
+              textCapitalization: TextCapitalization.characters,
+            ),
+        ],
         if (rules.tieneCalibracion) ...[
           const SizedBox(height: 10),
           const Text('Inicial del Calibrador (NOM-010-SCFI-2020):',
@@ -2303,16 +2323,16 @@ class _CapturaScreenState extends State<CapturaScreen>
     _os['capacidad_max']         = _capMaxCtrl.text.trim();
     _os['division_minima']       = divNorm;
 
-    // Números regulatorios independientes CCA y DVE: se preservan siempre que se capturen
-    final ccaClean = _ccaEf;
-    final numDveClean = _numeroDveEf;
+    // Números regulatorios condicionales estrictos (CCA solo Calibración; DVE + Hologramas solo Inspección)
+    final ccaClean = rules.tieneCalibracion ? _ccaEf : '';
+    final numDveClean = rules.tieneInspeccion ? _numeroDveEf : '';
     _os['numero_cca'] = ccaClean;
     _os['cca']        = ccaClean;
-    _os['cca_aplica'] = rules.tieneCalibracion || ccaClean.isNotEmpty;
+    _os['cca_aplica'] = rules.tieneCalibracion;
     _os['numero_dve'] = numDveClean;
     _os['folio_dve']  = numDveClean;
 
-    if (rules.tieneInspeccion || numDveClean.isNotEmpty) {
+    if (rules.tieneInspeccion) {
       _os['holograma_anterior']    = _holoAntCtrl.text.trim();
       _os['holograma_actualizado'] = _holoActCtrl.text.trim();
       _os['div_verificacion']      = double.tryParse(_divVerCtrl.text.replaceAll(',', '.'));

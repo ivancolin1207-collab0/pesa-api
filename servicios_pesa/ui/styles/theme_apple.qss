@@ -1,30 +1,33 @@
 /* ============================================================================
-   BÁSCULAS PESA -- theme_apple.qss (Diseño Corporativo Minimalista v3.2)
+   BÁSCULAS PESA -- theme_apple.qss (Sistema de Diseño Industrial v3.3)
+   Reglas anti-fuga QSS:
+     - QLabel sin borde ni fondo por defecto.
+     - Ningún selector genérico de contenedor QFrame/QWidget sobreescribe hijos.
+     - SVG vectoriales para ComboBox y SpinBox (Fusion light palette).
    Paleta estricta sin colores pastel/IA:
-     Canvas / fondo principal:   #F6F7F9
+     Canvas / fondo principal:   #F5F6F8
      Superficies / tarjetas:     #FFFFFF
      Superficies neutras:        #F8FAFC / #F9FAFB
-     Bordes y divisores:         1px solid #E5E7EB / #CBD5E1 / #F3F4F6
+     Bordes y divisores:         #E5E7EB / #D1D5DB / #F3F4F6
      Texto primario:             #111827
      Texto secundario:           #6B7280
      Texto terciario:            #9CA3AF
-     Único acento corporativo:   #C8102E (Hover #A60D26)
+     Único acento corporativo:   #C8102E (Hover #A60D26, Pressed #880B20)
 ============================================================================ */
 
 QMainWindow,
 QDialog {
-    background-color: #F6F7F9;
+    background-color: #F5F6F8;
     color: #111827;
     font-family: "Segoe UI", "Inter", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
     font-size: 13px;
     font-weight: 400;
 }
 
-QWidget {
+QLabel {
+    border: none;
+    background-color: transparent;
     color: #111827;
-    font-family: "Segoe UI", "Inter", -apple-system, BlinkMacSystemFont, Arial, sans-serif;
-    font-size: 13px;
-    font-weight: 400;
 }
 
 QMainWindow::separator {
@@ -72,7 +75,7 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 }
 
 /* ============================================================================
-   BARRA LATERAL (SIDEBAR)
+   BARRA LATERAL (SIDEBAR 232px)
 ============================================================================ */
 QWidget#sidebar {
     background-color: #FFFFFF;
@@ -120,7 +123,7 @@ QPushButton#nav_btn:hover {
 }
 
 QPushButton#nav_btn[active="true"] {
-    background-color: #F8FAFC;
+    background-color: #FFF5F6;
     color: #C8102E;
     border-left: 3px solid #C8102E;
     font-weight: 700;
@@ -168,17 +171,13 @@ QLabel#page_title {
 QLabel#page_subtitle,
 QLabel#breadcrumb {
     color: #111827;
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
 }
 
-QFrame#kpi_card {
-    background-color: #FFFFFF;
-    border: 1px solid #E5E7EB;
-    border-radius: 12px;
-}
-
-QFrame#filter_bar {
+QFrame#kpi_card,
+QFrame#filter_bar,
+QFrame[card="true"] {
     background-color: #FFFFFF;
     border: 1px solid #E5E7EB;
     border-radius: 12px;
@@ -214,14 +213,14 @@ QPushButton#seg_btn:hover:!checked {
 }
 
 /* ============================================================================
-   CONTROLES DE ENTRADA
+   CONTROLES DE ENTRADA (38px, 8px radius, SVG icons)
 ============================================================================ */
 QComboBox {
     background-color: #FFFFFF;
     color: #111827;
     border: 1px solid #D1D5DB;
-    border-radius: 6px;
-    padding: 0px 28px 0px 12px;
+    border-radius: 8px;
+    padding: 0px 30px 0px 12px;
     min-height: 36px;
     max-height: 38px;
     font-size: 13px;
@@ -238,13 +237,13 @@ QComboBox:focus {
 QComboBox::drop-down {
     subcontrol-origin: padding;
     subcontrol-position: top right;
-    width: 26px;
+    width: 28px;
     border: none;
     background: transparent;
 }
 
 QComboBox::down-arrow {
-    image: url(assets/images/chevron_down.png);
+    image: url(ui/assets/icons/chevron_down.svg);
     width: 12px;
     height: 12px;
     border: none;
@@ -271,11 +270,11 @@ QComboBox QAbstractItemView {
 }
 
 QComboBox QAbstractItemView::item {
-    min-height: 30px;
+    min-height: 32px;
     padding: 4px 10px;
     color: #111827;
     background-color: #FFFFFF;
-    border-radius: 5px;
+    border-radius: 6px;
 }
 
 QComboBox QAbstractItemView::item:selected,
@@ -284,11 +283,11 @@ QComboBox QAbstractItemView::item:hover {
     color: #111827;
 }
 
-QLineEdit, QDateEdit, QSpinBox, QDoubleSpinBox {
+QLineEdit, QDateEdit {
     background-color: #FFFFFF;
     color: #111827;
     border: 1px solid #D1D5DB;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 0px 12px;
     min-height: 36px;
     max-height: 38px;
@@ -297,11 +296,61 @@ QLineEdit, QDateEdit, QSpinBox, QDoubleSpinBox {
     selection-color: #111827;
 }
 
+QSpinBox, QDoubleSpinBox {
+    background-color: #FFFFFF;
+    color: #111827;
+    border: 1px solid #D1D5DB;
+    border-radius: 8px;
+    padding: 0px 28px 0px 10px;
+    min-width: 112px;
+    min-height: 36px;
+    max-height: 38px;
+    font-size: 13px;
+    selection-background-color: #E5E7EB;
+    selection-color: #111827;
+}
+
+QSpinBox::up-button, QDoubleSpinBox::up-button {
+    subcontrol-origin: border;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left: 1px solid #E5E7EB;
+    border-bottom: 1px solid #E5E7EB;
+    border-top-right-radius: 8px;
+    background-color: #F9FAFB;
+}
+
+QSpinBox::down-button, QDoubleSpinBox::down-button {
+    subcontrol-origin: border;
+    subcontrol-position: bottom right;
+    width: 24px;
+    border-left: 1px solid #E5E7EB;
+    border-bottom-right-radius: 8px;
+    background-color: #F9FAFB;
+}
+
+QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover {
+    background-color: #E5E7EB;
+}
+
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {
+    image: url(ui/assets/icons/arrow_up.svg);
+    width: 10px;
+    height: 10px;
+}
+
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {
+    image: url(ui/assets/icons/arrow_down.svg);
+    width: 10px;
+    height: 10px;
+}
+
 QTextEdit, QPlainTextEdit {
     background-color: #FFFFFF;
     color: #111827;
     border: 1px solid #D1D5DB;
-    border-radius: 6px;
+    border-radius: 8px;
     padding: 8px 12px;
     min-height: 76px;
     font-size: 13px;
@@ -379,7 +428,7 @@ QPushButton {
     padding: 6px 14px;
     font-weight: 600;
     font-size: 12.5px;
-    min-height: 32px;
+    min-height: 34px;
 }
 
 QPushButton:hover {

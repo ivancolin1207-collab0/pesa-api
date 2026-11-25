@@ -29,6 +29,7 @@ from pesa_api.core.security import (
     get_current_user,
     get_optional_user,
     id_tecnico_de,
+    require_roles,
     tiene_visibilidad_global,
     verificar_acceso_os,
 )
@@ -670,8 +671,19 @@ async def crear_orden(
     div_str = _norm_div_min_str(body.division_minima) if body.division_minima is not None and str(body.division_minima).strip() else None
     cap_num = _parse_float_opt(body.capacidad_maxima)
     div_num = _parse_float_opt(div_str)
-    cca_in = _limpiar_num_reg(body.numero_cca) or None
-    dve_in = _limpiar_num_reg(body.numero_dve) or None
+    import unicodedata as _ud_cat, re as _re_cat
+    _ts_norm_cat = "".join(
+        c for c in _ud_cat.normalize("NFKD", str(tipo_srv_txt or "").lower())
+        if not _ud_cat.combining(c)
+    )
+    _permite_cca = pref == "OS" and ("calibraci" in _ts_norm_cat or bool(_re_cat.search(r"\bcca\b", _ts_norm_cat)))
+    _permite_dve = pref == "OS" and (
+        "inspecc" in _ts_norm_cat
+        or "verifica" in _ts_norm_cat
+        or bool(_re_cat.search(r"\bdve\b", _ts_norm_cat))
+    )
+    cca_in = (_limpiar_num_reg(body.numero_cca) or None) if (_permite_cca or not _ts_norm_cat) else None
+    dve_in = (_limpiar_num_reg(body.numero_dve) or None) if (_permite_dve or not _ts_norm_cat) else None
     aplica_exc = True if body.aplica_excentricidad is None else bool(body.aplica_excentricidad)
     motivo_no_exc = (body.motivo_no_excentricidad or "").strip() if not aplica_exc else None
     tipo_inst_txt = (body.tipo_instrumento or "").strip() or None
@@ -1169,12 +1181,14 @@ async def actualizar_instrumento_parcial(
 # ── Adjuntar escaneo ──────────────────────────────────────────────────────────
 
 def _normalizar_modalidad(valor) -> Optional[str]:
-    """'Físico'/'fisico'/'FISICO' → 'FISICO'; 'Digital' → 'DIGITAL'; otro → None."""
+    """'Físico' → 'FISICO'; 'Híbrido' → 'HIBRIDO'; 'Digital' → 'DIGITAL'; otro → None."""
     if valor is None:
         return None
     v = str(valor).strip().upper().replace("Í", "I")
     if v.startswith("FISIC"):
         return "FISICO"
+    if v.startswith("HIBRID"):
+        return "HIBRIDO"
     if v.startswith("DIGITAL"):
         return "DIGITAL"
     return None
@@ -1950,4 +1964,346 @@ async def registrar_marcas_modelos(
             logger.warning("[MARCAS-MODELOS] Error insertando (%s, %s): %s", m, mod, e)
 
     return {"ok": True, "recibidos": len(item_list), "insertados": inserted}
+
+
+# ── CRUD Administrativo de Clientes, Sucursales y Asignación de OS ────────────
+
+class ClienteWriteBody(BaseModel):
+    razon_social: Optional[str] = None
+    nombre:       Optional[str] = None
+    rfc:          Optional[str] = None
+    telefono:     Optional[str] = None
+    correo:       Optional[str] = None
+    email:        Optional[str] = None
+    direccion:    Optional[str] = None
+    activo:       Optional[bool] = True
+
+
+class SucursalWriteBody(BaseModel):
+    nombre_sucursal:   Optional[str] = None
+    nombre:            Optional[str] = None
+    direccion:         Optional[str] = None
+    contacto_nombre:   Optional[str] = None
+    contacto_telefono: Optional[str] = None
+    contacto_correo:   Optional[str] = None
+    activo:            Optional[bool] = True
+
+
+class AsignarOrdenBody(BaseModel):
+    id_tecnico: int
+    modalidad:  Optional[str] = None
+    estatus:    Optional[str] = None
+
+
+@router.get(
+    "/sucursales",
+    summary="Listar todas las sucursales/direcciones activas",
+    tags=["Catálogos"],
+)
+async def listar_todas_sucursales(
+    cliente_id: Optional[int] = None,
+    db=Depends(get_db),
+    _=Depends(get_current_user),
+):
+    if cliente_id:
+        rows = await db.fetch(
+            """
+            SELECT cs.id, cs.cliente_id,
+                   COALESCE(cc.razon_social, '') AS cliente_nombre,
+                   COALESCE(cs.nombre_sucursal, '') AS nombre_sucursal,
+                   COALESCE(cs.direccion, '') AS direccion,
+                   COALESCE(cs.contacto_nombre, '') AS contacto_nombre,
+                   COALESCE(cs.contacto_telefono, '') AS contacto_telefono,
+                   COALESCE(cs.activo, TRUE) AS activo
+            FROM cliente_sucursales cs
+            LEFT JOIN cat_clientes cc ON cc.id = cs.cliente_id
+            WHERE cs.cliente_id = $1 AND cs.activo IS NOT FALSE
+            ORDER BY cs.nombre_sucursal ASC
+            """,
+            cliente_id,
+        )
+    else:
+        rows = await db.fetch(
+            """
+            SELECT cs.id, cs.cliente_id,
+                   COALESCE(cc.razon_social, '') AS cliente_nombre,
+                   COALESCE(cs.nombre_sucursal, '') AS nombre_sucursal,
+                   COALESCE(cs.direccion, '') AS direccion,
+                   COALESCE(cs.contacto_nombre, '') AS contacto_nombre,
+                   COALESCE(cs.contacto_telefono, '') AS contacto_telefono,
+                   COALESCE(cs.activo, TRUE) AS activo
+            FROM cliente_sucursales cs
+            LEFT JOIN cat_clientes cc ON cc.id = cs.cliente_id
+            WHERE cs.activo IS NOT FALSE
+            ORDER BY cc.razon_social ASC, cs.nombre_sucursal ASC
+            """
+        )
+    return [dict(r) for r in rows]
+
+
+@router.get(
+    "/clientes/{cliente_id}/sucursales",
+    summary="Listar sucursales de un cliente",
+    tags=["Catálogos"],
+)
+async def listar_sucursales_cliente(
+    cliente_id: int,
+    db=Depends(get_db),
+    _=Depends(get_current_user),
+):
+    rows = await db.fetch(
+        """
+        SELECT id, cliente_id,
+               COALESCE(nombre_sucursal, '') AS nombre_sucursal,
+               COALESCE(direccion, '') AS direccion,
+               COALESCE(contacto_nombre, '') AS contacto_nombre,
+               COALESCE(contacto_telefono, '') AS contacto_telefono,
+               COALESCE(activo, TRUE) AS activo
+        FROM cliente_sucursales
+        WHERE cliente_id = $1 AND activo IS NOT FALSE
+        ORDER BY nombre_sucursal ASC
+        """,
+        cliente_id,
+    )
+    return [dict(r) for r in rows]
+
+
+@router.post(
+    "/clientes",
+    summary="Crear nuevo cliente (Admin)",
+    tags=["Catálogos", "Admin"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def crear_cliente(
+    body: ClienteWriteBody,
+    db=Depends(get_db),
+    _=Depends(require_roles("admin", "administrador", "superadmin", "jefe", "gerente", "logistica")),
+):
+    razon = (body.razon_social or body.nombre or "").strip()
+    if not razon:
+        raise HTTPException(status_code=400, detail="razon_social es obligatoria")
+    rfc_val = (body.rfc or "").strip() or None
+    tel_val = (body.telefono or "").strip() or None
+    dir_val = (body.direccion or "").strip() or None
+    correo_val = (body.correo or body.email or "").strip() or None
+
+    existing = await db.fetchrow(
+        "SELECT id, razon_social, COALESCE(rfc,'') AS rfc, COALESCE(telefono,'') AS telefono, COALESCE(direccion,'') AS direccion, COALESCE(activo, TRUE) AS activo "
+        "FROM cat_clientes WHERE LOWER(TRIM(razon_social)) = LOWER(TRIM($1)) LIMIT 1",
+        razon,
+    )
+    if existing:
+        row = dict(existing)
+        row["nombre"] = row["razon_social"]
+        return row
+
+    try:
+        row = await db.fetchrow(
+            """
+            INSERT INTO cat_clientes (razon_social, rfc, telefono, correo, direccion, activo)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, razon_social, COALESCE(rfc,'') AS rfc, COALESCE(telefono,'') AS telefono,
+                      COALESCE(correo,'') AS correo, COALESCE(direccion,'') AS direccion, COALESCE(activo, TRUE) AS activo
+            """,
+            razon, rfc_val, tel_val, correo_val, dir_val,
+            True if body.activo is None else bool(body.activo),
+        )
+    except Exception:
+        row = await db.fetchrow(
+            """
+            INSERT INTO cat_clientes (razon_social, rfc, telefono, direccion, activo)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, razon_social, COALESCE(rfc,'') AS rfc, COALESCE(telefono,'') AS telefono,
+                      COALESCE(direccion,'') AS direccion, COALESCE(activo, TRUE) AS activo
+            """,
+            razon, rfc_val, tel_val, dir_val,
+            True if body.activo is None else bool(body.activo),
+        )
+    out = dict(row)
+    out["nombre"] = out["razon_social"]
+    # Crear sucursal matriz inicial si se envió dirección
+    if dir_val:
+        try:
+            await db.execute(
+                """
+                INSERT INTO cliente_sucursales (cliente_id, nombre_sucursal, direccion, activo)
+                VALUES ($1, 'Matriz / Principal', $2, TRUE)
+                ON CONFLICT DO NOTHING
+                """,
+                out["id"], dir_val,
+            )
+        except Exception:
+            pass
+    return out
+
+
+@router.put(
+    "/clientes/{cliente_id}",
+    summary="Actualizar cliente existente (Admin)",
+    tags=["Catálogos", "Admin"],
+)
+async def actualizar_cliente(
+    cliente_id: int,
+    body: ClienteWriteBody,
+    db=Depends(get_db),
+    _=Depends(require_roles("admin", "administrador", "superadmin", "jefe", "gerente", "logistica")),
+):
+    razon = (body.razon_social or body.nombre or "").strip() or None
+    row = await db.fetchrow(
+        """
+        UPDATE cat_clientes
+        SET razon_social = COALESCE($1, razon_social),
+            rfc          = COALESCE($2, rfc),
+            telefono     = COALESCE($3, telefono),
+            direccion    = COALESCE($4, direccion),
+            activo       = COALESCE($5, activo)
+        WHERE id = $6
+        RETURNING id, razon_social, COALESCE(rfc,'') AS rfc, COALESCE(telefono,'') AS telefono,
+                  COALESCE(direccion,'') AS direccion, COALESCE(activo, TRUE) AS activo
+        """,
+        razon,
+        (body.rfc or "").strip() or None,
+        (body.telefono or "").strip() or None,
+        (body.direccion or "").strip() or None,
+        body.activo,
+        cliente_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Cliente no encontrado")
+    out = dict(row)
+    out["nombre"] = out["razon_social"]
+    return out
+
+
+@router.post(
+    "/clientes/{cliente_id}/sucursales",
+    summary="Crear sucursal/planta para un cliente (Admin)",
+    tags=["Catálogos", "Admin"],
+    status_code=status.HTTP_201_CREATED,
+)
+async def crear_sucursal_cliente(
+    cliente_id: int,
+    body: SucursalWriteBody,
+    db=Depends(get_db),
+    _=Depends(require_roles("admin", "administrador", "superadmin", "jefe", "gerente", "logistica")),
+):
+    nom = (body.nombre_sucursal or body.nombre or "").strip()
+    dir_val = (body.direccion or "").strip()
+    if not nom and not dir_val:
+        raise HTTPException(status_code=400, detail="nombre_sucursal o direccion requerido")
+    if not nom:
+        nom = dir_val[:80]
+    row = await db.fetchrow(
+        """
+        INSERT INTO cliente_sucursales (
+            cliente_id, nombre_sucursal, direccion, contacto_nombre, contacto_telefono, activo
+        ) VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, cliente_id,
+                  COALESCE(nombre_sucursal,'') AS nombre_sucursal,
+                  COALESCE(direccion,'') AS direccion,
+                  COALESCE(contacto_nombre,'') AS contacto_nombre,
+                  COALESCE(contacto_telefono,'') AS contacto_telefono,
+                  COALESCE(activo, TRUE) AS activo
+        """,
+        cliente_id,
+        nom,
+        dir_val or "",
+        (body.contacto_nombre or "").strip() or None,
+        (body.contacto_telefono or "").strip() or None,
+        True if body.activo is None else bool(body.activo),
+    )
+    return dict(row)
+
+
+@router.put(
+    "/clientes/{cliente_id}/sucursales/{sucursal_id}",
+    summary="Actualizar sucursal de un cliente (Admin)",
+    tags=["Catálogos", "Admin"],
+)
+async def actualizar_sucursal_cliente(
+    cliente_id: int,
+    sucursal_id: int,
+    body: SucursalWriteBody,
+    db=Depends(get_db),
+    _=Depends(require_roles("admin", "administrador", "superadmin", "jefe", "gerente", "logistica")),
+):
+    nom = (body.nombre_sucursal or body.nombre or "").strip() or None
+    row = await db.fetchrow(
+        """
+        UPDATE cliente_sucursales
+        SET nombre_sucursal   = COALESCE($1, nombre_sucursal),
+            direccion         = COALESCE($2, direccion),
+            contacto_nombre   = COALESCE($3, contacto_nombre),
+            contacto_telefono = COALESCE($4, contacto_telefono),
+            activo            = COALESCE($5, activo)
+        WHERE id = $6 AND cliente_id = $7
+        RETURNING id, cliente_id,
+                  COALESCE(nombre_sucursal,'') AS nombre_sucursal,
+                  COALESCE(direccion,'') AS direccion,
+                  COALESCE(contacto_nombre,'') AS contacto_nombre,
+                  COALESCE(contacto_telefono,'') AS contacto_telefono,
+                  COALESCE(activo, TRUE) AS activo
+        """,
+        nom,
+        (body.direccion or "").strip() or None,
+        (body.contacto_nombre or "").strip() or None,
+        (body.contacto_telefono or "").strip() or None,
+        body.activo,
+        sucursal_id,
+        cliente_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Sucursal no encontrada")
+    return dict(row)
+
+
+@router.patch(
+    "/ordenes/{folio}/asignar",
+    summary="Reasignar orden de servicio a técnico y/o modalidad (Admin)",
+    tags=["Catálogos", "Admin", "Órdenes de Servicio"],
+)
+@router.post(
+    "/ordenes/{folio}/asignar",
+    summary="Reasignar orden de servicio a técnico y/o modalidad (Admin alias POST)",
+    tags=["Catálogos", "Admin", "Órdenes de Servicio"],
+)
+async def asignar_orden_admin(
+    folio: str,
+    body: AsignarOrdenBody,
+    db=Depends(get_db),
+    _=Depends(require_roles("admin", "administrador", "superadmin", "jefe", "gerente", "logistica")),
+):
+    clean_folio = (folio or "").strip()
+    trow = await db.fetchrow(
+        "SELECT id, nombre_completo FROM cat_tecnicos WHERE id = $1",
+        body.id_tecnico,
+    )
+    if not trow:
+        raise HTTPException(status_code=404, detail=f"Técnico id={body.id_tecnico} no encontrado")
+
+    mod_norm = _normalizar_modalidad(body.modalidad) if body.modalidad else None
+    est_norm = (body.estatus or "").strip() or None
+    row = await db.fetchrow(
+        """
+        UPDATE ordenes_servicio
+        SET id_tecnico = $1,
+            modalidad  = COALESCE($2, modalidad),
+            estatus    = COALESCE($3, estatus),
+            updated_at = NOW(),
+            sync_version = COALESCE(sync_version, 0) + 1
+        WHERE folio_os = $4 OR id::text = $4
+        RETURNING id, folio_os, id_tecnico, modalidad, estado, estatus
+        """,
+        body.id_tecnico,
+        mod_norm,
+        est_norm,
+        clean_folio,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Orden {clean_folio} no encontrada")
+    out = dict(row)
+    out["tecnico"] = str(trow["nombre_completo"] or "")
+    out["ok"] = True
+    return out
+
 

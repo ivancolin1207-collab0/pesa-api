@@ -171,12 +171,14 @@ class NumericKeypad(QDialog):
         outer.setContentsMargins(0, 0, 0, 0)
 
         card = QFrame()
+        card.setObjectName("td_keypad_card")
         card.setStyleSheet(f"""
-            QFrame {{
+            QFrame#td_keypad_card {{
                 background: {_WHITE};
-                border-radius: 20px;
-                border: 1px solid rgba(0,0,0,0.10);
+                border-radius: 16px;
+                border: 1px solid #E5E7EB;
             }}
+            QFrame#td_keypad_card QLabel {{ border: none; background: transparent; }}
         """)
         lay = QVBoxLayout(card)
         lay.setContentsMargins(20, 20, 20, 20)
@@ -295,12 +297,14 @@ class TouchTableWidget(QFrame):
         self._build()
 
     def _build(self) -> None:
+        self.setObjectName("td_touch_table")
         self.setStyleSheet(f"""
-            QFrame {{
+            QFrame#td_touch_table {{
                 background: {_WHITE};
-                border: 1.5px solid rgba(0,0,0,0.07);
-                border-radius: 14px;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
             }}
+            QFrame#td_touch_table QLabel {{ border: none; background: transparent; }}
         """)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -561,6 +565,18 @@ class DrawingCanvas(QWidget):
         y_base = int(round(self.height() * 0.75))
         painter.drawLine(20, int(y_base), int(self.width() - 20), int(y_base))
 
+        if getattr(self, "_preloaded_pixmap", None) is not None and not self._preloaded_pixmap.isNull():
+            scaled = self._preloaded_pixmap.scaled(
+                max(10, self.width() - 24),
+                max(10, self.height() - 24),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x0 = int(round((self.width() - scaled.width()) / 2))
+            y0 = int(round((self.height() - scaled.height()) / 2))
+            painter.drawPixmap(x0, y0, scaled)
+            return
+
         if not self._strokes and not self._current_stroke:
             painter.setPen(QColor("#C7C7CC"))
             f = painter.font()
@@ -589,17 +605,47 @@ class DrawingCanvas(QWidget):
             path.lineTo(p)
         painter.drawPath(path)
 
+    def set_base64_image(self, b64_data: str) -> bool:
+        import base64
+        clean = str(b64_data or "").strip()
+        if clean.startswith("data:image") and "base64," in clean:
+            clean = clean.split("base64,", 1)[-1].strip()
+        if not clean:
+            return False
+        try:
+            raw = base64.b64decode(clean)
+            pix = QPixmap()
+            if pix.loadFromData(raw) and not pix.isNull():
+                self._strokes.clear()
+                self._current_stroke.clear()
+                self._preloaded_pixmap = pix
+                self.update()
+                self.signature_changed.emit()
+                return True
+        except Exception:
+            pass
+        return False
+
     def clear(self) -> None:
         self._strokes.clear()
         self._current_stroke.clear()
+        self._preloaded_pixmap = None
         self._drawing = False
         self.update()
         self.signature_changed.emit()
 
     def is_empty(self) -> bool:
+        if getattr(self, "_preloaded_pixmap", None) is not None and not self._preloaded_pixmap.isNull():
+            return False
         return len(self._strokes) == 0
 
-    def to_pixmap(self, width: int = 400, height: int = 150) -> QPixmap:
+    def to_pixmap(self, width: int = 480, height: int = 180) -> QPixmap:
+        if getattr(self, "_preloaded_pixmap", None) is not None and not self._strokes:
+            return self._preloaded_pixmap.scaled(
+                width, height,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
         pix = QPixmap(width, height)
         pix.fill(Qt.GlobalColor.white)
         if self.is_empty():
@@ -620,6 +666,13 @@ class DrawingCanvas(QWidget):
     def to_base64_png(self) -> str:
         import base64
         from PyQt6.QtCore import QBuffer, QIODevice
+        if getattr(self, "_preloaded_pixmap", None) is not None and not self._strokes:
+            buf = QBuffer()
+            buf.open(QIODevice.OpenModeFlag.WriteOnly)
+            self._preloaded_pixmap.toImage().save(buf, "PNG")
+            return base64.b64encode(buf.data().data()).decode("utf-8")
+        if self.is_empty():
+            return ""
         pix = self.to_pixmap()
         buf = QBuffer()
         buf.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -652,12 +705,14 @@ class EnlacesSustitucionWidget(QFrame):
         self._build()
 
     def _build(self) -> None:
+        self.setObjectName("td_touch_table")
         self.setStyleSheet(f"""
-            QFrame {{
+            QFrame#td_touch_table {{
                 background: {_WHITE};
-                border: 1.5px solid rgba(0,0,0,0.07);
-                border-radius: 14px;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
             }}
+            QFrame#td_touch_table QLabel {{ border: none; background: transparent; }}
         """)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
@@ -746,12 +801,14 @@ class EnlacesSustitucionWidget(QFrame):
     ) -> dict:
         """Crea una fila de la tabla y retorna un dict con los widgets de entrada."""
         w = QFrame()
+        w.setObjectName("td_enlace_row")
         w.setStyleSheet(f"""
-            QFrame {{
+            QFrame#td_enlace_row {{
                 background: {color};
                 border: 1px solid {border}33;
                 border-radius: 8px;
             }}
+            QFrame#td_enlace_row QLabel {{ border: none; background: transparent; }}
         """)
         lay = QHBoxLayout(w)
         lay.setContentsMargins(10, 6, 10, 6)
@@ -1038,12 +1095,14 @@ class TomDigitalDialog(QDialog):
     def _build_top_bar(self) -> QWidget:
         """Barra superior: Folio | Cliente | Técnico | Fecha | Modo."""
         bar = QFrame()
+        bar.setObjectName("td_top_bar")
         bar.setFixedHeight(70)
         bar.setStyleSheet(f"""
-            QFrame {{
-                background: #1E2230;
-                border-bottom: 2px solid {_RED};
+            QFrame#td_top_bar {{
+                background: #111827;
+                border-bottom: 2px solid #C8102E;
             }}
+            QFrame#td_top_bar QLabel {{ border: none; background: transparent; }}
         """)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(20, 0, 20, 0)
@@ -1176,12 +1235,14 @@ class TomDigitalDialog(QDialog):
     def _build_equipo_block(self) -> QFrame:
         """Bloque de datos del instrumento (táctil, campos grandes)."""
         frame = QFrame()
+        frame.setObjectName("td_equipo_block")
         frame.setStyleSheet(f"""
-            QFrame {{
+            QFrame#td_equipo_block {{
                 background: {_WHITE};
-                border-radius: 14px;
-                border: 1.5px solid rgba(0,0,0,0.06);
+                border-radius: 12px;
+                border: 1px solid #E5E7EB;
             }}
+            QFrame#td_equipo_block QLabel {{ border: none; background: transparent; }}
         """)
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(20, 16, 20, 16)
@@ -1266,12 +1327,14 @@ class TomDigitalDialog(QDialog):
         # ── Bloque condicional: Inicial J/I/A + Número CCA ──────────────────────
         # Visible SOLO cuando el servicio incluye Calibración (NOM-010-SCFI-2020)
         self._frame_calib = QFrame()
-        self._frame_calib.setStyleSheet(f"""
-            QFrame {{
-                background: rgba(200,16,46,0.05);
-                border: 1.5px solid rgba(200,16,46,0.25);
+        self._frame_calib.setObjectName("td_calib_frame")
+        self._frame_calib.setStyleSheet("""
+            QFrame#td_calib_frame {
+                background: #FFF5F6;
+                border: 1px solid #C8102E;
                 border-radius: 10px;
-            }}
+            }
+            QFrame#td_calib_frame QLabel { border: none; background: transparent; }
         """)
         _calib_lay = QVBoxLayout(self._frame_calib)
         _calib_lay.setContentsMargins(14, 10, 14, 10)
@@ -1361,12 +1424,14 @@ class TomDigitalDialog(QDialog):
     def _build_observaciones_block(self) -> QFrame:
         """Bloque de observaciones con teclado virtual hint."""
         frame = QFrame()
+        frame.setObjectName("td_equipo_block")
         frame.setStyleSheet(f"""
-            QFrame {{
+            QFrame#td_equipo_block {{
                 background: {_WHITE};
-                border-radius: 14px;
-                border: 1.5px solid rgba(0,0,0,0.06);
+                border-radius: 12px;
+                border: 1px solid #E5E7EB;
             }}
+            QFrame#td_equipo_block QLabel {{ border: none; background: transparent; }}
         """)
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(20, 16, 20, 16)
@@ -1400,12 +1465,14 @@ class TomDigitalDialog(QDialog):
     def _build_firmas_block(self) -> QFrame:
         """Bloque de firmas táctiles dobles (técnico + cliente)."""
         frame = QFrame()
+        frame.setObjectName("td_equipo_block")
         frame.setStyleSheet(f"""
-            QFrame {{
+            QFrame#td_equipo_block {{
                 background: {_WHITE};
-                border-radius: 14px;
-                border: 1.5px solid rgba(0,0,0,0.06);
+                border-radius: 12px;
+                border: 1px solid #E5E7EB;
             }}
+            QFrame#td_equipo_block QLabel {{ border: none; background: transparent; }}
         """)
         lay = QVBoxLayout(frame)
         lay.setContentsMargins(20, 16, 20, 16)
@@ -1486,12 +1553,14 @@ class TomDigitalDialog(QDialog):
     def _build_bottom_bar(self) -> QWidget:
         """Barra inferior fija con el botón principal de guardado."""
         bar = QFrame()
+        bar.setObjectName("td_bottom_bar")
         bar.setFixedHeight(80)
         bar.setStyleSheet(f"""
-            QFrame {{
+            QFrame#td_bottom_bar {{
                 background: {_WHITE};
-                border-top: 1px solid rgba(0,0,0,0.08);
+                border-top: 1px solid #E5E7EB;
             }}
+            QFrame#td_bottom_bar QLabel {{ border: none; background: transparent; }}
         """)
         lay = QHBoxLayout(bar)
         lay.setContentsMargins(20, 12, 20, 12)
@@ -1591,8 +1660,40 @@ class TomDigitalDialog(QDialog):
         self._inp_nombre_tecnico.setText(tec)
         self._inp_nombre_cliente.setText(data.get("firma_cliente_nombre", ""))
 
+        # Precargar firma del técnico desde orden o perfil (cat_tecnicos.firma_digital)
+        self._precargar_firma_tecnico(data)
+
         # Aplicar reglas metrológicas de calibración
         self._aplicar_reglas_servicio()
+
+    def _precargar_firma_tecnico(self, data: dict) -> None:
+        sig_b64 = str(
+            data.get("firma_tecnico")
+            or data.get("firma_tecnico_b64")
+            or ""
+        ).strip()
+        if not sig_b64 or len(sig_b64) < 32:
+            uid = (
+                data.get("id_tecnico")
+                or (_session.id_tecnico if (_HAS_SESSION and _session) else None)
+                or (_session.user_id if (_HAS_SESSION and _session) else None)
+            )
+            if uid:
+                try:
+                    from database.connection import db_pool
+                    with db_pool.get_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(
+                                "SELECT firma_digital FROM cat_tecnicos WHERE id = %s",
+                                (int(uid),),
+                            )
+                            row = cur.fetchone()
+                            if row and row[0]:
+                                sig_b64 = str(row[0]).strip()
+                except Exception as exc_sig:
+                    logger.debug("No se pudo precargar firma de perfil técnico: %s", exc_sig)
+        if sig_b64 and len(sig_b64) >= 32 and hasattr(self, "_canvas_tecnico"):
+            self._canvas_tecnico.set_base64_image(sig_b64)
 
     def _aplicar_reglas_servicio(self) -> None:
         """

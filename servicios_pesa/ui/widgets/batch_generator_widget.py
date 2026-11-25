@@ -242,13 +242,18 @@ class EquipoCard(QFrame):
                     cmb.setCurrentIndex(idx)
 
     def _build(self) -> None:
-        self.setObjectName(f"equipo_card_{self._index}")
-        self.setStyleSheet("""
-            QFrame {
+        card_id = f"equipo_card_{self._index}"
+        self.setObjectName(card_id)
+        self.setStyleSheet(f"""
+            QFrame#{card_id} {{
                 background: #FFFFFF;
-                border: 1px solid rgba(0,0,0,0.07);
+                border: 1px solid #E5E7EB;
                 border-radius: 12px;
-            }
+            }}
+            QFrame#{card_id} QLabel {{
+                border: none;
+                background: transparent;
+            }}
         """)
         root = QVBoxLayout(self)
         root.setContentsMargins(18, 14, 18, 14)
@@ -448,20 +453,21 @@ class EquipoCard(QFrame):
 
         row2.addWidget(self._widget_calibracion, stretch=3)
 
-        # ── Número DVE regulatorio independiente (puede llenarse junto con CCA, solo, o vacío) ──
+        # ── Número DVE regulatorio independiente (visible EXCLUSIVAMENTE cuando el servicio incluye Inspección/Verificación/DVE) ──
         self._widget_numero_dve = QWidget()
         self._widget_numero_dve.setStyleSheet("background: transparent;")
         _dve_num_lay = QVBoxLayout(self._widget_numero_dve)
         _dve_num_lay.setContentsMargins(0, 0, 0, 0)
         _dve_num_lay.setSpacing(4)
         self._lbl_numero_dve = QLabel("Número DVE (Opcional)")
-        self._lbl_numero_dve.setStyleSheet("font-size: 11px; font-weight: 700; color: #86868B;")
+        self._lbl_numero_dve.setStyleSheet("font-size: 11px; font-weight: 600; color: #6B7280; background: transparent; border: none;")
         _dve_num_lay.addWidget(self._lbl_numero_dve)
         self._inp_numero_dve = QLineEdit()
         self._inp_numero_dve.setPlaceholderText(f"DVE.{_anio}.XXXX")
         self._inp_numero_dve.setStyleSheet(_EQUIPO_FIELD_STYLE)
-        self._inp_numero_dve.setFixedHeight(40)
+        self._inp_numero_dve.setFixedHeight(38)
         _dve_num_lay.addWidget(self._inp_numero_dve)
+        self._widget_numero_dve.setVisible(False)
         row2.addWidget(self._widget_numero_dve, stretch=2)
 
         fields_lay.addWidget(self._fields_row2)
@@ -497,11 +503,8 @@ class EquipoCard(QFrame):
         self._spin_filas_exc.setRange(1, 10)
         self._spin_filas_exc.setValue(5)
         self._spin_filas_exc.setSuffix(" pos")
-        self._spin_filas_exc.setFixedHeight(40)
-        self._spin_filas_exc.setFixedWidth(110)
-        self._spin_filas_exc.setStyleSheet(
-            _EQUIPO_FIELD_STYLE.replace('QLineEdit', 'QSpinBox')
-        )
+        self._spin_filas_exc.setFixedHeight(38)
+        self._spin_filas_exc.setMinimumWidth(118)
         self._spin_filas_exc.setToolTip(
             "Número de posiciones de excentricidad (renglones en la tabla del PDF).\n"
             "Por defecto: 5.  Cambia según el tipo de instrumento."
@@ -512,15 +515,14 @@ class EquipoCard(QFrame):
         # Puntos de Exactitud: selector compacto por instrumento
         _col_pts = QVBoxLayout(); _col_pts.setSpacing(4)
         _lbl_pts = QLabel("Pts. Exactitud")
-        _lbl_pts.setStyleSheet("font-size: 11px; font-weight: 700; color: #86868B;")
+        _lbl_pts.setStyleSheet("font-size: 11px; font-weight: 600; color: #6B7280; border: none; background: transparent;")
         _col_pts.addWidget(_lbl_pts)
         self._spin_pts_exact = QSpinBox()
         self._spin_pts_exact.setRange(1, 15)
         self._spin_pts_exact.setValue(5)   # mismo default que el global
         self._spin_pts_exact.setSuffix(" pts")
-        self._spin_pts_exact.setFixedHeight(40)
-        self._spin_pts_exact.setFixedWidth(110)
-        self._spin_pts_exact.setStyleSheet(_EQUIPO_FIELD_STYLE.replace('QLineEdit', 'QSpinBox'))
+        self._spin_pts_exact.setFixedHeight(38)
+        self._spin_pts_exact.setMinimumWidth(116)
         self._spin_pts_exact.setToolTip(
             "Número de puntos de exactitud para este instrumento.\n"
             "Sobreescribe el valor global del Paso 3."
@@ -534,12 +536,11 @@ class EquipoCard(QFrame):
         _lay_geo.setSpacing(12)
         _col_geo = QVBoxLayout(); _col_geo.setSpacing(4)
         _lbl_geo = QLabel("Geometría / Puntos")
-        _lbl_geo.setStyleSheet("font-size: 11px; font-weight: 700; color: #86868B;")
+        _lbl_geo.setStyleSheet("font-size: 11px; font-weight: 600; color: #6B7280; border: none; background: transparent;")
         _col_geo.addWidget(_lbl_geo)
         self._cmb_geo = QComboBox()
         self._cmb_geo.addItems(["Libre", "Plataforma Cuadrada", "Plataforma Circular", "Camionera"])
-        self._cmb_geo.setStyleSheet(_EQUIPO_FIELD_STYLE)
-        self._cmb_geo.setFixedHeight(40)
+        self._cmb_geo.setFixedHeight(38)
         _col_geo.addWidget(self._cmb_geo)
         _lay_geo.addLayout(_col_geo, stretch=2)
 
@@ -549,13 +550,13 @@ class EquipoCard(QFrame):
         _col_sec.setContentsMargins(0,0,0,0)
         _col_sec.setSpacing(4)
         _lbl_sec = QLabel("Secciones")
-        _lbl_sec.setStyleSheet("font-size: 11px; font-weight: 700; color: #86868B;")
+        _lbl_sec.setStyleSheet("font-size: 11px; font-weight: 600; color: #6B7280; border: none; background: transparent;")
         _col_sec.addWidget(_lbl_sec)
         self._spin_sec = QSpinBox()
         self._spin_sec.setRange(2,8)
         self._spin_sec.setValue(4)
-        self._spin_sec.setFixedHeight(40)
-        self._spin_sec.setStyleSheet(_EQUIPO_FIELD_STYLE.replace('QLineEdit','QSpinBox'))
+        self._spin_sec.setFixedHeight(38)
+        self._spin_sec.setMinimumWidth(116)
         _col_sec.addWidget(self._spin_sec)
         _lay_geo.addWidget(self._wgt_secciones, stretch=1)
         row3.addWidget(self._wgt_geo, stretch=2)
@@ -647,11 +648,8 @@ class EquipoCard(QFrame):
         self._spin_enlaces.setRange(1, 20)
         self._spin_enlaces.setValue(8)
         self._spin_enlaces.setSuffix("  enlaces")
-        self._spin_enlaces.setFixedHeight(40)
-        self._spin_enlaces.setMinimumWidth(160)
-        self._spin_enlaces.setStyleSheet(
-            _EQUIPO_FIELD_STYLE.replace('QLineEdit', 'QSpinBox')
-        )
+        self._spin_enlaces.setFixedHeight(38)
+        self._spin_enlaces.setMinimumWidth(148)
         _col_n_enl.addWidget(self._spin_enlaces)
         self._wgt_spin_enlaces = QWidget()   # contenedor para mostrar/ocultar
         self._wgt_spin_enlaces.setStyleSheet("background: transparent;")
@@ -928,26 +926,33 @@ class EquipoCard(QFrame):
 
     def set_inspeccion_visible(self, visible: bool) -> None:
         """
-        Muestra u oculta los campos de Holograma (Anterior + Actualizado) y DVE
-        según si el tipo de servicio activo contiene 'inspección'.
-        - Hologramas: opcionales; si se dejan en blanco el PDF los marca en rojo.
-        - DVE: metrológicamente solo aplica con inspección oficial.
+        Muestra u oculta Hologramas (Anterior + Actualizado) y DVE (Div. Verificación + Número DVE)
+        EXCLUSIVAMENTE cuando el tipo de servicio incluye inspección/verificación/DVE.
+        Al ocultarse, limpia los valores para no contaminar BD, correos ni PDFs.
         """
         try:
             if hasattr(self, '_wgt_hologramas'):
                 self._wgt_hologramas.setVisible(visible)
+                if not visible:
+                    if hasattr(self, '_inp_holograma_ant'):
+                        self._inp_holograma_ant.clear()
+                    if hasattr(self, '_inp_holograma_act'):
+                        self._inp_holograma_act.clear()
         except Exception:
             pass
-        # DVE: mostrar solo con inspección; limpiar al ocultar
         self.set_dve_visible(visible)
 
     def set_dve_visible(self, visible: bool) -> None:
-        """Muestra u oculta el campo DVE. Al ocultarlo limpia el valor capturado."""
+        """Muestra u oculta Div. Verificación DVE y Número DVE. Al ocultarlo limpia ambos."""
         try:
             if hasattr(self, '_wgt_dve'):
                 self._wgt_dve.setVisible(visible)
                 if not visible and hasattr(self, '_inp_dve'):
                     self._inp_dve.clear()
+            if hasattr(self, '_widget_numero_dve'):
+                self._widget_numero_dve.setVisible(visible)
+                if not visible and hasattr(self, '_inp_numero_dve'):
+                    self._inp_numero_dve.clear()
         except Exception:
             pass
 
@@ -1087,8 +1092,20 @@ class EquipoCard(QFrame):
 
         from services.metrology import formatear_division_minima, limpiar_numero_regulatorio
         _div_norm = formatear_division_minima(_v("_inp_division"))
-        _cca_clean = limpiar_numero_regulatorio(_v("_inp_cca"))
-        _dve_num_clean = limpiar_numero_regulatorio(_v("_inp_numero_dve"))
+
+        _permite_calibracion = not (
+            hasattr(self, "_widget_calibracion") and self._widget_calibracion.isHidden()
+        )
+        _permite_inspeccion = not (
+            hasattr(self, "_wgt_hologramas") and self._wgt_hologramas.isHidden()
+        )
+
+        ini = ini if _permite_calibracion else ""
+        _cca_clean = limpiar_numero_regulatorio(_v("_inp_cca")) if _permite_calibracion else ""
+        _dve_num_clean = limpiar_numero_regulatorio(_v("_inp_numero_dve")) if _permite_inspeccion else ""
+        _dve_div_val = _v("_inp_dve") if _permite_inspeccion else ""
+        _holo_ant_val = _v("_inp_holograma_ant") if _permite_inspeccion else ""
+        _holo_act_val = _v("_inp_holograma_act") if _permite_inspeccion else ""
 
         return {
             # ── Folio Manual ───────────────────────────────────────────────────
@@ -1100,7 +1117,7 @@ class EquipoCard(QFrame):
             "equipo_id":           _v("_inp_id")       or None,
             "equipo_alcance":      _v("_inp_alcance")  or None,
             "equipo_division":     _div_norm           or None,
-            "equipo_dve":          _v("_inp_dve")      or None,
+            "equipo_dve":          _dve_div_val        or None,
             "equipo_ubicacion":    _v("_inp_ubicacion") or None,
             # Alias adicionales para compatibilidad con os_pdf_generator y tablet
             "marca":               _v("_inp_marca"),
@@ -1115,7 +1132,7 @@ class EquipoCard(QFrame):
             "division_minima":     _div_norm,
             "division_min":        _div_norm,
             "div_minima":          _div_norm,
-            "dve":                 _v("_inp_dve"),
+            "dve":                 _dve_div_val,
             "ubicacion":           _v("_inp_ubicacion"),
             "planta":              _v("_inp_ubicacion"),
             "orden_servicio_vinculada": _v("_inp_os_vinculada"),
@@ -1165,8 +1182,8 @@ class EquipoCard(QFrame):
             "filas_exactitud":         pts_exact_val,
             "puntos_exactitud":        pts_exact_val,
             # ── Hologramas (solo relevante si el servicio contiene 'inspección') ──
-            "holograma_anterior":      _v("_inp_holograma_ant"),
-            "holograma_actualizado":   _v("_inp_holograma_act"),
+            "holograma_anterior":      _holo_ant_val,
+            "holograma_actualizado":   _holo_act_val,
         }
 
 
@@ -1260,42 +1277,51 @@ class SelectCard(QPushButton):
 
     def _apply_style(self, checked: bool) -> None:
         self._selected = checked
+        self.setObjectName("select_card")
         if checked:
             self.setStyleSheet("""
-                SelectCard, QPushButton {
+                QPushButton#select_card {
                     background-color: #FFF5F6;
                     border: 2px solid #C8102E;
                     border-radius: 10px;
-                    min-height: 82px;
+                    min-height: 86px;
                     padding: 0px;
                     text-align: left;
+                }
+                QPushButton#select_card QLabel {
+                    border: none;
+                    background: transparent;
                 }
             """)
             self._lbl_badge.setStyleSheet(
                 "background-color: #C8102E; color: #FFFFFF; border: none; "
-                "border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700;"
+                "border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: 700;"
             )
             self._lbl_title.setStyleSheet(
                 "font-size: 13px; font-weight: 700; color: #C8102E; background: transparent; border: none;"
             )
         else:
             self.setStyleSheet("""
-                SelectCard, QPushButton {
+                QPushButton#select_card {
                     background-color: #FFFFFF;
                     border: 1px solid #E5E7EB;
                     border-radius: 10px;
-                    min-height: 82px;
+                    min-height: 86px;
                     padding: 0px;
                     text-align: left;
                 }
-                SelectCard:hover, QPushButton:hover {
+                QPushButton#select_card:hover {
                     border-color: #CBD5E1;
                     background-color: #F8FAFC;
+                }
+                QPushButton#select_card QLabel {
+                    border: none;
+                    background: transparent;
                 }
             """)
             self._lbl_badge.setStyleSheet(
                 "background-color: #F8FAFC; color: #6B7280; border: 1px solid #E5E7EB; "
-                "border-radius: 4px; padding: 2px 6px; font-size: 10px; font-weight: 700;"
+                "border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: 700;"
             )
             self._lbl_title.setStyleSheet(
                 "font-size: 13px; font-weight: 700; color: #111827; background: transparent; border: none;"
@@ -1339,11 +1365,16 @@ def _sep() -> QFrame:
 
 def _section_card() -> tuple[QFrame, QVBoxLayout]:
     card = QFrame()
+    card.setObjectName("section_card")
     card.setStyleSheet("""
-        QFrame {
+        QFrame#section_card {
             background: #FFFFFF;
             border: 1px solid #E5E7EB;
             border-radius: 12px;
+        }
+        QFrame#section_card QLabel {
+            border: none;
+            background: transparent;
         }
     """)
     lay = QVBoxLayout(card)
@@ -1364,27 +1395,29 @@ def _field_label(text: str, required: bool = False) -> QLabel:
 
 
 def _input_style() -> str:
-    chevron_path = ""
-    try:
-        import os as _os
-        import sys as _sys
-        base = getattr(_sys, "_MEIPASS", _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
-        cand = _os.path.join(base, "assets", "images", "chevron_down.png").replace("\\", "/")
-        if _os.path.exists(cand):
-            chevron_path = cand
-    except Exception:
-        pass
+    import os as _os
+    import sys as _sys
+    base = getattr(_sys, "_MEIPASS", _os.path.dirname(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))))
+    def _icon(name: str) -> str:
+        cand = _os.path.join(base, "ui", "assets", "icons", name).replace("\\", "/")
+        return cand if _os.path.exists(cand) else ""
+
+    chevron_path = _icon("chevron_down.svg")
+    arrow_up_path = _icon("arrow_up.svg")
+    arrow_down_path = _icon("arrow_down.svg")
     arrow_rule = (
         f"image: url({chevron_path}); width: 12px; height: 12px; border: none;"
         if chevron_path
         else "border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 5px solid #6B7280;"
     )
+    up_arrow_rule = f"image: url({arrow_up_path}); width: 10px; height: 10px;" if arrow_up_path else ""
+    down_arrow_rule = f"image: url({arrow_down_path}); width: 10px; height: 10px;" if arrow_down_path else ""
     return f"""
         QComboBox {{
             background-color: #FFFFFF;
             border: 1px solid #D1D5DB;
-            border-radius: 6px;
-            padding: 0px 28px 0px 12px;
+            border-radius: 8px;
+            padding: 0px 30px 0px 12px;
             color: #111827;
             font-size: 13px;
             min-height: 36px;
@@ -1401,7 +1434,7 @@ def _input_style() -> str:
             border: none;
             subcontrol-origin: padding;
             subcontrol-position: top right;
-            width: 26px;
+            width: 28px;
             background: transparent;
         }}
         QComboBox::down-arrow {{
@@ -1446,13 +1479,36 @@ def _input_style() -> str:
         QSpinBox, QDateEdit {{
             background-color: #FFFFFF;
             border: 1px solid #D1D5DB;
-            border-radius: 6px;
-            padding: 0px 12px;
+            border-radius: 8px;
+            padding: 0px 26px 0px 10px;
             color: #111827;
             font-size: 13px;
+            min-width: 112px;
             min-height: 36px;
             max-height: 38px;
         }}
+        QSpinBox::up-button {{
+            subcontrol-origin: border;
+            subcontrol-position: top right;
+            width: 24px;
+            border-left: 1px solid #E5E7EB;
+            border-bottom: 1px solid #E5E7EB;
+            border-top-right-radius: 8px;
+            background-color: #F9FAFB;
+        }}
+        QSpinBox::down-button {{
+            subcontrol-origin: border;
+            subcontrol-position: bottom right;
+            width: 24px;
+            border-left: 1px solid #E5E7EB;
+            border-bottom-right-radius: 8px;
+            background-color: #F9FAFB;
+        }}
+        QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
+            background-color: #E5E7EB;
+        }}
+        QSpinBox::up-arrow {{ {up_arrow_rule} }}
+        QSpinBox::down-arrow {{ {down_arrow_rule} }}
         QSpinBox:hover, QDateEdit:hover {{
             border-color: #9CA3AF;
         }}
@@ -1699,8 +1755,9 @@ class BatchGeneratorWidget(QWidget):
         self._main_lay.addWidget(self._card_step2)
         self._card_step2.setEnabled(False)
         self._card_step2.setStyleSheet("""
-            QFrame { background: #F9FAFB; border: 1px solid #E5E7EB;
+            QFrame#section_card { background: #F9FAFB; border: 1px solid #E5E7EB;
                      border-radius: 12px; }
+            QFrame#section_card QLabel { border: none; background: transparent; }
         """)
 
         # ── PASO 3: Parámetros ────────────────────────────────────────────────
@@ -1712,8 +1769,9 @@ class BatchGeneratorWidget(QWidget):
         self._main_lay.addWidget(self._card_step3)
         self._card_step3.setEnabled(False)
         self._card_step3.setStyleSheet("""
-            QFrame { background: #F9FAFB; border: 1px solid #E5E7EB;
+            QFrame#section_card { background: #F9FAFB; border: 1px solid #E5E7EB;
                      border-radius: 12px; }
+            QFrame#section_card QLabel { border: none; background: transparent; }
         """)
 
         # ── PASO 4: Resumen + acción ──────────────────────────────────────────
@@ -1725,8 +1783,9 @@ class BatchGeneratorWidget(QWidget):
         self._main_lay.addWidget(self._card_step4)
         self._card_step4.setEnabled(False)
         self._card_step4.setStyleSheet("""
-            QFrame { background: #F9FAFB; border: 1px solid #E5E7EB;
+            QFrame#section_card { background: #F9FAFB; border: 1px solid #E5E7EB;
                      border-radius: 12px; }
+            QFrame#section_card QLabel { border: none; background: transparent; }
         """)
 
         self._main_lay.addStretch()
@@ -1854,8 +1913,8 @@ class BatchGeneratorWidget(QWidget):
     # ── PASO 3 ────────────────────────────────────────────────────────────────
     def _build_step3_content(self) -> QWidget:
         w = QWidget()
-        w.setStyleSheet("background: transparent;")
-        w.setStyleSheet(_input_style() + "QWidget { background: transparent; }")
+        w.setObjectName("batch_step3_content")
+        w.setStyleSheet(_input_style() + "QWidget#batch_step3_content { background: transparent; } QLabel { border: none; background: transparent; }")
 
         grid = QVBoxLayout(w)
         grid.setSpacing(14)
@@ -2470,7 +2529,7 @@ class BatchGeneratorWidget(QWidget):
         self.spn_lv_basculas = QSpinBox()
         self.spn_lv_basculas.setRange(1, 20)
         self.spn_lv_basculas.setValue(1)
-        self.spn_lv_basculas.setFixedWidth(90)
+        self.spn_lv_basculas.setMinimumWidth(120)
         self.spn_lv_basculas.setToolTip("N\u00famero de b\u00e1sculas o instrumentos a levantar en este pre-visita")
         _lv_ctrl.addWidget(self.spn_lv_basculas)
         _btn_add_basc = QPushButton("+  Agregar B\u00e1scula")
@@ -2644,9 +2703,10 @@ class BatchGeneratorWidget(QWidget):
     # ── Barra de acción inferior (sticky footer corporativo) ──────────────────
     def _build_action_bar(self) -> QWidget:
         bar = QWidget()
+        bar.setObjectName("batch_action_bar")
         bar.setFixedHeight(64)
         bar.setStyleSheet("""
-            QWidget {
+            QWidget#batch_action_bar {
                 background: #FFFFFF;
                 border-top: 1px solid #E5E7EB;
             }
@@ -5527,10 +5587,14 @@ class BatchGeneratorWidget(QWidget):
     def _enable_card(self, card: QFrame) -> None:
         card.setEnabled(True)
         card.setStyleSheet("""
-            QFrame {
+            QFrame#section_card {
                 background: #FFFFFF;
-                border: 1px solid rgba(0,0,0,0.07);
-                border-radius: 14px;
+                border: 1px solid #E5E7EB;
+                border-radius: 12px;
+            }
+            QFrame#section_card QLabel {
+                border: none;
+                background: transparent;
             }
         """)
 

@@ -40,20 +40,22 @@ const _tecnicoOnlyRoutes = {'/mi-firma'};
 
 bool _isTecnicoRole(String? role) {
   if (role == null || role.isEmpty) return false;
-  final r = role.toLowerCase().trim()
-      .replaceAll('é', 'e')
-      .replaceAll('á', 'a')
-      .replaceAll('í', 'i')
-      .replaceAll('ó', 'o')
-      .replaceAll('ú', 'u');
-  return r.contains('tec') ||
+  if (UsuarioActual.esRolAdmin(role)) return false;
+  final r = AuthService.normalizeRole(role);
+  return r == 'tecnico' ||
       r == 'servicio' ||
       r == 'calibrador' ||
       r == 'inspector' ||
       r == 'operativo';
 }
 
-List<_NavItem> _navItemsForRole(String? role) {
+List<_NavItem> _navItemsForRole(String? role, [String? username]) {
+  final isAdmin = UsuarioActual.esRolAdmin(role, username);
+  if (isAdmin) {
+    return _navItemsAll
+        .where((i) => !_tecnicoOnlyRoutes.contains(i.route))
+        .toList();
+  }
   final isTecnico = _isTecnicoRole(role);
   if (isTecnico) {
     return _navItemsAll
@@ -204,7 +206,7 @@ class _AppShellState extends State<AppShell> {
     }
 
     final auth = context.watch<AuthService>();
-    final bool isTec = _isTecnicoRole(auth.role);
+    final bool isTec = !auth.isAdmin && _isTecnicoRole(auth.role);
     final List<_NavItem> bottomItems = isTec
         ? const [
             _NavItem(icon: Icons.dashboard_outlined,        label: 'Dashboard', shortLabel: 'Órdenes',   route: '/os'),
@@ -421,7 +423,7 @@ class _SidebarContent extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 2),
             child: Builder(builder: (ctx) {
               final auth = ctx.watch<AuthService>();
-              final items = _navItemsForRole(auth.role);
+              final items = _navItemsForRole(auth.role, auth.username);
               return Column(
                 children: items
                     .map((item) => _NavTile(
