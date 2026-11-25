@@ -1,8 +1,33 @@
-fastapi
-uvicorn[standard]
-asyncpg
-pydantic
-pydantic-settings
-python-jose[cryptography]
-passlib[bcrypt]
-python-multipart
+# ══════════════════════════════════════════════════════════════
+#  Servicios PESA API — Dependencias de producción (Linux / Render)
+#  Aislado 100% de PyQt6 / pywin32 / paquetes de escritorio Windows.
+#  Desktop dependencies live in: requirements-desktop.txt
+# ══════════════════════════════════════════════════════════════
+
+# Framework principal
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+
+# Base de datos (asyncpg para API + psycopg2-binary para compatibilidad)
+asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
+
+# Seguridad y autenticación
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+passlib[bcrypt]>=1.7.4
+PyJWT>=2.8.0
+
+# Validación, configuración y zona horaria
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+email-validator>=2.2.0
+python-dotenv>=1.0.0
+tzdata>=2024.1
+
+# Red, utilidades y PDF / imágenes
+requests>=2.31.0
+python-multipart>=0.0.9
+pypdf>=5.0.0
+reportlab>=4.2.0
+Pillow>=10.4.0

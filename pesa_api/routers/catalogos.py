@@ -18,7 +18,7 @@ import uuid
 import base64
 import logging
 from datetime import date
-from typing import Optional, Union, List, Any
+from typing import Any, Dict, List, Optional, Union
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, UploadFile, Request, status
 from pydantic import BaseModel
@@ -1487,10 +1487,10 @@ async def upload_pdf_tablet(
             ).strip() or None
             ns_up = str(p.get("ns") or p.get("serie") or dt_map.get("ns") or dt_map.get("serie") or "").strip() or None
             ubic_up = str(p.get("ubicacion") or dt_map.get("ubicacion") or "").strip() or None
-            cca_up = _limpiar_numero_regulatorio(
+            cca_up = _limpiar_num_reg(
                 p.get("numero_cca") or p.get("cca") or dt_map.get("numero_cca") or dt_map.get("cca")
             ) or None
-            dve_up = _limpiar_numero_regulatorio(
+            dve_up = _limpiar_num_reg(
                 p.get("numero_dve") or p.get("folio_dve") or dt_map.get("numero_dve") or dt_map.get("folio_dve")
             ) or None
 
@@ -1644,8 +1644,8 @@ async def _aplicar_ordenes_meta_previo_correo(db, ordenes_meta: Optional[List[Di
         marca_v = str(item.get("marca") or "").strip() or None
         modelo_v = str(item.get("modelo") or "").strip() or None
         id_v = str(item.get("id_indicador") or item.get("id_equipo") or item.get("indicador_id") or "").strip() or None
-        cca_v = _limpiar_numero_regulatorio(item.get("numero_cca") or item.get("cca")) or None
-        dve_v = _limpiar_numero_regulatorio(item.get("numero_dve") or item.get("folio_dve")) or None
+        cca_v = _limpiar_num_reg(item.get("numero_cca") or item.get("cca")) or None
+        dve_v = _limpiar_num_reg(item.get("numero_dve") or item.get("folio_dve")) or None
         try:
             await db.execute(
                 """

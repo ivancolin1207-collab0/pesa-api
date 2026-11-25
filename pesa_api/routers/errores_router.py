@@ -1,4 +1,4 @@
-﻿"""
+"""
 pesa_api/routers/errores_router.py
 Endpoints para registro de errores técnicos desde la Tablet:
   POST /api/v1/errores-tecnicos      → Registra un incidente de captura digital fallida

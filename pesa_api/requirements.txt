@@ -1,30 +1,36 @@
 # ══════════════════════════════════════════════════════════════
-#  Servicios PESA API — Dependencias de producción
-#  Instalar: pip install -r requirements.txt
+#  Servicios PESA API — Dependencias de producción (Linux / Render)
 #  Render Build Command: pip install -r pesa_api/requirements.txt
+#  Aislado 100% de PyQt6 / pywin32 / paquetes de escritorio Windows.
 # ══════════════════════════════════════════════════════════════
 
 # ── Framework principal ───────────────────────────────────────
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 
-# ── Base de datos async ───────────────────────────────────────
+# ── Base de datos ─────────────────────────────────────────────
 asyncpg>=0.29.0
+psycopg2-binary>=2.9.9
 
 # ── Seguridad ─────────────────────────────────────────────────
 python-jose[cryptography]>=3.3.0
 bcrypt>=4.0.0
 passlib[bcrypt]>=1.7.4
+PyJWT>=2.8.0
 
-# ── Validación / configuración ────────────────────────────────
+# ── Validación / configuración / zona horaria ─────────────────
 pydantic>=2.7.0
 pydantic-settings>=2.3.0
 email-validator>=2.2.0
 python-dotenv>=1.0.0
+tzdata>=2024.1
 
-# ── Utilidades ────────────────────────────────────────────────
+# ── Utilidades y PDF / imágenes ───────────────────────────────
+requests>=2.31.0
 python-multipart>=0.0.9       # Form data en /auth/login
 pypdf>=5.0.0                  # Extracción de metadatos y texto de PDFs
+reportlab>=4.2.0
+Pillow>=10.4.0
 
 # ══════════════════════════════════════════════════════════════
 #  Dependencias de desarrollo / test  (no se instalan en Render)

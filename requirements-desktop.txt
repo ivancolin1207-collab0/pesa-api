@@ -1,0 +1,32 @@
+# ══════════════════════════════════════════════════════════════
+#  Servicios PESA — Dependencias de Escritorio Windows (.exe)
+#  NO usar este archivo en Render / servidor Linux.
+#  Instalar con: pip install -r requirements-desktop.txt
+# ══════════════════════════════════════════════════════════════
+
+# Interfaz Gráfica PyQt6
+PyQt6>=6.7.0
+PyQt6-Qt6>=6.7.0
+PyQt6-sip>=13.8.0
+
+# Empaquetado Windows
+pyinstaller>=6.10.0
+
+# Base de Datos y Entorno
+psycopg2-binary>=2.9.9
+python-dotenv>=1.0.1
+tzdata>=2024.1
+
+# Seguridad y Red
+bcrypt>=4.0.0
+PyJWT>=2.8.0
+requests>=2.31.0
+
+# Generación / lectura de PDFs e Imágenes
+reportlab>=4.2.0
+pypdf>=5.0.0
+pdfplumber>=0.11.0
+Pillow>=10.4.0
+
+# Integración Windows (rutas UNC)
+pywin32>=306; sys_platform=="win32"
