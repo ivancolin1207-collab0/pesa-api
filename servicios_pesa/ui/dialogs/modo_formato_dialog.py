@@ -40,13 +40,13 @@ except ImportError:
     _db_pool = None
 
 
-# ─── Paleta ───────────────────────────────────────────────────────────────────
-_RED   = "#CC1F1F"
-_DARK  = "#1C1C1C"
-_GRAY  = "#6B7280"
-_BG    = "#F9FAFB"
+# ─── Paleta Apple Minimalist (macOS Sequoia v3.3.1) ───────────────────────────
+_RED   = "#C8102E"
+_DARK  = "#1D1D1F"
+_GRAY  = "#6E6E73"
+_BG    = "#F5F5F7"
 _WHITE = "#FFFFFF"
-_BLUE  = "#2563EB"
+_BLUE  = "#1D1D1F"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

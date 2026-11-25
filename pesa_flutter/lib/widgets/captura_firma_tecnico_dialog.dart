@@ -205,7 +205,7 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
       surfaceTintColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
         side: const BorderSide(color: PesaColors.border),
       ),
       child: ConstrainedBox(
@@ -223,7 +223,7 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                     height: 40,
                     decoration: BoxDecoration(
                       color: PesaColors.brand,
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Icon(Icons.draw_outlined, color: Colors.white, size: 22),
                   ),

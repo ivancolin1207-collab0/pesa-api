@@ -24,36 +24,36 @@ from PyQt6.QtWidgets import (
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# TOKENS DE DISEÑO — BÁSCULAS PESA (CORPORATE MINIMALIST)
+# TOKENS DE DISEÑO — BÁSCULAS PESA (APPLE MINIMALIST macOS SEQUOIA v3.3.1)
 # ──────────────────────────────────────────────────────────────────────────────
 PALETTE: dict[str, str] = {
-    "canvas":         "#F6F7F9",  # Fondo principal de contenido
-    "surface":        "#FFFFFF",  # Tarjetas, tablas, formularios, sidebar
-    "surface_muted":  "#F8FAFC",  # Badges neutros, hover de filas
-    "table_header":   "#F9FAFB",  # Encabezados de tabla
-    "border":         "#E5E7EB",  # Borde principal 1px
-    "border_strong":  "#CBD5E1",  # Borde de inputs y botones secundarios
-    "divider":        "#F3F4F6",  # Divisores horizontales entre filas
-    "text_primary":   "#111827",  # Texto principal (carbón oscuro)
-    "text_secondary": "#6B7280",  # Texto secundario / etiquetas
-    "text_tertiary":  "#9CA3AF",  # Placeholders / hints
+    "canvas":         "#F5F5F7",  # Apple System Gray 6 — Fondo principal
+    "surface":        "#FFFFFF",  # Tarjetas, tablas, formularios
+    "surface_muted":  "#F2F2F7",  # Badges neutros, hover de filas y cápsulas
+    "table_header":   "#FBFBFD",  # Encabezados de tabla
+    "border":         "#E5E5EA",  # Borde principal ultrafino 1px
+    "border_strong":  "#D2D2D7",  # Borde de inputs y botones secundarios
+    "divider":        "#F2F2F7",  # Divisores horizontales entre filas
+    "text_primary":   "#1D1D1F",  # Texto principal (Apple Anthracite)
+    "text_secondary": "#6E6E73",  # Texto secundario / etiquetas
+    "text_tertiary":  "#8E8E93",  # Placeholders / hints
     "brand":          "#C8102E",  # Rojo Corporativo Básculas PESA
     "brand_hover":    "#A60D26",  # Rojo hover
     "brand_pressed":  "#880B20",  # Rojo pressed
-    "dot_green":      "#16A34A",  # Punto semántico 6px: Cerrado / Sincronizado / Conectado
-    "dot_amber":      "#D97706",  # Punto semántico 6px: En Proceso / Offline / Pendiente
+    "dot_green":      "#34C759",  # Punto semántico 6px: Cerrado / Sincronizado / Conectado
+    "dot_amber":      "#FF9500",  # Punto semántico 6px: En Proceso / Offline
     "dot_red":        "#C8102E",  # Punto semántico 6px: Pendiente / Alerta / Cancelada
-    "dot_neutral":    "#6B7280",  # Punto semántico neutro
+    "dot_neutral":    "#6E6E73",  # Punto semántico neutro
 }
 
-FONT_FAMILY = '"Segoe UI", "Inter", -apple-system, BlinkMacSystemFont, Arial, sans-serif'
+FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Inter", -apple-system, BlinkMacSystemFont, Arial, sans-serif'
 
 BTN_PRIMARY_QSS = """
     QPushButton {
         background-color: #C8102E;
         color: #FFFFFF;
         border: 1px solid #C8102E;
-        border-radius: 8px;
+        border-radius: 10px;
         padding: 0 16px;
         font-size: 13px;
         font-weight: 600;
@@ -68,9 +68,9 @@ BTN_PRIMARY_QSS = """
         border-color: #880B20;
     }
     QPushButton:disabled {
-        background-color: #E5E7EB;
-        color: #9CA3AF;
-        border-color: #E5E7EB;
+        background-color: #E5E5EA;
+        color: #8E8E93;
+        border-color: #E5E5EA;
     }
     QPushButton::menu-indicator { image: none; width: 0px; }
 """
@@ -78,25 +78,25 @@ BTN_PRIMARY_QSS = """
 BTN_SECONDARY_QSS = """
     QPushButton {
         background-color: #FFFFFF;
-        color: #111827;
-        border: 1px solid #CBD5E1;
-        border-radius: 8px;
+        color: #1D1D1F;
+        border: 1px solid #D2D2D7;
+        border-radius: 10px;
         padding: 0 14px;
         font-size: 13px;
         font-weight: 500;
         min-height: 36px;
     }
     QPushButton:hover {
-        background-color: #F8FAFC;
-        border-color: #9CA3AF;
+        background-color: #F2F2F7;
+        border-color: #8E8E93;
     }
     QPushButton:pressed {
-        background-color: #F3F4F6;
+        background-color: #E5E5EA;
     }
     QPushButton:disabled {
-        background-color: #F8FAFC;
-        color: #9CA3AF;
-        border-color: #E5E7EB;
+        background-color: #F2F2F7;
+        color: #8E8E93;
+        border-color: #E5E5EA;
     }
     QPushButton::menu-indicator { image: none; width: 0px; }
 """
@@ -106,7 +106,7 @@ BTN_TABLE_PRIMARY_QSS = """
         background-color: #C8102E;
         color: #FFFFFF;
         border: 1px solid #C8102E;
-        border-radius: 6px;
+        border-radius: 8px;
         padding: 0 10px;
         font-size: 11.5px;
         font-weight: 600;
@@ -125,25 +125,25 @@ BTN_TABLE_PRIMARY_QSS = """
 BTN_TABLE_SECONDARY_QSS = """
     QPushButton {
         background-color: #FFFFFF;
-        color: #111827;
-        border: 1px solid #CBD5E1;
-        border-radius: 6px;
+        color: #1D1D1F;
+        border: 1px solid #D2D2D7;
+        border-radius: 8px;
         padding: 0 10px;
         font-size: 11.5px;
         font-weight: 600;
         min-height: 28px;
     }
     QPushButton:hover {
-        background-color: #F8FAFC;
-        border-color: #9CA3AF;
+        background-color: #F2F2F7;
+        border-color: #8E8E93;
     }
     QPushButton:pressed {
-        background-color: #F3F4F6;
+        background-color: #E5E5EA;
     }
     QPushButton:disabled {
-        background-color: #F8FAFC;
-        color: #9CA3AF;
-        border-color: #E5E7EB;
+        background-color: #F2F2F7;
+        color: #8E8E93;
+        border-color: #E5E5EA;
     }
     QPushButton::menu-indicator { image: none; width: 0px; }
 """
@@ -151,26 +151,26 @@ BTN_TABLE_SECONDARY_QSS = """
 MENU_QSS = """
     QMenu {
         background-color: #FFFFFF;
-        border: 1px solid #E5E7EB;
-        border-radius: 8px;
+        border: 1px solid #E5E5EA;
+        border-radius: 10px;
         padding: 4px;
         font-size: 12.5px;
     }
     QMenu::item {
         padding: 7px 14px;
-        border-radius: 6px;
-        color: #111827;
+        border-radius: 8px;
+        color: #1D1D1F;
     }
     QMenu::item:selected {
-        background-color: #F8FAFC;
-        color: #111827;
+        background-color: #F2F2F7;
+        color: #1D1D1F;
     }
     QMenu::item:disabled {
-        color: #9CA3AF;
+        color: #8E8E93;
     }
     QMenu::separator {
         height: 1px;
-        background-color: #F3F4F6;
+        background-color: #F2F2F7;
         margin: 4px 8px;
     }
 """
@@ -272,9 +272,9 @@ class StatusBadge(QWidget):
         r = QRectF(0.5, 0.5, float(self.width() - 1), float(self.height() - 1))
 
         path = QPainterPath()
-        path.addRoundedRect(r, 6.0, 6.0)
+        path.addRoundedRect(r, 8.0, 8.0)
         p.fillPath(path, QBrush(QColor(PALETTE["surface_muted"])))
-        p.setPen(QPen(QColor(PALETTE["border_strong"]), 1.0))
+        p.setPen(QPen(QColor(PALETTE["border"]), 1.0))
         p.drawPath(path)
 
         text_left = 9.0
@@ -297,16 +297,17 @@ class StatusBadge(QWidget):
 
 
 class SectionCard(QFrame):
-    """Contenedor tarjeta corporativa (#FFFFFF, 1px solid #E5E7EB, radio 12px)."""
+    """Contenedor tarjeta corporativa (#FFFFFF, 1px solid #E5E5EA, radio 14px)."""
 
     def __init__(self, padding: int = 20, spacing: int = 12, parent: Optional[QWidget] = None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
         self.setObjectName("section_card")
+        self.setProperty("card", True)
         self.setStyleSheet("""
             QFrame#section_card {
                 background-color: #FFFFFF;
-                border: 1px solid #E5E7EB;
-                border-radius: 12px;
+                border: 1px solid #E5E5EA;
+                border-radius: 14px;
             }
         """)
         self.content_layout = QVBoxLayout(self)

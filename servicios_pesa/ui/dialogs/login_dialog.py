@@ -49,20 +49,20 @@ except ImportError as _e:
     _HAS_DB = False
     db_pool = None  # type: ignore
 
-# ─── Paleta corporativa ───────────────────────────────────────────────────────
-_RED      = "#B81D24"    # Rojo carmín PESA principal
-_RED_H    = "#9E161C"    # Hover
-_RED_P    = "#831116"    # Pressed
-_BG       = "#F5F5F7"    # Fondo ventana macOS gray
+# ─── Paleta Apple Minimalist (macOS Sequoia v3.3.1) ───────────────────────────
+_RED      = "#C8102E"    # Rojo Corporativo Básculas PESA
+_RED_H    = "#A60D26"    # Hover
+_RED_P    = "#880B20"    # Pressed
+_BG       = "#F5F5F7"    # Fondo ventana Apple System Gray 6
 _DARK2    = "#1D1D1F"    # Texto Apple Anthracite
 _CARD_BG  = "#FFFFFF"    # Tarjeta blanca
-_FIELD_BG = "#FAFAFA"    # Fondo input
-_BORDER   = "#D1D1D6"    # Borde input neutro
-_GRAY     = "#86868B"    # Texto secundario
-_GRAY2    = "#5A6070"    # Texto botón salir
-_LGRAY    = "#B0B7C3"    # Gris claro
-_SUCCESS  = "#16A34A"    # Verde conexión OK
-_DANGER   = "#DC2626"    # Rojo conexión KO
+_FIELD_BG = "#FFFFFF"    # Fondo input
+_BORDER   = "#D2D2D7"    # Borde input neutro
+_GRAY     = "#6E6E73"    # Texto secundario
+_GRAY2    = "#6E6E73"    # Texto botón salir
+_LGRAY    = "#8E8E93"    # Placeholder
+_SUCCESS  = "#34C759"    # Verde conexión OK
+_DANGER   = "#C8102E"    # Rojo conexión KO
 _WHITE    = "#FFFFFF"
 
 

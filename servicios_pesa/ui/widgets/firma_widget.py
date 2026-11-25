@@ -27,13 +27,13 @@ from database.connection import db_pool
 
 logger = logging.getLogger(__name__)
 
-_DARK = "#111827"
-_GRAY = "#6B7280"
-_LGRAY = "#CBD5E1"
-_BORDER = "#E5E7EB"
+_DARK = "#1D1D1F"
+_GRAY = "#6E6E73"
+_LGRAY = "#D2D2D7"
+_BORDER = "#E5E5EA"
 _RED = "#C8102E"
 _RED_HOVER = "#A60D26"
-_SURFACE = "#F8FAFC"
+_SURFACE = "#F2F2F7"
 
 
 class _LoadFirmaWorker(QThread):
@@ -485,7 +485,7 @@ class FirmaWidget(QWidget):
     def _setup_ui(self):
         self.setObjectName("firma_widget_root")
         self.setStyleSheet(
-            "QWidget#firma_widget_root { background: #F6F7F9; } "
+            "QWidget#firma_widget_root { background: #F5F5F7; } "
             "QLabel { border: none; background: transparent; }"
         )
 
@@ -494,7 +494,7 @@ class FirmaWidget(QWidget):
         main_lay.setSpacing(18)
 
         hdr = QLabel("Mi Firma Digital")
-        hdr.setStyleSheet("font-size: 20px; font-weight: 700; color: #111827;")
+        hdr.setStyleSheet("font-size: 20px; font-weight: 700; color: #1D1D1F;")
         main_lay.addWidget(hdr)
 
         sub = QLabel(
@@ -502,14 +502,15 @@ class FirmaWidget(QWidget):
             "en tus Órdenes de Servicio, formatos de campo y certificados PDF."
         )
         sub.setWordWrap(True)
-        sub.setStyleSheet("font-size: 13px; color: #6B7280;")
+        sub.setStyleSheet("font-size: 13px; color: #6E6E73;")
         main_lay.addWidget(sub)
 
         card = QFrame()
         card.setObjectName("firma_profile_card")
+        card.setProperty("card", True)
         card.setStyleSheet(
             "QFrame#firma_profile_card { "
-            "background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; }"
+            "background: #FFFFFF; border: 1px solid #E5E5EA; border-radius: 14px; }"
         )
         card_lay = QVBoxLayout(card)
         card_lay.setContentsMargins(24, 22, 24, 22)
@@ -517,12 +518,12 @@ class FirmaWidget(QWidget):
 
         status_row = QHBoxLayout()
         self._status_dot = QFrame()
-        self._status_dot.setFixedSize(8, 8)
-        self._status_dot.setStyleSheet("background: #6B7280; border-radius: 4px; border: none;")
+        self._status_dot.setFixedSize(6, 6)
+        self._status_dot.setStyleSheet("background: #6E6E73; border-radius: 3px; border: none;")
         status_row.addWidget(self._status_dot)
 
         self._lbl_status = QLabel("Consultando perfil de firma...")
-        self._lbl_status.setStyleSheet("font-size: 13px; font-weight: 600; color: #6B7280;")
+        self._lbl_status.setStyleSheet("font-size: 13px; font-weight: 600; color: #6E6E73;")
         status_row.addWidget(self._lbl_status)
         status_row.addStretch()
         card_lay.addLayout(status_row)
@@ -531,8 +532,8 @@ class FirmaWidget(QWidget):
         self._img_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_preview.setMinimumHeight(210)
         self._img_preview.setStyleSheet(
-            "border: 1.5px dashed #CBD5E1; border-radius: 8px; background: #F8FAFC; "
-            "color: #6B7280; font-size: 13px;"
+            "border: 1px dashed #D2D2D7; border-radius: 10px; background: #F2F2F7; "
+            "color: #6E6E73; font-size: 13px;"
         )
         card_lay.addWidget(self._img_preview)
 

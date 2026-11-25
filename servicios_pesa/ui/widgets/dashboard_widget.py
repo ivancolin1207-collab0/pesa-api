@@ -306,17 +306,17 @@ def construir_nombre_pdf_estricto(folio, cliente="", id_equipo="", servicio="", 
 
     return f"{'-'.join(partes)}.pdf"
 
-# -- Paleta Corporativa Minimalista Básculas PESA v3.2 ------------------------
-_BG       = "#F6F7F9"   # Canvas principal gris muy suave
+# -- Paleta Apple Minimalist (macOS Sequoia v3.3.1) — Básculas PESA ------------
+_BG       = "#F5F5F7"   # Canvas Apple System Gray 6
 _WHITE    = "#FFFFFF"   # Tarjetas, tablas y formularios
-_DARK     = "#111827"   # Texto primario
-_GRAY     = "#6B7280"   # Texto secundario
-_LGRAY    = "#9CA3AF"   # Placeholder / hint
+_DARK     = "#1D1D1F"   # Texto primario
+_GRAY     = "#6E6E73"   # Texto secundario
+_LGRAY    = "#8E8E93"   # Placeholder / hint
 _RED      = "#C8102E"   # Rojo Corporativo Básculas PESA
 _RED2     = "#A60D26"   # Rojo hover
-_BORDER   = "#E5E7EB"   # Borde fino 1px
-_SEP      = "#F3F4F6"   # Separador horizontal entre filas
-_SEG_BG   = "#F8FAFC"   # Superficie secundaria ultra clara
+_BORDER   = "#E5E5EA"   # Borde fino 1px
+_SEP      = "#F2F2F7"   # Separador horizontal entre filas
+_SEG_BG   = "#F2F2F7"   # Superficie secundaria ultra clara
 
 try:
     from ui.theme import (
@@ -1884,10 +1884,10 @@ class DashboardWidget(QWidget):
         # 2. KPI Cards (4 tarjetas interactivas con filtro rápido al clic)
         kpi_row = QHBoxLayout()
         kpi_row.setSpacing(16)
-        self._card_total    = KPICard("Total Periodo",    "--", subtitle="del periodo seleccionado", value_color="#111827", filter_key="all")
-        self._card_proceso  = KPICard("En Proceso",       "--", subtitle="activos actualmente",      value_color="#111827", filter_key="proceso",  dot_color="#D97706")
-        self._card_cerrados = KPICard("Cerrados",         "--", subtitle="finalizados",              value_color="#111827", filter_key="cerrado",  dot_color="#16A34A")
-        self._card_fisicos  = KPICard("Formatos Físicos", "--", subtitle="pendientes de escanear",   value_color="#111827", filter_key="fisico",   dot_color="#6B7280")
+        self._card_total    = KPICard("Total Periodo",    "--", subtitle="del periodo seleccionado", value_color="#1D1D1F", filter_key="all")
+        self._card_proceso  = KPICard("En Proceso",       "--", subtitle="activos actualmente",      value_color="#1D1D1F", filter_key="proceso",  dot_color="#FF9500")
+        self._card_cerrados = KPICard("Cerrados",         "--", subtitle="finalizados",              value_color="#1D1D1F", filter_key="cerrado",  dot_color="#34C759")
+        self._card_fisicos  = KPICard("Formatos Físicos", "--", subtitle="pendientes de escanear",   value_color="#1D1D1F", filter_key="fisico",   dot_color="#6E6E73")
         self._kpi_cards = {
             "all": self._card_total,
             "proceso": self._card_proceso,
@@ -2125,11 +2125,12 @@ class DashboardWidget(QWidget):
         """Barra de filtros en una sola fila: periodo, tecnico, estado, buscador."""
         bar = QFrame()
         bar.setObjectName("filter_bar")
+        bar.setProperty("card", True)
         bar.setStyleSheet("""
             QFrame#filter_bar {
                 background: #FFFFFF;
                 border: 1px solid #E5E5EA;
-                border-radius: 10px;
+                border-radius: 14px;
             }
         """)
         sh = QGraphicsDropShadowEffect(bar)
@@ -2139,14 +2140,14 @@ class DashboardWidget(QWidget):
         bar.setGraphicsEffect(sh)
 
         lay = QHBoxLayout(bar)
-        lay.setContentsMargins(12, 8, 12, 8)
+        lay.setContentsMargins(14, 10, 14, 10)
         lay.setSpacing(10)
 
-        # -- Segmented Control de periodos (Píldoras corporativas) ------------
+        # -- Segmented Control de periodos (Píldoras Apple) ------------
         seg = QFrame()
         seg.setObjectName("segmented_control")
         seg.setStyleSheet(
-            "background: #F8FAFC; border-radius: 8px; border: 1px solid #E2E8F0; padding: 2px;"
+            "background: #F2F2F7; border-radius: 10px; border: 1px solid #E5E5EA; padding: 2px;"
         )
         seg_lay = QHBoxLayout(seg)
         seg_lay.setContentsMargins(2, 2, 2, 2)
@@ -2161,9 +2162,9 @@ class DashboardWidget(QWidget):
         _seg_btn_style = """
             QPushButton {
                 background: transparent;
-                color: #475569;
+                color: #6E6E73;
                 border: none;
-                border-radius: 6px;
+                border-radius: 8px;
                 font-size: 12px;
                 font-weight: 600;
                 padding: 0 12px;
@@ -2174,7 +2175,7 @@ class DashboardWidget(QWidget):
                 color: #FFFFFF;
                 font-weight: 700;
             }
-            QPushButton:hover:!checked { background: #F1F5F9; color: #0F172A; }
+            QPushButton:hover:!checked { background: #E5E5EA; color: #1D1D1F; }
         """
 
         for lbl_txt, key in _presets:
@@ -2310,24 +2311,27 @@ class DashboardWidget(QWidget):
         self._combo_tipo_servicio_bar.currentIndexChanged.connect(self._on_filter_changed)
         lay.addWidget(self._combo_tipo_servicio_bar)
 
-        # -- Buscador rapido --------------------------------------------------
+        # -- Buscador rapido estilo Spotlight ---------------------------------
         self._search_global = QLineEdit()
         self._search_global.setPlaceholderText(
             "Buscar por folio, cliente, sucursal, técnico, marca, modelo, serie, ID, CCA o DVE..."
         )
-        self._search_global.setFixedHeight(36)
+        self._search_global.setFixedHeight(38)
         self._search_global.setStyleSheet("""
             QLineEdit {
                 background: #FFFFFF;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
+                border: 1px solid #D2D2D7;
+                border-radius: 10px;
                 padding: 0 12px;
                 font-size: 13px;
-                color: #111827;
+                color: #1D1D1F;
             }
             QLineEdit:focus {
                 background: #FFFFFF;
                 border: 1.5px solid #C8102E;
+            }
+            QLineEdit::placeholder {
+                color: #8E8E93;
             }
         """)
         self._search_global.textChanged.connect(self._on_search_changed)

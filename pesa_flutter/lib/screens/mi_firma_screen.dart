@@ -257,12 +257,10 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
-                          color: _statusIsError
-                              ? const Color(0xFFFFF5F6)
-                              : PesaColors.surface,
-                          borderRadius: BorderRadius.circular(8),
+                          color: PesaColors.surfaceMuted,
+                          borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: _statusIsError ? PesaColors.brand : PesaColors.borderStrong,
+                            color: _statusIsError ? PesaColors.brand : PesaColors.border,
                           ),
                         ),
                         child: Row(

@@ -232,15 +232,15 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                 filled: true,
                 fillColor: PesaColors.surfaceMuted,
                 border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   borderSide: const BorderSide(color: PesaColors.border),
                 ),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   borderSide: const BorderSide(color: PesaColors.border),
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                   borderSide: const BorderSide(color: _red, width: 1.5),
                 ),
               ),
@@ -291,10 +291,10 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
     final infoCorreo = formatearInfoEnvioCorreo(os);
 
     final cardContent = Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: isSelected ? PesaColors.surfaceMuted : PesaColors.surface,
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(14),
         border: Border(
           left: BorderSide(
             color: isSelected ? _red : _border,

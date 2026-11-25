@@ -622,12 +622,12 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
           builder: (dlgCtx) => AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             title: const Row(children: [
-              Icon(Icons.check_circle_rounded, color: Colors.green, size: 26),
+              Icon(Icons.check_circle_rounded, color: PesaColors.dotGreen, size: 26),
               SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Servicio Creado y Asignado',
-                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: PesaColors.textPrimary),
                 ),
               ),
             ]),
@@ -637,15 +637,15 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               children: [
                 const Text(
                   'El formato fue registrado en PostgreSQL y sincronizado inmediatamente en el dispositivo.',
-                  style: TextStyle(fontSize: 13, color: Color(0xFF374151)),
+                  style: TextStyle(fontSize: 13, color: PesaColors.textSecondary),
                 ),
                 const SizedBox(height: 12),
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
                     color: PesaColors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: PesaColors.borderStrong),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: PesaColors.border),
                   ),
                   child: Row(children: [
                     const Icon(Icons.assignment_turned_in, color: _red, size: 22),

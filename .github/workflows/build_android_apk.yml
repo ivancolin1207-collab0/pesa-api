@@ -1,0 +1,56 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pesa_flutter/**"
+      - ".github/workflows/build_android_apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pesa_flutter
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Setup Flutter Stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+
+      - name: Install dependencies and build release APK
+        run: |
+          flutter pub get
+          flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation || flutter build apk --release --no-tree-shake-icons
+          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.1+141.apk
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Servicios_PESA_Tablet_v3.3.1+141
+          path: pesa_flutter/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+      - name: Publish Android Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: android-v3.3.1
+          name: "Servicios PESA Tablet v3.3.1+141"
+          prerelease: false
+          make_latest: true
+          files: |
+            pesa_flutter/build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.1+141.apk

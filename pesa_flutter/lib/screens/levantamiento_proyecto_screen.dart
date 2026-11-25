@@ -31,7 +31,7 @@ class LevantamientoProyectoScreen extends StatefulWidget {
 
 class _LevantamientoProyectoScreenState extends State<LevantamientoProyectoScreen> {
   static const Color _red = Color(0xFFC8102E);
-  static const Color _dark = Color(0xFF1A1A2E);
+  static const Color _dark = Color(0xFF1D1D1F);
 
   final _tipoProyectoCtrl = TextEditingController();
   final _dimensionesCtrl = TextEditingController();

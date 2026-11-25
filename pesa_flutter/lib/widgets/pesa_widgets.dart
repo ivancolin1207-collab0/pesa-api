@@ -10,8 +10,9 @@ import 'pesa_components.dart';
 
 typedef PesaSignatureModal = CapturFirmaTecnicoDialog;
 typedef PesaStatusDot = PesaSemanticDot;
+typedef PesaSegmentedControl<T> = PesaSegmentedSelector<T>;
 
-/// Campo de entrada corporativo estandarizado (>= 48dp táctil, radio 8dp).
+/// Campo de entrada corporativo estandarizado (>= 48dp táctil, radio 10dp).
 class PesaInput extends StatelessWidget {
   final String label;
   final TextEditingController controller;

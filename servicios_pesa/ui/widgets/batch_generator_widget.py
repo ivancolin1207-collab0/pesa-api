@@ -45,15 +45,15 @@ except ImportError:
     _HAS_SESSION = False
     session = None
 
-# ─── Paleta Corporativa Minimalista Básculas PESA v3.2 ───────────────────────
-_BG    = "#F6F7F9"
+# ─── Paleta Apple Minimalist (macOS Sequoia v3.3.1) — Básculas PESA ──────────
+_BG    = "#F5F5F7"
 _WHITE = "#FFFFFF"
-_DARK  = "#111827"
-_GRAY  = "#6B7280"
+_DARK  = "#1D1D1F"
+_GRAY  = "#6E6E73"
 _RED   = "#C8102E"
-_BLUE  = "#111827"
-_GREEN = "#111827"
-_AMBER = "#374151"
+_BLUE  = "#1D1D1F"
+_GREEN = "#1D1D1F"
+_AMBER = "#6E6E73"
 
 # (Sin datos hardcoded — los catálogos se cargan exclusivamente desde PostgreSQL)
 
@@ -64,18 +64,18 @@ _AMBER = "#374151"
 _EQUIPO_FIELD_STYLE = """
     QLineEdit {
         background: #FFFFFF;
-        border: 1px solid #CBD5E1;
-        border-radius: 6px;
+        border: 1px solid #D2D2D7;
+        border-radius: 10px;
         padding: 7px 12px;
         font-size: 13px;
-        color: #0F172A;
+        color: #1D1D1F;
         min-height: 36px;
     }
     QLineEdit:focus {
         border: 1.5px solid #C8102E;
         background: #FFFFFF;
     }
-    QLineEdit::placeholder { color: #94A3B8; }
+    QLineEdit::placeholder { color: #8E8E93; }
 """
 
 class EquipoCard(QFrame):
@@ -1201,12 +1201,12 @@ class SelectCard(QPushButton):
         self._accent = _RED  # Único acento corporativo Básculas PESA
         self._selected = False
         self.setCheckable(True)
-        self.setMinimumHeight(82)
+        self.setMinimumHeight(88)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         lay = QVBoxLayout(self)
-        lay.setContentsMargins(14, 12, 14, 12)
+        lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(6)
 
         self._top_lay = QHBoxLayout()
@@ -1222,7 +1222,7 @@ class SelectCard(QPushButton):
         self._lbl_title = QLabel(title)
         self._lbl_title.setWordWrap(True)
         self._lbl_title.setStyleSheet(
-            "font-size: 13px; font-weight: 700; color: #111827; background: transparent; border: none;"
+            "font-size: 13px; font-weight: 700; color: #1D1D1F; background: transparent; border: none;"
         )
         self._lbl_title.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._top_lay.addWidget(self._lbl_title, stretch=1)
@@ -1231,7 +1231,7 @@ class SelectCard(QPushButton):
         self._lbl_desc = QLabel(desc)
         self._lbl_desc.setWordWrap(True)
         self._lbl_desc.setStyleSheet(
-            "font-size: 11.5px; color: #6B7280; background: transparent; border: none;"
+            "font-size: 11.5px; color: #6E6E73; background: transparent; border: none;"
         )
         self._lbl_desc.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         lay.addWidget(self._lbl_desc)
@@ -1246,7 +1246,7 @@ class SelectCard(QPushButton):
     def heightForWidth(self, width: int) -> int:
         lay = self.layout()
         if lay is None:
-            return 82
+            return 88
         m = lay.contentsMargins()
         w = max(width, 220)
         inner_w = max(120, w - m.left() - m.right())
@@ -1264,7 +1264,7 @@ class SelectCard(QPushButton):
             else self._lbl_desc.sizeHint().height()
         )
         total = m.top() + top_h + lay.spacing() + desc_h + m.bottom() + 4
-        return max(82, int(total))
+        return max(88, int(total))
 
     def sizeHint(self):
         from PyQt6.QtCore import QSize
@@ -1281,10 +1281,10 @@ class SelectCard(QPushButton):
         if checked:
             self.setStyleSheet("""
                 QPushButton#select_card {
-                    background-color: #FFF5F6;
+                    background-color: #FFFFFF;
                     border: 2px solid #C8102E;
-                    border-radius: 10px;
-                    min-height: 86px;
+                    border-radius: 14px;
+                    min-height: 88px;
                     padding: 0px;
                     text-align: left;
                 }
@@ -1295,7 +1295,7 @@ class SelectCard(QPushButton):
             """)
             self._lbl_badge.setStyleSheet(
                 "background-color: #C8102E; color: #FFFFFF; border: none; "
-                "border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: 700;"
+                "border-radius: 8px; padding: 2px 8px; font-size: 10px; font-weight: 700;"
             )
             self._lbl_title.setStyleSheet(
                 "font-size: 13px; font-weight: 700; color: #C8102E; background: transparent; border: none;"
@@ -1304,15 +1304,15 @@ class SelectCard(QPushButton):
             self.setStyleSheet("""
                 QPushButton#select_card {
                     background-color: #FFFFFF;
-                    border: 1px solid #E5E7EB;
-                    border-radius: 10px;
-                    min-height: 86px;
+                    border: 1px solid #E5E5EA;
+                    border-radius: 14px;
+                    min-height: 88px;
                     padding: 0px;
                     text-align: left;
                 }
                 QPushButton#select_card:hover {
-                    border-color: #CBD5E1;
-                    background-color: #F8FAFC;
+                    border-color: #D2D2D7;
+                    background-color: #F2F2F7;
                 }
                 QPushButton#select_card QLabel {
                     border: none;
@@ -1320,11 +1320,11 @@ class SelectCard(QPushButton):
                 }
             """)
             self._lbl_badge.setStyleSheet(
-                "background-color: #F8FAFC; color: #6B7280; border: 1px solid #E5E7EB; "
-                "border-radius: 4px; padding: 2px 7px; font-size: 10px; font-weight: 700;"
+                "background-color: #F2F2F7; color: #6E6E73; border: 1px solid #E5E5EA; "
+                "border-radius: 8px; padding: 2px 8px; font-size: 10px; font-weight: 700;"
             )
             self._lbl_title.setStyleSheet(
-                "font-size: 13px; font-weight: 700; color: #111827; background: transparent; border: none;"
+                "font-size: 13px; font-weight: 700; color: #1D1D1F; background: transparent; border: none;"
             )
 
 
@@ -1358,7 +1358,7 @@ class StepHeader(QWidget):
 def _sep() -> QFrame:
     f = QFrame()
     f.setFrameShape(QFrame.Shape.HLine)
-    f.setStyleSheet("background: #F3F4F6; border: none; margin: 2px 0;")
+    f.setStyleSheet("background: #F2F2F7; border: none; margin: 2px 0;")
     f.setFixedHeight(1)
     return f
 
@@ -1366,11 +1366,12 @@ def _sep() -> QFrame:
 def _section_card() -> tuple[QFrame, QVBoxLayout]:
     card = QFrame()
     card.setObjectName("section_card")
+    card.setProperty("card", True)
     card.setStyleSheet("""
         QFrame#section_card {
             background: #FFFFFF;
-            border: 1px solid #E5E7EB;
-            border-radius: 12px;
+            border: 1px solid #E5E5EA;
+            border-radius: 14px;
         }
         QFrame#section_card QLabel {
             border: none;
@@ -1388,7 +1389,7 @@ def _field_label(text: str, required: bool = False) -> QLabel:
     lbl = QLabel(f"{text}{suffix}")
     lbl.setTextFormat(Qt.TextFormat.RichText)
     lbl.setStyleSheet(
-        "font-size: 11.5px; font-weight: 600; color: #6B7280; "
+        "font-size: 11.5px; font-weight: 600; color: #6E6E73; "
         "letter-spacing: 0.2px; background: transparent; border: none;"
     )
     return lbl
@@ -1415,16 +1416,16 @@ def _input_style() -> str:
     return f"""
         QComboBox {{
             background-color: #FFFFFF;
-            border: 1px solid #D1D5DB;
-            border-radius: 8px;
+            border: 1px solid #D2D2D7;
+            border-radius: 10px;
             padding: 0px 30px 0px 12px;
-            color: #111827;
+            color: #1D1D1F;
             font-size: 13px;
             min-height: 36px;
             max-height: 38px;
         }}
         QComboBox:hover {{
-            border-color: #9CA3AF;
+            border-color: #8E8E93;
         }}
         QComboBox:focus {{
             border: 1.5px solid #C8102E;
@@ -1442,32 +1443,32 @@ def _input_style() -> str:
         }}
         QComboBox QAbstractItemView {{
             background-color: #FFFFFF;
-            border: 1px solid #E5E7EB;
-            border-radius: 8px;
-            selection-background-color: #F8FAFC;
-            selection-color: #111827;
-            color: #111827;
+            border: 1px solid #E5E5EA;
+            border-radius: 10px;
+            selection-background-color: #F2F2F7;
+            selection-color: #1D1D1F;
+            color: #1D1D1F;
             outline: none;
             padding: 4px;
         }}
         QComboBox QAbstractItemView::item {{
             min-height: 30px;
             padding: 4px 10px;
-            color: #111827;
+            color: #1D1D1F;
             background-color: #FFFFFF;
-            border-radius: 5px;
+            border-radius: 8px;
         }}
         QComboBox QAbstractItemView::item:selected {{
-            background-color: #F8FAFC;
-            color: #111827;
+            background-color: #F2F2F7;
+            color: #1D1D1F;
             font-weight: 600;
         }}
         QComboBox QAbstractItemView::item:hover {{
-            background-color: #F8FAFC;
-            color: #111827;
+            background-color: #F2F2F7;
+            color: #1D1D1F;
         }}
         QComboBox QLineEdit {{
-            color: #111827;
+            color: #1D1D1F;
             background: transparent;
             border: none;
             padding: 0px 2px;
@@ -1478,10 +1479,10 @@ def _input_style() -> str:
         }}
         QSpinBox, QDateEdit {{
             background-color: #FFFFFF;
-            border: 1px solid #D1D5DB;
-            border-radius: 8px;
+            border: 1px solid #D2D2D7;
+            border-radius: 10px;
             padding: 0px 26px 0px 10px;
-            color: #111827;
+            color: #1D1D1F;
             font-size: 13px;
             min-width: 112px;
             min-height: 36px;
@@ -1491,26 +1492,26 @@ def _input_style() -> str:
             subcontrol-origin: border;
             subcontrol-position: top right;
             width: 24px;
-            border-left: 1px solid #E5E7EB;
-            border-bottom: 1px solid #E5E7EB;
-            border-top-right-radius: 8px;
-            background-color: #F9FAFB;
+            border-left: 1px solid #E5E5EA;
+            border-bottom: 1px solid #E5E5EA;
+            border-top-right-radius: 10px;
+            background-color: #F2F2F7;
         }}
         QSpinBox::down-button {{
             subcontrol-origin: border;
             subcontrol-position: bottom right;
             width: 24px;
-            border-left: 1px solid #E5E7EB;
-            border-bottom-right-radius: 8px;
-            background-color: #F9FAFB;
+            border-left: 1px solid #E5E5EA;
+            border-bottom-right-radius: 10px;
+            background-color: #F2F2F7;
         }}
         QSpinBox::up-button:hover, QSpinBox::down-button:hover {{
-            background-color: #E5E7EB;
+            background-color: #E5E5EA;
         }}
         QSpinBox::up-arrow {{ {up_arrow_rule} }}
         QSpinBox::down-arrow {{ {down_arrow_rule} }}
         QSpinBox:hover, QDateEdit:hover {{
-            border-color: #9CA3AF;
+            border-color: #8E8E93;
         }}
         QSpinBox:focus, QDateEdit:focus {{
             border: 1.5px solid #C8102E;

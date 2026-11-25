@@ -23,8 +23,8 @@ class AttachScanScreen extends StatefulWidget {
 
 class _AttachScanScreenState extends State<AttachScanScreen> {
   static const _red    = Color(0xFFC8102E);
-  static const _border = Color(0xFFE5E7EB);
-  static const _bg     = Color(0xFFF9FAFB);
+  static const _border = Color(0xFFE5E5EA);
+  static const _bg     = Color(0xFFF5F5F7);
 
   // ── Estado del Stepper ───────────────────────────────────────────────────
   int _currentStep = 0;

@@ -47,15 +47,15 @@ try:
 except Exception:
     _DB_CFG = {}
 
-# ─── Paleta ───────────────────────────────────────────────────────────────────
+# ─── Paleta Apple Minimalist (macOS Sequoia v3.3.1) ───────────────────────────
 _BG    = "#F5F5F7"
 _WHITE = "#FFFFFF"
 _DARK  = "#1D1D1F"
-_GRAY  = "#86868B"
-_RED   = "#E63946"
-_BLUE  = "#007AFF"
+_GRAY  = "#6E6E73"
+_RED   = "#C8102E"
+_BLUE  = "#C8102E"
 _GREEN = "#34C759"
-_AMBER = "#FF9F0A"
+_AMBER = "#FF9500"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -64,11 +64,12 @@ _AMBER = "#FF9F0A"
 def _section_card() -> tuple[QFrame, QVBoxLayout]:
     card = QFrame()
     card.setObjectName("cfg_section_card")
+    card.setProperty("card", True)
     card.setStyleSheet("""
         QFrame#cfg_section_card {
             background: #FFFFFF;
-            border: 1px solid #E5E7EB;
-            border-radius: 12px;
+            border: 1px solid #E5E5EA;
+            border-radius: 14px;
         }
         QFrame#cfg_section_card QLabel {
             border: none;
@@ -76,13 +77,13 @@ def _section_card() -> tuple[QFrame, QVBoxLayout]:
         }
     """)
     lay = QVBoxLayout(card)
-    lay.setContentsMargins(24, 20, 24, 20)
+    lay.setContentsMargins(20, 18, 20, 18)
     lay.setSpacing(14)
     return card, lay
 
 
 def _section_title(text: str, icon: str = "") -> QLabel:
-    lbl = QLabel(f"{icon}  {text}" if icon else text)
+    lbl = QLabel(text)
     lbl.setStyleSheet(
         f"font-size: 14px; font-weight: 700; color: {_DARK}; background: transparent;"
     )
@@ -146,10 +147,10 @@ class ConfiguracionWidget(QWidget):
         root.addWidget(scroll)
 
         # Título
-        lbl_title = QLabel("⚙️  Configuración del Sistema")
+        lbl_title = QLabel("Configuración del Sistema")
         lbl_title.setStyleSheet(
-            f"font-size: 22px; font-weight: 700; color: {_DARK}; "
-            f"letter-spacing: -0.4px; background: transparent;"
+            f"font-size: 20px; font-weight: 700; color: {_DARK}; "
+            f"letter-spacing: -0.3px; background: transparent;"
         )
         lay.addWidget(lbl_title)
 

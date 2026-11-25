@@ -59,9 +59,9 @@ class CalibracionAjusteScreen extends StatelessWidget {
   }
 }
 
-// ── Constantes de estilo ───────────────────────────────────────────────────
+// ── Constantes de estilo Apple Minimalist (iOS / iPadOS v3.3.1) ────────────
 const _kRed  = Color(0xFFC8102E);
-const _kDark = Color(0xFF1A1A2E);
+const _kDark = Color(0xFF1D1D1F);
 
 // Tipos de instrumento que metrológicamente aplican excentricidad.
 const _kExcInstrumentos = {

@@ -169,14 +169,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
             if (_testResult.isNotEmpty) ...[
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: _testResult.contains('alcanzable')
-                      ? Colors.green.shade50 : Colors.orange.shade50,
-                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFFF2F2F7),
+                  borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: _testResult.contains('alcanzable')
-                        ? Colors.green : Colors.orange),
+                        ? const Color(0xFF34C759) : const Color(0xFFC8102E)),
                 ),
                 child: Row(children: [
                   Icon(

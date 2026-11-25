@@ -23,14 +23,14 @@ from PyQt6.QtGui import QColor
 
 logger = logging.getLogger(__name__)
 
-# \u2500\u2500 Paleta de badges por rol \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+# \u2500\u2500 Paleta de badges por rol (Apple Minimalist monocromática) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
 _ROL_BADGE = {
-    "Administrador":      ("#6C3483", "#EAD6F1"),
-    "Log\u00edstica":          ("#1A5276", "#D6EAF8"),
-    "Recepci\u00f3n":          ("#117A65", "#D1F2EB"),
-    "T\u00e9cnico":            ("#784212", "#FAE5D3"),
-    "T\u00e9cnico Calibrador": ("#922B21", "#FADBD8"),
-    "T\u00e9cnico Inspector":  ("#1B4F72", "#D6EAF8"),
+    "Administrador":      ("#C8102E", "#F2F2F7"),
+    "Log\u00edstica":          ("#1D1D1F", "#F2F2F7"),
+    "Recepci\u00f3n":          ("#1D1D1F", "#F2F2F7"),
+    "T\u00e9cnico":            ("#1D1D1F", "#F2F2F7"),
+    "T\u00e9cnico Calibrador": ("#1D1D1F", "#F2F2F7"),
+    "T\u00e9cnico Inspector":  ("#1D1D1F", "#F2F2F7"),
 }
 
 
@@ -945,51 +945,51 @@ class ClientesSucursalesTab(QWidget):
         root.setSpacing(8)
 
         # ── Panel Clientes ────────────────────────────────────────────────────
-        self._grp_clientes = QGroupBox("🏢  Clientes")
+        self._grp_clientes = QGroupBox("Clientes")
         self._grp_clientes.setStyleSheet(
-            "QGroupBox { font-weight:700; font-size:13px; border:1px solid #D1D1D6;"
-            " border-radius:8px; margin-top:8px; padding:8px 4px; }"
+            "QGroupBox { font-weight:700; font-size:13px; border:1px solid #E5E5EA;"
+            " border-radius:14px; margin-top:8px; padding:12px 8px; background:#FFFFFF; }"
             "QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 6px; color:#1D1D1F; }"
         )
         grp_lay = QVBoxLayout(self._grp_clientes)
-        grp_lay.setContentsMargins(8, 8, 8, 8)
-        grp_lay.setSpacing(6)
+        grp_lay.setContentsMargins(12, 12, 12, 12)
+        grp_lay.setSpacing(8)
 
         # Toolbar clientes
         tb_cl = QHBoxLayout()
-        tb_cl.setSpacing(6)
-        self._btn_cl_new  = QPushButton("➕  Nuevo")
+        tb_cl.setSpacing(8)
+        self._btn_cl_new  = QPushButton("+ Nuevo")
         self._btn_cl_new.setProperty("class", "primary")
         self._btn_cl_new.clicked.connect(self._new_cliente)
         tb_cl.addWidget(self._btn_cl_new)
 
-        self._btn_cl_edit = QPushButton("✏️  Editar")
+        self._btn_cl_edit = QPushButton("Editar")
         self._btn_cl_edit.clicked.connect(self._edit_cliente)
         tb_cl.addWidget(self._btn_cl_edit)
 
-        self._btn_cl_del = QPushButton("❎  Desactivar")
+        self._btn_cl_del = QPushButton("Desactivar")
         self._btn_cl_del.setProperty("class", "danger")
         self._btn_cl_del.clicked.connect(self._delete_cliente)
         tb_cl.addWidget(self._btn_cl_del)
 
-        self._btn_cl_hard_del = QPushButton("🗑️  Eliminar Definitivo")
+        self._btn_cl_hard_del = QPushButton("Eliminar Definitivo")
         self._btn_cl_hard_del.setStyleSheet(
-            "background:#FF3B30; color:white; border:none; border-radius:6px;"
+            "background:#FFFFFF; color:#C8102E; border:1px solid #C8102E; border-radius:10px;"
             " padding:6px 12px; font-weight:700;"
         )
         self._btn_cl_hard_del.clicked.connect(self._hard_delete_cliente)
         tb_cl.addWidget(self._btn_cl_hard_del)
 
-        self._btn_cl_merge = QPushButton("🔗  Fusionar")
+        self._btn_cl_merge = QPushButton("Fusionar")
         self._btn_cl_merge.setStyleSheet(
-            "background:#5856D6; color:white; border:none; border-radius:6px;"
+            "background:#F2F2F7; color:#1D1D1F; border:1px solid #D2D2D7; border-radius:10px;"
             " padding:6px 12px; font-weight:600;"
         )
         self._btn_cl_merge.clicked.connect(self._merge_clientes)
         tb_cl.addWidget(self._btn_cl_merge)
         tb_cl.addStretch()
 
-        btn_refresh = QPushButton("↻  Actualizar")
+        btn_refresh = QPushButton("Actualizar")
         btn_refresh.clicked.connect(self._load_clientes)
         tb_cl.addWidget(btn_refresh)
         grp_lay.addLayout(tb_cl)
@@ -997,7 +997,7 @@ class ClientesSucursalesTab(QWidget):
         # Barra de búsqueda rápida
         search_row = QHBoxLayout()
         self._inp_search = QLineEdit()
-        self._inp_search.setPlaceholderText("🔍  Buscar cliente por nombre...")
+        self._inp_search.setPlaceholderText("Buscar cliente por nombre...")
         self._inp_search.setClearButtonEnabled(True)
         self._inp_search.textChanged.connect(self._filter_clientes)
         search_row.addWidget(self._inp_search)
@@ -1008,7 +1008,7 @@ class ClientesSucursalesTab(QWidget):
         self._tbl_clientes.verticalHeader().setVisible(False)
         self._tbl_clientes.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._tbl_clientes.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._tbl_clientes.setAlternatingRowColors(True)
+        self._tbl_clientes.setAlternatingRowColors(False)
         self._tbl_clientes.setMinimumHeight(200)
         SP = QSizePolicy
         self._tbl_clientes.setSizePolicy(SP.Policy.Expanding, SP.Policy.Expanding)
@@ -1020,48 +1020,48 @@ class ClientesSucursalesTab(QWidget):
         root.addWidget(self._grp_clientes, stretch=3)
 
         # ── Panel Sucursales ──────────────────────────────────────────────────
-        self._grp_sucursales = QGroupBox("🏭  Sucursales / Plantas  —  (selecciona un cliente)")
+        self._grp_sucursales = QGroupBox("Sucursales / Plantas  —  (selecciona un cliente)")
         self._grp_sucursales.setStyleSheet(
-            "QGroupBox { font-weight:700; font-size:13px; border:1px solid #A5C8E1;"
-            " border-radius:8px; margin-top:8px; padding:8px 4px; background:#F0F8FF; }"
-            "QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 6px; color:#1A5276; }"
+            "QGroupBox { font-weight:700; font-size:13px; border:1px solid #E5E5EA;"
+            " border-radius:14px; margin-top:8px; padding:12px 8px; background:#FFFFFF; }"
+            "QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 6px; color:#1D1D1F; }"
         )
         grp_suc = QVBoxLayout(self._grp_sucursales)
-        grp_suc.setContentsMargins(8, 8, 8, 8)
-        grp_suc.setSpacing(6)
+        grp_suc.setContentsMargins(12, 12, 12, 12)
+        grp_suc.setSpacing(8)
 
         tb_suc = QHBoxLayout()
-        tb_suc.setSpacing(6)
-        self._btn_suc_new  = QPushButton("➕  Nueva Sucursal")
+        tb_suc.setSpacing(8)
+        self._btn_suc_new  = QPushButton("+ Nueva Sucursal")
         self._btn_suc_new.setProperty("class", "primary")
         self._btn_suc_new.setEnabled(False)
         self._btn_suc_new.clicked.connect(self._new_sucursal)
         tb_suc.addWidget(self._btn_suc_new)
 
-        self._btn_suc_edit = QPushButton("✏️  Editar")
+        self._btn_suc_edit = QPushButton("Editar")
         self._btn_suc_edit.setEnabled(False)
         self._btn_suc_edit.clicked.connect(self._edit_sucursal)
         tb_suc.addWidget(self._btn_suc_edit)
 
-        self._btn_suc_del = QPushButton("❎  Desactivar")
+        self._btn_suc_del = QPushButton("Desactivar")
         self._btn_suc_del.setProperty("class", "danger")
         self._btn_suc_del.setEnabled(False)
         self._btn_suc_del.clicked.connect(self._delete_sucursal)
         tb_suc.addWidget(self._btn_suc_del)
 
-        self._btn_suc_hard_del = QPushButton("🗑️  Eliminar Definitivo")
+        self._btn_suc_hard_del = QPushButton("Eliminar Definitivo")
         self._btn_suc_hard_del.setEnabled(False)
         self._btn_suc_hard_del.setStyleSheet(
-            "background:#FF3B30; color:white; border:none; border-radius:6px;"
+            "background:#FFFFFF; color:#C8102E; border:1px solid #C8102E; border-radius:10px;"
             " padding:6px 12px; font-weight:700;"
         )
         self._btn_suc_hard_del.clicked.connect(self._hard_delete_sucursal)
         tb_suc.addWidget(self._btn_suc_hard_del)
 
-        self._btn_suc_merge = QPushButton("🔗  Fusionar")
+        self._btn_suc_merge = QPushButton("Fusionar")
         self._btn_suc_merge.setEnabled(False)
         self._btn_suc_merge.setStyleSheet(
-            "background:#5856D6; color:white; border:none; border-radius:6px;"
+            "background:#F2F2F7; color:#1D1D1F; border:1px solid #D2D2D7; border-radius:10px;"
             " padding:6px 12px; font-weight:600;"
         )
         self._btn_suc_merge.clicked.connect(self._merge_sucursales)
@@ -1072,7 +1072,7 @@ class ClientesSucursalesTab(QWidget):
         # Barra de búsqueda de sucursales
         suc_search_row = QHBoxLayout()
         self._inp_search_suc = QLineEdit()
-        self._inp_search_suc.setPlaceholderText("🔍  Buscar sucursal por nombre, dirección o contacto...")
+        self._inp_search_suc.setPlaceholderText("Buscar sucursal por nombre, dirección o contacto...")
         self._inp_search_suc.setClearButtonEnabled(True)
         self._inp_search_suc.textChanged.connect(self._filter_sucursales)
         suc_search_row.addWidget(self._inp_search_suc)
@@ -1085,7 +1085,7 @@ class ClientesSucursalesTab(QWidget):
         self._tbl_sucursales.verticalHeader().setVisible(False)
         self._tbl_sucursales.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._tbl_sucursales.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._tbl_sucursales.setAlternatingRowColors(True)
+        self._tbl_sucursales.setAlternatingRowColors(False)
         self._tbl_sucursales.setMinimumHeight(140)
         SP = QSizePolicy
         self._tbl_sucursales.setSizePolicy(SP.Policy.Expanding, SP.Policy.Expanding)
@@ -1097,39 +1097,39 @@ class ClientesSucursalesTab(QWidget):
         root.addWidget(self._grp_sucursales, stretch=2)
 
         # ── Panel Equipos ─────────────────────────────────────────────────────
-        self._grp_equipos = QGroupBox("⚖️  Equipos / Básculas  —  (selecciona una planta)")
+        self._grp_equipos = QGroupBox("Equipos / Básculas  —  (selecciona una planta)")
         self._grp_equipos.setStyleSheet(
-            "QGroupBox { font-weight:700; font-size:13px; border:1px solid #9AE6B4;"
-            " border-radius:8px; margin-top:8px; padding:8px 4px; background:#F0FFF4; }"
-            "QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 6px; color:#1A6134; }"
+            "QGroupBox { font-weight:700; font-size:13px; border:1px solid #E5E5EA;"
+            " border-radius:14px; margin-top:8px; padding:12px 8px; background:#FFFFFF; }"
+            "QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 6px; color:#1D1D1F; }"
         )
         grp_eq = QVBoxLayout(self._grp_equipos)
-        grp_eq.setContentsMargins(8, 8, 8, 8)
-        grp_eq.setSpacing(6)
+        grp_eq.setContentsMargins(12, 12, 12, 12)
+        grp_eq.setSpacing(8)
 
         tb_eq = QHBoxLayout()
-        tb_eq.setSpacing(6)
-        self._btn_eq_new  = QPushButton("➕  Dar de Alta Equipo")
+        tb_eq.setSpacing(8)
+        self._btn_eq_new  = QPushButton("+ Dar de Alta Equipo")
         self._btn_eq_new.setProperty("class", "primary")
         self._btn_eq_new.setEnabled(False)
         self._btn_eq_new.clicked.connect(self._new_equipo)
         tb_eq.addWidget(self._btn_eq_new)
 
-        self._btn_eq_edit = QPushButton("✏️  Editar")
+        self._btn_eq_edit = QPushButton("Editar")
         self._btn_eq_edit.setEnabled(False)
         self._btn_eq_edit.clicked.connect(self._edit_equipo)
         tb_eq.addWidget(self._btn_eq_edit)
 
-        self._btn_eq_del = QPushButton("❎  Dar de Baja")
+        self._btn_eq_del = QPushButton("Dar de Baja")
         self._btn_eq_del.setProperty("class", "danger")
         self._btn_eq_del.setEnabled(False)
         self._btn_eq_del.clicked.connect(self._delete_equipo)
         tb_eq.addWidget(self._btn_eq_del)
 
-        self._btn_eq_hard_del = QPushButton("🗑️  Eliminar Definitivo")
+        self._btn_eq_hard_del = QPushButton("Eliminar Definitivo")
         self._btn_eq_hard_del.setEnabled(False)
         self._btn_eq_hard_del.setStyleSheet(
-            "background:#FF3B30; color:white; border:none; border-radius:6px;"
+            "background:#FFFFFF; color:#C8102E; border:1px solid #C8102E; border-radius:10px;"
             " padding:6px 12px; font-weight:700;"
         )
         self._btn_eq_hard_del.clicked.connect(self._hard_delete_equipo)
@@ -1140,7 +1140,7 @@ class ClientesSucursalesTab(QWidget):
         # Barra de búsqueda de equipos
         eq_search_row = QHBoxLayout()
         self._inp_search_eq = QLineEdit()
-        self._inp_search_eq.setPlaceholderText("🔍  Buscar equipo por N/S, Tag/ID, Marca, Modelo o Ubicación...")
+        self._inp_search_eq.setPlaceholderText("Buscar equipo por N/S, Tag/ID, Marca, Modelo o Ubicación...")
         self._inp_search_eq.setClearButtonEnabled(True)
         self._inp_search_eq.textChanged.connect(self._filter_equipos)
         eq_search_row.addWidget(self._inp_search_eq)
@@ -1898,20 +1898,22 @@ class CatalogosWidget(QWidget):
         self._setup_ui()
 
     def _setup_ui(self) -> None:
+        self.setObjectName("catalogos_root")
+        self.setStyleSheet("QWidget#catalogos_root { background: #F5F5F7; }")
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 16, 20, 24)
-        root.setSpacing(12)
+        root.setContentsMargins(24, 20, 24, 24)
+        root.setSpacing(14)
 
         title = QLabel("Administración de Catálogos")
-        title.setStyleSheet("font-size:18px; font-weight:700; color:#111827;")
+        title.setStyleSheet("font-size:20px; font-weight:700; color:#1D1D1F; letter-spacing:-0.3px;")
         root.addWidget(title)
 
         note = QLabel(
             "Acceso restringido — Los cambios aquí afectan todas las Órdenes de Servicio"
         )
         note.setStyleSheet(
-            "background:#F8FAFC; color:#111827; border:1px solid #CBD5E1;"
-            " border-radius:8px; padding:8px 12px; font-size:12px;"
+            "background:#F2F2F7; color:#1D1D1F; border:1px solid #E5E5EA;"
+            " border-radius:10px; padding:10px 14px; font-size:12.5px;"
         )
         root.addWidget(note)
 
@@ -1932,10 +1934,10 @@ class CatalogosWidget(QWidget):
                 cliente_repo, sucursal_repo, equipo_sucursal_repo
             )
             cl_tab.setWidget(cl_inner)
-            tabs.addTab(cl_tab,                                    "👥 Clientes")
-            tabs.addTab(TecnicosTab(tecnico_repo),                 "👷 Técnicos")
-            tabs.addTab(TipoServicioTab(tipo_servicio_repo),       "🔧 Tipos de Servicio")
-            tabs.addTab(TipoInstrumentoTab(tipo_instrumento_repo), "⚖️ Tipos de Instrumento")
+            tabs.addTab(cl_tab,                                    "Clientes")
+            tabs.addTab(TecnicosTab(tecnico_repo),                 "Técnicos")
+            tabs.addTab(TipoServicioTab(tipo_servicio_repo),       "Tipos de Servicio")
+            tabs.addTab(TipoInstrumentoTab(tipo_instrumento_repo), "Tipos de Instrumento")
         except Exception as exc:
             error_lbl = QLabel(f"No se pudieron cargar los catálogos:\n{exc}")
             error_lbl.setStyleSheet("color:#FF3B30; padding:20px;")

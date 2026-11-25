@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import '../theme/pesa_theme.dart';
 
-/// Tarjeta corporativa limpia (#FFFFFF, radio 10dp, borde 1dp #E5E7EB, sin sombras fuertes).
+/// Tarjeta corporativa limpia (#FFFFFF, radio 14dp, borde 1dp #E5E5EA, sin sombras fuertes).
 class PesaCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -25,7 +25,7 @@ class PesaCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(10),
+      borderRadius: BorderRadius.circular(14),
       side: BorderSide(
         color: borderColor ?? PesaColors.border,
         width: borderWidth,
@@ -112,8 +112,8 @@ class PesaStatusBadge extends StatelessWidget {
       padding: padding,
       decoration: BoxDecoration(
         color: PesaColors.surfaceMuted,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: PesaColors.borderStrong, width: 1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: PesaColors.border, width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

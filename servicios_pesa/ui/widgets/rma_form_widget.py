@@ -55,20 +55,20 @@ class RMAFormWidget(QWidget):
 
         # Título
         header = QWidget()
-        header.setFixedHeight(54)
-        header.setStyleSheet("background:#F2F2F7; border-bottom:1px solid #D1D1D6;")
+        header.setFixedHeight(56)
+        header.setStyleSheet("background:#FFFFFF; border-bottom:1px solid #E5E5EA;")
         hl = QHBoxLayout(header)
         hl.setContentsMargins(24, 0, 24, 0)
-        t = QLabel("📋  Remisiones de Material — RMA")
-        t.setStyleSheet("font-size:18px; font-weight:800; color:#1D1D1F;")
+        t = QLabel("Remisiones de Material — RMA")
+        t.setStyleSheet("font-size:18px; font-weight:700; color:#1D1D1F; letter-spacing:-0.3px;")
         hl.addWidget(t)
         hl.addStretch()
         root.addWidget(header)
 
         # Tabs
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_form_tab(), "➕  Nueva Remisión")
-        self._tabs.addTab(self._build_historial_tab(), "📄  Historial")
+        self._tabs.addTab(self._build_form_tab(), "Nueva Remisión")
+        self._tabs.addTab(self._build_historial_tab(), "Historial")
         root.addWidget(self._tabs)
 
     # ── Tab 1: Formulario ─────────────────────────────────────────────────────

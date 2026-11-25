@@ -43,13 +43,18 @@ class ScannerWidget(QWidget):
         self._search_os()
 
     def _setup_ui(self) -> None:
+        self.setObjectName("scanner_root")
+        self.setStyleSheet(
+            "QWidget#scanner_root { background: #F5F5F7; } "
+            "QLabel { border: none; background: transparent; }"
+        )
         root = QVBoxLayout(self)
-        root.setContentsMargins(24, 20, 24, 20)
-        root.setSpacing(20)
+        root.setContentsMargins(28, 22, 28, 28)
+        root.setSpacing(18)
 
         # Título
-        title = QLabel("📎  Adjuntar Escaneo a Orden de Servicio")
-        title.setStyleSheet("font-size:18px; font-weight:800; color:#1D1D1F;")
+        title = QLabel("Adjuntar Escaneo a Orden de Servicio")
+        title.setStyleSheet("font-size:20px; font-weight:700; color:#1D1D1F; letter-spacing:-0.3px;")
         root.addWidget(title)
 
         # Instrucciones
@@ -58,90 +63,94 @@ class ScannerWidget(QWidget):
             "Formato de nombre: OS-AA-NNN-ESCANEADO.pdf"
         )
         note.setStyleSheet(
-            "background:#EBF5FF; color:#0A3663; border:1px solid #BFE0FF; "
-            "border-radius:6px; padding:10px 14px; font-size:12px; line-height:1.6;"
+            "background:#F2F2F7; color:#1D1D1F; border:1px solid #E5E5EA; "
+            "border-radius:10px; padding:12px 16px; font-size:12.5px; line-height:1.5;"
         )
         note.setWordWrap(True)
         root.addWidget(note)
 
         # ── Paso 1: Buscar OS ─────────────────────────────────────────────────
         step1 = QFrame()
-        step1.setStyleSheet("background:#FFFFFF; border:1px solid #D1D1D6; border-radius:8px;")
+        step1.setObjectName("scan_step1")
+        step1.setProperty("card", True)
+        step1.setStyleSheet("QFrame#scan_step1 { background:#FFFFFF; border:1px solid #E5E5EA; border-radius:14px; }")
         s1_layout = QVBoxLayout(step1)
-        s1_layout.setContentsMargins(16, 14, 16, 14)
+        s1_layout.setContentsMargins(20, 16, 20, 16)
         s1_layout.setSpacing(10)
 
         lbl1 = QLabel("PASO 1 — Buscar la Orden de Servicio")
-        lbl1.setStyleSheet("color:#E63946; font-size:11px; font-weight:800; letter-spacing:1px;")
+        lbl1.setStyleSheet("color:#C8102E; font-size:11px; font-weight:700; letter-spacing:0.8px;")
         s1_layout.addWidget(lbl1)
 
         search_row = QHBoxLayout()
         self._txt_folio = QComboBox()
         self._txt_folio.setEditable(True)
         self._txt_folio.lineEdit().setPlaceholderText("Escribir folio (Ej. OS-26-443) o seleccionar...")
-        self._txt_folio.setFixedHeight(36)
-        self._txt_folio.setStyleSheet("""
-            QComboBox { background: white; border: 1px solid #D1D1D6; border-radius: 4px; padding: 4px; }
-            QComboBox::drop-down { border: none; }
-        """)
+        self._txt_folio.setFixedHeight(38)
         search_row.addWidget(self._txt_folio, stretch=1)
 
-        btn_buscar = QPushButton("🔍  Buscar")
+        btn_buscar = QPushButton("Buscar")
         btn_buscar.setFixedWidth(110)
+        btn_buscar.setFixedHeight(38)
         btn_buscar.clicked.connect(self._search_os)
         search_row.addWidget(btn_buscar)
         s1_layout.addLayout(search_row)
 
         # Info de OS encontrada
         self._lbl_os_info = QLabel("—  Sin OS seleccionada")
-        self._lbl_os_info.setStyleSheet("color:#86868B; font-size:12px; padding:4px 0;")
+        self._lbl_os_info.setStyleSheet("color:#6E6E73; font-size:12px; padding:4px 0;")
         s1_layout.addWidget(self._lbl_os_info)
 
         root.addWidget(step1)
 
         # ── Paso 2: Seleccionar archivo ───────────────────────────────────────
         step2 = QFrame()
-        step2.setStyleSheet("background:#FFFFFF; border:1px solid #D1D1D6; border-radius:8px;")
+        step2.setObjectName("scan_step2")
+        step2.setProperty("card", True)
+        step2.setStyleSheet("QFrame#scan_step2 { background:#FFFFFF; border:1px solid #E5E5EA; border-radius:14px; }")
         s2_layout = QVBoxLayout(step2)
-        s2_layout.setContentsMargins(16, 14, 16, 14)
+        s2_layout.setContentsMargins(20, 16, 20, 16)
         s2_layout.setSpacing(10)
 
         lbl2 = QLabel("PASO 2 — Seleccionar el archivo escaneado")
-        lbl2.setStyleSheet("color:#E63946; font-size:11px; font-weight:800; letter-spacing:1px;")
+        lbl2.setStyleSheet("color:#C8102E; font-size:11px; font-weight:700; letter-spacing:0.8px;")
         s2_layout.addWidget(lbl2)
 
         file_row = QHBoxLayout()
         self._txt_file = QLineEdit()
         self._txt_file.setPlaceholderText("Ruta del archivo PDF o imagen...")
         self._txt_file.setReadOnly(True)
-        self._txt_file.setFixedHeight(36)
+        self._txt_file.setFixedHeight(38)
         file_row.addWidget(self._txt_file)
 
-        btn_browse = QPushButton("📂  Examinar...")
+        btn_browse = QPushButton("Examinar...")
         btn_browse.setFixedWidth(130)
+        btn_browse.setFixedHeight(38)
         btn_browse.clicked.connect(self._browse_file)
         file_row.addWidget(btn_browse)
         s2_layout.addLayout(file_row)
 
         self._lbl_file_info = QLabel("—  Sin archivo seleccionado")
-        self._lbl_file_info.setStyleSheet("color:#86868B; font-size:12px; padding:4px 0;")
+        self._lbl_file_info.setStyleSheet("color:#6E6E73; font-size:12px; padding:4px 0;")
         s2_layout.addWidget(self._lbl_file_info)
 
         root.addWidget(step2)
 
         # ── Paso 3: Adjuntar ──────────────────────────────────────────────────
         step3 = QFrame()
-        step3.setStyleSheet("background:#FFFFFF; border:1px solid #D1D1D6; border-radius:8px;")
+        step3.setObjectName("scan_step3")
+        step3.setProperty("card", True)
+        step3.setStyleSheet("QFrame#scan_step3 { background:#FFFFFF; border:1px solid #E5E5EA; border-radius:14px; }")
         s3_layout = QVBoxLayout(step3)
-        s3_layout.setContentsMargins(16, 14, 16, 14)
+        s3_layout.setContentsMargins(20, 16, 20, 16)
         s3_layout.setSpacing(10)
 
         lbl3 = QLabel("PASO 3 — Adjuntar al servidor")
-        lbl3.setStyleSheet("color:#E63946; font-size:11px; font-weight:800; letter-spacing:1px;")
+        lbl3.setStyleSheet("color:#C8102E; font-size:11px; font-weight:700; letter-spacing:0.8px;")
         s3_layout.addWidget(lbl3)
 
-        self._btn_adjuntar = QPushButton("📎  Adjuntar y Marcar como Escaneada")
-        self._btn_adjuntar.setProperty("class", "success")
+        self._btn_adjuntar = QPushButton("Adjuntar y Marcar como Escaneada")
+        self._btn_adjuntar.setProperty("class", "primary")
         self._btn_adjuntar.setFixedHeight(42)
         self._btn_adjuntar.setEnabled(False)
         self._btn_adjuntar.clicked.connect(self._attach)

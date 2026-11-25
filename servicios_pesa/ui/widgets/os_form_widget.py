@@ -31,8 +31,8 @@ def _make_line_edit(placeholder: str = "", max_len: int = 200) -> QLineEdit:
 def _section_label(text: str) -> QLabel:
     lbl = QLabel(text)
     lbl.setStyleSheet(
-        "color:#E63946; font-size:11px; font-weight:800; "
-        "letter-spacing:1.2px; padding:4px 0;"
+        "color:#C8102E; font-size:11px; font-weight:700; "
+        "letter-spacing:1.0px; padding:4px 0;"
     )
     return lbl
 

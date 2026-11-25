@@ -67,7 +67,7 @@ class _PartidaItem {
 class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     with SingleTickerProviderStateMixin {
   static const Color _red = Color(0xFFC8102E);
-  static const Color _dark = Color(0xFF1A1A2E);
+  static const Color _dark = Color(0xFF1D1D1F);
 
   final List<_PartidaItem> _partidas = [];
   final TextEditingController _observacionesCtrl = TextEditingController();

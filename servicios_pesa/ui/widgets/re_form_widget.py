@@ -63,19 +63,20 @@ _TIPOS_BASCULA = [
     "Otro",
 ]
 
-# ─── Estilos ──────────────────────────────────────────────────────────────────
+# ─── Estilos Apple Minimalist (macOS Sequoia v3.3.1) ─────────────────────────
 _SECTION_HDR = """
 QWidget#section_hdr {
-    background: #E5E5EA;
-    border-radius: 6px;
+    background: #F2F2F7;
+    border: 1px solid #E5E5EA;
+    border-radius: 10px;
 }
 """
-_CUMPLE_BTN_ON  = "QPushButton { background:#D4F5DA; color:#34C759; border:1px solid #34C759; border-radius:4px; font-size:11px; font-weight:700; padding:3px 8px; }"
-_CUMPLE_BTN_OFF = "QPushButton { background:#FFFFFF; color:#E5E5EA; border:1px solid #D1D1D6; border-radius:4px; font-size:11px; padding:3px 8px; }"
-_NOCUMPLE_BTN_ON  = "QPushButton { background:#FDEEEF; color:#FF3B30; border:1px solid #FF3B30; border-radius:4px; font-size:11px; font-weight:700; padding:3px 8px; }"
-_NOCUMPLE_BTN_OFF = "QPushButton { background:#FFFFFF; color:#E5E5EA; border:1px solid #D1D1D6; border-radius:4px; font-size:11px; padding:3px 8px; }"
-_FIELD_STYLE = "QLineEdit { background:#FFFFFF; color:#1D1D1F; border:1px solid #D1D1D6; border-radius:4px; padding:4px 8px; font-size:12px; } QLineEdit:focus { border-color:#E63946; }"
-_SB_STYLE = "QDoubleSpinBox { background:transparent; border:none; color:#1D1D1F; font-size:11px; } QDoubleSpinBox:focus { border-bottom:1px solid #E63946; }"
+_CUMPLE_BTN_ON  = "QPushButton { background:#1D1D1F; color:#FFFFFF; border:1px solid #1D1D1F; border-radius:8px; font-size:11px; font-weight:700; padding:3px 8px; }"
+_CUMPLE_BTN_OFF = "QPushButton { background:#FFFFFF; color:#6E6E73; border:1px solid #D2D2D7; border-radius:8px; font-size:11px; padding:3px 8px; }"
+_NOCUMPLE_BTN_ON  = "QPushButton { background:#C8102E; color:#FFFFFF; border:1px solid #C8102E; border-radius:8px; font-size:11px; font-weight:700; padding:3px 8px; }"
+_NOCUMPLE_BTN_OFF = "QPushButton { background:#FFFFFF; color:#6E6E73; border:1px solid #D2D2D7; border-radius:8px; font-size:11px; padding:3px 8px; }"
+_FIELD_STYLE = "QLineEdit { background:#FFFFFF; color:#1D1D1F; border:1px solid #D2D2D7; border-radius:10px; padding:4px 10px; font-size:12px; } QLineEdit:focus { border:1.5px solid #C8102E; }"
+_SB_STYLE = "QDoubleSpinBox { background:transparent; border:none; color:#1D1D1F; font-size:11px; } QDoubleSpinBox:focus { border-bottom:1px solid #C8102E; }"
 
 
 # ══════════════════════════════════════════════════════════════════════════════

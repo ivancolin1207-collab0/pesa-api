@@ -228,10 +228,10 @@ class SidebarNavButton(QPushButton):
     def _apply_active(self):
         self.setStyleSheet("""
             QPushButton {
-                background-color: #F8FAFC;
+                background-color: #F2F2F7;
                 border: none;
                 border-left: 3px solid #C8102E;
-                border-radius: 6px;
+                border-radius: 10px;
                 margin: 2px 8px;
             }
         """)
@@ -246,19 +246,19 @@ class SidebarNavButton(QPushButton):
                 background-color: transparent;
                 border: none;
                 border-left: 3px solid transparent;
-                border-radius: 6px;
+                border-radius: 10px;
                 margin: 2px 8px;
             }
             QPushButton:hover {
-                background-color: #F8FAFC;
+                background-color: #F2F2F7;
             }
             QPushButton:pressed {
-                background-color: #F1F5F9;
+                background-color: #E5E5EA;
             }
         """)
-        self._lbl_icon.set_color("#475569")
+        self._lbl_icon.set_color("#6E6E73")
         self._lbl_text.setStyleSheet(
-            "font-size: 13px; font-weight: 500; color: #475569; background: transparent;"
+            "font-size: 13px; font-weight: 500; color: #6E6E73; background: transparent;"
         )
 
     def is_active(self) -> bool:
@@ -465,9 +465,9 @@ class MainWindow(QMainWindow):
         self._sidebar = self._build_sidebar()
         root.addWidget(self._sidebar)
 
-        # Área de contenido (header + stack) sobre canvas corporativo #F6F7F9
+        # Área de contenido (header + stack) sobre canvas Apple #F5F5F7
         content_wrapper = QWidget()
-        content_wrapper.setStyleSheet("background-color: #F6F7F9;")
+        content_wrapper.setStyleSheet("background-color: #F5F5F7;")
         content_wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay = QVBoxLayout(content_wrapper)
         cw_lay.setContentsMargins(0, 0, 0, 0)
@@ -479,7 +479,7 @@ class MainWindow(QMainWindow):
 
         # Stack de páginas con tamaño expandible
         self._stack = QStackedWidget()
-        self._stack.setStyleSheet("background-color: #F6F7F9;")
+        self._stack.setStyleSheet("background-color: #F5F5F7;")
         self._stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay.addWidget(self._stack, stretch=1)
 
@@ -491,8 +491,8 @@ class MainWindow(QMainWindow):
         sb.setFixedWidth(232)
         sb.setStyleSheet("""
             QWidget#sidebar {
-                background-color: #FFFFFF;
-                border-right: 1px solid #E5E7EB;
+                background-color: #FBFBFD;
+                border-right: 1px solid #E5E5EA;
             }
             QWidget#sidebar QLabel {
                 border: none;
@@ -692,14 +692,14 @@ class MainWindow(QMainWindow):
         self._anim_group.start()
 
     def _build_header(self) -> QWidget:
-        """Header minimalista con título de vista, estado discreto de PostgreSQL y acción primaria."""
+        """TopBar (56px) estilo macOS con título de vista, estado discreto de PostgreSQL y acción primaria."""
         header = QWidget()
         header.setObjectName("content_header")
-        header.setFixedHeight(60)
+        header.setFixedHeight(56)
         header.setStyleSheet("""
             QWidget#content_header {
                 background-color: #FFFFFF;
-                border-bottom: 1px solid #E5E7EB;
+                border-bottom: 1px solid #E5E5EA;
             }
             QWidget#content_header QLabel {
                 border: none;
@@ -715,7 +715,7 @@ class MainWindow(QMainWindow):
         self._lbl_breadcrumb = QLabel("Dashboard")
         self._lbl_breadcrumb.setObjectName("breadcrumb")
         self._lbl_breadcrumb.setStyleSheet(
-            "color: #111827; font-size: 15px; font-weight: 700; letter-spacing: -0.2px; background: transparent;"
+            "color: #1D1D1F; font-size: 15px; font-weight: 700; letter-spacing: -0.2px; background: transparent;"
         )
         lay.addWidget(self._lbl_breadcrumb)
         lay.addStretch()
@@ -723,22 +723,22 @@ class MainWindow(QMainWindow):
         # Píldora discreta de conexión PostgreSQL (punto semántico 6px)
         try:
             from ui.theme import StatusBadge, PrimaryButton
-            self._header_conn_badge = StatusBadge("Verificando BD…", dot_color="#D97706", parent=header)
+            self._header_conn_badge = StatusBadge("Verificando BD…", dot_color="#FF9500", parent=header)
             lay.addWidget(self._header_conn_badge)
         except Exception:
             self._header_conn_badge = None
 
         # Indicador de rol discreto
         self._header_role_chip = QLabel("")
-        self._header_role_chip.setFixedHeight(30)
+        self._header_role_chip.setFixedHeight(28)
         self._header_role_chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._header_role_chip.setStyleSheet("""
-            background-color: #F8FAFC;
-            color: #6B7280;
-            border: 1px solid #E5E7EB;
+            background-color: #F2F2F7;
+            color: #1D1D1F;
+            border: 1px solid #E5E5EA;
             font-size: 10.5px;
             font-weight: 700;
-            border-radius: 6px;
+            border-radius: 8px;
             padding: 0 12px;
             letter-spacing: 0.5px;
         """)
@@ -754,7 +754,7 @@ class MainWindow(QMainWindow):
                 background-color: #C8102E;
                 color: #FFFFFF;
                 border: 1px solid #C8102E;
-                border-radius: 8px;
+                border-radius: 10px;
                 font-size: 12.5px;
                 font-weight: 600;
                 padding: 0 14px;
@@ -1163,11 +1163,11 @@ class MainWindow(QMainWindow):
         self._conn_indicator.set_status(connected)
         if hasattr(self, "_header_conn_badge") and self._header_conn_badge is not None:
             if connected is True:
-                self._header_conn_badge.set_status("PostgreSQL Conectado", "#16A34A")
+                self._header_conn_badge.set_status("PostgreSQL", "#34C759")
             elif connected is False:
-                self._header_conn_badge.set_status("Modo Offline", "#D97706")
+                self._header_conn_badge.set_status("Modo Offline", "#FF9500")
             else:
-                self._header_conn_badge.set_status("Verificando BD…", "#D97706")
+                self._header_conn_badge.set_status("Verificando BD…", "#FF9500")
 
     def _test_connection(self) -> None:
         from database.connection import db_pool

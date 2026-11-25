@@ -46,22 +46,18 @@ Widget buildEmailAuditBanner(String infoCorreo, {EdgeInsetsGeometry? margin}) {
   return Container(
     width: double.infinity,
     margin: margin ?? const EdgeInsets.only(top: 6),
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-    decoration: const BoxDecoration(
-      color: Color(0xFFF8FAFC),
-      border: Border(
-        left: BorderSide(color: Color(0xFF0F172A), width: 3),
-        top: BorderSide(color: Color(0xFFE2E8F0)),
-        right: BorderSide(color: Color(0xFFE2E8F0)),
-        bottom: BorderSide(color: Color(0xFFE2E8F0)),
-      ),
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+    decoration: BoxDecoration(
+      color: PesaColors.surfaceMuted,
+      borderRadius: BorderRadius.circular(8),
+      border: Border.all(color: PesaColors.border),
     ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Padding(
           padding: EdgeInsets.only(top: 1.5, right: 6),
-          child: Icon(Icons.mark_email_read_outlined, size: 13, color: Color(0xFF334155)),
+          child: Icon(Icons.mark_email_read_outlined, size: 13, color: PesaColors.textSecondary),
         ),
         Expanded(
           child: Text(
@@ -70,7 +66,7 @@ Widget buildEmailAuditBanner(String infoCorreo, {EdgeInsetsGeometry? margin}) {
             style: const TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF334155),
+              color: PesaColors.textPrimary,
               height: 1.3,
             ),
           ),

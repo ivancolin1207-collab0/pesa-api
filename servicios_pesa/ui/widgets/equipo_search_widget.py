@@ -37,11 +37,11 @@ except ImportError:
     _db_pool = None
 
 
-# ─── Paleta ───────────────────────────────────────────────────────────────────
-_RED  = "#CC1F1F"
-_DARK = "#1C1C1C"
-_GRAY = "#6B7280"
-_BG   = "#F9FAFB"
+# ─── Paleta Apple Minimalist (macOS Sequoia v3.3.1) ───────────────────────────
+_RED  = "#C8102E"
+_DARK = "#1D1D1F"
+_GRAY = "#6E6E73"
+_BG   = "#FFFFFF"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -100,7 +100,7 @@ class EquipoSearchWidget(QWidget):
         self.txt_id.textChanged.connect(self._on_text_changed)
         self.txt_id.returnPressed.connect(self._search_by_id)
 
-        self.btn_buscar = QPushButton("🔍  Buscar")
+        self.btn_buscar = QPushButton("Buscar")
         self.btn_buscar.setObjectName("btn_buscar_equipo")
         self.btn_buscar.setFixedHeight(38)
         self.btn_buscar.setFixedWidth(100)
@@ -126,7 +126,7 @@ class EquipoSearchWidget(QWidget):
         chip_lay.setContentsMargins(10, 6, 10, 6)
         chip_lay.setSpacing(8)
 
-        self.lbl_chip_icon = QLabel("⚙")
+        self.lbl_chip_icon = QLabel("ID")
         self.lbl_chip_icon.setObjectName("chip_icon")
 
         self.lbl_chip_text = QLabel("")

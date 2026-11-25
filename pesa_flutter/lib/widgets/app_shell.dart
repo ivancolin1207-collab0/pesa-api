@@ -12,16 +12,16 @@ import '../services/api_service.dart';
 import '../services/sync_service.dart';
 import '../theme/foldable_layout.dart';
 
-// ── Tokens corporativos minimalistas Básculas PESA v3.2 ─────────────────────
+// ── Tokens Apple Minimalist (iOS / iPadOS v3.3.1) — Básculas PESA ───────────
 const _red        = Color(0xFFC8102E);
-const _redLight   = Color(0xFFF8FAFC);
+const _redLight   = Color(0xFFF2F2F7);
 const _sidebarBg  = Color(0xFFFFFFFF);
 const _sidebarW   = 232.0;
 const _railW      = 72.0;
 const _textActive = Color(0xFFC8102E);
-const _textInact  = Color(0xFF6B7280);
-const _divider    = Color(0xFFE5E7EB);
-const _bgGeneral  = Color(0xFFF6F7F9);
+const _textInact  = Color(0xFF6E6E73);
+const _divider    = Color(0xFFE5E5EA);
+const _bgGeneral  = Color(0xFFF5F5F7);
 
 /// Items del menú lateral — todos los roles
 const _navItemsAll = [

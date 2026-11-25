@@ -38,9 +38,9 @@ class RevisionBasculaScreen extends StatefulWidget {
 }
 
 class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
-  static const Color _pesaRed = Color(0xFFB71C1C);
-  static const Color _pesaDark = Color(0xFF1C1C1C);
-  static const Color _pesaSlate = Color(0xFF2D2D2D);
+  static const Color _pesaRed = Color(0xFFC8102E);
+  static const Color _pesaDark = Color(0xFF1D1D1F);
+  static const Color _pesaSlate = Color(0xFF6E6E73);
 
   /// 11 filas exactas del formato físico oficial (Sección 3)
   static const List<List<String>> _ohmsParams = [

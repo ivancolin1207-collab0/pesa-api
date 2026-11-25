@@ -10,9 +10,9 @@ Filosofía: Alto contraste, tipografía corporativa limpia, sin pasteles deslava
 # PALETA DE COLORES — Industrial Enterprise
 # ──────────────────────────────────────────────────────────────────────────────
 COLORS: dict[str, str] = {
-    # Fondos corporativos minimalistas (Básculas PESA v3.2)
-    "bg_primary":       "#F6F7F9",   # Canvas principal gris muy suave
-    "bg_surface":       "#F8FAFC",   # Superficies secundarias / badges neutros
+    # Fondos Apple Minimalist (macOS Sequoia v3.3.1)
+    "bg_primary":       "#F5F5F7",   # Canvas Apple System Gray 6
+    "bg_surface":       "#F2F2F7",   # Superficies secundarias / badges neutros
     "bg_card":          "#FFFFFF",   # Tarjetas / paneles / tablas
     "bg_input":         "#FFFFFF",   # Campos de entrada
 
@@ -20,42 +20,42 @@ COLORS: dict[str, str] = {
     "accent_primary":   "#C8102E",   # Rojo Corporativo Básculas PESA
     "accent_hover":     "#A60D26",   # Rojo hover
     "accent_pressed":   "#880B20",   # Rojo pressed
-    "accent_muted":     "#F8FAFC",   # Superficie neutra activa (cero fondos rosados)
-    "accent_border":    "#CBD5E1",   # Borde neutro corporativo
-    "navy":             "#111827",   # Carbón corporativo
+    "accent_muted":     "#F2F2F7",   # Superficie neutra activa (cero fondos rosados)
+    "accent_border":    "#D2D2D7",   # Borde neutro Apple
+    "navy":             "#1D1D1F",   # Apple Anthracite
     "focus_blue":       "#C8102E",   # Foco corporativo
 
     # Texto
-    "text_primary":     "#111827",   # Texto primario
-    "text_secondary":   "#6B7280",   # Texto secundario
-    "text_muted":       "#9CA3AF",   # Placeholders / hints
-    "text_disabled":    "#CBD5E1",
+    "text_primary":     "#1D1D1F",   # Texto primario
+    "text_secondary":   "#6E6E73",   # Texto secundario
+    "text_muted":       "#8E8E93",   # Placeholders / hints
+    "text_disabled":    "#D2D2D7",
     "text_on_red":      "#FFFFFF",
 
     # Bordes
-    "border_default":   "#E5E7EB",   # Borde fino 1px
-    "border_strong":    "#CBD5E1",   # Borde marcado
+    "border_default":   "#E5E5EA",   # Borde fino 1px
+    "border_strong":    "#D2D2D7",   # Borde marcado inputs
     "border_focus":     "#C8102E",   # Foco en rojo corporativo
 
-    # Estados semánticos discretos (punto 6px + contenedor neutro)
-    "success":          "#16A34A",
-    "success_bg":       "#F8FAFC",
-    "warning":          "#D97706",
-    "warning_bg":       "#F8FAFC",
+    # Estados semánticos discretos (punto 6px + contenedor neutro #F2F2F7)
+    "success":          "#34C759",
+    "success_bg":       "#F2F2F7",
+    "warning":          "#FF9500",
+    "warning_bg":       "#F2F2F7",
     "error":            "#C8102E",
     "error_bg":         "#FFFFFF",
-    "info":             "#111827",
-    "info_bg":          "#F8FAFC",
+    "info":             "#1D1D1F",
+    "info_bg":          "#F2F2F7",
 
     # Badges de estado OS corporativos
-    "estado_proceso":       "#111827",
-    "estado_proceso_bg":    "#F8FAFC",
+    "estado_proceso":       "#1D1D1F",
+    "estado_proceso_bg":    "#F2F2F7",
     "estado_cancelada":     "#C8102E",
     "estado_cancelada_bg":  "#FFFFFF",
-    "estado_escaneada":     "#111827",
-    "estado_escaneada_bg":  "#F8FAFC",
-    "estado_fisico":        "#111827",
-    "estado_fisico_bg":     "#F8FAFC",
+    "estado_escaneada":     "#1D1D1F",
+    "estado_escaneada_bg":  "#F2F2F7",
+    "estado_fisico":        "#1D1D1F",
+    "estado_fisico_bg":     "#F2F2F7",
 }
 
 # ──────────────────────────────────────────────────────────────────────────────

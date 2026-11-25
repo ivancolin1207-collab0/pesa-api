@@ -106,7 +106,7 @@ class _CatalogosScreenState extends State<CatalogosScreen>
                           height: 38,
                           decoration: BoxDecoration(
                             color: PesaColors.brand,
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: const Icon(Icons.folder_copy_outlined, color: Colors.white, size: 20),
                         ),

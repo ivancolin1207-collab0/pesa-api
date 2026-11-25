@@ -121,12 +121,12 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   final _sigClienteCtrl = SignatureController(
     penStrokeWidth: 2.5,
-    penColor: Colors.black,
+    penColor: const Color(0xFF1D1D1F),
     exportBackgroundColor: Colors.white,
   );
   final _sigTecnicoCtrl = SignatureController(
     penStrokeWidth: 2.5,
-    penColor: Colors.black,
+    penColor: const Color(0xFF1D1D1F),
     exportBackgroundColor: Colors.white,
   );
 

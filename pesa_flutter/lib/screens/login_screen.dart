@@ -38,12 +38,12 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const carmineRed  = Color(0xFFB81D24);
+    const carmineRed  = Color(0xFFC8102E);
     const bgGray      = Color(0xFFF5F5F7);
     const cardBorder  = Color(0xFFE5E5EA);
-    const fieldBg     = Color(0xFFFAFAFA);
-    const fieldBorder = Color(0xFFD1D1D6);
-    const subTitleColor = Color(0xFF86868B);
+    const fieldBg     = Color(0xFFFFFFFF);
+    const fieldBorder = Color(0xFFD2D2D7);
+    const subTitleColor = Color(0xFF6E6E73);
     const textDark    = Color(0xFF1D1D1F);
 
     return Scaffold(

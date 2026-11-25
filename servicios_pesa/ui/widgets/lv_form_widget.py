@@ -27,40 +27,42 @@ from models.orden_servicio import orden_servicio_repo
 
 logger = logging.getLogger(__name__)
 
-# ─── Paleta y estilos ──────────────────────────────────────────────────────────
+# ─── Paleta y estilos Apple Minimalist (macOS Sequoia v3.3.1) ──────────────────
 _RED   = "#C8102E"
 _DARK  = "#1D1D1F"
-_GRAY  = "#86868B"
-_BLUE  = "#007AFF"
+_GRAY  = "#6E6E73"
+_BLUE  = "#C8102E"
 _BG    = "#F5F5F7"
 _WHITE = "#FFFFFF"
 
 _GRP_STYLE = """
     QGroupBox {
         font-weight: bold;
-        border: 1px solid #D1D1D6;
-        border-radius: 8px;
+        border: 1px solid #E5E5EA;
+        border-radius: 14px;
         margin-top: 10px;
+        background: #FFFFFF;
     }
     QGroupBox::title {
         subcontrol-origin: margin;
-        left: 10px;
-        padding: 0 3px 0 3px;
+        left: 12px;
+        padding: 0 6px;
+        color: #1D1D1F;
     }
 """
 
 _FIELD_STYLE = """
     QLineEdit, QComboBox, QTextEdit, QDateEdit, QSpinBox {
-        background: #F8FAFC;
-        border: 1.5px solid #D1D5DB;
-        border-radius: 7px;
+        background: #FFFFFF;
+        border: 1px solid #D2D2D7;
+        border-radius: 10px;
         padding: 6px 10px;
-        font-size: 12px;
+        font-size: 13px;
         color: #1D1D1F;
-        min-height: 32px;
+        min-height: 36px;
     }
     QLineEdit:focus, QComboBox:focus, QTextEdit:focus, QDateEdit:focus, QSpinBox:focus {
-        border-color: #007AFF;
+        border: 1.5px solid #C8102E;
         background: #FFFFFF;
     }
     QComboBox::drop-down { border: none; width: 24px; }

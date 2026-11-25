@@ -43,29 +43,29 @@ except ImportError:
     _HAS_SESSION = False
     _session = None
 
-# ─── Paleta de colores ───────────────────────────────────────────────────────
+# ─── Paleta Apple Minimalist (macOS Sequoia v3.3.1) ──────────────────────────
 _BG        = "#F5F5F7"
 _WHITE     = "#FFFFFF"
 _DARK      = "#1D1D1F"
-_GRAY      = "#86868B"
-_RED       = "#E63946"
+_GRAY      = "#6E6E73"
+_RED       = "#C8102E"
 _GREEN     = "#34C759"
-_AMBER     = "#FF9F0A"
-_BLUE      = "#007AFF"
-_BLUE_DARK = "#0A2342"
-_LIGHT_RED = "#FEE2E2"
-_LIGHT_GRN = "#DCFCE7"
-_LIGHT_AMB = "#FEF9C3"
+_AMBER     = "#FF9500"
+_BLUE      = "#1D1D1F"
+_BLUE_DARK = "#1D1D1F"
+_LIGHT_RED = "#F2F2F7"
+_LIGHT_GRN = "#F2F2F7"
+_LIGHT_AMB = "#F2F2F7"
 
-# ─── Colores de estado de celdas ─────────────────────────────────────────────
-_CELL_OK_BG   = "#DCFCE7"
-_CELL_OK_FG   = "#166534"
-_CELL_ERR_BG  = "#FEE2E2"
-_CELL_ERR_FG  = "#991B1B"
-_CELL_NA_BG   = "#F3F4F6"
-_CELL_NA_FG   = "#6B7280"
-_CELL_PEND_BG = "#FEF9C3"
-_CELL_PEND_FG = "#92400E"
+# ─── Colores de estado de celdas (monocromáticos sobrios, cero pastel) ───────
+_CELL_OK_BG   = "#F2F2F7"
+_CELL_OK_FG   = "#1D1D1F"
+_CELL_ERR_BG  = "#FFFFFF"
+_CELL_ERR_FG  = "#C8102E"
+_CELL_NA_BG   = "#F2F2F7"
+_CELL_NA_FG   = "#6E6E73"
+_CELL_PEND_BG = "#F2F2F7"
+_CELL_PEND_FG  = "#6E6E73"
 
 # ─── Cabecera de columnas ─────────────────────────────────────────────────────
 _COL_HEADERS = [

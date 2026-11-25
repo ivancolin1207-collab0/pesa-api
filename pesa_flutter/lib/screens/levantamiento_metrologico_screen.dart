@@ -31,7 +31,7 @@ class LevantamientoMetrologicoScreen extends StatefulWidget {
 
 class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologicoScreen> {
   static const Color _red = Color(0xFFC8102E);
-  static const Color _dark = Color(0xFF1A1A2E);
+  static const Color _dark = Color(0xFF1D1D1F);
 
   final _pesoTotalCtrl = TextEditingController();
   final _clasePesasCtrl = TextEditingController();

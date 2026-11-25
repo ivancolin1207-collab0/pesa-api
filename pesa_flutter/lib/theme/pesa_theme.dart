@@ -1,36 +1,36 @@
 // lib/theme/pesa_theme.dart
-// Sistema de Diseño Corporativo Minimalista — Básculas PESA (Flutter Android)
+// Sistema de Diseño Apple Minimalista (iOS / iPadOS) — Básculas PESA (Flutter Android & Z Fold8 Ultra)
 import 'package:flutter/material.dart';
 
 class PesaColors {
   PesaColors._();
 
-  // Superficies y fondos
-  static const Color canvas = Color(0xFFF5F6F8);
+  // Superficies y fondos (Apple System Gray 6 & Pure White)
+  static const Color canvas = Color(0xFFF5F5F7);
   static const Color surface = Color(0xFFFFFFFF);
-  static const Color surfaceMuted = Color(0xFFF8FAFC);
-  static const Color tableHeader = Color(0xFFF9FAFB);
+  static const Color surfaceMuted = Color(0xFFF2F2F7);
+  static const Color tableHeader = Color(0xFFFBFBFD);
 
-  // Bordes y divisores
-  static const Color border = Color(0xFFE5E7EB);
-  static const Color borderStrong = Color(0xFFCBD5E1);
-  static const Color divider = Color(0xFFF3F4F6);
+  // Bordes y divisores ultrafinos
+  static const Color border = Color(0xFFE5E5EA);
+  static const Color borderStrong = Color(0xFFD2D2D7);
+  static const Color divider = Color(0xFFF2F2F7);
 
-  // Tipografía
-  static const Color textPrimary = Color(0xFF111827);
-  static const Color textSecondary = Color(0xFF6B7280);
-  static const Color textTertiary = Color(0xFF9CA3AF);
+  // Tipografía Apple Anthracite & Neutral Gray
+  static const Color textPrimary = Color(0xFF1D1D1F);
+  static const Color textSecondary = Color(0xFF6E6E73);
+  static const Color textTertiary = Color(0xFF8E8E93);
 
-  // Único acento corporativo
+  // Único acento corporativo Básculas PESA
   static const Color brand = Color(0xFFC8102E);
   static const Color brandHover = Color(0xFFA60D26);
   static const Color brandPressed = Color(0xFF880B20);
 
-  // Puntos semánticos discretos (6dp únicamente en estados)
-  static const Color dotGreen = Color(0xFF16A34A);
-  static const Color dotAmber = Color(0xFFD97706);
+  // Puntos semánticos discretos (6dp dentro de cápsulas #F2F2F7)
+  static const Color dotGreen = Color(0xFF34C759);
+  static const Color dotAmber = Color(0xFFFF9500);
   static const Color dotRed = Color(0xFFC8102E);
-  static const Color dotNeutral = Color(0xFF6B7280);
+  static const Color dotNeutral = Color(0xFF6E6E73);
 }
 
 class PesaTheme {
@@ -67,7 +67,7 @@ class PesaTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(14),
           side: const BorderSide(color: PesaColors.border, width: 1),
         ),
       ),
@@ -94,23 +94,23 @@ class PesaTheme {
         hintStyle: const TextStyle(color: PesaColors.textTertiary, fontSize: 14),
         labelStyle: const TextStyle(color: PesaColors.textSecondary, fontSize: 13),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: PesaColors.borderStrong),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: PesaColors.borderStrong),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: PesaColors.brand, width: 1.5),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: PesaColors.brand, width: 1.2),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: PesaColors.brand, width: 1.5),
         ),
       ),
@@ -121,7 +121,7 @@ class PesaTheme {
           elevation: 0,
           minimumSize: const Size(48, 48),
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
@@ -132,7 +132,7 @@ class PesaTheme {
           side: const BorderSide(color: PesaColors.borderStrong),
           minimumSize: const Size(48, 48),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),
@@ -140,7 +140,7 @@ class PesaTheme {
         style: TextButton.styleFrom(
           foregroundColor: PesaColors.brand,
           minimumSize: const Size(48, 44),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           textStyle: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600),
         ),
       ),
@@ -190,7 +190,7 @@ class PesaTheme {
         surfaceTintColor: Colors.transparent,
         elevation: 2,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           side: const BorderSide(color: PesaColors.border),
         ),
       ),
