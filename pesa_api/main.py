@@ -148,6 +148,7 @@ app.include_router(catalogos.router,        prefix="/api/v1",              tags=
 app.include_router(catalogos.router,        prefix="/api",                 tags=["Catálogos Legacy"])
 # ── Firma de perfil del técnico + errores de campo (v3.1) ────────────────
 app.include_router(usuarios_router.router,  prefix="/api/v1/usuarios",     tags=["Usuarios - Firma"])
+app.include_router(usuarios_router.router,  prefix="/api/usuarios",        tags=["Usuarios - Firma Legacy"])
 app.include_router(errores_router.router,   prefix="/api/v1/errores-tecnicos", tags=["Errores Técnicos"])
 # ── Administración y mantenimiento de datos (solo admin) ──────────────
 app.include_router(admin_router.router,     prefix="/api/v1/admin",          tags=["Administración"])
@@ -162,6 +163,8 @@ app.mount("/uploads", StaticFiles(directory=_upload_dir), name="uploads")
 
 # ─── Healthcheck ─────────────────────────────────────────────────────────────
 
+@app.get("/health", tags=["Sistema"], include_in_schema=False)
+@app.get("/api/v1/ping", tags=["Sistema"], include_in_schema=False)
 @app.get("/", tags=["Sistema"], summary="Healthcheck")
 async def root():
     """

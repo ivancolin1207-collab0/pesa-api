@@ -205,121 +205,59 @@ async def obtener_catalogos_admin(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Devuelve la lista completa y actualizada de:
-    - clientes (con todas sus sucursales/direcciones anidadas)
+    Devuelve la lista completa y deduplicada de las tablas reales de PostgreSQL:
+    - clientes (cat_clientes + cliente_sucursales + cat_clientes.direccion normalizadas)
     - sucursales (lista plana de todas las sucursales/direcciones activas)
     - tecnicos activos
     - tipos_servicio y tipos_instrumento
-    - historial_instrumentos (combinaciones únicas de cliente, sucursal, marca, modelo,
-      serie, id_indicador, capacidad_maxima, division_minima y ubicacion para autocompletado)
+    - historial_instrumentos (cliente_equipos + cliente_instrumentos + ordenes_servicio)
     """
-    # 1. Clientes activos
-    clientes_list: list[dict] = []
-    try:
-        rows_cli = await db.fetch(
-            """
-            SELECT id,
-                   razon_social,
-                   razon_social AS nombre,
-                   COALESCE(rfc, '') AS rfc,
-                   COALESCE(telefono, '') AS telefono,
-                   COALESCE(direccion, '') AS direccion,
-                   COALESCE(activo, TRUE) AS activo
-            FROM cat_clientes
-            WHERE activo IS NOT FALSE
-            ORDER BY razon_social ASC
-            """
-        )
-        clientes_list = [dict(r) for r in rows_cli]
-    except Exception:
-        rows_cli = await db.fetch(
-            """
-            SELECT id, razon_social, razon_social AS nombre, COALESCE(direccion, '') AS direccion, COALESCE(activo, TRUE) AS activo
-            FROM cat_clientes
-            WHERE activo IS NOT FALSE
-            ORDER BY razon_social ASC
-            """
-        )
-        clientes_list = [
-            {
-                "id": r["id"],
-                "nombre": r["razon_social"],
-                "razon_social": r["razon_social"],
-                "rfc": "",
-                "telefono": "",
-                "direccion": r["direccion"] or "",
-                "activo": bool(r["activo"]),
-            }
-            for r in rows_cli
-        ]
+    from pesa_api.routers.catalogos import obtener_clientes_con_sucursales_reales
 
-    # 2. Sucursales / Direcciones por cliente
-    sucursales_list: list[dict] = []
-    suc_by_cliente: dict[int, list[dict]] = {}
-    try:
-        rows_suc = await db.fetch(
-            """
-            SELECT cs.id,
-                   cs.cliente_id,
-                   COALESCE(cc.razon_social, '') AS cliente_nombre,
-                   COALESCE(cs.nombre_sucursal, '') AS nombre_sucursal,
-                   COALESCE(cs.direccion, '') AS direccion,
-                   COALESCE(cs.contacto_nombre, '') AS contacto_nombre,
-                   COALESCE(cs.contacto_telefono, '') AS contacto_telefono
-            FROM cliente_sucursales cs
-            LEFT JOIN cat_clientes cc ON cc.id = cs.cliente_id
-            WHERE cs.activo IS NOT FALSE
-            ORDER BY cc.razon_social ASC, cs.nombre_sucursal ASC
-            """
-        )
-        for r in rows_suc:
-            sd = dict(r)
-            sucursales_list.append(sd)
-            cid = sd.get("cliente_id")
-            if cid is not None:
-                suc_by_cliente.setdefault(int(cid), []).append(sd)
-    except Exception as exc_s:
-        logger.warning("[ADMIN catalogos] cliente_sucursales fallback: %s", exc_s)
+    clientes_list, sucursales_list = await obtener_clientes_con_sucursales_reales(db, activo=True)
 
-    for cli in clientes_list:
-        cid = int(cli["id"])
-        cli["sucursales"] = suc_by_cliente.get(cid, [])
-
-    # 3. Técnicos activos
+    # 3. Técnicos activos (deduplicados por id)
     tecnicos_list: list[dict] = []
     try:
         rows_tec = await db.fetch(
             """
-            SELECT id,
+            SELECT DISTINCT ON (id)
+                   id,
                    nombre_completo,
+                   nombre_completo AS nombre,
                    COALESCE(usuario, '') AS usuario,
+                   COALESCE(usuario, '') AS username,
                    COALESCE(rol, 'Técnico') AS rol,
                    COALESCE(activo, TRUE) AS activo
             FROM cat_tecnicos
             WHERE activo IS NOT FALSE
-            ORDER BY nombre_completo ASC
+            ORDER BY id, nombre_completo ASC
             """
         )
-        tecnicos_list = [dict(r) for r in rows_tec]
+        tecnicos_list = sorted([dict(r) for r in rows_tec], key=lambda x: str(x.get("nombre_completo") or "").lower())
     except Exception as exc_t:
         logger.warning("[ADMIN catalogos] cat_tecnicos error: %s", exc_t)
 
-    # 4. Tipos de servicio y tipos de instrumento
+    # 4. Tipos de servicio y tipos de instrumento (deduplicados por id)
     tipos_servicio_list: list[dict] = []
     try:
-        rows_ts = await db.fetch("SELECT id, nombre, COALESCE(descripcion, '') AS descripcion FROM cat_tipo_servicio ORDER BY id ASC")
+        rows_ts = await db.fetch(
+            "SELECT DISTINCT ON (id) id, nombre, COALESCE(descripcion, '') AS descripcion FROM cat_tipo_servicio ORDER BY id ASC"
+        )
         tipos_servicio_list = [dict(r) for r in rows_ts]
     except Exception:
         pass
 
     tipos_inst_list: list[dict] = []
     try:
-        rows_ti = await db.fetch("SELECT id, nombre, COALESCE(descripcion, '') AS descripcion FROM cat_tipo_instrumento ORDER BY nombre ASC")
-        tipos_inst_list = [dict(r) for r in rows_ti]
+        rows_ti = await db.fetch(
+            "SELECT DISTINCT ON (id) id, nombre, COALESCE(descripcion, '') AS descripcion FROM cat_tipo_instrumento ORDER BY id, nombre ASC"
+        )
+        tipos_inst_list = sorted([dict(r) for r in rows_ti], key=lambda x: str(x.get("nombre") or "").lower())
     except Exception:
         pass
 
-    # 5. Historial consolidado de instrumentos (cliente_equipos + ordenes_servicio)
+    # 5. Historial consolidado de instrumentos (cliente_equipos + cliente_instrumentos + ordenes_servicio)
     invalidos = {"", "none", "null", "sin id", "sin modelo", "sin serie", "n/a", "na", "--"}
 
     def _clean(val) -> str:
@@ -370,7 +308,7 @@ async def obtener_catalogos_admin(
             "tipo_instrumento": _clean(tipo_inst),
         })
 
-    # 5a. Desde cliente_equipos (catálogo maestro por sucursal)
+    # 5a. Desde cliente_equipos
     try:
         rows_eq = await db.fetch(
             """
@@ -387,8 +325,8 @@ async def obtener_catalogos_admin(
                    COALESCE(ce.ubicacion_interna, '') AS ubicacion,
                    COALESCE(ce.tipo_instrumento, '') AS tipo_instrumento
             FROM cliente_equipos ce
-            LEFT JOIN cliente_sucursales cs ON cs.id = ce.sucursal_id
-            LEFT JOIN cat_clientes cc ON cc.id = cs.cliente_id
+            LEFT JOIN (SELECT DISTINCT ON (id) id, cliente_id, nombre_sucursal FROM cliente_sucursales ORDER BY id) cs ON cs.id = ce.sucursal_id
+            LEFT JOIN (SELECT DISTINCT ON (id) id, razon_social FROM cat_clientes ORDER BY id) cc ON cc.id = cs.cliente_id
             WHERE ce.activo IS NOT FALSE
             ORDER BY ce.id DESC
             LIMIT 2500
@@ -403,7 +341,38 @@ async def obtener_catalogos_admin(
     except Exception as exc_eq:
         logger.warning("[ADMIN catalogos] cliente_equipos fallback: %s", exc_eq)
 
-    # 5b. Desde ordenes_servicio históricas
+    # 5b. Desde cliente_instrumentos (catálogo de instrumentos por cliente usado en Windows)
+    try:
+        rows_ci = await db.fetch(
+            """
+            SELECT ci.cliente_id,
+                   COALESCE(cc.razon_social, '') AS cliente,
+                   NULL::int AS sucursal_id,
+                   '' AS sucursal,
+                   COALESCE(ci.marca, '') AS marca,
+                   COALESCE(ci.modelo, '') AS modelo,
+                   COALESCE(ci.numero_serie, '') AS serie,
+                   COALESCE(ci.id_indicador, '') AS id_indicador,
+                   COALESCE(ci.capacidad_max::text, '') AS capacidad_maxima,
+                   COALESCE(ci.division_min::text, '') AS division_minima,
+                   COALESCE(ci.ubicacion, '') AS ubicacion,
+                   '' AS tipo_instrumento
+            FROM cliente_instrumentos ci
+            LEFT JOIN (SELECT DISTINCT ON (id) id, razon_social FROM cat_clientes ORDER BY id) cc ON cc.id = ci.cliente_id
+            ORDER BY ci.id DESC
+            LIMIT 2500
+            """
+        )
+        for r in rows_ci:
+            _add_inst(
+                r["cliente_id"], r["cliente"], r["sucursal_id"], r["sucursal"],
+                r["marca"], r["modelo"], r["serie"], r["id_indicador"],
+                r["capacidad_maxima"], r["division_minima"], r["ubicacion"], r["tipo_instrumento"],
+            )
+    except Exception as exc_ci:
+        logger.warning("[ADMIN catalogos] cliente_instrumentos fallback: %s", exc_ci)
+
+    # 5c. Desde ordenes_servicio históricas
     try:
         rows_os_eq = await db.fetch(
             """
@@ -420,8 +389,8 @@ async def obtener_catalogos_admin(
                    COALESCE(os.ubicacion, '') AS ubicacion,
                    COALESCE(ti.nombre, '') AS tipo_instrumento
             FROM ordenes_servicio os
-            LEFT JOIN cat_clientes cc ON cc.id = os.id_cliente
-            LEFT JOIN cliente_sucursales cs ON cs.id = os.sucursal_id
+            LEFT JOIN (SELECT DISTINCT ON (id) id, razon_social FROM cat_clientes ORDER BY id) cc ON cc.id = os.id_cliente
+            LEFT JOIN (SELECT DISTINCT ON (id) id, nombre_sucursal FROM cliente_sucursales ORDER BY id) cs ON cs.id = os.sucursal_id
             LEFT JOIN cat_tipo_instrumento ti ON ti.id = os.id_tipo_instrumento
             WHERE (COALESCE(TRIM(os.marca), '') <> ''
                OR COALESCE(TRIM(os.modelo), '') <> ''

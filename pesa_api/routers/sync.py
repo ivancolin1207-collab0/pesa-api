@@ -72,8 +72,10 @@ class OSCompleta(BaseModel):
     Todos los campos salvo folio_os son Optional para tolerar
     órdenes físicas con columnas NULL en la BD.
     """
+    id:                    Optional[int]   = None
     folio_os:              str
     id_tecnico:            Optional[int]   = None
+    id_cliente:            Optional[int]   = None
     estado:                Optional[str]   = 'PROCESO'
     estatus:               Optional[str]   = None
     has_pdf:               Optional[bool]  = None
@@ -81,8 +83,10 @@ class OSCompleta(BaseModel):
     fecha:                 Optional[str]   = None
     cliente:               Optional[str]   = None
     cliente_nombre:        Optional[str]   = None
+    direccion:             Optional[str]   = None
     direccion_cliente:     Optional[str]   = None
     sucursal_id:           Optional[int]   = None
+    sucursal:              Optional[str]   = None
     sucursal_nombre:       Optional[str]   = None
     tipo_servicio:         Optional[str]   = None
     tecnico:               Optional[str]   = None
@@ -405,31 +409,33 @@ async def calibraciones_consulta(
 @router.get(
     "/pull",
     response_model = list[OSCompleta],
-    summary        = "Descargar OS asignadas al técnico (Tablet → Servidor)",
+    summary        = "Descargar OS asignadas al técnico o todas las recientes para Admin",
 )
 async def sync_pull(
+    q: Optional[str] = Query(
+        default = None,
+        description = "Búsqueda directa en servidor por folio, cliente, marca, modelo, serie, ID, CCA o DVE.",
+    ),
     since: Optional[Union[datetime, str]] = Query(
         default = None,
-        description = "Timestamp del último sync exitoso (ISO 8601). Se retornan solo OS modificadas después de este tiempo.",
+        description = "Timestamp del último sync exitoso (ISO 8601).",
     ),
     tecnico_id: Optional[str] = Query(None, description="ID numérico del técnico (opcional)"),
     tecnico_nombre: Optional[str] = Query(None, description="Nombre o filtro de técnico (opcional)"),
     updated_after: Optional[str] = Query(None, description="Alias de since (opcional)"),
+    limit: Optional[int] = Query(None, ge=1, le=2000, description="Límite máximo de registros"),
     db          = Depends(get_db),
-    current_user: dict = Depends(require_roles(
-        "servicio", "tecnico", "tecnico_campo", "admin", "administrador",
-        "logistica", "operativo",
-    )),
+    current_user: dict = Depends(get_current_user),
 ):
     """
-    La tablet llama a este endpoint al reconectar al WiFi.
-    Retorna SOLO las OS digitales asignadas al técnico autenticado
-    que hayan sido modificadas después del timestamp `since`.
-
-    El campo `since` debe ser el `updated_at` del último pull exitoso.
-    Acepta parámetros opcionales tecnico_id, tecnico_nombre, updated_after sin romper con 422.
+    Descarga de Órdenes de Servicio para Android / sincronización Offline-First:
+    - Admin / Jefe / Gerente / Superadmin / Logística / Recepción: recibe TODAS las órdenes recientes
+      de todos los técnicos ordenadas por fecha DESC, id DESC (sin filtrar por tecnico_id).
+    - Técnico de campo: recibe únicamente sus órdenes asignadas (os.id_tecnico).
+    - Parámetro opcional ?q= permite búsqueda directa en PostgreSQL sin restricción de since.
     """
     import unicodedata
+    from datetime import timedelta
     from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
     await _ensure_email_columns(db)
 
@@ -440,16 +446,23 @@ async def sync_pull(
         return "".join(c for c in nfkd if not unicodedata.combining(c)).lower().strip()
 
     role       = str(current_user.get("role", "")).strip()
+    role_raw_l = role.lower().strip()
     role_norm  = _norm_role(role)
     id_tecnico = current_user.get("id_tecnico") or current_user.get("id")
 
-    # Solo roles expresamente de control y administración ven todas las órdenes
     username_clean = str(current_user.get("username", "")).strip().lower()
-    _ADMIN_ROLES = {"admin", "administrador", "superadmin", "jefe", "gerente", "direccion", "gerencia"}
-    is_admin   = any(ar in role_norm for ar in _ADMIN_ROLES) or username_clean == "ivancolin1207"
+    _ADMIN_EXACT = {"admin", "administrador", "superadmin", "jefe", "gerente", "direccion", "gerencia", "logistica", "recepcion"}
+    is_admin = (
+        role_raw_l in _ADMIN_EXACT
+        or role_norm in _ADMIN_EXACT
+        or any(ar in role_norm for ar in ("admin", "superadmin", "gerencia", "jefe", "gerente", "logist", "recep"))
+        or username_clean == "ivancolin1207"
+    )
 
-    # [FIX-422] Parseo tolerante de since / updated_after (evita HTTP 422 si el formato difiere)
-    raw_date = updated_after or since
+    q_clean = str(q).strip() if q and str(q).strip() else None
+
+    # [FIX-422] Parseo tolerante de since / updated_after (ignorado cuando se busca con ?q=)
+    raw_date = None if q_clean else (updated_after or since)
     since_dt: Optional[datetime] = None
     if raw_date is not None:
         if isinstance(raw_date, datetime):
@@ -468,17 +481,20 @@ async def sync_pull(
 
     if since_dt is not None and since_dt.tzinfo is not None:
         since_dt = since_dt.astimezone(timezone.utc).replace(tzinfo=None)
+    # Margen de seguridad de 12h para absorber diferencias entre relojes naive UTC-6 (Windows) y UTC (Render)
+    since_safe = (since_dt - timedelta(hours=12)) if (since_dt and since_dt.year > 2000) else None
 
-    # ── SELECT blindado con COALESCE en todos los campos de texto ─────────────
-    # Garantiza que ningún NULL en órdenes físicas rompa la validación Pydantic.
-    # [FIX-DUPLICADOS] SELECT DISTINCT ON garantiza una sola fila por folio_os.
-    # El JOIN con cliente_sucursales puede multiplicar filas si hay varias sucursales
-    # por cliente, o si el técnico coincide tanto por id como por nombre en el WHERE.
-    _SELECT = """
+    effective_limit = int(limit) if (limit and limit > 0) else int(settings.SYNC_MAX_BATCH_SIZE)
+
+    _SELECT_INNER = """
         SELECT DISTINCT ON (os.folio_os)
+            os.id,
+            os.fecha AS _fecha_sort,
             os.folio_os,
             COALESCE(os.tipo_documento, 'OS') AS tipo_documento,
             os.id_tecnico,
+            os.id_cliente,
+            os.sucursal_id,
             COALESCE(os.estado,    'PROCESO') AS estado,
             COALESCE(os.estatus, os.estado, 'Proceso') AS estatus,
             (COALESCE(os.pdf_generado, FALSE)
@@ -486,7 +502,7 @@ async def sync_pull(
                OR COALESCE(os.pdf_path, '') <> ''
                OR COALESCE(os.pdf_b64, '') <> '') AS has_pdf,
             COALESCE(os.modalidad, 'DIGITAL') AS modalidad,
-            os.fecha::text,
+            os.fecha::text AS fecha,
             os.observaciones,
             COALESCE(os.marca,    '') AS marca,
             COALESCE(os.modelo,   '') AS modelo,
@@ -529,7 +545,9 @@ async def sync_pull(
                 NULLIF(TRIM(os.cliente), ''),
                 CASE WHEN os.folio_os ~* '^OSOCC-' THEN COALESCE(NULLIF(TRIM(os.ubicacion), ''), 'Stock / Taller Básculas PESA') ELSE '' END
             ) AS cliente_nombre,
-            COALESCE(cl.direccion,       '') AS direccion_cliente,
+            COALESCE(suc.direccion, cl.direccion, '') AS direccion,
+            COALESCE(suc.direccion, cl.direccion, '') AS direccion_cliente,
+            COALESCE(suc.nombre_sucursal, '') AS sucursal,
             COALESCE(suc.nombre_sucursal, '') AS sucursal_nombre,
             """ + _TIPO_SERVICIO_SQL + """ AS tipo_servicio,
             COALESCE(tc.nombre_completo, '') AS tecnico,
@@ -575,30 +593,36 @@ async def sync_pull(
                 ELSE NULL
             END AS pdf_url
         FROM ordenes_servicio os
-        LEFT JOIN cat_clientes         cl ON os.id_cliente         = cl.id
+        LEFT JOIN (SELECT DISTINCT ON (id) id, razon_social, direccion FROM cat_clientes ORDER BY id) cl ON os.id_cliente = cl.id
         LEFT JOIN cat_tipo_servicio    ts ON os.id_tipo_servicio    = ts.id
         LEFT JOIN cat_tecnicos         tc ON os.id_tecnico          = tc.id
         LEFT JOIN cat_clase_exactitud  ce ON os.id_clase_exactitud  = ce.id
         LEFT JOIN cat_tipo_instrumento ti ON os.id_tipo_instrumento = ti.id
-        LEFT JOIN cliente_sucursales   suc ON os.sucursal_id        = suc.id
+        LEFT JOIN (SELECT DISTINCT ON (id) id, nombre_sucursal, direccion FROM cliente_sucursales ORDER BY id) suc ON os.sucursal_id = suc.id
     """
 
-    # ── DIAGNÓSTICO COMPLETO EN RENDER LOGS ─────────────────────────────────
-    logger.info(
-        "[SYNC PULL] ===== DIAGNÓSTICO INICIO =====\n"
-        "  current_user completo: %s\n"
-        "  id_tecnico=%s | role=%s | is_admin=%s\n"
-        "  since=%s",
-        dict(current_user), id_tecnico, role, is_admin, since,
-    )
-    print(
-        f"[SYNC PULL DIAG] id={current_user.get('id')} "
-        f"username={current_user.get('username')} "
-        f"nombre_completo={current_user.get('nombre_completo')} "
-        f"role={role} id_tecnico={id_tecnico} is_admin={is_admin}"
-    )
+    def _build_q_clause(param_index: int) -> str:
+        return (
+            f"("
+            f"os.folio_os ILIKE ${param_index} "
+            f"OR COALESCE(cl.razon_social, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.cliente, '') ILIKE ${param_index} "
+            f"OR COALESCE(suc.nombre_sucursal, '') ILIKE ${param_index} "
+            f"OR COALESCE(suc.direccion, '') ILIKE ${param_index} "
+            f"OR COALESCE(tc.nombre_completo, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.marca, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.modelo, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.ns, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.id_equipo::text, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.indicador_id, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.ubicacion, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.numero_cca, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.numero_dve, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.id_lote, '') ILIKE ${param_index} "
+            f"OR COALESCE(os.datos_tecnicos_json, '') ILIKE ${param_index}"
+            f")"
+        )
 
-    # Parametros opcionales procesados de forma flexible
     param_tecnico_id: Optional[int] = None
     if tecnico_id is not None and str(tecnico_id).strip().isdigit():
         param_tecnico_id = int(str(tecnico_id).strip())
@@ -609,8 +633,8 @@ async def sync_pull(
 
     try:
         if is_admin:
-            where_admin = ["(os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')"]
-            params_admin = []
+            where_admin = ["(os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('CANCELADA', 'ELIMINADO', 'ELIMINADA'))"]
+            params_admin: list = []
 
             if param_tecnico_nombre:
                 params_admin.append(f"%{param_tecnico_nombre.lower()}%")
@@ -621,37 +645,39 @@ async def sync_pull(
                 idx = len(params_admin)
                 where_admin.append(f"os.id_tecnico = ${idx}")
 
-            if since_dt and since_dt.year > 2000:
-                params_admin.append(since_dt)
+            if q_clean:
+                params_admin.append(f"%{q_clean}%")
+                where_admin.append(_build_q_clause(len(params_admin)))
+            elif since_safe is not None:
+                params_admin.append(since_safe)
                 idx = len(params_admin)
-                where_admin.append(f"os.updated_at >= ${idx}::timestamp")
+                where_admin.append(f"(os.updated_at >= ${idx}::timestamp OR os.created_at >= ${idx}::timestamp)")
 
-            params_admin.append(settings.SYNC_MAX_BATCH_SIZE)
-            query_sql = _SELECT + f"""
-                WHERE {" AND ".join(where_admin)}
-                ORDER BY os.folio_os DESC, os.updated_at DESC
+            params_admin.append(effective_limit)
+            query_sql = f"""
+                SELECT * FROM (
+                    {_SELECT_INNER}
+                    WHERE {" AND ".join(where_admin)}
+                    ORDER BY os.folio_os, os.id DESC
+                ) AS dedup_os
+                ORDER BY dedup_os._fecha_sort DESC NULLS LAST, dedup_os.id DESC
                 LIMIT ${len(params_admin)}
             """
             rows = await db.fetch(query_sql, *params_admin)
             logger.info(
-                "Sync PULL [ADMIN %s (rol=%s)]: %d OS DISTINTAS",
-                current_user.get("username"), role, len(rows),
+                "Sync PULL [ADMIN %s (rol=%s, q=%r)]: %d OS ordenadas por fecha DESC, id DESC",
+                current_user.get("username"), role, q_clean, len(rows),
             )
         else:
-            # Técnico: ÚNICAMENTE sus propias órdenes asignadas por id_tecnico exacto
             username_jwt = str(current_user.get("username") or "").strip()
             nombre_jwt   = str(current_user.get("nombre_completo") or current_user.get("nombre") or username_jwt).strip()
 
-            # [SEC] Un técnico NUNCA puede ampliar su alcance con tecnico_id /
-            # tecnico_nombre: solo se usa el id del propio JWT.
             if param_tecnico_id and id_tecnico and int(id_tecnico) != param_tecnico_id:
                 logger.warning(
                     "[SYNC PULL] Técnico %s pidió tecnico_id=%s ajeno — ignorado.",
                     username_jwt, param_tecnico_id,
                 )
 
-            # [FIX-DEFENSIVO] Si id_tecnico falta en el token, resolverlo SOLO por
-            # el username exacto del JWT (nunca por parámetros del cliente).
             if not id_tecnico and username_jwt:
                 tec_lookup = await db.fetchrow(
                     "SELECT id, nombre_completo FROM cat_tecnicos WHERE LOWER(TRIM(usuario)) = LOWER(TRIM($1)) LIMIT 1",
@@ -666,110 +692,36 @@ async def sync_pull(
                 logger.warning("[SYNC PULL] Usuario %s no tiene id_tecnico asociado — retornando 0 órdenes.", username_jwt)
                 return []
 
-            # REGLA DE NEGOCIO ESTRICTA:
-            # Filtrar EXCLUSIVAMENTE por os.id_tecnico = :id_tecnico
             where_clauses = [
                 "os.id_tecnico = $1",
                 "(os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('CANCELADA', 'ELIMINADO', 'ELIMINADA'))",
             ]
-            params = [int(id_tecnico)]
+            params: list = [int(id_tecnico)]
 
-            # Filtro since si aplica
-            if since_dt and since_dt.year > 2000:
-                params.append(since_dt)
-                where_clauses.append(f"os.updated_at >= ${len(params)}::timestamp")
+            if q_clean:
+                params.append(f"%{q_clean}%")
+                where_clauses.append(_build_q_clause(len(params)))
+            elif since_safe is not None:
+                params.append(since_safe)
+                idx = len(params)
+                where_clauses.append(f"(os.updated_at >= ${idx}::timestamp OR os.created_at >= ${idx}::timestamp)")
 
-            params.append(settings.SYNC_MAX_BATCH_SIZE)
-            query_sql = _SELECT + f"""
-                WHERE {" AND ".join(where_clauses)}
-                ORDER BY os.folio_os DESC, os.updated_at DESC
+            params.append(effective_limit)
+            query_sql = f"""
+                SELECT * FROM (
+                    {_SELECT_INNER}
+                    WHERE {" AND ".join(where_clauses)}
+                    ORDER BY os.folio_os, os.id DESC
+                ) AS dedup_os
+                ORDER BY dedup_os._fecha_sort DESC NULLS LAST, dedup_os.id DESC
                 LIMIT ${len(params)}
             """
 
-            logger.info(
-                "[SYNC PULL SQL QUERY - STRICT TECNICO %s (id=%s)]:\n%s\nPARAMS: %s",
-                username_jwt, id_tecnico, query_sql, params,
-            )
-
             rows = await db.fetch(query_sql, *params)
-
             logger.info(
-                "Sync PULL [TECNICO id=%s user=%s nombre=%s]: %d OS encontradas",
-                id_tecnico, username_jwt, nombre_jwt, len(rows),
+                "Sync PULL [TECNICO id=%s user=%s q=%r]: %d OS encontradas",
+                id_tecnico, username_jwt, q_clean, len(rows),
             )
-            print(
-                f"[SYNC PULL RESULT] id_tecnico={id_tecnico} username={username_jwt} "
-                f"nombre='{nombre_jwt}' -> {len(rows)} OS encontradas"
-            )
-
-            # Diagnóstico extra si no se encontró nada
-            if len(rows) == 0:
-                try:
-                    # Contar cuántas OS hay sin filtro de técnico
-                    total_os = await db.fetchval(
-                        "SELECT COUNT(*) FROM ordenes_servicio WHERE UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
-                    )
-                    # Buscar si existe el técnico en cat_tecnicos
-                    tec_check = await db.fetchrow(
-                        "SELECT id, nombre_completo, usuario, activo FROM cat_tecnicos WHERE id = $1 OR LOWER(usuario) = LOWER($2)",
-                        id_tecnico or -1, username_jwt,
-                    )
-                    # Buscar OS con JOIN por nombre via cat_tecnicos
-                    nombre_param = f"%{nombre_jwt.lower()}%" if nombre_jwt else "%"
-                    os_por_nombre = await db.fetchval(
-                        """
-                        SELECT COUNT(*) FROM ordenes_servicio os
-                        JOIN cat_tecnicos t ON t.id = os.id_tecnico
-                        WHERE LOWER(t.nombre_completo) ILIKE $1 OR LOWER(t.usuario) ILIKE $1
-                        """,
-                        nombre_param,
-                    )
-                    # Buscar OS por id_tecnico directo
-                    os_por_id = await db.fetchval(
-                        "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1",
-                        id_tecnico or -1,
-                    )
-                    # OS por id_tecnico sin el filtro de since
-                    os_por_id_sin_since = await db.fetchval(
-                        "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'",
-                        id_tecnico or -1,
-                    )
-                    # OS con id_tecnico NULL (huérfanas)
-                    os_null_tecnico = await db.fetchval(
-                        "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico IS NULL AND UPPER(TRIM(COALESCE(estado,''))) != 'CANCELADA'"
-                    )
-                    # since podría estar bloqueando
-                    os_bloqueadas_since = await db.fetchval(
-                        "SELECT COUNT(*) FROM ordenes_servicio WHERE id_tecnico = $1 AND updated_at < $2::timestamp",
-                        id_tecnico or -1, since_dt,
-                    ) if since_dt else 0
-                    logger.warning(
-                        "[SYNC PULL CERO RESULTADOS] DIAGNÓSTICO:\n"
-                        "  Total OS no canceladas en BD: %s\n"
-                        "  OS con id_tecnico=%s (con filtro since): %s\n"
-                        "  OS con id_tecnico=%s (SIN filtro since): %s\n"
-                        "  OS BLOQUEADAS por filtro since (%s): %s\n"
-                        "  OS con id_tecnico NULL (huerfanas): %s\n"
-                        "  OS con tecnico ILIKE '%s': %s\n"
-                        "  Registro en cat_tecnicos: %s",
-                        total_os, id_tecnico, os_por_id,
-                        id_tecnico, os_por_id_sin_since,
-                        since_dt, os_bloqueadas_since,
-                        os_null_tecnico,
-                        nombre_jwt, os_por_nombre,
-                        dict(tec_check) if tec_check else "NO ENCONTRADO",
-                    )
-                    print(
-                        f"[SYNC PULL CERO] total_os={total_os} | "
-                        f"os_by_id={os_por_id} | os_by_id_sin_since={os_por_id_sin_since} | "
-                        f"os_bloqueadas_since={os_bloqueadas_since} | "
-                        f"os_null_id_tecnico={os_null_tecnico} | "
-                        f"os_by_nombre={os_por_nombre} | "
-                        f"cat_tecnico={dict(tec_check) if tec_check else 'NO_ENCONTRADO'}"
-                    )
-                except Exception as e_diag:
-                    # El bloque de diagnóstico NUNCA debe romper la respuesta principal
-                    logger.warning("[SYNC PULL] Error en bloque diagnóstico (ignorado): %s", e_diag)
 
         # ── Trazabilidad Estado 2: Doble palomita gris (Recibida en Tablet) ──────
         pulled_folios = [r["folio_os"] for r in rows if r.get("folio_os")]
@@ -797,6 +749,7 @@ async def sync_pull(
         for r in rows:
             try:
                 d = dict(r)
+                d.pop("_fecha_sort", None)
                 folio = (d.get("folio_os") or "").strip()
 
                 # Comprobar si realmente existe un archivo binario en base de datos o en disco del servidor
