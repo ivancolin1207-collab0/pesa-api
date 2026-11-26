@@ -226,6 +226,12 @@ class DatabasePool:
             # Lógica dinámica Excentricidad
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS aplica_excentricidad BOOLEAN DEFAULT TRUE;",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS filas_excentricidad INTEGER DEFAULT 5;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS puntos_excentricidad INTEGER DEFAULT 5;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS puntos_exactitud INTEGER DEFAULT 5;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS geometria_puntos VARCHAR(80);",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS usa_sustitucion BOOLEAN DEFAULT FALSE;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS aplica_enlaces_sustitucion BOOLEAN DEFAULT FALSE;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cantidad_enlaces INTEGER DEFAULT 3;",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_no_excentricidad VARCHAR(100);",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_cca VARCHAR(100);",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_dve VARCHAR(100);",

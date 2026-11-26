@@ -118,7 +118,20 @@ class OSCompleta(BaseModel):
     motivo_no_excentricidad: Optional[str] = None
     num_celdas_camionera:  Optional[int]   = 0
     secciones_camionera:   Optional[int]   = 0
-    filas_excentricidad:   Optional[int]   = 4
+    filas_excentricidad:   Optional[int]   = 5
+    puntos_excentricidad:  Optional[int]   = 5
+    puntos_exactitud:      Optional[int]   = 5
+    pts_exactitud:         Optional[int]   = 5
+    geometria_puntos:      Optional[str]   = None
+    geometria_plataforma:  Optional[str]   = None
+    usa_sustitucion:       Optional[bool]  = False
+    aplica_sustitucion:    Optional[bool]  = False
+    aplica_enlaces_sustitucion: Optional[bool] = False
+    cantidad_enlaces:      Optional[int]   = None
+    num_enlaces_sustitucion: Optional[int] = None
+    num_enlaces:           Optional[int]   = None
+    inicial_calibrador:    Optional[str]   = None
+    dve:                   Optional[str]   = None
     num_secciones:         Optional[int]   = 0
     instrumento_capacidad: Optional[str]   = None
     instrumento_division:  Optional[str]   = None
@@ -199,6 +212,11 @@ class PushPayload(BaseModel):
     holograma_actualizado: Optional[str] = None
     aplica_excentricidad: Optional[bool] = None
     motivo_no_excentricidad: Optional[str] = None
+    filas_excentricidad: Optional[int] = None
+    puntos_excentricidad: Optional[int] = None
+    puntos_exactitud: Optional[int] = None
+    geometria_puntos: Optional[str] = None
+    geometria_plataforma: Optional[str] = None
     parcial_instrumento: Optional[bool] = False
 
     # Vinculación a catálogo de sucursales (v13)
@@ -212,6 +230,11 @@ class PushPayload(BaseModel):
     datos_captura:  Optional[str] = None
     datos_tecnicos_json: Optional[Union[str, dict]] = None
     usa_sustitucion: Optional[bool] = None
+    aplica_sustitucion: Optional[bool] = None
+    aplica_enlaces_sustitucion: Optional[bool] = None
+    cantidad_enlaces: Optional[int] = None
+    num_enlaces_sustitucion: Optional[int] = None
+    num_enlaces: Optional[int] = None
     factor_sustitucion: Optional[str] = None
     capacidad_maxima: Optional[float] = None
     alcance_max:      Optional[float] = None
@@ -520,7 +543,14 @@ async def sync_pull(
             COALESCE(os.motivo_no_excentricidad, '') AS motivo_no_excentricidad,
             COALESCE(os.secciones_camionera,   0)    AS num_celdas_camionera,
             COALESCE(os.secciones_camionera,   0)    AS secciones_camionera,
-            COALESCE(os.filas_excentricidad,   4)    AS filas_excentricidad,
+            COALESCE(os.filas_excentricidad,   5)    AS filas_excentricidad,
+            COALESCE(os.puntos_excentricidad, os.filas_excentricidad, 5) AS puntos_excentricidad,
+            COALESCE(os.puntos_exactitud,      5)    AS puntos_exactitud,
+            COALESCE(os.geometria_puntos,     '')    AS geometria_puntos,
+            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS usa_sustitucion,
+            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_sustitucion,
+            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_enlaces_sustitucion,
+            os.cantidad_enlaces                      AS cantidad_enlaces,
             COALESCE(os.num_secciones,         0)    AS num_secciones,
             COALESCE(os.instrumento_capacidad, '')   AS instrumento_capacidad,
             COALESCE(os.instrumento_division,  '')   AS instrumento_division,
@@ -669,9 +699,10 @@ async def sync_pull(
                 LIMIT ${len(params_admin)}
             """
             rows = await db.fetch(query_sql, *params_admin)
+            _rol_log = current_user.get("role") or current_user.get("rol") or "admin"
             logger.info(
                 "Sync PULL [ADMIN %s (rol=%s, q=%r)]: %d OS ordenadas por fecha DESC, id DESC",
-                current_user.get("username"), role, q_clean, len(rows),
+                current_user.get("username"), _rol_log, q_clean, len(rows),
             )
         else:
             username_jwt = str(current_user.get("username") or "").strip()
@@ -826,8 +857,63 @@ async def sync_pull(
                                 d["numero_cca"] = str(dt_obj.get("cca"))
                             if not d.get("numero_dve") and dt_obj.get("folio_dve"):
                                 d["numero_dve"] = str(dt_obj.get("folio_dve"))
+                            if not d.get("motivo_no_excentricidad"):
+                                _m_no = dt_obj.get("motivo_no_excentricidad") or dt_obj.get("motivo_no_aplica") or dt_obj.get("tipo_no_apto")
+                                if _m_no:
+                                    d["motivo_no_excentricidad"] = str(_m_no)
+                            _p_exc = dt_obj.get("puntos_excentricidad") or dt_obj.get("filas_excentricidad") or dt_obj.get("puntos_apoyo")
+                            if _p_exc is not None:
+                                try:
+                                    d["puntos_excentricidad"] = int(_p_exc)
+                                    d["filas_excentricidad"] = int(_p_exc)
+                                except Exception:
+                                    pass
+                            _p_exa = dt_obj.get("puntos_exactitud") or dt_obj.get("pts_exactitud") or dt_obj.get("filas_exactitud")
+                            if _p_exa is not None:
+                                try:
+                                    d["puntos_exactitud"] = int(_p_exa)
+                                    d["pts_exactitud"] = int(_p_exa)
+                                except Exception:
+                                    pass
+                            _geo_v = d.get("geometria_puntos") or dt_obj.get("geometria_puntos") or dt_obj.get("geometria_plataforma") or dt_obj.get("geometria_excentricidad")
+                            if _geo_v:
+                                d["geometria_puntos"] = str(_geo_v)
+                                d["geometria_plataforma"] = str(_geo_v)
+                            _sust_dt = (
+                                dt_obj.get("aplica_enlaces_sustitucion")
+                                if dt_obj.get("aplica_enlaces_sustitucion") is not None
+                                else (
+                                    dt_obj.get("aplica_sustitucion")
+                                    if dt_obj.get("aplica_sustitucion") is not None
+                                    else (
+                                        dt_obj.get("usa_sustitucion")
+                                        if dt_obj.get("usa_sustitucion") is not None
+                                        else dt_obj.get("es_enlace_sustitucion")
+                                    )
+                                )
+                            )
+                            if _sust_dt is not None and not d.get("usa_sustitucion"):
+                                d["usa_sustitucion"] = bool(_sust_dt)
+                                d["aplica_sustitucion"] = bool(_sust_dt)
+                                d["aplica_enlaces_sustitucion"] = bool(_sust_dt)
+                            _n_enl = d.get("cantidad_enlaces") or dt_obj.get("cantidad_enlaces") or dt_obj.get("num_enlaces_sustitucion") or dt_obj.get("num_enlaces")
+                            if _n_enl is not None:
+                                try:
+                                    _n_enl_i = int(_n_enl)
+                                    d["cantidad_enlaces"] = _n_enl_i
+                                    d["num_enlaces_sustitucion"] = _n_enl_i
+                                    d["num_enlaces"] = _n_enl_i
+                                except Exception:
+                                    pass
+                            if dt_obj.get("inicial_calibrador"):
+                                d["inicial_calibrador"] = str(dt_obj.get("inicial_calibrador"))
+                            if dt_obj.get("dve"):
+                                d["dve"] = str(dt_obj.get("dve"))
                     except Exception:
                         pass
+                d["pts_exactitud"] = d.get("pts_exactitud") or d.get("puntos_exactitud") or 5
+                d["num_enlaces_sustitucion"] = d.get("num_enlaces_sustitucion") or d.get("cantidad_enlaces")
+                d["num_enlaces"] = d.get("num_enlaces") or d.get("cantidad_enlaces")
                 d["partidas"] = partidas_list
                 d["refacciones"] = partidas_list
 

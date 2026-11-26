@@ -76,8 +76,10 @@ class TipoInstrumentoOut(BaseModel):
 
 class CrearOrdenBody(BaseModel):
     tipo:                    str = "Individual"   # Individual | Lote
-    modalidad:               str = "Digital"      # Digital | Físico
+    modalidad:               str = "Digital"      # Digital | Físico | Híbrido
     tipo_documento:          Optional[str] = None # OS | RMA | RE | OSOB | OSOCC | LV | LP
+    folio_inicial:           Optional[str] = None # Ej: OS-26-863 (editable)
+    folio_base:              Optional[str] = None # Alias Windows
     id_cliente:              Optional[int] = None
     sucursal_id:             Optional[int] = None
     sucursal:                Optional[str] = None
@@ -88,7 +90,7 @@ class CrearOrdenBody(BaseModel):
     tipo_instrumento:        Optional[str] = None
     fecha:                   Optional[str] = None
     observaciones:           Optional[str] = None
-    cantidad:                int = 1              # Solo para lote
+    cantidad:                int = 1              # 1..100
     # Datos parciales o completos del instrumento (asignación temporal o completa)
     marca:                   Optional[str] = None
     modelo:                  Optional[str] = None
@@ -101,11 +103,30 @@ class CrearOrdenBody(BaseModel):
     ubicacion:               Optional[str] = None
     numero_cca:              Optional[str] = None
     numero_dve:              Optional[str] = None
+    dve:                     Optional[str] = None
+    inicial_calibrador:      Optional[str] = None
+    holograma_anterior:      Optional[str] = None
+    holograma_actualizado:   Optional[str] = None
     aplica_excentricidad:    Optional[bool] = True
     motivo_no_excentricidad: Optional[str] = None
+    puntos_excentricidad:    Optional[int] = None
+    filas_excentricidad:     Optional[int] = None
+    puntos_exactitud:        Optional[int] = None
+    pts_exactitud:           Optional[int] = None
+    geometria_puntos:        Optional[str] = None
+    geometria_plataforma:    Optional[str] = None
+    num_secciones:           Optional[int] = None
+    usa_sustitucion:         Optional[bool] = None
+    aplica_sustitucion:      Optional[bool] = None
+    aplica_enlaces_sustitucion: Optional[bool] = None
+    cantidad_enlaces:        Optional[int] = None
+    num_enlaces_sustitucion: Optional[int] = None
+    num_enlaces:             Optional[int] = None
     unidad_medida:           Optional[str] = "kg"
     correo_destino:          Optional[str] = None
     correo_cliente:          Optional[str] = None
+    # Lista por instrumento para lotes 1:1 con Windows (Instrumento 1 .. N)
+    equipos:                 Optional[list[dict]] = None
 
 
 class ActualizarInstrumentoBody(BaseModel):
@@ -127,6 +148,18 @@ class ActualizarInstrumentoBody(BaseModel):
     folio_dve:               Optional[str] = None
     aplica_excentricidad:    Optional[bool] = None
     motivo_no_excentricidad: Optional[str] = None
+    puntos_excentricidad:    Optional[int] = None
+    filas_excentricidad:     Optional[int] = None
+    puntos_exactitud:        Optional[int] = None
+    pts_exactitud:           Optional[int] = None
+    geometria_puntos:        Optional[str] = None
+    geometria_plataforma:    Optional[str] = None
+    usa_sustitucion:         Optional[bool] = None
+    aplica_sustitucion:      Optional[bool] = None
+    aplica_enlaces_sustitucion: Optional[bool] = None
+    cantidad_enlaces:        Optional[int] = None
+    num_enlaces_sustitucion: Optional[int] = None
+    num_enlaces:             Optional[int] = None
     unidad_medida:           Optional[str] = None
     holograma_anterior:      Optional[str] = None
     holograma_actualizado:   Optional[str] = None
@@ -879,7 +912,14 @@ async def get_ordenes(
             os.id_tipo_instrumento,
             COALESCE(ti.nombre, '') AS tipo_instrumento,
             COALESCE(os.aplica_excentricidad, true) AS aplica_excentricidad,
-            COALESCE(os.filas_excentricidad, 4) AS filas_excentricidad,
+            COALESCE(os.filas_excentricidad, 5) AS filas_excentricidad,
+            COALESCE(os.puntos_excentricidad, os.filas_excentricidad, 5) AS puntos_excentricidad,
+            COALESCE(os.puntos_exactitud, 5) AS puntos_exactitud,
+            COALESCE(os.geometria_puntos, '') AS geometria_puntos,
+            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS usa_sustitucion,
+            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_sustitucion,
+            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_enlaces_sustitucion,
+            os.cantidad_enlaces AS cantidad_enlaces,
             COALESCE(os.num_secciones, 0) AS num_secciones,
             COALESCE(os.secciones_camionera, 0) AS secciones_camionera,
             COALESCE(os.instrumento_capacidad, '') AS instrumento_capacidad,
@@ -1026,8 +1066,46 @@ async def get_ordenes(
                             d["numero_cca"] = str(dt_obj.get("cca"))
                         if not d.get("numero_dve") and dt_obj.get("folio_dve"):
                             d["numero_dve"] = str(dt_obj.get("folio_dve"))
+                        _geo_v = d.get("geometria_puntos") or dt_obj.get("geometria_puntos") or dt_obj.get("geometria_plataforma")
+                        if _geo_v:
+                            d["geometria_puntos"] = str(_geo_v)
+                            d["geometria_plataforma"] = str(_geo_v)
+                        _pe = dt_obj.get("puntos_excentricidad") or dt_obj.get("filas_excentricidad")
+                        if _pe is not None:
+                            try:
+                                d["puntos_excentricidad"] = int(_pe)
+                                d["filas_excentricidad"] = int(_pe)
+                            except Exception:
+                                pass
+                        _px = dt_obj.get("puntos_exactitud") or dt_obj.get("pts_exactitud")
+                        if _px is not None:
+                            try:
+                                d["puntos_exactitud"] = int(_px)
+                                d["pts_exactitud"] = int(_px)
+                            except Exception:
+                                pass
+                        _sust_dt = (
+                            dt_obj.get("aplica_enlaces_sustitucion")
+                            if dt_obj.get("aplica_enlaces_sustitucion") is not None
+                            else (dt_obj.get("aplica_sustitucion") if dt_obj.get("aplica_sustitucion") is not None else dt_obj.get("usa_sustitucion"))
+                        )
+                        if _sust_dt is not None and not d.get("usa_sustitucion"):
+                            d["usa_sustitucion"] = bool(_sust_dt)
+                            d["aplica_sustitucion"] = bool(_sust_dt)
+                            d["aplica_enlaces_sustitucion"] = bool(_sust_dt)
+                        _ne = d.get("cantidad_enlaces") or dt_obj.get("cantidad_enlaces") or dt_obj.get("num_enlaces_sustitucion") or dt_obj.get("num_enlaces")
+                        if _ne is not None:
+                            try:
+                                d["cantidad_enlaces"] = int(_ne)
+                                d["num_enlaces_sustitucion"] = int(_ne)
+                                d["num_enlaces"] = int(_ne)
+                            except Exception:
+                                pass
                 except Exception:
                     pass
+            d["pts_exactitud"] = d.get("pts_exactitud") or d.get("puntos_exactitud") or 5
+            d["num_enlaces_sustitucion"] = d.get("num_enlaces_sustitucion") or d.get("cantidad_enlaces")
+            d["num_enlaces"] = d.get("num_enlaces") or d.get("cantidad_enlaces")
             d["numero_cca"] = _limpiar_num_reg(d.get("numero_cca"))
             d["numero_dve"] = _limpiar_num_reg(d.get("numero_dve"))
             d["etiqueta_instrumento"] = _construir_etiqueta_instrumento_dict(d)
@@ -1046,6 +1124,112 @@ async def get_ordenes(
         )
 
 
+# ── Consecutivo Real de Folios (Paridad 1:1 con Windows batch_generator_widget) ──
+
+_VALID_TIPOS_FOLIO = ("OS", "RMA", "RE", "LP", "LV", "OSOB", "OSOCC")
+
+
+def _formatear_folio_consecutivo(tipo: str, anio2: str, consec: int) -> str:
+    t = str(tipo or "OS").strip().upper()
+    if t in ("OSOB", "OSOCC"):
+        return f"{t}-{anio2}-{int(consec):03d}"
+    return f"{t}-{anio2}-{int(consec)}"
+
+
+async def _calcular_siguiente_folio(db, tipo: str = "OS", anio: Optional[int] = None) -> dict:
+    """
+    Replica exactamente `_obtener_siguiente_folio()` de Windows:
+      1. Lee `control_folios.ultimo_consecutivo` (tipo_folio = tipo AND anio = anio).
+      2. Lee `MAX(consecutivo)` en `ordenes_servicio` para (tipo_documento, anio).
+      3. Lee `MAX` numérico del tercer segmento de `folio_os` (`{TIPO}-{ANIO2}-%`).
+      4. Toma el mayor de las 3 fuentes + 1 para garantizar que nunca se retrasa ni colisiona.
+    """
+    pref = str(tipo or "OS").strip().upper()
+    if pref not in _VALID_TIPOS_FOLIO:
+        pref = "OS"
+    anio_eff = int(anio or date.today().year)
+    anio2 = str(anio_eff)[-2:]
+
+    max_control = 0
+    max_os_consec = 0
+    max_os_parsed = 0
+
+    try:
+        row_cf = await db.fetchrow(
+            """
+            SELECT COALESCE(MAX(ultimo_consecutivo), 0) AS mc
+            FROM control_folios
+            WHERE UPPER(TRIM(tipo_folio)) = $1 AND anio = $2
+            """,
+            pref,
+            anio_eff,
+        )
+        if row_cf and row_cf["mc"] is not None:
+            max_control = int(row_cf["mc"])
+    except Exception as e_cf:
+        logger.debug("[FOLIOS] control_folios lookup omitido: %s", e_cf)
+
+    try:
+        row_os1 = await db.fetchrow(
+            """
+            SELECT COALESCE(MAX(consecutivo), 0) AS mo
+            FROM ordenes_servicio
+            WHERE UPPER(TRIM(COALESCE(tipo_documento, ''))) = $1
+              AND EXTRACT(YEAR FROM fecha) = $2
+            """,
+            pref,
+            anio_eff,
+        )
+        if row_os1 and row_os1["mo"] is not None:
+            max_os_consec = int(row_os1["mo"])
+    except Exception as e_os1:
+        logger.debug("[FOLIOS] ordenes_servicio.consecutivo lookup omitido: %s", e_os1)
+
+    try:
+        row_os2 = await db.fetchrow(
+            """
+            SELECT COALESCE(MAX(CAST(SPLIT_PART(folio_os, '-', 3) AS INT)), 0) AS mp
+            FROM ordenes_servicio
+            WHERE UPPER(folio_os) LIKE $1
+              AND SPLIT_PART(folio_os, '-', 3) ~ '^[0-9]+$'
+            """,
+            f"{pref}-{anio2}-%",
+        )
+        if row_os2 and row_os2["mp"] is not None:
+            max_os_parsed = int(row_os2["mp"])
+    except Exception as e_os2:
+        logger.debug("[FOLIOS] ordenes_servicio.folio_os parse omitido: %s", e_os2)
+
+    ultimo = max(max_control, max_os_consec, max_os_parsed)
+    siguiente = ultimo + 1
+    folio_str = _formatear_folio_consecutivo(pref, anio2, siguiente)
+    return {
+        "tipo": pref,
+        "anio": anio_eff,
+        "folio_inicial": folio_str,
+        "consecutivo": siguiente,
+        "ultimo_consecutivo": ultimo,
+    }
+
+
+@router.get(
+    "/folios/siguiente",
+    summary="Obtener el siguiente folio consecutivo real desde PostgreSQL sin consumirlo",
+    tags=["Catálogos", "Folios"],
+)
+async def get_siguiente_folio(
+    tipo: str = "OS",
+    anio: Optional[int] = None,
+    db=Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Devuelve el folio inicial consecutivo real desde PostgreSQL para cualquier
+    tipo de formato (OS, RMA, RE, LP, LV, OSOB, OSOCC) con paridad 1:1 con Windows.
+    """
+    return await _calcular_siguiente_folio(db, tipo=tipo, anio=anio)
+
+
 # ── Crear Orden de Servicio ────────────────────────────────────────────────────
 
 @router.post(
@@ -1060,22 +1244,25 @@ async def crear_orden(
     current_user: dict = Depends(get_current_user),
 ):
     """
-    Crea una nueva OS (o lote de OS) directamente desde la tablet con paridad completa
+    Crea una nueva OS (o lote de OS) directamente desde la tablet con paridad 1:1
     con el generador de formatos de Windows:
       - Todos los tipos de documento: OS, RMA, RE, LP, LV, OSOB, OSOCC
-      - Modalidad: Digital | Físico
-      - Individual o Lote (con id_lote y rango_lote)
-      - Cliente, Sucursal/Dirección completa y Técnico asignado
-      - Datos parciales o completos del instrumento (Marca, Modelo, Serie, ID, Ubicación, CCA, DVE)
+      - Modalidad: Digital | Físico | Híbrido
+      - Individual o Lote (con id_lote y rango_lote; cantidad == 1 -> id_lote = None)
+      - Folio consecutivo real desde control_folios + ordenes_servicio (o folio_inicial manual)
+      - Arreglo `equipos` por instrumento (Instrumento 1 .. N) con Excentricidad y Enlaces de Sustitución
     """
+    import unicodedata as _ud_cat, re as _re_cat
+
     today = date.today()
-    year_short = today.strftime("%y")
     fecha_orden = today
     if body.fecha and str(body.fecha).strip():
         try:
             fecha_orden = date.fromisoformat(str(body.fecha).strip()[:10])
         except Exception:
             fecha_orden = today
+    year_full = fecha_orden.year
+    year_short = str(year_full)[-2:]
 
     # [SEC] Un técnico solo puede crear OS asignadas a sí mismo; Admin/Logística a cualquiera.
     id_tecnico_asignado = body.id_tecnico
@@ -1083,27 +1270,33 @@ async def crear_orden(
         id_tecnico_asignado = id_tecnico_de(current_user)
 
     pref = (body.tipo_documento or "OS").strip().upper()
-    if pref not in ("OS", "RMA", "RE", "OSOB", "OSOCC", "LV", "LP"):
+    if pref not in _VALID_TIPOS_FOLIO:
         pref = "OS"
 
-    seq_row = await db.fetchrow(
-        f"""
-        SELECT COALESCE(MAX(
-            NULLIF(
-                REGEXP_REPLACE(folio_os, '^{pref}-\\d+-', '', 'g'),
-                ''
-            )::integer
-        ), 0) + 1 AS siguiente
-        FROM ordenes_servicio
-        WHERE folio_os LIKE $1
-        """,
-        f"{pref}-{year_short}-%"
-    )
-    siguiente = seq_row["siguiente"] if seq_row else 1
+    # Determinar folio inicial: respetar folio_inicial/folio_base manual o calcular vivo desde PostgreSQL
+    folio_req = str(body.folio_inicial or body.folio_base or "").strip()
+    prefix_eff = f"{pref}-{year_short}"
+    siguiente: Optional[int] = None
+    if folio_req:
+        parts = folio_req.split("-")
+        if len(parts) >= 2 and parts[-1].isdigit():
+            siguiente = int(parts[-1])
+            prefix_eff = "-".join(parts[:-1]).upper()
 
-    es_lote = str(body.tipo or "").strip().lower() == "lote" and (body.cantidad or 1) > 1
-    cantidad = max(1, body.cantidad) if es_lote else 1
-    folios_creados = [f"{pref}-{year_short}-{siguiente + i:03d}" for i in range(cantidad)]
+    if siguiente is None:
+        seq_info = await _calcular_siguiente_folio(db, tipo=pref, anio=year_full)
+        siguiente = int(seq_info["consecutivo"])
+        prefix_eff = f"{pref}-{year_short}"
+
+    cantidad = max(1, min(100, int(body.cantidad or 1)))
+    if str(body.tipo or "").strip().lower() == "individual" and not (body.equipos and len(body.equipos) > 1):
+        cantidad = max(1, cantidad)
+
+    is_padded_3 = pref in ("OSOB", "OSOCC") or prefix_eff.startswith(("OSOB", "OSOCC"))
+    folios_creados = [
+        f"{prefix_eff}-{siguiente + i:03d}" if is_padded_3 else f"{prefix_eff}-{siguiente + i}"
+        for i in range(cantidad)
+    ]
 
     id_lote_val = f"LOTE-{uuid.uuid4().hex[:10].upper()}" if cantidad > 1 else None
     rango_lote_val = f"{folios_creados[0]} al {folios_creados[-1]}" if cantidad > 1 else None
@@ -1170,18 +1363,6 @@ async def crear_orden(
         except Exception:
             pass
 
-    # Instrumento parcial / inicial (solo en Individual o en primera orden si es lote;
-    # si es Individual o si envían marca/modelo generales se guardan en la orden)
-    marca_in = (body.marca or "").strip() or None
-    modelo_in = (body.modelo or "").strip() or None
-    serie_in = (body.serie or body.ns or "").strip() or None
-    id_eq_in = (body.id_indicador or body.id_equipo or "").strip() or None
-    ubic_in = (body.ubicacion or "").strip() or None
-    cap_str = str(body.capacidad_maxima).strip() if body.capacidad_maxima is not None and str(body.capacidad_maxima).strip() else None
-    div_str = _norm_div_min_str(body.division_minima) if body.division_minima is not None and str(body.division_minima).strip() else None
-    cap_num = _parse_float_opt(body.capacidad_maxima)
-    div_num = _parse_float_opt(div_str)
-    import unicodedata as _ud_cat, re as _re_cat
     _ts_norm_cat = "".join(
         c for c in _ud_cat.normalize("NFKD", str(tipo_srv_txt or "").lower())
         if not _ud_cat.combining(c)
@@ -1192,53 +1373,188 @@ async def crear_orden(
         or "verifica" in _ts_norm_cat
         or bool(_re_cat.search(r"\bdve\b", _ts_norm_cat))
     )
-    cca_in = (_limpiar_num_reg(body.numero_cca) or None) if (_permite_cca or not _ts_norm_cat) else None
-    dve_in = (_limpiar_num_reg(body.numero_dve) or None) if (_permite_dve or not _ts_norm_cat) else None
-    aplica_exc = True if body.aplica_excentricidad is None else bool(body.aplica_excentricidad)
-    motivo_no_exc = (body.motivo_no_excentricidad or "").strip() if not aplica_exc else None
-    tipo_inst_txt = (body.tipo_instrumento or "").strip() or None
     correo_in_list = _extraer_correos_validos_lista(body.correo_destino or body.correo_cliente)
     correo_in = ", ".join(correo_in_list) if correo_in_list else None
 
-    dt_json_dict = {
-        k: v
-        for k, v in {
-            "marca": marca_in,
-            "modelo": modelo_in,
-            "serie": serie_in,
-            "ns": serie_in,
-            "id_indicador": id_eq_in,
-            "id_equipo": id_eq_in,
-            "capacidad_maxima": cap_str,
-            "division_minima": div_str,
-            "ubicacion": ubic_in,
-            "tipo_instrumento": tipo_inst_txt,
-            "numero_cca": cca_in,
-            "numero_dve": dve_in,
-            "aplica_excentricidad": aplica_exc,
-            "motivo_no_excentricidad": motivo_no_exc,
-            "direccion": cliente_dir,
-            "sucursal": sucursal_nom,
-            "unidad_medida": (body.unidad_medida or "kg").strip() or "kg",
-            "correo_destino": correo_in,
-            "correo_cliente": correo_in,
-        }.items()
-        if v is not None and v != ""
+    def _to_int_opt(v, default=None):
+        if v is None or str(v).strip() == "":
+            return default
+        try:
+            return int(float(str(v).strip()))
+        except Exception:
+            return default
+
+    def _to_bool_opt(v, default=None):
+        if v is None:
+            return default
+        if isinstance(v, bool):
+            return v
+        s = str(v).strip().lower()
+        if s in ("true", "1", "si", "sí", "yes"):
+            return True
+        if s in ("false", "0", "no"):
+            return False
+        return default
+
+    # Mapa de respaldo global si no se envió lista `equipos` por tarjeta
+    base_eq_fallback = {
+        "marca": body.marca,
+        "modelo": body.modelo,
+        "serie": body.serie or body.ns,
+        "id_indicador": body.id_indicador or body.id_equipo,
+        "capacidad_maxima": body.capacidad_maxima,
+        "division_minima": body.division_minima,
+        "ubicacion": body.ubicacion,
+        "id_tipo_instrumento": body.id_tipo_instrumento,
+        "tipo_instrumento": body.tipo_instrumento,
+        "numero_cca": body.numero_cca,
+        "numero_dve": body.numero_dve,
+        "dve": body.dve,
+        "inicial_calibrador": body.inicial_calibrador,
+        "holograma_anterior": body.holograma_anterior,
+        "holograma_actualizado": body.holograma_actualizado,
+        "aplica_excentricidad": body.aplica_excentricidad,
+        "motivo_no_excentricidad": body.motivo_no_excentricidad,
+        "puntos_excentricidad": body.puntos_excentricidad or body.filas_excentricidad,
+        "puntos_exactitud": body.puntos_exactitud or body.pts_exactitud,
+        "geometria_puntos": body.geometria_puntos or body.geometria_plataforma,
+        "num_secciones": body.num_secciones,
+        "aplica_enlaces_sustitucion": (
+            body.aplica_enlaces_sustitucion
+            if body.aplica_enlaces_sustitucion is not None
+            else (body.aplica_sustitucion if body.aplica_sustitucion is not None else body.usa_sustitucion)
+        ),
+        "cantidad_enlaces": body.cantidad_enlaces or body.num_enlaces_sustitucion or body.num_enlaces,
+        "unidad_medida": body.unidad_medida or "kg",
     }
-    dt_json_str = json.dumps(dt_json_dict, ensure_ascii=False) if dt_json_dict else "{}"
+    equipos_in = body.equipos if (isinstance(body.equipos, list) and len(body.equipos) > 0) else None
 
     ordenes_creadas = []
     for idx, folio in enumerate(folios_creados):
         consec_num = siguiente + idx
-        # En lote, serie e id_equipo únicos no se clonan en las demás tarjetas salvo marca/modelo/ubicacion parciales
-        f_serie = serie_in if (cantidad == 1 or idx == 0) else None
-        f_ideq = id_eq_in if (cantidad == 1 or idx == 0) else None
-        f_cca = cca_in if (cantidad == 1 or idx == 0) else None
-        f_dve = dve_in if (cantidad == 1 or idx == 0) else None
-        f_dt = dt_json_str if (cantidad == 1 or idx == 0) else json.dumps(
-            {k: v for k, v in dt_json_dict.items() if k not in ("serie", "ns", "id_indicador", "id_equipo", "numero_cca", "numero_dve")},
-            ensure_ascii=False,
+        if equipos_in is not None:
+            eq_raw = dict(equipos_in[idx]) if idx < len(equipos_in) and isinstance(equipos_in[idx], dict) else {}
+        else:
+            eq_raw = dict(base_eq_fallback)
+            if cantidad > 1 and idx > 0:
+                for unique_k in ("serie", "ns", "id_indicador", "id_equipo", "numero_cca", "numero_dve"):
+                    eq_raw[unique_k] = None
+
+        f_marca = str(eq_raw.get("marca") or "").strip() or None
+        f_modelo = str(eq_raw.get("modelo") or "").strip() or None
+        f_serie = str(eq_raw.get("serie") or eq_raw.get("ns") or "").strip() or None
+        f_ideq = str(eq_raw.get("id_indicador") or eq_raw.get("id_equipo") or "").strip() or None
+        f_ubic = str(eq_raw.get("ubicacion") or "").strip() or None
+        f_cap_raw = eq_raw.get("capacidad_maxima") if eq_raw.get("capacidad_maxima") not in (None, "") else eq_raw.get("alcance_max")
+        f_div_raw = eq_raw.get("division_minima") if eq_raw.get("division_minima") not in (None, "") else eq_raw.get("div_minima")
+        f_cap_str = str(f_cap_raw).strip() if f_cap_raw is not None and str(f_cap_raw).strip() else None
+        f_div_str = _norm_div_min_str(f_div_raw) if f_div_raw is not None and str(f_div_raw).strip() else None
+        f_cap_num = _parse_float_opt(f_cap_raw)
+        f_div_num = _parse_float_opt(f_div_str)
+        f_tipo_inst_id = _to_int_opt(eq_raw.get("id_tipo_instrumento"), body.id_tipo_instrumento)
+        f_tipo_inst_txt = str(eq_raw.get("tipo_instrumento") or "").strip() or None
+
+        f_cca = (_limpiar_num_reg(eq_raw.get("numero_cca") or eq_raw.get("cca")) or None) if (_permite_cca or not _ts_norm_cat) else None
+        f_dve = (_limpiar_num_reg(eq_raw.get("numero_dve") or eq_raw.get("folio_dve")) or None) if (_permite_dve or not _ts_norm_cat) else None
+        f_dve_div = str(eq_raw.get("dve") or "").strip() if _permite_dve else ""
+        f_ini_cal = str(eq_raw.get("inicial_calibrador") or "").strip() if _permite_cca else ""
+        f_holo_ant = str(eq_raw.get("holograma_anterior") or "").strip() if _permite_dve else ""
+        f_holo_act = str(eq_raw.get("holograma_actualizado") or "").strip() if _permite_dve else ""
+
+        f_aplica_exc = _to_bool_opt(eq_raw.get("aplica_excentricidad"), True)
+        f_motivo_no = str(
+            eq_raw.get("motivo_no_excentricidad")
+            or eq_raw.get("motivo_no_aplica")
+            or eq_raw.get("tipo_no_apto")
+            or ""
+        ).strip() if not f_aplica_exc else None
+        f_pts_exc = _to_int_opt(
+            eq_raw.get("puntos_excentricidad") or eq_raw.get("filas_excentricidad") or eq_raw.get("puntos_apoyo"),
+            5,
         )
+        f_pts_exact = _to_int_opt(
+            eq_raw.get("puntos_exactitud") or eq_raw.get("pts_exactitud") or eq_raw.get("filas_exactitud"),
+            5,
+        )
+        f_geo = str(
+            eq_raw.get("geometria_puntos") or eq_raw.get("geometria_plataforma") or "Libre"
+        ).strip() if f_aplica_exc else ""
+        f_secciones = _to_int_opt(eq_raw.get("num_secciones") or eq_raw.get("secciones_camionera"), 0)
+
+        f_aplica_enl = _to_bool_opt(
+            eq_raw.get("aplica_enlaces_sustitucion")
+            if eq_raw.get("aplica_enlaces_sustitucion") is not None
+            else (
+                eq_raw.get("aplica_sustitucion")
+                if eq_raw.get("aplica_sustitucion") is not None
+                else (
+                    eq_raw.get("usa_sustitucion")
+                    if eq_raw.get("usa_sustitucion") is not None
+                    else eq_raw.get("es_enlace_sustitucion")
+                )
+            ),
+            False,
+        )
+        if f_aplica_exc:
+            f_aplica_enl = False
+        f_cant_enl = _to_int_opt(
+            eq_raw.get("cantidad_enlaces") or eq_raw.get("num_enlaces_sustitucion") or eq_raw.get("num_enlaces"),
+            3 if f_aplica_enl else None,
+        ) if f_aplica_enl else None
+        f_unidad = str(eq_raw.get("unidad_medida") or body.unidad_medida or "kg").strip() or "kg"
+
+        f_dt_dict = {
+            k: v
+            for k, v in {
+                "folio_os": folio,
+                "marca": f_marca,
+                "modelo": f_modelo,
+                "serie": f_serie,
+                "ns": f_serie,
+                "id_indicador": f_ideq,
+                "id_equipo": f_ideq,
+                "capacidad_maxima": f_cap_str,
+                "division_minima": f_div_str,
+                "ubicacion": f_ubic,
+                "tipo_instrumento": f_tipo_inst_txt,
+                "numero_cca": f_cca,
+                "cca": f_cca,
+                "numero_dve": f_dve,
+                "folio_dve": f_dve,
+                "dve": f_dve_div or None,
+                "inicial_calibrador": f_ini_cal or None,
+                "holograma_anterior": f_holo_ant or None,
+                "holograma_actualizado": f_holo_act or None,
+                "aplica_excentricidad": f_aplica_exc,
+                "motivo_no_excentricidad": f_motivo_no,
+                "motivo_no_aplica": f_motivo_no,
+                "tipo_no_apto": f_motivo_no,
+                "puntos_excentricidad": f_pts_exc,
+                "filas_excentricidad": f_pts_exc,
+                "puntos_apoyo": f_pts_exc,
+                "puntos_exactitud": f_pts_exact,
+                "pts_exactitud": f_pts_exact,
+                "filas_exactitud": f_pts_exact,
+                "geometria_puntos": f_geo or None,
+                "geometria_plataforma": f_geo or None,
+                "num_secciones": f_secciones if f_secciones else None,
+                "usa_sustitucion": f_aplica_enl,
+                "aplica_sustitucion": f_aplica_enl,
+                "aplica_enlaces_sustitucion": f_aplica_enl,
+                "es_enlace_sustitucion": f_aplica_enl,
+                "es_sustitucion": f_aplica_enl,
+                "cantidad_enlaces": f_cant_enl,
+                "num_enlaces_sustitucion": f_cant_enl,
+                "num_enlaces": f_cant_enl,
+                "direccion": cliente_dir,
+                "sucursal": sucursal_nom,
+                "unidad_medida": f_unidad,
+                "correo_destino": correo_in,
+                "correo_cliente": correo_in,
+            }.items()
+            if v is not None and v != ""
+        }
+        f_dt = json.dumps(f_dt_dict, ensure_ascii=False)
 
         try:
             await db.execute(
@@ -1250,7 +1566,12 @@ async def crear_orden(
                     id_tipo_servicio, id_tipo_instrumento,
                     marca, modelo, ns, id_equipo, ubicacion,
                     alcance_max, div_minima, instrumento_capacidad, instrumento_division,
-                    numero_cca, numero_dve, aplica_excentricidad, motivo_no_excentricidad,
+                    numero_cca, numero_dve, hologramas,
+                    holograma_anterior, holograma_actualizado,
+                    aplica_excentricidad, motivo_no_excentricidad,
+                    filas_excentricidad, puntos_excentricidad, puntos_exactitud,
+                    geometria_puntos, num_secciones,
+                    usa_sustitucion, aplica_enlaces_sustitucion, cantidad_enlaces,
                     id_lote, rango_lote, datos_tecnicos_json,
                     correo_destino, correo_cliente,
                     observaciones, sync_check_status, sync_version, updated_at
@@ -1261,10 +1582,15 @@ async def crear_orden(
                     $11, $12,
                     $13, $14, $15, $16, $17,
                     $18, $19, $20, $21,
-                    $22, $23, $24, $25,
-                    $26, $27, $28,
-                    $29, $30,
-                    $31, 'ASIGNADA', 1, NOW()
+                    $22, $23, $24,
+                    $25, $26,
+                    $27, $28,
+                    $29, $30, $31,
+                    $32, $33,
+                    $34, $35, $36,
+                    $37, $38, $39,
+                    $40, $41,
+                    $42, 'ASIGNADA', 1, NOW()
                 )
                 ON CONFLICT (folio_os) DO NOTHING
                 """,
@@ -1279,20 +1605,31 @@ async def crear_orden(
                 body.sucursal_id,
                 id_tecnico_asignado,
                 body.id_tipo_servicio,
-                body.id_tipo_instrumento,
-                marca_in,
-                modelo_in,
+                f_tipo_inst_id,
+                f_marca,
+                f_modelo,
                 f_serie,
                 f_ideq,
-                ubic_in,
-                cap_num,
-                div_num,
-                cap_str,
-                div_str,
+                f_ubic,
+                f_cap_num,
+                f_div_num,
+                f_cap_str,
+                f_div_str,
                 f_cca,
                 f_dve,
-                aplica_exc,
-                motivo_no_exc,
+                (" / ".join(x for x in (f_holo_ant, f_holo_act) if x) or None),
+                f_holo_ant or None,
+                f_holo_act or None,
+                f_aplica_exc,
+                f_motivo_no,
+                f_pts_exc,
+                f_pts_exc,
+                f_pts_exact,
+                f_geo or None,
+                f_secciones,
+                f_aplica_enl,
+                f_aplica_enl,
+                f_cant_enl,
                 id_lote_val,
                 rango_lote_val,
                 f_dt,
@@ -1326,11 +1663,11 @@ async def crear_orden(
                 body.sucursal_id,
                 id_tecnico_asignado,
                 body.id_tipo_servicio,
-                marca_in,
-                modelo_in,
+                f_marca,
+                f_modelo,
                 f_serie,
                 f_ideq,
-                ubic_in,
+                f_ubic,
                 f_cca,
                 f_dt,
                 body.observaciones or "",
@@ -1358,55 +1695,100 @@ async def crear_orden(
             "fecha": fecha_orden.isoformat(),
             "id_cliente": body.id_cliente,
             "cliente": cliente_nom,
+            "cliente_nombre": cliente_nom,
             "sucursal_id": body.sucursal_id,
             "sucursal": sucursal_nom,
             "direccion": cliente_dir,
             "id_tecnico": id_tecnico_asignado,
             "tecnico": tecnico_nom,
-            "correo_destino": correo_in or "",
-            "correo_cliente": correo_in or "",
-            "marca": marca_in or "",
-            "modelo": modelo_in or "",
+            "marca": f_marca or "",
+            "modelo": f_modelo or "",
             "ns": f_serie or "",
             "serie": f_serie or "",
             "id_equipo": f_ideq or "",
             "id_indicador": f_ideq or "",
-            "ubicacion": ubic_in or "",
-            "alcance_max": cap_num,
-            "div_minima": div_num,
-            "instrumento_capacidad": cap_str or "",
-            "instrumento_division": div_str or "",
-            "tipo_instrumento": tipo_inst_txt or "",
+            "ubicacion": f_ubic or "",
+            "capacidad_maxima": f_cap_str or "",
+            "division_minima": f_div_str or "",
+            "tipo_instrumento": f_tipo_inst_txt or "",
             "numero_cca": f_cca or "",
             "numero_dve": f_dve or "",
-            "aplica_excentricidad": aplica_exc,
-            "motivo_no_excentricidad": motivo_no_exc or "",
-            "id_lote": id_lote_val or "",
-            "rango_lote": rango_lote_val or "",
+            "holograma_anterior": f_holo_ant,
+            "holograma_actualizado": f_holo_act,
+            "aplica_excentricidad": f_aplica_exc,
+            "motivo_no_excentricidad": f_motivo_no or "",
+            "filas_excentricidad": f_pts_exc,
+            "puntos_excentricidad": f_pts_exc,
+            "puntos_exactitud": f_pts_exact,
+            "pts_exactitud": f_pts_exact,
+            "geometria_puntos": f_geo,
+            "geometria_plataforma": f_geo,
+            "usa_sustitucion": f_aplica_enl,
+            "aplica_sustitucion": f_aplica_enl,
+            "aplica_enlaces_sustitucion": f_aplica_enl,
+            "cantidad_enlaces": f_cant_enl,
+            "num_enlaces_sustitucion": f_cant_enl,
+            "num_enlaces": f_cant_enl,
+            "id_lote": id_lote_val,
+            "rango_lote": rango_lote_val,
+            "correo_destino": correo_in or "",
+            "correo_cliente": correo_in or "",
             "datos_tecnicos_json": f_dt,
             "observaciones": body.observaciones or "",
-            "sync_check_status": "ASIGNADA",
         }
         orden_dict["etiqueta_instrumento"] = _construir_etiqueta_instrumento_dict(orden_dict)
         ordenes_creadas.append(orden_dict)
 
-    if marca_in and modelo_in:
-        try:
-            await db.execute(
-                "INSERT INTO catalogo_marcas_modelos (marca, modelo) VALUES ($1, $2) ON CONFLICT (marca, modelo) DO NOTHING",
-                marca_in, modelo_in,
-            )
-        except Exception:
-            pass
+        if f_marca and f_modelo:
+            try:
+                await db.execute(
+                    "INSERT INTO catalogo_marcas_modelos (marca, modelo) VALUES ($1, $2) ON CONFLICT (marca, modelo) DO NOTHING",
+                    f_marca,
+                    f_modelo,
+                )
+            except Exception:
+                pass
 
+    # Actualizar control_folios atómicamente para paridad 1:1 con Windows
+    ultimo_usado = siguiente + len(folios_creados) - 1
+    try:
+        updated_cf = await db.execute(
+            """
+            UPDATE control_folios
+            SET ultimo_consecutivo = GREATEST(ultimo_consecutivo, $1),
+                updated_at = NOW()
+            WHERE UPPER(TRIM(tipo_folio)) = $2 AND anio = $3
+            """,
+            ultimo_usado,
+            pref,
+            year_full,
+        )
+        if str(updated_cf or "").strip().endswith(" 0"):
+            await db.execute(
+                """
+                INSERT INTO control_folios (tipo_folio, anio, ultimo_consecutivo, updated_at)
+                VALUES ($1, $2, $3, NOW())
+                """,
+                pref,
+                year_full,
+                ultimo_usado,
+            )
+    except Exception as e_cf_up:
+        logger.debug("[CREAR ORDEN] No se pudo actualizar control_folios: %s", e_cf_up)
+
+    folio_resumen = (
+        f"{folios_creados[0]} al {folios_creados[-1]}" if len(folios_creados) > 1 else folios_creados[0]
+    )
     return {
-        "folio_os": folios_creados[0],
+        "ok": True,
+        "folio": folio_resumen,
+        "folio_os": folio_resumen,
         "folios": folios_creados,
-        "cantidad": cantidad,
-        "tipo": body.tipo,
-        "modalidad": modalidad_norm,
         "id_lote": id_lote_val,
         "rango_lote": rango_lote_val,
+        "cantidad": len(folios_creados),
+        "tipo": body.tipo,
+        "modalidad": modalidad_norm,
         "ordenes": ordenes_creadas,
     }
 
@@ -1515,6 +1897,22 @@ async def actualizar_instrumento_parcial(
     except Exception:
         dt_existing = {}
 
+    pts_exc_val = body.puntos_excentricidad if body.puntos_excentricidad is not None else body.filas_excentricidad
+    pts_exact_val = body.puntos_exactitud if body.puntos_exactitud is not None else body.pts_exactitud
+    geo_val = (body.geometria_puntos if body.geometria_puntos is not None else body.geometria_plataforma)
+    if geo_val is not None:
+        geo_val = geo_val.strip()
+    aplica_enl_val = (
+        body.aplica_enlaces_sustitucion
+        if body.aplica_enlaces_sustitucion is not None
+        else (body.aplica_sustitucion if body.aplica_sustitucion is not None else body.usa_sustitucion)
+    )
+    cant_enl_val = (
+        body.cantidad_enlaces
+        if body.cantidad_enlaces is not None
+        else (body.num_enlaces_sustitucion if body.num_enlaces_sustitucion is not None else body.num_enlaces)
+    )
+
     merge_updates = {
         "marca": marca_val,
         "modelo": modelo_val,
@@ -1528,6 +1926,18 @@ async def actualizar_instrumento_parcial(
         "tipo_instrumento": tipo_inst_val,
         "aplica_excentricidad": aplica_exc_val,
         "motivo_no_excentricidad": motivo_no_val,
+        "puntos_excentricidad": pts_exc_val,
+        "filas_excentricidad": pts_exc_val,
+        "puntos_exactitud": pts_exact_val,
+        "pts_exactitud": pts_exact_val,
+        "geometria_puntos": geo_val,
+        "geometria_plataforma": geo_val,
+        "usa_sustitucion": aplica_enl_val,
+        "aplica_sustitucion": aplica_enl_val,
+        "aplica_enlaces_sustitucion": aplica_enl_val,
+        "cantidad_enlaces": cant_enl_val,
+        "num_enlaces_sustitucion": cant_enl_val,
+        "num_enlaces": cant_enl_val,
         "unidad_medida": body.unidad_medida,
         "holograma_anterior": body.holograma_anterior,
         "holograma_actualizado": body.holograma_actualizado,
@@ -1577,6 +1987,13 @@ async def actualizar_instrumento_parcial(
                 numero_dve              = CASE WHEN $15::boolean THEN $16 ELSE numero_dve END,
                 aplica_excentricidad    = COALESCE($17, aplica_excentricidad),
                 motivo_no_excentricidad = COALESCE($18, motivo_no_excentricidad),
+                filas_excentricidad     = COALESCE($25, filas_excentricidad),
+                puntos_excentricidad    = COALESCE($25, puntos_excentricidad),
+                puntos_exactitud        = COALESCE($26, puntos_exactitud),
+                geometria_puntos        = COALESCE($27, geometria_puntos),
+                usa_sustitucion         = COALESCE($28, usa_sustitucion),
+                aplica_enlaces_sustitucion = COALESCE($28, aplica_enlaces_sustitucion),
+                cantidad_enlaces        = COALESCE($29, cantidad_enlaces),
                 unidad_medida           = COALESCE($19, unidad_medida),
                 holograma_anterior      = COALESCE($20, holograma_anterior),
                 holograma_actualizado   = COALESCE($21, holograma_actualizado),
@@ -1610,6 +2027,11 @@ async def actualizar_instrumento_parcial(
             body.sucursal_id,
             dt_json_final,
             actual_id,
+            pts_exc_val,
+            pts_exact_val,
+            geo_val,
+            aplica_enl_val,
+            cant_enl_val,
         )
     except Exception as exc_upd:
         logger.warning("[PATCH INSTRUMENTO] UPDATE completo falló (%s), usando fallback compatible", exc_upd)

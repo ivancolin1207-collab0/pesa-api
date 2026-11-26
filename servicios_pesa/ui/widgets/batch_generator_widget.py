@@ -1173,7 +1173,9 @@ class EquipoCard(QFrame):
             # ── Enlaces de Sustitución (Báscula tipo Tanque) ───────────────────
             "aplica_sustitucion":      es_enlace_val,
             "usa_sustitucion":         es_enlace_val,
+            "aplica_enlaces_sustitucion": es_enlace_val,
             "es_enlace_sustitucion":   es_enlace_val,
+            "cantidad_enlaces":        num_enlace_val,
             "num_enlaces_sustitucion": num_enlace_val,
             "es_sustitucion":          es_enlace_val,       # Alias pedido
             "num_enlaces":             num_enlace_val,      # Alias pedido
@@ -5034,6 +5036,38 @@ class BatchGeneratorWidget(QWidget):
                             )
                         # Se agrega siempre para que el PDF se genere correctamente
                         folios.append(folio)
+
+                        # Persistir columnas metrológicas 1:1 (motivo_no_excentricidad, puntos, geometria, enlaces de sustitución)
+                        try:
+                            _mot_no_db = str(datos_eq.get("motivo_no_excentricidad") or "").strip() if not _aplica_exc else None
+                            _geo_db = str(datos_eq.get("geometria_plataforma") or "Libre").strip() if _aplica_exc else None
+                            _n_enl_db = datos_eq.get("cantidad_enlaces") or datos_eq.get("num_enlaces_sustitucion") or datos_eq.get("num_enlaces")
+                            _n_enl_db = int(_n_enl_db) if (_n_enl_db is not None and aplica_sustitucion) else None
+                            cur.execute(
+                                """
+                                UPDATE ordenes_servicio
+                                SET motivo_no_excentricidad = %s,
+                                    puntos_excentricidad = %s,
+                                    puntos_exactitud = %s,
+                                    geometria_puntos = %s,
+                                    usa_sustitucion = %s,
+                                    aplica_enlaces_sustitucion = %s,
+                                    cantidad_enlaces = %s
+                                WHERE folio_os = %s
+                                """,
+                                (
+                                    _mot_no_db,
+                                    _filas_exc or 5,
+                                    int(pts_exactitud or 5),
+                                    _geo_db,
+                                    bool(aplica_sustitucion),
+                                    bool(aplica_sustitucion),
+                                    _n_enl_db,
+                                    folio,
+                                ),
+                            )
+                        except Exception as _exc_enl:
+                            logger.debug("[RESERVAR] Columnas extendidas de enlaces omitidas: %s", _exc_enl)
 
                         # Persistir correo del cliente precargado desde oficina (se heredará en la tablet)
                         _correo_pre_db = str(datos.get("correo_destino") or datos.get("correo_cliente") or "").strip()
