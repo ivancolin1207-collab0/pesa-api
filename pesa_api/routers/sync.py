@@ -152,6 +152,11 @@ class OSCompleta(BaseModel):
     correo_destino:        Optional[str]   = None
     correo_cc:             Optional[str]   = None
     fecha_envio_correo:    Optional[str]   = None
+    motivo_cancelacion:    Optional[str]   = None
+    cancelada_por:         Optional[str]   = None
+    fecha_cancelacion:     Optional[str]   = None
+    sin_correo_cliente:    Optional[bool]  = False
+    motivo_sin_correo:     Optional[str]   = None
     sync_version:          Optional[int]   = 1
     updated_at:            Optional[datetime] = None
 
@@ -244,6 +249,11 @@ class PushPayload(BaseModel):
     correo_destino:       Optional[str] = None
     correo_cc:            Optional[str] = None
     fecha_envio_correo:   Optional[Union[datetime, str]] = None
+    motivo_cancelacion:   Optional[str] = None
+    cancelada_por:        Optional[str] = None
+    fecha_cancelacion:    Optional[str] = None
+    sin_correo_cliente:   Optional[bool] = None
+    motivo_sin_correo:    Optional[str] = None
 
 
 class PushResponse(BaseModel):
@@ -584,6 +594,11 @@ async def sync_pull(
             COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS correo_enviado,
             COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
             COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_correo_raw,
+            COALESCE(os.motivo_cancelacion, '') AS motivo_cancelacion,
+            COALESCE(os.cancelada_por, '') AS cancelada_por,
+            os.fecha_cancelacion::text AS fecha_cancelacion,
+            COALESCE(os.sin_correo_cliente, FALSE) AS sin_correo_cliente,
+            COALESCE(os.motivo_sin_correo, '') AS motivo_sin_correo,
             CASE
                 WHEN COALESCE(os.pdf_b64,  '') <> ''
                   OR COALESCE(os.pdf_base64, '') <> ''
@@ -632,8 +647,13 @@ async def sync_pull(
         param_tecnico_nombre = str(tecnico_nombre).strip()
 
     try:
+        from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
+        await _ensure_email_columns(db)
         if is_admin:
-            where_admin = ["(os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('CANCELADA', 'ELIMINADO', 'ELIMINADA'))"]
+            where_admin = [
+                "(os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('ELIMINADO', 'ELIMINADA'))",
+                "(os.estatus IS NULL OR UPPER(TRIM(os.estatus)) NOT IN ('ELIMINADO', 'ELIMINADA'))",
+            ]
             params_admin: list = []
 
             if param_tecnico_nombre:
@@ -694,7 +714,8 @@ async def sync_pull(
 
             where_clauses = [
                 "os.id_tecnico = $1",
-                "(os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('CANCELADA', 'ELIMINADO', 'ELIMINADA'))",
+                "(os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('ELIMINADO', 'ELIMINADA'))",
+                "(os.estatus IS NULL OR UPPER(TRIM(os.estatus)) NOT IN ('ELIMINADO', 'ELIMINADA'))",
             ]
             params: list = [int(id_tecnico)]
 
@@ -780,8 +801,13 @@ async def sync_pull(
                     d["pdf_url"] = None
 
                 # Si no se ha capturado en campo ni existe PDF generado, su estatus debe ser 'Asignada' o 'En Proceso'
+                # (respetando estrictamente órdenes CANCELADA)
                 estatus_actual = str(d.get("estatus") or d.get("estado") or "").strip().upper()
-                if not tiene_terminacion_real:
+                estado_actual_col = str(d.get("estado") or "").strip().upper()
+                if estatus_actual in ("CANCELADA", "CANCELADO") or estado_actual_col in ("CANCELADA", "CANCELADO"):
+                    d["estatus"] = "CANCELADA"
+                    d["estado"] = "CANCELADA"
+                elif not tiene_terminacion_real:
                     if estatus_actual in ("CERRADO", "CERRADA", "COMPLETADO", "COMPLETADA", "COMPLETADA_DIGITAL", "COMPLETADA_FISICA", "FIRMADA", "ESCANEADA"):
                         d["estatus"] = "Asignada"
                         d["estado"] = "PROCESO"
@@ -924,8 +950,12 @@ async def sync_push(
                 # Permitir cierre siempre que no esté ya cancelada/completada por admin
                 nuevo_estado = "COMPLETADA_DIGITAL"
 
-        # Si la tablet declara la orden Cerrada explícitamente, el estado final es COMPLETADA_DIGITAL
+        # Si la tablet declara la orden Cerrada o Cancelada explícitamente
         if (not estado_protegido
+                and ((payload.estatus or "").strip().upper() in ("CANCELADA", "CANCELADO")
+                     or (payload.nuevo_estado or "").strip().upper() in ("CANCELADA", "CANCELADO"))):
+            nuevo_estado = "CANCELADA"
+        elif (not estado_protegido
                 and not payload.parcial_instrumento
                 and (payload.estatus or "").strip().upper() in ("CERRADO", "CERRADA", "COMPLETADO", "COMPLETADA")):
             nuevo_estado = "COMPLETADA_DIGITAL"
@@ -936,7 +966,9 @@ async def sync_push(
             nuevo_estado = "EN_PROCESO" if (payload.nuevo_estado or "").strip().upper() != "ASIGNADA" else "ASIGNADA"
 
         _CERRADOS = {"COMPLETADA", "COMPLETADA_DIGITAL", "CERRADO", "CERRADA", "ESCANEADA", "FIRMADA"}
-        if str(nuevo_estado or "").upper() in _CERRADOS:
+        if str(nuevo_estado or "").upper() in ("CANCELADA", "CANCELADO"):
+            nuevo_estatus = "CANCELADA"
+        elif str(nuevo_estado or "").upper() in _CERRADOS:
             nuevo_estatus = "Cerrado"
         elif str(nuevo_estado or "").upper() == "ASIGNADA":
             nuevo_estatus = "Asignada"
@@ -1084,6 +1116,35 @@ async def sync_push(
                 status_code=status.HTTP_409_CONFLICT,
                 detail=f"OS {payload.folio_os!r} no se pudo actualizar en el servidor",
             )
+
+        if any(v is not None for v in (
+            payload.correo_destino, payload.correo_cliente,
+            payload.sin_correo_cliente, payload.motivo_sin_correo,
+            payload.motivo_cancelacion, payload.cancelada_por,
+        )):
+            try:
+                corr_eff = (payload.correo_destino or payload.correo_cliente or "").strip() or None
+                await db.execute(
+                    """
+                    UPDATE ordenes_servicio SET
+                        correo_destino     = COALESCE($1, correo_destino),
+                        correo_cliente     = COALESCE($1, correo_cliente),
+                        sin_correo_cliente = COALESCE($2, sin_correo_cliente),
+                        motivo_sin_correo  = COALESCE($3, motivo_sin_correo),
+                        motivo_cancelacion = COALESCE($4, motivo_cancelacion),
+                        cancelada_por      = COALESCE($5, cancelada_por),
+                        fecha_cancelacion  = CASE WHEN $4 IS NOT NULL THEN COALESCE(fecha_cancelacion, NOW()) ELSE fecha_cancelacion END
+                    WHERE id = $6
+                    """,
+                    corr_eff,
+                    payload.sin_correo_cliente,
+                    payload.motivo_sin_correo,
+                    payload.motivo_cancelacion,
+                    payload.cancelada_por,
+                    os_id,
+                )
+            except Exception as e_mc:
+                logger.warning("[SYNC PUSH] Error guardando correo/cancelación para %s: %s", payload.folio_os, e_mc)
 
         # Actualizar fecha real de realización enviada por la tablet al finalizar servicio
         if payload.datos_tecnicos_json or payload.datos_captura:

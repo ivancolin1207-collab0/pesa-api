@@ -450,41 +450,52 @@ class PesaDraftIndicator extends StatelessWidget {
   }
 }
 
-/// Barra de progreso de lote ("X de Y completadas") para tarjetas y filas de lote.
+/// Barra de progreso de lote ("X de Y activas listas · Z no utilizada") para tarjetas y filas de lote.
 class PesaBatchProgressBar extends StatelessWidget {
   final int completed;
   final int total;
+  final int cancelled;
 
   const PesaBatchProgressBar({
     super.key,
     required this.completed,
     required this.total,
+    this.cancelled = 0,
   });
 
   @override
   Widget build(BuildContext context) {
-    final safeTotal = total <= 0 ? 1 : total;
-    final ratio = (completed / safeTotal).clamp(0.0, 1.0);
-    final allDone = completed >= total && total > 0;
+    final int activeTotal = (total - cancelled) < 0 ? 0 : (total - cancelled);
+    final int safeDenom = activeTotal <= 0 ? 1 : activeTotal;
+    final double ratio = activeTotal == 0 ? 0.0 : (completed / safeDenom).clamp(0.0, 1.0);
+    final bool allDone = activeTotal > 0 && completed >= activeTotal;
+    final String labelTxt = cancelled > 0
+        ? '$completed de $activeTotal activas listas · $cancelled no utilizada${cancelled == 1 ? '' : 's'}'
+        : '$completed de $total completadas';
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
             PesaSemanticDot(
-              color: allDone
-                  ? PesaColors.dotGreen
-                  : (completed > 0 ? PesaColors.dotAmber : PesaColors.dotRed),
+              color: activeTotal == 0
+                  ? PesaColors.dotNeutral
+                  : (allDone
+                      ? PesaColors.dotGreen
+                      : (completed > 0 ? PesaColors.dotAmber : PesaColors.dotRed)),
               size: 6,
             ),
             const SizedBox(width: 6),
-            Text(
-              '$completed de $total completadas',
-              style: const TextStyle(
-                fontSize: 11.5,
-                fontWeight: FontWeight.w600,
-                color: PesaColors.textSecondary,
-                fontFeatures: [FontFeature.tabularFigures()],
+            Flexible(
+              child: Text(
+                labelTxt,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w600,
+                  color: PesaColors.textSecondary,
+                  fontFeatures: [FontFeature.tabularFigures()],
+                ),
               ),
             ),
           ],

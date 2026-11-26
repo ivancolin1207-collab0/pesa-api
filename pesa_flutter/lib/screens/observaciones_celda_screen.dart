@@ -30,6 +30,7 @@ import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
 import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
+import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/nombre_recibe.dart';
 import '../widgets/pesa_components.dart';
 import '../widgets/signature_shield.dart';
@@ -114,6 +115,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   final _tecPuestoCtrl = TextEditingController(text: 'Técnico Especialista');
   final _cliNombreCtrl = TextEditingController();
   final _cliPuestoCtrl = TextEditingController();
+  late final ClienteCorreoController _correoCtrl = ClienteCorreoController(esOpcional: _destinoTipo == 'Stock');
 
   List<String> _contactosSugeridos = [];
 
@@ -471,6 +473,8 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
       } catch (_) {}
     }
 
+    _correoCtrl.esOpcional = (_destinoTipo == 'Stock');
+    await _correoCtrl.inicializarDesdeOrden(_datosCombinados);
     _cargandoInicial = false;
     if (mounted) setState(() {});
   }
@@ -674,126 +678,21 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
 
     final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'OSOCC-26-001').toString().trim();
     final loteId = _pickFromMap(_datosCombinados, ['id_lote', 'lote']);
-    final bool esLote = loteId.isNotEmpty;
-    String correoCapturado = _pickFromMap(_datosCombinados, ['correo_cliente', 'email_cliente']);
-
-    if (!esLote && !esStock) {
-      final emailCtrl = TextEditingController(text: correoCapturado);
-      final bool? capturo = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.mark_email_read_rounded, color: _osoccBlue, size: 26),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Envío de Diagnóstico de Celda por Correo',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Ingresa el correo electrónico del cliente para enviar el Formato de Diagnóstico y Revisión de Celda de Carga:',
-                style: TextStyle(fontSize: 13, color: Color(0xFF374151), height: 1.4),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: 'Correo del Cliente',
-                  hintText: 'cliente@empresa.com',
-                  prefixIcon: const Icon(Icons.email_outlined, color: _osoccBlue),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'CC obligatorio: recepcion@basculaspesa.com.mx',
-                style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(false),
-              child: const Text('Cancelar', style: TextStyle(color: Colors.grey)),
-            ),
-            TextButton(
-              onPressed: () {
-                emailCtrl.clear();
-                Navigator.of(ctx).pop(true);
-              },
-              child: const Text('Omitir correo'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _osoccBlue,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Continuar'),
-            ),
-          ],
+    _correoCtrl.esOpcional = esStock;
+    if (!_correoCtrl.isValido) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(kMsgPokaYokeCorreo),
+          backgroundColor: PesaColors.brand,
         ),
       );
-
-      if (capturo != true) return;
-      correoCapturado = emailCtrl.text.trim();
-
-      if (correoCapturado.isNotEmpty) {
-        if (!mounted) return;
-        final bool? confirmado = await showDialog<bool>(
-          context: context,
-          barrierDismissible: false,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            title: const Row(
-              children: [
-                Icon(Icons.outgoing_mail, color: _osoccBlue, size: 26),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Confirmar Envío de Correo',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ),
-              ],
-            ),
-            content: Text(
-              'Se enviará el formato $folio al correo $correoCapturado con copia a recepcion@basculaspesa.com.mx, ¿desea continuar?',
-              style: const TextStyle(fontSize: 13.5, height: 1.4),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('Cancelar'),
-              ),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _osoccBlue,
-                  foregroundColor: Colors.white,
-                ),
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('Sí, continuar'),
-              ),
-            ],
-          ),
-        );
-        if (confirmado != true) return;
-      }
+      return;
     }
+    final String correoCapturado = await _correoCtrl.persistirEnOrdenYLote(
+      folio: folio,
+      loteId: loteId,
+      ordenMutable: _datosCombinados,
+    );
 
     setState(() => _guardando = true);
     try {
@@ -924,6 +823,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               'fecha_servicio': fechaEjecucionHoy,
               'fecha_cierre': fechaCierreIso,
               'correo_cliente': correoCapturado,
+              'correo_destino': correoCapturado,
+              'sin_correo_cliente': _correoCtrl.sinCorreoCliente,
+              'motivo_sin_correo': _correoCtrl.motivoSinCorreoEfectivo,
               'datos_tecnicos_json': datosJsonStr,
             },
           );
@@ -1084,6 +986,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
     _tecPuestoCtrl.dispose();
     _cliNombreCtrl.dispose();
     _cliPuestoCtrl.dispose();
+    _correoCtrl.dispose();
     _sigClienteCtrl.dispose();
     _sigTecnicoCtrl.dispose();
     super.dispose();
@@ -1188,29 +1091,40 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     const SizedBox(height: 12),
                     _buildSeccion5Card(),
                     const SizedBox(height: 22),
-                    SizedBox(
-                      height: 52,
-                      child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _pesaRed,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 0,
-                        ),
-                        onPressed: _guardando ? null : _finalizar,
-                        icon: _guardando
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                              )
-                            : const Icon(Icons.assignment_turned_in_rounded),
-                        label: Text(
-                          _guardando
-                              ? 'Generando PDF Oficial...'
-                              : 'Finalizar y Generar PDF Oficial (OSOCC)',
-                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
-                        ),
+                    AnimatedBuilder(
+                      animation: _correoCtrl,
+                      builder: (_, __) => Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          ClienteCorreoLockBanner(controller: _correoCtrl),
+                          SizedBox(
+                            height: 52,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _pesaRed,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: PesaColors.surfaceMuted,
+                                disabledForegroundColor: PesaColors.textTertiary,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                elevation: 0,
+                              ),
+                              onPressed: (_guardando || !_correoCtrl.isValido) ? null : _finalizar,
+                              icon: _guardando
+                                  ? const SizedBox(
+                                      width: 20,
+                                      height: 20,
+                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                    )
+                                  : Icon(!_correoCtrl.isValido ? Icons.lock_outline_rounded : Icons.assignment_turned_in_rounded),
+                              label: Text(
+                                _guardando
+                                    ? 'Generando PDF Oficial...'
+                                    : 'Finalizar y Generar PDF Oficial (OSOCC)',
+                                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1356,6 +1270,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                         onSelected: (_) {
                           setState(() {
                             _destinoTipo = 'Stock';
+                            _correoCtrl.esOpcional = true;
                             if (_clienteDestinoCtrl.text.trim().isEmpty) {
                               _clienteDestinoCtrl.text = 'Stock / Taller Básculas PESA';
                             }
@@ -1377,6 +1292,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                         onSelected: (_) {
                           setState(() {
                             _destinoTipo = 'Cliente';
+                            _correoCtrl.esOpcional = false;
                           });
                           _programarAutoGuardado();
                         },
@@ -2093,6 +2009,10 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     const SizedBox(height: 8),
                     _buildTextField(_cliPuestoCtrl, 'Puesto / Área'),
                     const SizedBox(height: 10),
+                    ClienteCorreoPokaYokeCard(
+                      controller: _correoCtrl,
+                      loteId: _pickFromMap(_datosCombinados, ['id_lote', 'lote']),
+                    ),
                     Container(
                       height: 120,
                       decoration: BoxDecoration(

@@ -58,10 +58,13 @@ bool esRazonSocialEmpresa(String? texto, [String? clienteEmpresa]) {
          t.contains('s.a.p.i.');
 }
 
-/// Memoria de sesión en lotes para reutilizar el responsable en órdenes hermanas con 1 toque
+/// Memoria de sesión en lotes para reutilizar el responsable y correo del cliente en órdenes hermanas con 1 toque
 class LoteSession {
   static final Map<String, String> _ultimoResponsablePorLote = {};
   static final Map<String, String> _ultimoPuestoPorLote = {};
+  static final Map<String, String> _ultimoCorreoPorLote = {};
+  static final Map<String, bool> _sinCorreoPorLote = {};
+  static final Map<String, String> _motivoSinCorreoPorLote = {};
 
   static String? getUltimoResponsable(String? loteId) {
     if (loteId == null || loteId.trim().isEmpty) return null;
@@ -78,6 +81,41 @@ class LoteSession {
     _ultimoResponsablePorLote[loteId.trim()] = nombre.trim();
     if (puesto != null && puesto.trim().isNotEmpty) {
       _ultimoPuestoPorLote[loteId.trim()] = puesto.trim();
+    }
+  }
+
+  static String? getUltimoCorreo(String? loteId) {
+    if (loteId == null || loteId.trim().isEmpty) return null;
+    return _ultimoCorreoPorLote[loteId.trim()];
+  }
+
+  static bool getSinCorreo(String? loteId) {
+    if (loteId == null || loteId.trim().isEmpty) return false;
+    return _sinCorreoPorLote[loteId.trim()] ?? false;
+  }
+
+  static String? getMotivoSinCorreo(String? loteId) {
+    if (loteId == null || loteId.trim().isEmpty) return null;
+    return _motivoSinCorreoPorLote[loteId.trim()];
+  }
+
+  static void registrarCorreo(
+    String? loteId,
+    String correo, {
+    bool sinCorreo = false,
+    String? motivoSinCorreo,
+  }) {
+    if (loteId == null || loteId.trim().isEmpty) return;
+    final key = loteId.trim();
+    _sinCorreoPorLote[key] = sinCorreo;
+    if (sinCorreo) {
+      _ultimoCorreoPorLote[key] = 'PENDIENTE (Solo recepción)';
+      if (motivoSinCorreo != null && motivoSinCorreo.trim().isNotEmpty) {
+        _motivoSinCorreoPorLote[key] = motivoSinCorreo.trim();
+      }
+    } else if (correo.trim().isNotEmpty) {
+      _ultimoCorreoPorLote[key] = correo.trim();
+      _motivoSinCorreoPorLote.remove(key);
     }
   }
 }

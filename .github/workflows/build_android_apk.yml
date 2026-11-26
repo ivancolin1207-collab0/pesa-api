@@ -40,21 +40,21 @@ jobs:
           fi
           flutter pub get
           flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation
-          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.2+142.apk
+          cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.3+143.apk
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Servicios_PESA_Tablet_v3.3.2+142
-          path: pesa_flutter/build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.2+142.apk
+          name: Servicios_PESA_Tablet_v3.3.3+143
+          path: pesa_flutter/build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.3+143.apk
           if-no-files-found: error
 
       - name: Publish Android Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: android-v3.3.2
-          name: "Servicios PESA Tablet v3.3.2+142"
+          tag_name: android-v3.3.3
+          name: "Servicios PESA Tablet v3.3.3+143"
           prerelease: false
           make_latest: true
           files: |
-            pesa_flutter/build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.2+142.apk
+            pesa_flutter/build/app/outputs/flutter-apk/Servicios_PESA_Tablet_v3.3.3+143.apk

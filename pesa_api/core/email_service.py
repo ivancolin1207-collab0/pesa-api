@@ -79,11 +79,18 @@ async def _ensure_email_columns(conn) -> None:
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS modelo TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_cca TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_dve TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cliente TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_enviado BOOLEAN DEFAULT FALSE",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_destino TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cca_dve_pdf_checked BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_cancelacion TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cancelada_por TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_cancelacion TIMESTAMP",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sin_correo_cliente BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_sin_correo TEXT",
+        "ALTER TABLE ordenes_servicio DROP CONSTRAINT IF EXISTS chk_os_estado",
         "ALTER TABLE cliente_sucursales ADD COLUMN IF NOT EXISTS email TEXT",
     )
     for stmt in ddl_statements:
@@ -406,10 +413,26 @@ def _nombre_tipo_documento_correo(folios: List[str]) -> str:
     return "Orden de Servicio"
 
 
+def _es_cancelada_orden(r: Any) -> bool:
+    """Retorna True si la orden fue marcada como CANCELADA / no utilizada en lote."""
+    if not r:
+        return False
+    for k in ("estatus", "estado"):
+        try:
+            v = str(r[k] if isinstance(r, dict) or hasattr(r, "__getitem__") else getattr(r, k, "") or "").strip().upper()
+        except Exception:
+            v = ""
+        if v in ("CANCELADA", "CANCELADO", "ELIMINADA", "ELIMINADO"):
+            return True
+    return False
+
+
 def construir_asunto_y_cuerpo_correo(
     ordenes_lote: List[Dict[str, Any]],
     cliente: str,
     es_lote: bool = False,
+    solo_recepcion: bool = False,
+    motivo_sin_correo: str = "",
 ) -> tuple[str, str, str, List[str]]:
     """
     Genera (asunto, cuerpo_html, cuerpo_texto, folios) con:
@@ -418,10 +441,12 @@ def construir_asunto_y_cuerpo_correo(
           * Lote:  '{Tipo} {folios[0]} a {folios[-1]} - {cliente} | Básculas PESA'
       - Tabla HTML dinámica (#, ID [solo folio], Marca, Modelo, ID / Equipo, y CCA/DVE solo si existen;
         celdas vacías '' sin guiones '-' ni '—').
+      - Excluye estrictamente cualquier orden con estatus/estado CANCELADA.
     """
     import html as _html
 
-    filas_raw = [_extraer_campos_tabla_correo(o) for o in (ordenes_lote or []) if o]
+    ordenes_activas_in = [o for o in (ordenes_lote or []) if o and not _es_cancelada_orden(o)]
+    filas_raw = [_extraer_campos_tabla_correo(o) for o in ordenes_activas_in]
     filas_por_folio: Dict[str, Dict[str, str]] = {}
     filas_sin_folio: List[Dict[str, str]] = []
     for f in filas_raw:
@@ -535,8 +560,25 @@ def construir_asunto_y_cuerpo_correo(
     filas_tabla_html = "\n                                        ".join(tr_html_list)
     lineas_txt = "\n".join(lineas_txt_list)
 
-    cuerpo_texto = f"""Estimado cliente ({cliente_limpio}):
+    aviso_sin_correo_txt = ""
+    aviso_sin_correo_html = ""
+    if solo_recepcion:
+        motivo_limpio = re.sub(r"[\r\n]+", " ", str(motivo_sin_correo or "").strip()) or "El cliente no proporcionó correo en planta"
+        aviso_sin_correo_txt = (
+            f"\nNOTA INTERNA RECEPCIÓN PESA: El cliente no proporcionó correo electrónico en sitio.\n"
+            f"Motivo reportado por el técnico: {motivo_limpio}\n"
+        )
+        aviso_sin_correo_html = (
+            f'<div style="margin: 0 0 16px 0; padding: 12px 14px; background-color: #F8FAFC; '
+            f'border: 1px solid #CBD5E1; border-left: 3px solid #C8102E; border-radius: 6px; '
+            f'font-size: 13px; color: #0F172A;">'
+            f'<strong>Respaldo interno (Solo recepción):</strong> El cliente no proporcionó correo electrónico al firmar.<br>'
+            f'<span style="color: #475569;">Motivo capturado en campo: {_html.escape(motivo_limpio)}</span>'
+            f'</div>'
+        )
 
+    cuerpo_texto = f"""Estimado cliente ({cliente_limpio}):
+{aviso_sin_correo_txt}
 Hacemos entrega de los reportes digitales correspondientes ({n} {'documento' if n == 1 else 'documentos'}):
 
 {lineas_txt}
@@ -556,6 +598,7 @@ recepcion@basculaspesa.com.mx
                             <h1 style="color: #FFFFFF; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
                         </div>
                         <div style="padding: 24px; background-color: #FFFFFF;">
+                            {aviso_sin_correo_html}
                             <p style="margin-top: 0; font-size: 14.5px; color: #0F172A;">Estimado cliente <strong>{cliente_esc}</strong>,</p>
                             <p style="font-size: 14px; color: #475569;">{intro_html}</p>
                             <div style="overflow-x: auto; margin: 18px 0;">
@@ -951,11 +994,13 @@ def _enviar_smtp_sync(destinatario: str, cc: str, asunto: str, cuerpo_html: str,
         part["Content-Disposition"] = f'attachment; filename="{nombre_archivo}"'
         msg.attach(part)
 
-    recipientes = [destinatario]
+    recipientes = [d.strip() for d in re.split(r"[,;]+", str(destinatario or "")) if d.strip() and "@" in d]
+    if not recipientes and destinatario and "@" in str(destinatario):
+        recipientes = [str(destinatario).strip()]
     if cc:
-        for c in cc.split(","):
+        for c in re.split(r"[,;]+", cc):
             c_clean = c.strip()
-            if c_clean and c_clean not in recipientes:
+            if c_clean and "@" in c_clean and c_clean.lower() not in [r.lower() for r in recipientes]:
                 recipientes.append(c_clean)
 
     server = smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT, timeout=30)
@@ -972,7 +1017,16 @@ def _enviar_smtp_sync(destinatario: str, cc: str, asunto: str, cuerpo_html: str,
             pass
 
 
-async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_override: Optional[str] = None, forzar: bool = False, folios_lista: Optional[List[str]] = None, auto: bool = False) -> Dict[str, Any]:
+async def enviar_email_orden(
+    db=None,
+    folio_o_id: Union[str, int] = "",
+    correo_override: Optional[str] = None,
+    forzar: bool = False,
+    folios_lista: Optional[List[str]] = None,
+    auto: bool = False,
+    sin_correo_cliente: bool = False,
+    motivo_sin_correo: Optional[str] = None,
+) -> Dict[str, Any]:
     """
     Envía por correo el PDF de una orden (o lote de 1 hasta N documentos terminados).
     Se ejecuta de forma asíncrona tolerante a fallos. Soporta db=None (obtiene del pool).
@@ -1001,12 +1055,15 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
         str_id = str(folio_o_id).strip()
         row = await conn.fetchrow(
             """
-            SELECT os.id, os.folio_os, os.id_lote, os.correo_cliente, os.email_enviado,
-                   os.fecha_envio_email,
+            SELECT os.id, os.folio_os, os.id_lote, os.correo_cliente, os.correo_destino,
+                   os.email_enviado, os.fecha_envio_email,
                    os.pdf_path, os.pdf_b64, os.tipo_servicio,
                    os.marca, os.modelo, os.id_equipo, os.indicador_id,
                    os.numero_cca, os.numero_dve,
                    os.fecha, os.dictamen, os.datos_tecnicos_json,
+                   COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
+                   COALESCE(os.sin_correo_cliente, FALSE) AS sin_correo_cliente,
+                   COALESCE(os.motivo_sin_correo, '') AS motivo_sin_correo,
                    COALESCE(cl.razon_social, os.cliente, '') AS cliente,
                    COALESCE(ts.nombre, os.tipo_servicio, '') AS srv_nombre
             FROM ordenes_servicio os
@@ -1070,25 +1127,32 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 fk = str(r["folio_os"] or "").strip()
                 if fk and fk not in lote_rows_dict:
                     lote_rows_dict[fk] = r
-            lote_rows = sorted(lote_rows_dict.values(), key=lambda rx: _clave_orden_folio(rx["folio_os"]))
+            lote_rows = sorted(
+                [rx for rx in lote_rows_dict.values() if not _es_cancelada_orden(rx)],
+                key=lambda rx: _clave_orden_folio(rx["folio_os"]),
+            )
             if len(lote_rows) >= 1:
                 es_agrupacion_lote = True
         elif id_lote and str(id_lote).strip():
             lote_rows = await conn.fetch(
                 """
-                SELECT os.id, os.folio_os, os.correo_cliente, os.email_enviado,
+                SELECT os.id, os.folio_os, os.correo_cliente, os.correo_destino, os.email_enviado,
                        os.fecha_envio_email,
                        os.pdf_path, os.pdf_b64, os.tipo_servicio,
                        os.marca, os.modelo, os.id_equipo, os.indicador_id,
                        os.numero_cca, os.numero_dve,
                        os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
                        COALESCE(os.estatus, '') AS estatus, COALESCE(os.estado, '') AS estado,
+                       COALESCE(os.sin_correo_cliente, FALSE) AS sin_correo_cliente,
+                       COALESCE(os.motivo_sin_correo, '') AS motivo_sin_correo,
                        COALESCE(cl.razon_social, os.cliente, '') AS cliente,
                        COALESCE(ts.nombre, os.tipo_servicio, '') AS srv_nombre
                 FROM ordenes_servicio os
                 LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
                 LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
                 WHERE os.id_lote = $1
+                  AND UPPER(TRIM(COALESCE(os.estatus, ''))) NOT IN ('CANCELADA', 'CANCELADO', 'ELIMINADA', 'ELIMINADO')
+                  AND UPPER(TRIM(COALESCE(os.estado, ''))) NOT IN ('CANCELADA', 'CANCELADO', 'ELIMINADA', 'ELIMINADO')
                 ORDER BY os.folio_os ASC
                 """,
                 id_lote,
@@ -1096,7 +1160,7 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
             lote_rows_dict = {}
             for r in lote_rows:
                 fk = str(r["folio_os"] or "").strip()
-                if fk and fk not in lote_rows_dict:
+                if fk and fk not in lote_rows_dict and not _es_cancelada_orden(r):
                     lote_rows_dict[fk] = r
             lote_rows = sorted(lote_rows_dict.values(), key=lambda rx: _clave_orden_folio(rx["folio_os"]))
             if len(lote_rows) > 1 or (len(lote_rows) == 1 and forzar):
@@ -1224,16 +1288,25 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
 
             # Destinatario para el lote (nunca 'Cliente' ni 'Sin registrar')
             invalidos_dest = {"", "cliente", "sin registrar", "destinatario registrado", "none", "null"}
-            destinatario = str(correo_override or "").strip()
+            override_raw = str(correo_override or "").strip()
+            es_solo_recepcion_lote = bool(sin_correo_cliente) or override_raw.upper().startswith("PENDIENTE")
+            motivo_sin_lote = str(motivo_sin_correo or "").strip()
+
+            destinatario = "" if es_solo_recepcion_lote else override_raw
             if destinatario.lower() in invalidos_dest or "@" not in destinatario:
                 destinatario = ""
-            if not destinatario:
+            if not destinatario and not es_solo_recepcion_lote:
                 for r in lote_rows:
-                    cand = str(r["correo_cliente"] or "").strip()
-                    if cand and cand.lower() not in invalidos_dest and "@" in cand:
+                    cand = str(r.get("correo_destino") or r.get("correo_cliente") or "").strip()
+                    if cand.upper().startswith("PENDIENTE") or bool(r.get("sin_correo_cliente")):
+                        es_solo_recepcion_lote = True
+                        if not motivo_sin_lote and r.get("motivo_sin_correo"):
+                            motivo_sin_lote = str(r.get("motivo_sin_correo") or "").strip()
+                    elif cand and cand.lower() not in invalidos_dest and "@" in cand:
                         destinatario = cand
+                        es_solo_recepcion_lote = False
                         break
-            if not destinatario and lote_rows:
+            if not destinatario and not es_solo_recepcion_lote and lote_rows:
                 try:
                     r_cli = await conn.fetchrow(
                         """
@@ -1253,6 +1326,9 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                         destinatario = str(r_cli["correo_cat"]).strip()
                 except Exception:
                     pass
+
+            if es_solo_recepcion_lote and not destinatario:
+                destinatario = "recepcion@basculaspesa.com.mx"
 
             if not destinatario:
                 logger.warning("[EMAIL] No se encontró correo de cliente para el lote %s", id_lote)
@@ -1338,9 +1414,13 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                 ordenes_lote_correo,
                 empresa_lote,
                 es_lote=True,
+                solo_recepcion=es_solo_recepcion_lote,
+                motivo_sin_correo=motivo_sin_lote,
             )
 
-            cc_efectivo = normalizar_cc_correo(settings.EMAIL_CC)
+            cc_efectivo = "" if es_solo_recepcion_lote else normalizar_cc_correo(settings.EMAIL_CC)
+            destino_bd = "PENDIENTE (Solo recepción)" if es_solo_recepcion_lote else destinatario
+            cc_bd = "recepcion@basculaspesa.com.mx" if es_solo_recepcion_lote else cc_efectivo
             loop = asyncio.get_running_loop()
             ok = await loop.run_in_executor(
                 None,
@@ -1366,29 +1446,34 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                         correo_cc          = $3,
                         fecha_envio_email  = $4,
                         fecha_envio_correo = $4,
+                        sin_correo_cliente = $5,
+                        motivo_sin_correo  = COALESCE(NULLIF($6, ''), motivo_sin_correo),
                         updated_at         = NOW()
                     WHERE folio_os = ANY($1::text[])
                     """,
                     folios_lote,
-                    destinatario,
-                    cc_efectivo,
+                    destino_bd,
+                    cc_bd,
                     now_mx,
+                    es_solo_recepcion_lote,
+                    motivo_sin_lote,
                 )
-                try:
-                    await conn.execute(
-                        """
-                        UPDATE cat_clientes cl
-                        SET email = $1
-                        FROM ordenes_servicio os
-                        WHERE os.folio_os = ANY($2::text[])
-                          AND os.id_cliente = cl.id
-                          AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
-                        """,
-                        destinatario,
-                        folios_lote,
-                    )
-                except Exception:
-                    pass
+                if not es_solo_recepcion_lote and "@" in destino_bd:
+                    try:
+                        await conn.execute(
+                            """
+                            UPDATE cat_clientes cl
+                            SET email = $1
+                            FROM ordenes_servicio os
+                            WHERE os.folio_os = ANY($2::text[])
+                              AND os.id_cliente = cl.id
+                              AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
+                            """,
+                            destino_bd,
+                            folios_lote,
+                        )
+                    except Exception:
+                        pass
                 return {
                     "ok": True,
                     "lote": True,
@@ -1396,22 +1481,34 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     "folios": folios_lote,
                     "etiquetas": etiquetas,
                     "omitidas": no_listas,
-                    "destinatario": destinatario,
+                    "destinatario": destino_bd,
                     "correo_enviado": True,
-                    "correo_destino": destinatario,
-                    "correo_cc": cc_efectivo,
+                    "correo_destino": destino_bd,
+                    "correo_cc": cc_bd,
+                    "sin_correo_cliente": es_solo_recepcion_lote,
                     "fecha_envio_correo": fecha_mx_str,
                     "asunto": asunto,
                 }
             return {"ok": False, "motivo": "Fallo el envío por SMTP"}
 
         # ── Orden individual ──────────────────────────────────────────────────
+        if _es_cancelada_orden(row):
+            return {"ok": False, "motivo": f"La orden {folio} está marcada como CANCELADA y no debe enviarse"}
+
         invalidos_dest = {"", "cliente", "sin registrar", "destinatario registrado", "none", "null"}
-        destinatario = str(correo_override or "").strip()
+        override_ind = str(correo_override or "").strip()
+        es_solo_recepcion_ind = (
+            bool(sin_correo_cliente)
+            or override_ind.upper().startswith("PENDIENTE")
+            or (not override_ind and (bool(row.get("sin_correo_cliente")) or str(row.get("correo_destino") or "").strip().upper().startswith("PENDIENTE")))
+        )
+        motivo_sin_ind = str(motivo_sin_correo or row.get("motivo_sin_correo") or "").strip()
+
+        destinatario = "" if es_solo_recepcion_ind else override_ind
         if destinatario.lower() in invalidos_dest or "@" not in destinatario:
-            cand_row = str(row["correo_cliente"] or "").strip()
-            destinatario = cand_row if (cand_row.lower() not in invalidos_dest and "@" in cand_row) else ""
-        if not destinatario:
+            cand_row = str(row.get("correo_destino") or row.get("correo_cliente") or "").strip()
+            destinatario = cand_row if (not es_solo_recepcion_ind and cand_row.lower() not in invalidos_dest and "@" in cand_row) else ""
+        if not destinatario and not es_solo_recepcion_ind:
             try:
                 r_cli = await conn.fetchrow(
                     """
@@ -1428,6 +1525,8 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     destinatario = str(r_cli["correo_cat"]).strip()
             except Exception:
                 pass
+        if es_solo_recepcion_ind and not destinatario:
+            destinatario = "recepcion@basculaspesa.com.mx"
         if not destinatario:
             logger.info("[EMAIL] Orden %s no tiene correo_cliente definido. Envío omitido.", folio)
             return {"ok": False, "motivo": "Sin correo de cliente especificado"}
@@ -1483,9 +1582,13 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
             [orden_consolidada],
             cliente_mostrar,
             es_lote=False,
+            solo_recepcion=es_solo_recepcion_ind,
+            motivo_sin_correo=motivo_sin_ind,
         )
 
-        cc_efectivo = normalizar_cc_correo(settings.EMAIL_CC)
+        cc_efectivo = "" if es_solo_recepcion_ind else normalizar_cc_correo(settings.EMAIL_CC)
+        destino_ind_bd = "PENDIENTE (Solo recepción)" if es_solo_recepcion_ind else destinatario
+        cc_ind_bd = "recepcion@basculaspesa.com.mx" if es_solo_recepcion_ind else cc_efectivo
         loop = asyncio.get_running_loop()
         ok = await loop.run_in_executor(
             None,
@@ -1511,37 +1614,43 @@ async def enviar_email_orden(db=None, folio_o_id: Union[str, int] = "", correo_o
                     correo_cc          = $3,
                     fecha_envio_email  = $4,
                     fecha_envio_correo = $4,
+                    sin_correo_cliente = $5,
+                    motivo_sin_correo  = COALESCE(NULLIF($6, ''), motivo_sin_correo),
                     updated_at         = NOW()
                 WHERE id = $1
                 """,
                 actual_id,
-                destinatario,
-                cc_efectivo,
+                destino_ind_bd,
+                cc_ind_bd,
                 now_mx,
+                es_solo_recepcion_ind,
+                motivo_sin_ind,
             )
-            try:
-                await conn.execute(
-                    """
-                    UPDATE cat_clientes cl
-                    SET email = $1
-                    FROM ordenes_servicio os
-                    WHERE os.id = $2
-                      AND os.id_cliente = cl.id
-                      AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
-                    """,
-                    destinatario,
-                    actual_id,
-                )
-            except Exception:
-                pass
+            if not es_solo_recepcion_ind and "@" in destino_ind_bd:
+                try:
+                    await conn.execute(
+                        """
+                        UPDATE cat_clientes cl
+                        SET email = $1
+                        FROM ordenes_servicio os
+                        WHERE os.id = $2
+                          AND os.id_cliente = cl.id
+                          AND COALESCE(NULLIF(TRIM(cl.email), ''), '') = ''
+                        """,
+                        destino_ind_bd,
+                        actual_id,
+                    )
+                except Exception:
+                    pass
             return {
                 "ok": True,
                 "folio": folio,
                 "etiquetas": etiquetas,
-                "destinatario": destinatario,
+                "destinatario": destino_ind_bd,
                 "correo_enviado": True,
-                "correo_destino": destinatario,
-                "correo_cc": cc_efectivo,
+                "correo_destino": destino_ind_bd,
+                "correo_cc": cc_ind_bd,
+                "sin_correo_cliente": es_solo_recepcion_ind,
                 "fecha_envio_correo": fecha_mx_str,
                 "asunto": asunto,
             }

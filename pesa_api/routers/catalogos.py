@@ -41,16 +41,17 @@ router = APIRouter()
 # ── Schemas ────────────────────────────────────────────────────────────────────
 
 class ClienteOut(BaseModel):
-    id:           int
-    nombre:       str        # alias de razon_social
-    razon_social: str
-    correo:       Optional[str] = ""
-    email:        Optional[str] = ""
-    rfc:          Optional[str] = None
-    telefono:     Optional[str] = None
-    direccion:    Optional[str] = None
-    activo:       bool = True
-    sucursales:   List[Dict[str, Any]] = []
+    id:                 int
+    nombre:             str        # alias de razon_social
+    razon_social:       str
+    correo:             Optional[str] = ""
+    email:              Optional[str] = ""
+    correos_frecuentes: List[str] = []
+    rfc:                Optional[str] = None
+    telefono:           Optional[str] = None
+    direccion:          Optional[str] = None
+    activo:             bool = True
+    sucursales:         List[Dict[str, Any]] = []
 
 
 class TecnicoOut(BaseModel):
@@ -103,6 +104,8 @@ class CrearOrdenBody(BaseModel):
     aplica_excentricidad:    Optional[bool] = True
     motivo_no_excentricidad: Optional[str] = None
     unidad_medida:           Optional[str] = "kg"
+    correo_destino:          Optional[str] = None
+    correo_cliente:          Optional[str] = None
 
 
 class ActualizarInstrumentoBody(BaseModel):
@@ -129,6 +132,10 @@ class ActualizarInstrumentoBody(BaseModel):
     holograma_actualizado:   Optional[str] = None
     sucursal_id:             Optional[int] = None
     estatus:                 Optional[str] = None
+    correo_destino:          Optional[str] = None
+    correo_cliente:          Optional[str] = None
+    sin_correo_cliente:      Optional[bool] = None
+    motivo_sin_correo:       Optional[str] = None
 
 
 def _limpiar_num_reg(val: Optional[str]) -> str:
@@ -199,6 +206,35 @@ def _construir_etiqueta_instrumento_dict(orden: dict) -> str:
 
 
 # ── Catálogos ──────────────────────────────────────────────────────────────────
+
+_EMAIL_VALID_RE = None
+
+
+def _extraer_correos_validos_lista(raw_val: Any) -> list[str]:
+    """Extrae correos válidos deduplicados separando por coma/punto y coma y excluyendo remitentes internos."""
+    global _EMAIL_VALID_RE
+    import re
+    if _EMAIL_VALID_RE is None:
+        _EMAIL_VALID_RE = re.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+    if not raw_val:
+        return []
+    partes = re.split(r"[,;\s]+", str(raw_val).strip())
+    excluidos = {
+        "ivancolin1207@gmail.com",
+        "recepcion@basculaspesa.com.mx",
+    }
+    vistos: set[str] = set()
+    salida: list[str] = []
+    for p in partes:
+        cand = p.strip().strip("<>\"'()")
+        low = cand.lower()
+        if not cand or low in excluidos or low.startswith("pendiente"):
+            continue
+        if _EMAIL_VALID_RE.match(cand) and low not in vistos:
+            vistos.add(low)
+            salida.append(cand)
+    return salida
+
 
 async def obtener_clientes_con_sucursales_reales(
     db,
@@ -442,9 +478,221 @@ async def obtener_clientes_con_sucursales_reales(
 
         cli_obj["sucursales"].sort(key=lambda s: str(s.get("nombre") or "").lower())
 
+    # Enriquecer clientes y sucursales con correos_frecuentes reales deduplicados
+    # (cat_clientes.email + cliente_sucursales.email + últimos correos enviados en ordenes_servicio)
+    hist_por_cid: dict[int, list[str]] = {}
+    hist_por_nom: dict[str, list[str]] = {}
+    hist_por_suc: dict[int, list[str]] = {}
+    try:
+        rows_hist_mail = await db.fetch(
+            """
+            SELECT id_cliente,
+                   sucursal_id,
+                   COALESCE(TRIM(cliente), '') AS cliente_txt,
+                   COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) AS correo_raw
+            FROM ordenes_servicio
+            WHERE COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+            ORDER BY fecha_envio_correo DESC NULLS LAST, updated_at DESC NULLS LAST, id DESC
+            LIMIT 1500
+            """
+        )
+        for rm in rows_hist_mail:
+            validos = _extraer_correos_validos_lista(rm["correo_raw"])
+            if not validos:
+                continue
+            raw_c = rm["id_cliente"]
+            if raw_c is not None:
+                c_canon = id_to_canonical_id.get(int(raw_c), int(raw_c))
+                lst_c = hist_por_cid.setdefault(c_canon, [])
+                for em in validos:
+                    if em.lower() not in {x.lower() for x in lst_c} and len(lst_c) < 8:
+                        lst_c.append(em)
+            c_txt = " ".join(str(rm["cliente_txt"] or "").lower().split())
+            if c_txt:
+                lst_n = hist_por_nom.setdefault(c_txt, [])
+                for em in validos:
+                    if em.lower() not in {x.lower() for x in lst_n} and len(lst_n) < 8:
+                        lst_n.append(em)
+            raw_s = rm["sucursal_id"]
+            if raw_s is not None:
+                sid_m = int(raw_s)
+                lst_s = hist_por_suc.setdefault(sid_m, [])
+                for em in validos:
+                    if em.lower() not in {x.lower() for x in lst_s} and len(lst_s) < 6:
+                        lst_s.append(em)
+    except Exception as exc_hm:
+        logger.debug("[CLIENTES] Historial de correos frecuentes omitido: %s", exc_hm)
+
+    for cid, cli_obj in canon_by_id.items():
+        frec_cli: list[str] = []
+        seen_frec: set[str] = set()
+
+        def _push_mail(val_str: Any):
+            for em in _extraer_correos_validos_lista(val_str):
+                if em.lower() not in seen_frec and len(frec_cli) < 8:
+                    seen_frec.add(em.lower())
+                    frec_cli.append(em)
+
+        _push_mail(cli_obj.get("correo"))
+        for s in cli_obj["sucursales"]:
+            _push_mail(s.get("correo"))
+        for em in hist_por_cid.get(cid, []):
+            _push_mail(em)
+        norm_c = " ".join(str(cli_obj.get("razon_social") or "").lower().split())
+        for em in hist_por_nom.get(norm_c, []):
+            _push_mail(em)
+
+        cli_obj["correos_frecuentes"] = frec_cli
+        if not cli_obj.get("correo") and frec_cli:
+            cli_obj["correo"] = frec_cli[0]
+            cli_obj["email"] = frec_cli[0]
+
+        for s in cli_obj["sucursales"]:
+            frec_s: list[str] = []
+            seen_s: set[str] = set()
+            for em in _extraer_correos_validos_lista(s.get("correo")):
+                if em.lower() not in seen_s:
+                    seen_s.add(em.lower())
+                    frec_s.append(em)
+            sid_v = s.get("id")
+            if sid_v is not None:
+                for em in hist_por_suc.get(int(sid_v), []):
+                    if em.lower() not in seen_s and len(frec_s) < 6:
+                        seen_s.add(em.lower())
+                        frec_s.append(em)
+            for em in frec_cli:
+                if em.lower() not in seen_s and len(frec_s) < 6:
+                    seen_s.add(em.lower())
+                    frec_s.append(em)
+            s["correos_frecuentes"] = frec_s
+            if not s.get("correo") and frec_s:
+                s["correo"] = frec_s[0]
+
     clientes_sorted = sorted(canon_by_id.values(), key=lambda c: str(c["razon_social"]).lower())
     flat_sucursales.sort(key=lambda s: (str(s.get("cliente_nombre") or "").lower(), str(s.get("nombre") or "").lower()))
     return clientes_sorted, flat_sucursales
+
+
+@router.get(
+    "/clientes/{cliente_id}/correos",
+    summary="Obtener correos frecuentes deduplicados de un cliente/sucursal",
+    tags=["Catálogos"],
+)
+async def obtener_correos_frecuentes_cliente(
+    cliente_id: int,
+    sucursal_id: Optional[int] = None,
+    cliente_nombre: Optional[str] = None,
+    db=Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """
+    Devuelve la lista deduplicada de correos frecuentes del cliente (cat_clientes.email,
+    cliente_sucursales.email y los últimos correos enviados en ordenes_servicio).
+    """
+    from pesa_api.core.email_service import _ensure_email_columns
+    await _ensure_email_columns(db)
+
+    vistos: set[str] = set()
+    frecuentes: list[str] = []
+
+    def _agregar(raw_v: Any):
+        for em in _extraer_correos_validos_lista(raw_v):
+            if em.lower() not in vistos and len(frecuentes) < 10:
+                vistos.add(em.lower())
+                frecuentes.append(em)
+
+    razon_lookup = (cliente_nombre or "").strip()
+    if cliente_id > 0:
+        try:
+            r_cli = await db.fetchrow(
+                "SELECT COALESCE(razon_social, '') AS razon_social, COALESCE(email, '') AS email FROM cat_clientes WHERE id = $1 LIMIT 1",
+                cliente_id,
+            )
+            if r_cli:
+                if not razon_lookup and r_cli["razon_social"]:
+                    razon_lookup = str(r_cli["razon_social"]).strip()
+                if sucursal_id is None:
+                    _agregar(r_cli["email"])
+        except Exception:
+            pass
+
+    if sucursal_id and sucursal_id > 0:
+        try:
+            r_suc = await db.fetchrow(
+                "SELECT COALESCE(email, '') AS email FROM cliente_sucursales WHERE id = $1 LIMIT 1",
+                sucursal_id,
+            )
+            if r_suc:
+                _agregar(r_suc["email"])
+            rows_os_suc = await db.fetch(
+                """
+                SELECT COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) AS correo
+                FROM ordenes_servicio
+                WHERE sucursal_id = $1
+                  AND COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+                ORDER BY fecha_envio_correo DESC NULLS LAST, updated_at DESC NULLS LAST, id DESC
+                LIMIT 20
+                """,
+                sucursal_id,
+            )
+            for rs in rows_os_suc:
+                _agregar(rs["correo"])
+        except Exception:
+            pass
+
+    if cliente_id > 0:
+        try:
+            r_cli2 = await db.fetchrow("SELECT COALESCE(email, '') AS email FROM cat_clientes WHERE id = $1 LIMIT 1", cliente_id)
+            if r_cli2:
+                _agregar(r_cli2["email"])
+            rows_sucs = await db.fetch(
+                "SELECT COALESCE(email, '') AS email FROM cliente_sucursales WHERE cliente_id = $1 AND activo IS NOT FALSE",
+                cliente_id,
+            )
+            for rs in rows_sucs:
+                _agregar(rs["email"])
+            rows_os_cli = await db.fetch(
+                """
+                SELECT COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) AS correo
+                FROM ordenes_servicio
+                WHERE id_cliente = $1
+                  AND COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+                ORDER BY fecha_envio_correo DESC NULLS LAST, updated_at DESC NULLS LAST, id DESC
+                LIMIT 30
+                """,
+                cliente_id,
+            )
+            for ro in rows_os_cli:
+                _agregar(ro["correo"])
+        except Exception:
+            pass
+
+    if razon_lookup:
+        try:
+            rows_os_nom = await db.fetch(
+                """
+                SELECT COALESCE(NULLIF(TRIM(os.correo_destino), ''), NULLIF(TRIM(os.correo_cliente), '')) AS correo
+                FROM ordenes_servicio os
+                LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
+                WHERE (LOWER(TRIM(COALESCE(os.cliente, ''))) = LOWER(TRIM($1))
+                       OR LOWER(TRIM(COALESCE(cl.razon_social, ''))) = LOWER(TRIM($1)))
+                  AND COALESCE(NULLIF(TRIM(os.correo_destino), ''), NULLIF(TRIM(os.correo_cliente), '')) LIKE '%@%'
+                ORDER BY os.fecha_envio_correo DESC NULLS LAST, os.updated_at DESC NULLS LAST, os.id DESC
+                LIMIT 30
+                """,
+                razon_lookup,
+            )
+            for rn in rows_os_nom:
+                _agregar(rn["correo"])
+        except Exception:
+            pass
+
+    return {
+        "cliente_id": cliente_id,
+        "cliente": razon_lookup,
+        "correos_frecuentes": frecuentes,
+        "correo_principal": frecuentes[0] if frecuentes else "",
+    }
 
 
 @router.get(
@@ -647,6 +895,11 @@ async def get_ordenes(
             COALESCE(NULLIF(os.correo_destino, ''), os.correo_cliente, '') AS correo_cliente,
             COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
             COALESCE(os.fecha_envio_correo, os.fecha_envio_email) AS fecha_envio_email,
+            COALESCE(os.motivo_cancelacion, '') AS motivo_cancelacion,
+            COALESCE(os.cancelada_por, '') AS cancelada_por,
+            os.fecha_cancelacion::text AS fecha_cancelacion,
+            COALESCE(os.sin_correo_cliente, FALSE) AS sin_correo_cliente,
+            COALESCE(os.motivo_sin_correo, '') AS motivo_sin_correo,
             CASE
                 WHEN os.has_pdf IS TRUE
                   OR UPPER(os.modalidad) = 'FISICO'
@@ -670,7 +923,8 @@ async def get_ordenes(
         LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
         LEFT JOIN cat_tipo_instrumento ti ON os.id_tipo_instrumento = ti.id
         LEFT JOIN (SELECT DISTINCT ON (id) id, nombre_sucursal, direccion FROM cliente_sucursales ORDER BY id) cs ON os.sucursal_id = cs.id
-        WHERE (os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('CANCELADA', 'ELIMINADO', 'ELIMINADA'))
+        WHERE (os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('ELIMINADO', 'ELIMINADA'))
+          AND (os.estatus IS NULL OR UPPER(TRIM(os.estatus)) NOT IN ('ELIMINADO', 'ELIMINADA'))
     """
     params: list = []
 
@@ -943,6 +1197,8 @@ async def crear_orden(
     aplica_exc = True if body.aplica_excentricidad is None else bool(body.aplica_excentricidad)
     motivo_no_exc = (body.motivo_no_excentricidad or "").strip() if not aplica_exc else None
     tipo_inst_txt = (body.tipo_instrumento or "").strip() or None
+    correo_in_list = _extraer_correos_validos_lista(body.correo_destino or body.correo_cliente)
+    correo_in = ", ".join(correo_in_list) if correo_in_list else None
 
     dt_json_dict = {
         k: v
@@ -964,6 +1220,8 @@ async def crear_orden(
             "direccion": cliente_dir,
             "sucursal": sucursal_nom,
             "unidad_medida": (body.unidad_medida or "kg").strip() or "kg",
+            "correo_destino": correo_in,
+            "correo_cliente": correo_in,
         }.items()
         if v is not None and v != ""
     }
@@ -1074,6 +1332,16 @@ async def crear_orden(
                 body.observaciones or "",
             )
 
+        if correo_in:
+            try:
+                await db.execute(
+                    "UPDATE ordenes_servicio SET correo_destino = $1, correo_cliente = $1 WHERE folio_os = $2",
+                    correo_in,
+                    folio,
+                )
+            except Exception:
+                pass
+
         orden_dict = {
             "folio_os": folio,
             "folio": folio,
@@ -1091,6 +1359,8 @@ async def crear_orden(
             "direccion": cliente_dir,
             "id_tecnico": id_tecnico_asignado,
             "tecnico": tecnico_nom,
+            "correo_destino": correo_in or "",
+            "correo_cliente": correo_in or "",
             "marca": marca_in or "",
             "modelo": modelo_in or "",
             "ns": f_serie or "",
@@ -1883,6 +2153,8 @@ class EnviarEmailBody(BaseModel):
     forzar: Optional[bool] = False
     folios: Optional[List[str]] = None
     ordenes_meta: Optional[List[Dict[str, Any]]] = None
+    sin_correo_cliente: Optional[bool] = False
+    motivo_sin_correo: Optional[str] = None
 
 EnviarEmailBody.model_rebuild()
 
@@ -1937,7 +2209,16 @@ async def api_enviar_email_orden(
         await _aplicar_ordenes_meta_previo_correo(db, body.ordenes_meta)
     override = body.correo if body else None
     forzar = body.forzar if body else False
-    resultado = await enviar_email_orden(db, folio, correo_override=override, forzar=forzar)
+    sin_correo = bool(body.sin_correo_cliente) if body else False
+    motivo_sc = body.motivo_sin_correo if body else None
+    resultado = await enviar_email_orden(
+        db,
+        folio,
+        correo_override=override,
+        forzar=forzar,
+        sin_correo_cliente=sin_correo,
+        motivo_sin_correo=motivo_sc,
+    )
     if not resultado.get("ok"):
         raise HTTPException(
             status_code=400,
@@ -1963,6 +2244,8 @@ async def api_enviar_email_lote(
         await _aplicar_ordenes_meta_previo_correo(db, body.ordenes_meta)
     override = body.correo if body else None
     forzar = body.forzar if body else True
+    sin_correo = bool(body.sin_correo_cliente) if body else False
+    motivo_sc = body.motivo_sin_correo if body else None
     folios_in = body.folios if (body and body.folios) else None
     if folios_in:
         folios_in = list(dict.fromkeys([str(f).strip() for f in folios_in if str(f).strip()]))
@@ -1970,7 +2253,13 @@ async def api_enviar_email_lote(
     # Si vienen folios específicos en el body, usarlos directamente para agrupar el lote
     if folios_in and len(folios_in) > 0:
         resultado = await enviar_email_orden(
-            db, folios_in[0], correo_override=override, forzar=forzar, folios_lista=folios_in
+            db,
+            folios_in[0],
+            correo_override=override,
+            forzar=forzar,
+            folios_lista=folios_in,
+            sin_correo_cliente=sin_correo,
+            motivo_sin_correo=motivo_sc,
         )
         if not resultado.get("ok"):
             raise HTTPException(
@@ -1980,7 +2269,13 @@ async def api_enviar_email_lote(
         return resultado
 
     row = await db.fetchrow(
-        "SELECT folio_os FROM ordenes_servicio WHERE id_lote = $1 LIMIT 1",
+        """
+        SELECT folio_os FROM ordenes_servicio
+        WHERE id_lote = $1
+          AND UPPER(TRIM(COALESCE(estatus, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+          AND UPPER(TRIM(COALESCE(estado, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+        LIMIT 1
+        """,
         lote_id,
     )
     if not row:
@@ -1992,7 +2287,14 @@ async def api_enviar_email_lote(
     if not row:
         raise HTTPException(status_code=404, detail=f"Lote '{lote_id}' no encontrado")
 
-    resultado = await enviar_email_orden(db, row["folio_os"], correo_override=override, forzar=forzar)
+    resultado = await enviar_email_orden(
+        db,
+        row["folio_os"],
+        correo_override=override,
+        forzar=forzar,
+        sin_correo_cliente=sin_correo,
+        motivo_sin_correo=motivo_sc,
+    )
     if not resultado.get("ok"):
         raise HTTPException(
             status_code=400,
@@ -2008,6 +2310,8 @@ class EnviarCorreoUniversalBody(BaseModel):
     forzar: Optional[bool] = True
     folios: Optional[List[str]] = None
     ordenes_meta: Optional[List[Dict[str, Any]]] = None
+    sin_correo_cliente: Optional[bool] = False
+    motivo_sin_correo: Optional[str] = None
 
 EnviarCorreoUniversalBody.model_rebuild()
 
@@ -2037,7 +2341,13 @@ async def api_enviar_correo_universal(
     if body.lote_id and str(body.lote_id).strip() and not folio_ref:
         lid = str(body.lote_id).strip()
         row = await db.fetchrow(
-            "SELECT folio_os FROM ordenes_servicio WHERE id_lote = $1 LIMIT 1",
+            """
+            SELECT folio_os FROM ordenes_servicio
+            WHERE id_lote = $1
+              AND UPPER(TRIM(COALESCE(estatus, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+              AND UPPER(TRIM(COALESCE(estado, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+            LIMIT 1
+            """,
             lid,
         )
         if not row:
@@ -2053,7 +2363,13 @@ async def api_enviar_correo_universal(
         raise HTTPException(status_code=422, detail="Debe indicar 'folio', 'lote_id' o 'folios'")
 
     resultado = await enviar_email_orden(
-        db, folio_ref, correo_override=body.correo, forzar=forzar, folios_lista=folios_in
+        db,
+        folio_ref,
+        correo_override=body.correo,
+        forzar=forzar,
+        folios_lista=folios_in,
+        sin_correo_cliente=bool(body.sin_correo_cliente),
+        motivo_sin_correo=body.motivo_sin_correo,
     )
     if not resultado.get("ok"):
         raise HTTPException(
@@ -2061,6 +2377,184 @@ async def api_enviar_correo_universal(
             detail=resultado.get("motivo") or resultado.get("error") or "Error enviando correo",
         )
     return resultado
+
+
+# ── Cancelar / Descartar orden sobrante y Reactivar orden (Poka-Yoke Lotes) ────
+
+class CancelarOrdenBody(BaseModel):
+    motivo: str = "Se asignaron folios de más"
+    usuario: Optional[str] = None
+
+
+class ReactivarOrdenBody(BaseModel):
+    usuario: Optional[str] = None
+
+
+async def ejecutar_cancelar_orden(
+    folio: str,
+    body: Optional[CancelarOrdenBody],
+    db,
+    current_user: dict,
+) -> dict[str, Any]:
+    from datetime import datetime
+    from pesa_api.core.email_service import _ensure_email_columns, _obtener_tz_mexico
+    await _ensure_email_columns(db)
+
+    clean_folio = (folio or "").strip()
+    row = await db.fetchrow(
+        """
+        SELECT id, folio_os, id_tecnico, COALESCE(estatus, '') AS estatus, COALESCE(estado, '') AS estado
+        FROM ordenes_servicio
+        WHERE folio_os = $1 OR id::text = $1
+        LIMIT 1
+        """,
+        clean_folio,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Orden '{clean_folio}' no encontrada")
+
+    verificar_acceso_os(current_user, row["id_tecnico"])
+
+    motivo_txt = ((body.motivo if body else "") or "Se asignaron folios de más").strip()
+    if not motivo_txt:
+        motivo_txt = "Se asignaron folios de más"
+    usuario_txt = (
+        (body.usuario if body and body.usuario else None)
+        or current_user.get("nombre_completo")
+        or current_user.get("nombre")
+        or current_user.get("username")
+        or "Técnico"
+    )
+    usuario_txt = str(usuario_txt).strip()
+
+    now_mx = datetime.now(_obtener_tz_mexico())
+    now_mx_naive = now_mx.replace(tzinfo=None)
+    fecha_mx_fmt = now_mx.strftime("%d/%m/%Y %H:%M")
+
+    await db.execute(
+        """
+        UPDATE ordenes_servicio
+        SET estatus            = 'CANCELADA',
+            estado             = 'CANCELADA',
+            motivo_cancelacion = $1,
+            cancelada_por      = $2,
+            fecha_cancelacion  = $3,
+            sync_version       = COALESCE(sync_version, 0) + 1,
+            updated_at         = NOW()
+        WHERE id = $4
+        """,
+        motivo_txt,
+        usuario_txt,
+        now_mx_naive,
+        row["id"],
+    )
+
+    logger.info(
+        "[CANCELAR ORDEN] Folio %s marcado como CANCELADA por %s (%s) — consecutivo preservado",
+        row["folio_os"], usuario_txt, motivo_txt,
+    )
+    return {
+        "ok": True,
+        "folio_os": row["folio_os"],
+        "id": row["id"],
+        "estatus": "CANCELADA",
+        "estado": "CANCELADA",
+        "motivo_cancelacion": motivo_txt,
+        "cancelada_por": usuario_txt,
+        "fecha_cancelacion": fecha_mx_fmt,
+    }
+
+
+async def ejecutar_reactivar_orden(
+    folio: str,
+    db,
+    current_user: dict,
+) -> dict[str, Any]:
+    from pesa_api.core.email_service import _ensure_email_columns
+    await _ensure_email_columns(db)
+
+    role_raw = str(current_user.get("role") or "").strip().lower()
+    username_c = str(current_user.get("username") or "").strip().lower()
+    es_admin = (
+        tiene_visibilidad_global(current_user)
+        or role_raw in {"admin", "administrador", "superadmin", "jefe", "gerente", "logistica"}
+        or username_c == "ivancolin1207"
+    )
+    if not es_admin:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo un usuario Administrador o Logística puede reactivar una orden cancelada.",
+        )
+
+    clean_folio = (folio or "").strip()
+    row = await db.fetchrow(
+        "SELECT id, folio_os FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1 LIMIT 1",
+        clean_folio,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Orden '{clean_folio}' no encontrada")
+
+    await db.execute(
+        """
+        UPDATE ordenes_servicio
+        SET estatus            = 'Asignada',
+            estado             = 'EN_PROCESO',
+            motivo_cancelacion = NULL,
+            cancelada_por      = NULL,
+            fecha_cancelacion  = NULL,
+            sync_version       = COALESCE(sync_version, 0) + 1,
+            updated_at         = NOW()
+        WHERE id = $1
+        """,
+        row["id"],
+    )
+
+    logger.info(
+        "[REACTIVAR ORDEN] Folio %s reactivado a EN_PROCESO por %s",
+        row["folio_os"], current_user.get("username"),
+    )
+    return {
+        "ok": True,
+        "folio_os": row["folio_os"],
+        "id": row["id"],
+        "estatus": "Asignada",
+        "estado": "EN_PROCESO",
+    }
+
+
+@router.patch(
+    "/ordenes/{folio}/cancelar",
+    summary="Marcar orden sobrante no utilizada como CANCELADA sin borrar consecutivo",
+    tags=["Órdenes de Servicio", "Lotes"],
+)
+@router.post(
+    "/ordenes/{folio}/cancelar",
+    include_in_schema=False,
+)
+async def cancelar_orden_endpoint(
+    folio: str,
+    body: Optional[CancelarOrdenBody] = Body(default=None),
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return await ejecutar_cancelar_orden(folio, body, db, current_user)
+
+
+@router.patch(
+    "/ordenes/{folio}/reactivar",
+    summary="Reactivar orden CANCELADA devolviéndola a EN_PROCESO (Solo Admin)",
+    tags=["Órdenes de Servicio", "Admin"],
+)
+@router.post(
+    "/ordenes/{folio}/reactivar",
+    include_in_schema=False,
+)
+async def reactivar_orden_endpoint(
+    folio: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return await ejecutar_reactivar_orden(folio, db, current_user)
 
 
 # ── Reset / Eliminar toma metrológica desde cero ──────────────────────────────

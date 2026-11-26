@@ -18,6 +18,7 @@ import '../services/local_db_service.dart';
 import '../services/sync_service.dart';
 import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
+import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/signature_shield.dart';
 
 class LevantamientoMetrologicoScreen extends StatefulWidget {
@@ -43,6 +44,7 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
   bool _errNombreRecibe = false;
 
   final SignatureController _ctrlFirmaCli = SignatureController(penStrokeWidth: 3, penColor: Colors.black);
+  late final ClienteCorreoController _correoCtrl = ClienteCorreoController();
 
   bool _saving = false;
 
@@ -55,6 +57,7 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
     _maniobraCtrl.text = (o['maniobra'] ?? 'Camión grúa PESA').toString();
     _nombreClienteCtrl.text = (o['firma_cliente_nombre'] ?? o['nombre_ing'] ?? '').toString();
     _observacionesCtrl.text = (o['observaciones'] ?? '').toString();
+    _correoCtrl.inicializarDesdeOrden(o);
   }
 
   @override
@@ -67,6 +70,7 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
     _observacionesCtrl.dispose();
     _nombreClienteCtrl.dispose();
     _ctrlFirmaCli.dispose();
+    _correoCtrl.dispose();
     super.dispose();
   }
 
@@ -74,6 +78,12 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
     final nombre = _nombreClienteCtrl.text.trim();
     if (!exigirNombreRecibe(context, nombre)) {
       setState(() => _errNombreRecibe = true);
+      return;
+    }
+    if (!_correoCtrl.isValido) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(backgroundColor: _red, content: Text(kMsgPokaYokeCorreo)),
+      );
       return;
     }
 
@@ -197,12 +207,23 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
         if (b != null) fCliB64 = base64Encode(b);
       }
 
+      final String loteIdLv = (widget.orden['id_lote'] ?? widget.orden['lote'] ?? '').toString().trim();
+      final String correoCapturado = await _correoCtrl.persistirEnOrdenYLote(
+        folio: folio,
+        loteId: loteIdLv,
+        ordenMutable: ordenMutable,
+      );
+      if (loteIdLv.isNotEmpty && nombre.isNotEmpty) {
+        LoteSession.registrarResponsable(loteIdLv, nombre);
+      }
+
       await LocalDbService.instance.saveFirmas(
         localId: localId,
         folio: folio,
         firmaTecBase64: '',
         firmaCliBase64: fCliB64 ?? '',
         nombreIng: nombre,
+        correoCliente: correoCapturado.isNotEmpty ? correoCapturado : null,
         fechaEjecucion: fechaEjecucionHoy,
         fechaCierre: fechaCierreIso,
         fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
@@ -222,6 +243,8 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
             'observaciones': _observacionesCtrl.text,
             'nombre_ing': nombre,
             'firma_cliente_nombre': nombre,
+            'correo_cliente': correoCapturado,
+            'correo_destino': correoCapturado,
           },
         );
       } catch (_) {}
@@ -282,18 +305,27 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
         ),
         title: Text('Levantamiento Metrológico ($folio)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: PesaColors.textPrimary)),
       ),
-      bottomNavigationBar: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            border: Border(top: BorderSide(color: PesaColors.border)),
-          ),
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white, minimumSize: const Size.fromHeight(48)),
-            onPressed: _saving ? null : _finalizarLV,
-            icon: const Icon(Icons.check_circle_outline),
-            label: const Text('Finalizar Levantamiento Metrológico', style: TextStyle(fontWeight: FontWeight.bold)),
+      bottomNavigationBar: AnimatedBuilder(
+        animation: _correoCtrl,
+        builder: (context, _) => SafeArea(
+          child: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: PesaColors.border)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClienteCorreoLockBanner(controller: _correoCtrl),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white, minimumSize: const Size.fromHeight(48)),
+                  onPressed: (_saving || !_correoCtrl.isValido) ? null : _finalizarLV,
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('Finalizar Levantamiento Metrológico', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -322,6 +354,10 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
             const SizedBox(height: 8),
             TextFormField(controller: _nombreClienteCtrl, onChanged: (_) { if (_errNombreRecibe) setState(() => _errNombreRecibe = false); }, decoration: InputDecoration(labelText: 'Nombre del Responsable en Planta *', errorText: _errNombreRecibe ? kMsgNombreRecibeObligatorio : null, border: const OutlineInputBorder())),
             const SizedBox(height: 10),
+            ClienteCorreoPokaYokeCard(
+              controller: _correoCtrl,
+              loteId: (widget.orden['id_lote'] ?? widget.orden['lote'])?.toString(),
+            ),
             Container(
               height: 165,
               decoration: BoxDecoration(color: Colors.white, border: Border.all(color: PesaColors.borderStrong), borderRadius: BorderRadius.circular(8)),

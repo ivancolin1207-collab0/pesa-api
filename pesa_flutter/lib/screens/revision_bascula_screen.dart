@@ -26,6 +26,7 @@ import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
 import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
+import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/nombre_recibe.dart';
 import '../widgets/signature_shield.dart';
 
@@ -93,6 +94,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   // Sección 5: Observaciones y Firmas
   final _observacionesCtrl = TextEditingController();
   final _nombreReceptorCtrl = TextEditingController();
+  final _correoCtrl = ClienteCorreoController();
   List<String> _contactosSugeridos = [];
 
   final _sigClienteCtrl = SignatureController(
@@ -381,6 +383,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
       } catch (_) {}
     }
 
+    await _correoCtrl.inicializarDesdeOrden(_datosCombinados);
     if (mounted) setState(() {});
   }
 
@@ -443,6 +446,14 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
     payload['nombre_receptor'] = _nombreReceptorCtrl.text.trim();
     payload['firma_cliente_nombre'] = _nombreReceptorCtrl.text.trim();
     payload['nombre_quien_recibe'] = _nombreReceptorCtrl.text.trim();
+    if (_correoCtrl.correoParaGuardar.isNotEmpty) {
+      payload['correo_cliente'] = _correoCtrl.correoParaGuardar;
+      payload['correo_destino'] = _correoCtrl.correoParaGuardar;
+    }
+    payload['sin_correo_cliente'] = _correoCtrl.sinCorreoCliente;
+    if (_correoCtrl.motivoSinCorreoEfectivo.isNotEmpty) {
+      payload['motivo_sin_correo'] = _correoCtrl.motivoSinCorreoEfectivo;
+    }
 
     if (fechaEjecucionHoy != null) {
       payload['fecha_creacion_logistica'] ??= payload['fecha'];
@@ -498,10 +509,26 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
       return;
     }
 
+    if (!_correoCtrl.isValido) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(kMsgPokaYokeCorreo),
+          backgroundColor: PesaColors.brand,
+        ),
+      );
+      return;
+    }
+
     setState(() => _guardando = true);
     try {
       final localId = widget.orden['local_id'] as int? ?? 0;
       final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'RE-LOCAL').toString().trim();
+      final loteKeyPre = _pickFromMap(_datosCombinados, ['lote_id', 'id_lote', 'lote']);
+      final correoCapturado = await _correoCtrl.persistirEnOrdenYLote(
+        folio: folio,
+        loteId: loteKeyPre,
+        ordenMutable: _datosCombinados,
+      );
 
       final sigCliBytes = await _sigClienteCtrl.toPngBytes();
       final Uint8List? sigTecBytes =
@@ -579,6 +606,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         firmaCliBase64: firmaCliB64 ?? '',
         nombreIng: nombreReceptor,
         puestoIng: '',
+        correoCliente: correoCapturado.isNotEmpty ? correoCapturado : null,
         fechaEjecucion: fechaEjecucionHoy,
         fechaCierre: fechaCierreIso,
         fechaCreacionLogistica: payload['fecha_creacion_logistica']?.toString(),
@@ -748,6 +776,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
     }
     _observacionesCtrl.dispose();
     _nombreReceptorCtrl.dispose();
+    _correoCtrl.dispose();
     _sigClienteCtrl.dispose();
     _sigTecnicoCtrl.dispose();
     super.dispose();
@@ -838,29 +867,40 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
             const SizedBox(height: 20),
 
             // ── BOTÓN FINALIZAR Y GENERAR PDF OFICIAL ──────────────────────────
-            SizedBox(
-              height: 52,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: PesaColors.brand,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: _guardando ? null : _finalizar,
-                icon: _guardando
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                      )
-                    : const Icon(Icons.picture_as_pdf_rounded, size: 22),
-                label: Text(
-                  _guardando
-                      ? 'GENERANDO FICHA TÉCNICA PDF...'
-                      : 'FINALIZAR REVISIÓN Y GENERAR PDF OFICIAL',
-                  style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, letterSpacing: 0.3),
-                ),
+            AnimatedBuilder(
+              animation: _correoCtrl,
+              builder: (_, __) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ClienteCorreoLockBanner(controller: _correoCtrl),
+                  SizedBox(
+                    height: 52,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: PesaColors.brand,
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: PesaColors.surfaceMuted,
+                        disabledForegroundColor: PesaColors.textTertiary,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: (_guardando || !_correoCtrl.isValido) ? null : _finalizar,
+                      icon: _guardando
+                          ? const SizedBox(
+                              width: 22,
+                              height: 22,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                            )
+                          : Icon(!_correoCtrl.isValido ? Icons.lock_outline_rounded : Icons.picture_as_pdf_rounded, size: 22),
+                      label: Text(
+                        _guardando
+                            ? 'GENERANDO FICHA TÉCNICA PDF...'
+                            : 'FINALIZAR REVISIÓN Y GENERAR PDF OFICIAL',
+                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, letterSpacing: 0.3),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -1806,6 +1846,10 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        ClienteCorreoPokaYokeCard(
+          controller: _correoCtrl,
+          loteId: _pickFromMap(_datosCombinados, ['id_lote', 'lote', 'lote_id']),
+        ),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [

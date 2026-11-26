@@ -250,6 +250,14 @@ class DatabasePool:
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS celda_b_modelo TEXT;",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS celda_b_capacidad TEXT;",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS celda_b_cantidad INTEGER;",
+            # Flujo Poka-Yoke: correo precargado y cancelación limpia de órdenes sobrantes en lotes
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cliente TEXT;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_destino TEXT;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_cancelacion TEXT;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cancelada_por TEXT;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_cancelacion TIMESTAMP;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sin_correo_cliente BOOLEAN DEFAULT FALSE;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_sin_correo TEXT;",
         ]
 
         conn = None

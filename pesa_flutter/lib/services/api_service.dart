@@ -1069,37 +1069,142 @@ class ApiService {
     String? correo,
     bool forzar = false,
     List<Map<String, dynamic>>? ordenesMeta,
+    bool sinCorreoCliente = false,
+    String? motivoSinCorreo,
     Duration timeout = const Duration(seconds: 20),
   }) async {
     final cleanFolio = folio.trim();
-    debugPrint('[API] enviarEmailOrden $cleanFolio (destinatario: $correo)');
+    debugPrint('[API] enviarEmailOrden $cleanFolio (destinatario: $correo, sinCorreo: $sinCorreoCliente)');
     return _postCorreo(_rutasCorreoOrden(cleanFolio), <String, dynamic>{
       'folio': cleanFolio,
       'forzar': forzar,
       if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
       if (ordenesMeta != null && ordenesMeta.isNotEmpty) 'ordenes_meta': ordenesMeta,
+      if (sinCorreoCliente) 'sin_correo_cliente': true,
+      if (motivoSinCorreo != null && motivoSinCorreo.trim().isNotEmpty) 'motivo_sin_correo': motivoSinCorreo.trim(),
     }, timeout: timeout);
   }
 
   /// Dispara el envío agrupado de un lote. El backend adjunta y cita ÚNICAMENTE
-  /// las órdenes FIRMADAS/Cerradas con PDF existente.
+  /// las órdenes FIRMADAS/Cerradas activas (excluyendo CANCELADA) con PDF existente.
   Future<Map<String, dynamic>> enviarEmailLote(
     String loteId, {
     String? correo,
     bool forzar = true,
     List<String>? folios,
     List<Map<String, dynamic>>? ordenesMeta,
+    bool sinCorreoCliente = false,
+    String? motivoSinCorreo,
     Duration timeout = const Duration(seconds: 20),
   }) async {
     final cleanLote = loteId.trim();
-    debugPrint('[API] enviarEmailLote $cleanLote (destinatario: $correo, folios: $folios)');
+    debugPrint('[API] enviarEmailLote $cleanLote (destinatario: $correo, folios: $folios, sinCorreo: $sinCorreoCliente)');
     return _postCorreo(_rutasCorreoLote(cleanLote), <String, dynamic>{
       'lote_id': cleanLote,
       'forzar': forzar,
       if (correo != null && correo.trim().isNotEmpty) 'correo': correo.trim(),
       if (folios != null && folios.isNotEmpty) 'folios': folios,
       if (ordenesMeta != null && ordenesMeta.isNotEmpty) 'ordenes_meta': ordenesMeta,
+      if (sinCorreoCliente) 'sin_correo_cliente': true,
+      if (motivoSinCorreo != null && motivoSinCorreo.trim().isNotEmpty) 'motivo_sin_correo': motivoSinCorreo.trim(),
     }, timeout: timeout);
+  }
+
+  /// Marca una orden sobrante no utilizada dentro de un lote como CANCELADA en el servidor
+  /// sin eliminar el consecutivo de la base de datos (`PATCH /api/ordenes/{folio}/cancelar`).
+  Future<Map<String, dynamic>> cancelarOrden(
+    String folio, {
+    required String motivo,
+    String? usuario,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final f = Uri.encodeComponent(folio.trim());
+    final payload = jsonEncode({
+      'motivo': motivo.trim().isNotEmpty ? motivo.trim() : 'Se asignaron folios de más',
+      if (usuario != null && usuario.trim().isNotEmpty) 'usuario': usuario.trim(),
+    });
+    final paths = [
+      '/api/ordenes/$f/cancelar',
+      '/api/v1/ordenes/$f/cancelar',
+      '/api/v1/os/$f/cancelar',
+    ];
+    int lastStatus = 0;
+    String lastBody = '';
+    for (final pth in paths) {
+      final uri = Uri.parse('$_baseUrl$pth');
+      var resp = await _patchWithRetry(uri, payload, timeout: timeout);
+      if (resp.statusCode == 405) {
+        resp = await _postWithRetry(uri, payload, timeout: timeout);
+      }
+      lastStatus = resp.statusCode;
+      lastBody = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        final dec = jsonDecode(lastBody);
+        return dec is Map ? Map<String, dynamic>.from(dec) : {'ok': true};
+      }
+      if (resp.statusCode != 404) break;
+    }
+    throw HttpException('HTTP $lastStatus - ${_detalleError(lastBody)}');
+  }
+
+  /// Reactiva una orden CANCELADA devolviéndola a EN_PROCESO (`PATCH /api/ordenes/{folio}/reactivar`, solo Admin).
+  Future<Map<String, dynamic>> reactivarOrden(
+    String folio, {
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    final f = Uri.encodeComponent(folio.trim());
+    final paths = [
+      '/api/ordenes/$f/reactivar',
+      '/api/v1/ordenes/$f/reactivar',
+      '/api/v1/os/$f/reactivar',
+    ];
+    int lastStatus = 0;
+    String lastBody = '';
+    for (final pth in paths) {
+      final uri = Uri.parse('$_baseUrl$pth');
+      var resp = await _patchWithRetry(uri, '{}', timeout: timeout);
+      if (resp.statusCode == 405) {
+        resp = await _postWithRetry(uri, '{}', timeout: timeout);
+      }
+      lastStatus = resp.statusCode;
+      lastBody = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        final dec = jsonDecode(lastBody);
+        return dec is Map ? Map<String, dynamic>.from(dec) : {'ok': true};
+      }
+      if (resp.statusCode != 404) break;
+    }
+    throw HttpException('HTTP $lastStatus - ${_detalleError(lastBody)}');
+  }
+
+  /// Obtiene la lista deduplicada de correos frecuentes de un cliente/sucursal desde Render.
+  Future<List<String>> getCorreosFrecuentesCliente(
+    int clienteId, {
+    int? sucursalId,
+    String? clienteNombre,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    final qp = <String, String>{
+      if (sucursalId != null && sucursalId > 0) 'sucursal_id': sucursalId.toString(),
+      if (clienteNombre != null && clienteNombre.trim().isNotEmpty) 'cliente_nombre': clienteNombre.trim(),
+    };
+    for (final pth in ['/api/clientes/$clienteId/correos', '/api/v1/clientes/$clienteId/correos']) {
+      try {
+        final base = Uri.parse('$_baseUrl$pth');
+        final uri = qp.isNotEmpty ? base.replace(queryParameters: qp) : base;
+        final resp = await _getWithRetry(uri, timeout: timeout);
+        if (resp.statusCode == 200) {
+          final dec = jsonDecode(utf8.decode(resp.bodyBytes));
+          if (dec is Map && dec['correos_frecuentes'] is List) {
+            return (dec['correos_frecuentes'] as List)
+                .map((e) => e.toString().trim())
+                .where((e) => e.isNotEmpty)
+                .toList();
+          }
+        }
+      } catch (_) {}
+    }
+    return const [];
   }
 
 
@@ -1211,6 +1316,11 @@ class ApiService {
     final razon = (c['razon_social'] ?? nom).toString().trim();
     final correo = (c['correo'] ?? c['email'] ?? '').toString().trim();
     final dirBase = (c['direccion'] ?? '').toString().trim();
+    final rawFrec = (c['correos_frecuentes'] as List?)
+            ?.map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList() ??
+        const <String>[];
 
     final rawNested = (c['sucursales'] as List?) ?? (c['direcciones'] as List?) ?? const [];
     final seen = <String>{};
@@ -1252,6 +1362,7 @@ class ApiService {
       'razon_social': razon.isNotEmpty ? razon : nom,
       'correo': correo,
       'email': correo,
+      'correos_frecuentes': rawFrec,
       'direccion': dirBase,
       'sucursales': sucs,
       'direcciones': sucs,

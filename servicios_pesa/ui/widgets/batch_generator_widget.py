@@ -1540,6 +1540,7 @@ class _CatalogLoader(QThread):
     tipos_srv_ready  = pyqtSignal(list)   # [(id, nombre), ...]
     tipos_inst_ready = pyqtSignal(list)   # [(id, nombre), ...]
     marcas_modelos_ready = pyqtSignal(list) # [(marca, modelo), ...]
+    correos_ready    = pyqtSignal(dict)   # {key: [correo1, correo2, ...]}
     error            = pyqtSignal(str)
 
     def run(self) -> None:
@@ -1660,6 +1661,63 @@ class _CatalogLoader(QThread):
                 except Exception as exc_mm:
                     logger.warning("Marcas/modelos error: %s", exc_mm)
 
+                # Correos frecuentes por cliente y sucursal (precarga poka-yoke)
+                try:
+                    import re as _re_em
+                    _rx_em = _re_em.compile(r"^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$")
+                    _excl = {"ivancolin1207@gmail.com", "recepcion@basculaspesa.com.mx"}
+                    correos_map: dict[str, list[str]] = {}
+
+                    def _add_em(k_str: str, raw_em):
+                        if not raw_em or not k_str:
+                            return
+                        lst = correos_map.setdefault(k_str, [])
+                        seen_l = {x.lower() for x in lst}
+                        for tok in _re_em.split(r"[,;\s]+", str(raw_em).strip()):
+                            cand = tok.strip().strip("<>\"'()")
+                            low = cand.lower()
+                            if cand and low not in _excl and not low.startswith("pendiente") and _rx_em.match(cand) and low not in seen_l and len(lst) < 8:
+                                seen_l.add(low)
+                                lst.append(cand)
+
+                    with conn.cursor() as cur:
+                        try:
+                            cur.execute("SELECT id, COALESCE(email, '') FROM cat_clientes WHERE COALESCE(email, '') LIKE '%@%'")
+                            for cid_e, em_c in cur.fetchall():
+                                _add_em(f"cli:{int(cid_e)}", em_c)
+                        except Exception:
+                            conn.rollback()
+                        try:
+                            cur.execute("SELECT id, cliente_id, COALESCE(email, '') FROM cliente_sucursales WHERE COALESCE(email, '') LIKE '%@%'")
+                            for sid_e, cid_e, em_s in cur.fetchall():
+                                if sid_e is not None:
+                                    _add_em(f"suc:{int(sid_e)}", em_s)
+                                if cid_e is not None:
+                                    _add_em(f"cli:{int(cid_e)}", em_s)
+                        except Exception:
+                            conn.rollback()
+                        try:
+                            cur.execute(
+                                """
+                                SELECT id_cliente, sucursal_id,
+                                       COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), ''))
+                                FROM ordenes_servicio
+                                WHERE COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+                                ORDER BY updated_at DESC NULLS LAST, id DESC
+                                LIMIT 1200
+                                """
+                            )
+                            for cid_o, sid_o, em_o in cur.fetchall():
+                                if sid_o is not None:
+                                    _add_em(f"suc:{int(sid_o)}", em_o)
+                                if cid_o is not None:
+                                    _add_em(f"cli:{int(cid_o)}", em_o)
+                        except Exception:
+                            conn.rollback()
+                    self.correos_ready.emit(correos_map)
+                except Exception as exc_em:
+                    logger.debug("Correos frecuentes precarga omitida: %s", exc_em)
+
                 conn.commit()
             finally:
                 _db_pool.release_connection(conn)
@@ -1697,6 +1755,7 @@ class BatchGeneratorWidget(QWidget):
         self._marcas_modelos: list[tuple[str, str]] = []  # catálogo consolidado de marcas/modelos
         # Diccionario de sucursales precargadas: {cliente_id: [(sid, nom, dir), ...]}
         self._suc_map: dict[int, list] = {}
+        self._correos_map: dict[str, list[str]] = {}
         self._catalog_loader: Optional[_CatalogLoader] = None
 
         self._build_ui()
@@ -1962,6 +2021,49 @@ class BatchGeneratorWidget(QWidget):
         col_tec.addWidget(self.cmb_tecnico)
         row1.addLayout(col_tec, stretch=2)
         grid.addLayout(row1)
+
+        # ── Fila Correo del Cliente (opcional en oficina — se precarga automáticamente en la tablet) ──
+        self._frame_correo_cliente = QFrame()
+        self._frame_correo_cliente.setObjectName("frame_correo_cliente")
+        self._frame_correo_cliente.setStyleSheet("""
+            QFrame#frame_correo_cliente {
+                background: #FFFFFF;
+                border: 1px solid #E5E7EB;
+                border-radius: 10px;
+            }
+        """)
+        _correo_vlay = QVBoxLayout(self._frame_correo_cliente)
+        _correo_vlay.setContentsMargins(14, 10, 14, 10)
+        _correo_vlay.setSpacing(6)
+
+        _correo_top = QHBoxLayout()
+        _correo_top.setContentsMargins(0, 0, 0, 0)
+        _correo_top.setSpacing(12)
+        _correo_top.addWidget(_field_label("Correo del Cliente (se precargará en la tablet)"))
+        _lbl_correo_sub = QLabel("Opcional en oficina · Obligatorio en tablet antes de firmar")
+        _lbl_correo_sub.setStyleSheet("font-size: 11px; color: #6E6E73; background: transparent; border: none;")
+        _correo_top.addStretch()
+        _correo_top.addWidget(_lbl_correo_sub)
+        _correo_vlay.addLayout(_correo_top)
+
+        self.le_correo_cliente = QLineEdit()
+        self.le_correo_cliente.setPlaceholderText("cliente@empresa.com (puedes separar varios con coma o tocar un correo frecuente)")
+        self._correo_completer_model = QStringListModel([])
+        self._correo_completer = QCompleter(self._correo_completer_model, self)
+        self._correo_completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+        self._correo_completer.setFilterMode(Qt.MatchFlag.MatchContains)
+        self.le_correo_cliente.setCompleter(self._correo_completer)
+        _correo_vlay.addWidget(self.le_correo_cliente)
+
+        self._correos_chips_container = QWidget()
+        self._correos_chips_container.setStyleSheet("background: transparent; border: none;")
+        self._correos_chips_lay = QHBoxLayout(self._correos_chips_container)
+        self._correos_chips_lay.setContentsMargins(0, 2, 0, 0)
+        self._correos_chips_lay.setSpacing(6)
+        self._correos_chips_container.setVisible(False)
+        _correo_vlay.addWidget(self._correos_chips_container)
+
+        grid.addWidget(self._frame_correo_cliente)
 
         # ── Bloque condicional OSOCC: Destino de la Celda (Cliente o Stock / Taller Interno) ──
         self._frame_osocc_destino = QFrame()
@@ -2830,6 +2932,7 @@ class BatchGeneratorWidget(QWidget):
         loader.tipos_srv_ready.connect(self._on_tipos_srv_loaded)
         loader.tipos_inst_ready.connect(self._on_tipos_inst_loaded)
         loader.marcas_modelos_ready.connect(self._on_marcas_modelos_loaded)
+        loader.correos_ready.connect(self._on_correos_loaded)
         loader.error.connect(lambda msg: logger.warning("[Catalog] %s", msg))
         self._catalog_loader = loader
         loader.start()
@@ -2919,6 +3022,73 @@ class BatchGeneratorWidget(QWidget):
             for card in self._equipo_cards:
                 if hasattr(card, 'set_marcas_modelos'):
                     card.set_marcas_modelos(self._marcas_modelos)
+
+    @pyqtSlot(dict)
+    def _on_correos_loaded(self, correos_map: dict) -> None:
+        self._correos_map = dict(correos_map or {})
+        self._actualizar_sugerencias_correo_cliente()
+
+    def _actualizar_sugerencias_correo_cliente(self, auto_fill_if_empty: bool = False) -> None:
+        """Actualiza el QCompleter y los chips monocromáticos de correos frecuentes para el cliente/sucursal activo."""
+        if not hasattr(self, "le_correo_cliente") or not hasattr(self, "_correos_chips_lay"):
+            return
+        while self._correos_chips_lay.count():
+            item = self._correos_chips_lay.takeAt(0)
+            if item and item.widget():
+                item.widget().deleteLater()
+
+        cliente_id = self.cmb_cliente.currentData() if hasattr(self, "cmb_cliente") else None
+        sucursal_id = self.cmb_sucursal.currentData() if hasattr(self, "cmb_sucursal") and self.cmb_sucursal.currentIndex() > 0 else None
+
+        sugerencias: list[str] = []
+        seen_low: set[str] = set()
+        if sucursal_id is not None:
+            for em in self._correos_map.get(f"suc:{int(sucursal_id)}", []):
+                if em.lower() not in seen_low:
+                    seen_low.add(em.lower())
+                    sugerencias.append(em)
+        if cliente_id is not None:
+            for em in self._correos_map.get(f"cli:{int(cliente_id)}", []):
+                if em.lower() not in seen_low:
+                    seen_low.add(em.lower())
+                    sugerencias.append(em)
+
+        if hasattr(self, "_correo_completer_model"):
+            self._correo_completer_model.setStringList(sugerencias)
+
+        if not sugerencias:
+            self._correos_chips_container.setVisible(False)
+            return
+
+        lbl_frec = QLabel("Frecuentes:")
+        lbl_frec.setStyleSheet("font-size: 11px; font-weight: 600; color: #6E6E73; background: transparent; border: none;")
+        self._correos_chips_lay.addWidget(lbl_frec)
+
+        for em in sugerencias[:5]:
+            btn_chip = QPushButton(em)
+            btn_chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn_chip.setStyleSheet("""
+                QPushButton {
+                    background-color: #F8FAFC;
+                    color: #0F172A;
+                    border: 1px solid #CBD5E1;
+                    border-radius: 6px;
+                    padding: 3px 9px;
+                    font-size: 11.5px;
+                    font-weight: 600;
+                }
+                QPushButton:hover {
+                    background-color: #F1F5F9;
+                    border-color: #0F172A;
+                }
+            """)
+            btn_chip.clicked.connect(lambda _c=False, addr=em: self.le_correo_cliente.setText(addr))
+            self._correos_chips_lay.addWidget(btn_chip)
+
+        self._correos_chips_lay.addStretch()
+        self._correos_chips_container.setVisible(True)
+        if auto_fill_if_empty and not self.le_correo_cliente.text().strip() and len(sugerencias) == 1:
+            self.le_correo_cliente.setText(sugerencias[0])
 
     def sugerir_puntos_apoyo(self, def_pa: str) -> None:
         """Asigna los puntos de apoyo sugeridos según el tipo de instrumento seleccionado."""
@@ -3029,7 +3199,13 @@ class BatchGeneratorWidget(QWidget):
             self.cmb_sucursal.addItem("— Selecciona sucursal —", None)
             self.cmb_sucursal.setEnabled(False)
             self.cmb_sucursal.blockSignals(False)
+            if hasattr(self, "le_correo_cliente"):
+                self.le_correo_cliente.clear()
+            self._actualizar_sugerencias_correo_cliente()
             return
+
+        if hasattr(self, "le_correo_cliente"):
+            self.le_correo_cliente.clear()
 
         sucursales = self._suc_map.get(int(cliente_id), [])
         if sucursales:
@@ -3064,6 +3240,7 @@ class BatchGeneratorWidget(QWidget):
     def _on_sucursal_changed(self, index=0):
         """Carga el catálogo e historial de equipos del cliente/sucursal seleccionado para QCompleter."""
         self._on_params_changed()
+        self._actualizar_sugerencias_correo_cliente()
         if not hasattr(self, 'cmb_sucursal'):
             return
 
@@ -4396,12 +4573,20 @@ class BatchGeneratorWidget(QWidget):
             id_lote_nuevo = None  # FORMATOS INDIVIDUALES NUNCA LLEVAN ID DE LOTE
         self.id_lote_actual = id_lote_nuevo
 
+        correo_cli_pre = (
+            self.le_correo_cliente.text().strip()
+            if hasattr(self, "le_correo_cliente")
+            else ""
+        )
+
         datos_formato = {
             "modalidad":             self._modalidad,
             "tipo_doc":              self._tipo_doc or "OS",
             "id_lote":               id_lote_nuevo,
             "cliente":               cliente_nom,
             "id_cliente":            id_cliente,
+            "correo_cliente":        correo_cli_pre or None,
+            "correo_destino":        correo_cli_pre or None,
             "id_tecnico":            tecnico_id,
             "tecnico_nombre":        tecnico_nom,
             "id_tipo_instrumento":   int(id_tipo_inst_1) if id_tipo_inst_1 is not None else None,
@@ -4842,6 +5027,22 @@ class BatchGeneratorWidget(QWidget):
                             )
                         # Se agrega siempre para que el PDF se genere correctamente
                         folios.append(folio)
+
+                        # Persistir correo del cliente precargado desde oficina (se heredará en la tablet)
+                        _correo_pre_db = str(datos.get("correo_destino") or datos.get("correo_cliente") or "").strip()
+                        if _correo_pre_db and "@" in _correo_pre_db:
+                            try:
+                                cur.execute(
+                                    """
+                                    UPDATE ordenes_servicio
+                                    SET correo_destino = %s,
+                                        correo_cliente = %s
+                                    WHERE folio_os = %s
+                                    """,
+                                    (_correo_pre_db, _correo_pre_db, folio),
+                                )
+                            except Exception:
+                                pass
 
                         # Persistir marcas y modelos capturados en catalogo_marcas_modelos
                         if _equipos:

@@ -95,6 +95,11 @@ def _asegurar_columnas_correo_bd_sync(conn) -> None:
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ",
         "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cca_dve_pdf_checked BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_cancelacion TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cancelada_por TEXT",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_cancelacion TIMESTAMP",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sin_correo_cliente BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_sin_correo TEXT",
         "ALTER TABLE cliente_sucursales ADD COLUMN IF NOT EXISTS email TEXT",
     )
     for stmt in ddl:
@@ -1122,6 +1127,9 @@ class _DashboardLoader(QThread):
                     d.get("numero_cca", ""),
                     d.get("numero_dve", ""),
                     d.get("correo_cc", "recepcion@basculaspesa.com.mx"),
+                    d.get("motivo_cancelacion", ""),
+                    d.get("cancelada_por", ""),
+                    d.get("fecha_cancelacion", ""),
                 )
                 for d in rows_dicts
             ]
@@ -1169,11 +1177,15 @@ class _DashboardLoader(QThread):
                 SELECT
                     COUNT(*)                                                            AS total_periodo,
                     COUNT(*) FILTER (
-                        WHERE os.estado ILIKE '%%proceso%%'
-                           OR os.estado ILIKE 'abiert%%'
-                           OR os.estado ILIKE 'pendiente%%'
-                           OR os.estado ILIKE 'asignad%%'
-                           OR COALESCE(NULLIF(TRIM(os.estado), ''), '') = ''
+                        WHERE UPPER(TRIM(COALESCE(os.estatus, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+                          AND UPPER(TRIM(COALESCE(os.estado, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+                          AND (
+                               os.estado ILIKE '%%proceso%%'
+                            OR os.estado ILIKE 'abiert%%'
+                            OR os.estado ILIKE 'pendiente%%'
+                            OR os.estado ILIKE 'asignad%%'
+                            OR COALESCE(NULLIF(TRIM(os.estado), ''), '') = ''
+                          )
                     )                                                                   AS en_proceso,
                     COUNT(*) FILTER (
                         WHERE os.estado ILIKE '%%cerrad%%' OR os.estado ILIKE '%%finaliz%%'
@@ -1269,7 +1281,10 @@ class _DashboardLoader(QThread):
                 ubicacion_equipo,
                 numero_cca,
                 numero_dve,
-                correo_cc
+                correo_cc,
+                motivo_cancelacion,
+                cancelada_por,
+                fecha_cancelacion
             FROM (
                 -- Clave DISTINCT tolerante a id NULL: con DISTINCT ON (os.id) todas
                 -- las órdenes sin id se fusionaban en UNA sola fila.
@@ -1323,6 +1338,9 @@ class _DashboardLoader(QThread):
                     COALESCE(os.numero_cca, '')                           AS numero_cca,
                     COALESCE(os.numero_dve, '')                           AS numero_dve,
                     COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
+                    COALESCE(os.motivo_cancelacion, '')                   AS motivo_cancelacion,
+                    COALESCE(os.cancelada_por, '')                        AS cancelada_por,
+                    os.fecha_cancelacion::text                            AS fecha_cancelacion,
                     os.fecha
                 FROM ordenes_servicio os
                 LEFT JOIN cat_clientes       cl  ON os.id_cliente       = cl.id
@@ -1388,7 +1406,10 @@ class _DashboardLoader(QThread):
                     COALESCE(os.ubicacion, '') AS ubicacion_equipo,
                     COALESCE(os.numero_cca, '') AS numero_cca,
                     COALESCE(os.numero_dve, '') AS numero_dve,
-                    COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc
+                    COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
+                    COALESCE(os.motivo_cancelacion, '') AS motivo_cancelacion,
+                    COALESCE(os.cancelada_por, '') AS cancelada_por,
+                    os.fecha_cancelacion::text AS fecha_cancelacion
                 FROM ordenes_servicio os
                 LEFT JOIN cat_clientes          cl  ON os.id_cliente       = cl.id
                 LEFT JOIN cat_tecnicos          tc  ON os.id_tecnico       = tc.id
@@ -3349,7 +3370,10 @@ class DashboardWidget(QWidget):
                             COALESCE(os.ubicacion, '') AS ubicacion_equipo,
                             COALESCE(os.numero_cca, '') AS numero_cca,
                             COALESCE(os.numero_dve, '') AS numero_dve,
-                            COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc
+                            COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
+                            COALESCE(os.motivo_cancelacion, '') AS motivo_cancelacion,
+                            COALESCE(os.cancelada_por, '') AS cancelada_por,
+                            os.fecha_cancelacion::text AS fecha_cancelacion
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes       cl    ON os.id_cliente       = cl.id
                         LEFT JOIN cat_tecnicos       tc    ON os.id_tecnico       = tc.id
@@ -3404,7 +3428,10 @@ class DashboardWidget(QWidget):
                             COALESCE(os.ubicacion, '') AS ubicacion_equipo,
                             COALESCE(os.numero_cca, '') AS numero_cca,
                             COALESCE(os.numero_dve, '') AS numero_dve,
-                            COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc
+                            COALESCE(NULLIF(os.correo_cc, ''), 'recepcion@basculaspesa.com.mx') AS correo_cc,
+                            COALESCE(os.motivo_cancelacion, '') AS motivo_cancelacion,
+                            COALESCE(os.cancelada_por, '') AS cancelada_por,
+                            os.fecha_cancelacion::text AS fecha_cancelacion
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes      cl ON os.id_cliente       = cl.id
                         LEFT JOIN cat_tecnicos      tc ON os.id_tecnico       = tc.id
@@ -3690,15 +3717,40 @@ class DashboardWidget(QWidget):
         return (etiqueta, specs_str, cca, dve, info_correo)
 
     @staticmethod
+    def _is_row_cancelada(row) -> bool:
+        """Retorna True si la tupla row representa una orden marcada como CANCELADA / no utilizada."""
+        if not row:
+            return False
+        est_col = str(row[7] or "").strip().upper() if len(row) > 7 else ""
+        estatus_col = str(row[18] or "").strip().upper() if len(row) > 18 else ""
+        return est_col in ("CANCELADA", "CANCELADO") or estatus_col in ("CANCELADA", "CANCELADO")
+
+    @staticmethod
+    def _extraer_motivo_cancelacion_row(row) -> tuple[str, str, str]:
+        """Retorna (motivo, cancelada_por, fecha_cancelacion) desde la tupla row."""
+        if not row:
+            return ("", "", "")
+        motivo = str(row[31] or "").strip() if len(row) > 31 and row[31] is not None else ""
+        por = str(row[32] or "").strip() if len(row) > 32 and row[32] is not None else ""
+        fecha_c = str(row[33] or "").strip() if len(row) > 33 and row[33] is not None else ""
+        return (motivo, por, fecha_c)
+
+    @staticmethod
     def _extraer_info_correo_lote(grupo_ord: list) -> str:
         """
         Construye la etiqueta de trazabilidad de envío de correo para la cabecera de un lote
-        cuando sus documentos ya fueron enviados (o parcialmente enviados).
+        cuando sus documentos activos ya fueron enviados (excluyendo órdenes CANCELADA).
         """
         if not grupo_ord:
             return ""
-        enviados = [
+        activas_lote = [
             r for r in grupo_ord
+            if not DashboardWidget._is_row_cancelada(r)
+        ]
+        if not activas_lote:
+            return ""
+        enviados = [
+            r for r in activas_lote
             if (len(r) > 22 and bool(r[22])) or (len(r) > 24 and r[24] is not None and str(r[24]).strip())
         ]
         if not enviados:
@@ -3717,7 +3769,7 @@ class DashboardWidget(QWidget):
                 cc_mail = str(r[30]).strip()
 
         if not dest_mail:
-            for r in grupo_ord:
+            for r in activas_lote:
                 if len(r) > 23 and r[23] and str(r[23]).strip():
                     dest_mail = str(r[23]).strip()
                     break
@@ -3730,8 +3782,8 @@ class DashboardWidget(QWidget):
         })
         if not base_txt:
             return ""
-        if len(enviados) < len(grupo_ord):
-            return base_txt.replace("Enviado", f"Enviado ({len(enviados)}/{len(grupo_ord)} OS)", 1)
+        if len(enviados) < len(activas_lote):
+            return base_txt.replace("Enviado", f"Enviado ({len(enviados)}/{len(activas_lote)} OS)", 1)
         return base_txt
 
     def _build_folio_cell_widget(
@@ -3743,6 +3795,8 @@ class DashboardWidget(QWidget):
         is_batch_parent: bool = False,
         total_lote: int = 0,
         info_correo: str = "",
+        badge_lote_custom: str = "",
+        is_cancelled: bool = False,
     ) -> tuple[QWidget, str]:
         """
         Construye el QWidget estructurado en hasta 3 niveles para la celda FOLIO OS:
@@ -3769,13 +3823,24 @@ class DashboardWidget(QWidget):
 
         lbl_folio = QLabel(folio_base)
         lbl_folio.setStyleSheet(
-            "font-weight: 700; font-size: 12px; color: #0F172A; background: transparent; border: none;"
+            "font-weight: 600; font-size: 12px; color: #8E8E93; background: transparent; border: none;"
+            if is_cancelled
+            else "font-weight: 700; font-size: 12px; color: #0F172A; background: transparent; border: none;"
         )
         lbl_folio.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         top_lay.addWidget(lbl_folio)
 
-        if is_batch_parent and total_lote > 1:
-            lbl_cnt = QLabel(f"{total_lote} OS")
+        if is_cancelled:
+            lbl_canc = QLabel("Cancelada")
+            lbl_canc.setStyleSheet(
+                "background-color: #F8FAFC; color: #6E6E73; border: 1px solid #CBD5E1; "
+                "border-radius: 4px; padding: 2px 7px; font-size: 10.5px; font-weight: 600;"
+            )
+            lbl_canc.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            top_lay.addWidget(lbl_canc)
+
+        if is_batch_parent and (badge_lote_custom or total_lote > 1):
+            lbl_cnt = QLabel(badge_lote_custom or f"{total_lote} OS")
             lbl_cnt.setStyleSheet(_SOBER_BADGE_STYLE)
             lbl_cnt.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             top_lay.addWidget(lbl_cnt)
@@ -3992,6 +4057,9 @@ class DashboardWidget(QWidget):
         total_lote: int = 0,
         is_child: bool = False,
         info_correo: str = "",
+        badge_lote_custom: str = "",
+        is_cancelled: bool = False,
+        cancel_tooltip: str = "",
     ) -> None:
         """Rellena las columnas de un QTreeWidgetItem e inserta el QWidget multilínea (hasta 3 niveles) en FOLIO OS."""
         folio_base = (raw_folio or folio_text.split(" - ")[0]).strip()
@@ -4015,7 +4083,12 @@ class DashboardWidget(QWidget):
             is_batch_parent=is_batch_parent,
             total_lote=total_lote,
             info_correo=info_correo,
+            badge_lote_custom=badge_lote_custom,
+            is_cancelled=is_cancelled,
         )
+        if cancel_tooltip:
+            texto_completo = f"{texto_completo}\n{cancel_tooltip}"
+            cell_w.setToolTip(texto_completo)
         self._table.setItemWidget(item, self._COL_FOLIO, cell_w)
         item.setToolTip(self._COL_FOLIO, texto_completo)
 
@@ -4097,6 +4170,12 @@ class DashboardWidget(QWidget):
                 item.setText(self._COL_SERVICIO, servicio)
         item.setText(self._COL_MODAL,    modal_label)
         item.setText(self._COL_ESTADO,   estado_label)
+        if cancel_tooltip:
+            item.setToolTip(self._COL_ESTADO, cancel_tooltip)
+        if is_cancelled:
+            muted_brush = QBrush(QColor("#8E8E93"))
+            for _mc in (self._COL_FECHA, self._COL_CLIENTE, self._COL_SUCURSAL, self._COL_TECNICO):
+                item.setForeground(_mc, muted_brush)
 
         # Col 9: badge SYNC tipo WhatsApp
         check_val = sync_check_status or sync_label or "ASIGNADA"
@@ -4245,14 +4324,31 @@ class DashboardWidget(QWidget):
                     sync_check   = str(rep[13]) if len(rep) > 13 and rep[13] else "ASIGNADA"
                     
                     modal_label  = modalidad.capitalize() + " (Lote)"
-                    # Estatus del lote padre derivado de TODAS sus hijas:
-                    # 'Cerrado' solo si todas están cerradas; si no, 'Proceso'.
-                    if all(self._is_estado_cerrado(str(r[7] or "")) for r in grupo_ord):
+                    # Filtrar órdenes activas vs canceladas dentro del lote
+                    activas_grupo = [r for r in grupo_ord if not self._is_row_cancelada(r)]
+                    canceladas_grupo = [r for r in grupo_ord if self._is_row_cancelada(r)]
+                    cerradas_activas = [
+                        r for r in activas_grupo
+                        if self._is_estado_cerrado(str(r[7] or "")) or self._check_real_has_pdf(str(r[0] or ""), r)
+                    ]
+                    if len(canceladas_grupo) > 0:
+                        _suf_c = "cancelada" if len(canceladas_grupo) == 1 else "canceladas"
+                        badge_lote_str = f"{len(cerradas_activas)}/{len(activas_grupo)} activas ({len(canceladas_grupo)} {_suf_c})"
+                    else:
+                        badge_lote_str = f"{total_os} OS"
+
+                    # Estatus del lote padre derivado de sus órdenes ACTIVAS:
+                    # 'Cerrado' cuando todas las activas están cerradas (ej. 3/3 activas y 1 cancelada).
+                    if not activas_grupo:
+                        estado = "Cancelada"
+                        estado_label = "Cancelada"
+                    elif len(cerradas_activas) == len(activas_grupo):
                         estado = "Cerrado"
-                    elif self._is_estado_cerrado(estado):
+                        estado_label = "Cerrado"
+                    else:
                         estado = "Proceso"
-                    estado_label = self._estado_label(estado)
-                    sync_label   = self._get_sync_label(estado, sync_status)
+                        estado_label = self._estado_label(estado)
+                    sync_label = self._get_sync_label(estado, sync_status)
 
                     # Crear item padre
                     lote_info_mail = self._extraer_info_correo_lote(grupo_ord)
@@ -4265,30 +4361,36 @@ class DashboardWidget(QWidget):
                         total_lote=total_os,
                         is_child=False,
                         info_correo=lote_info_mail,
+                        badge_lote_custom=badge_lote_str,
+                        is_cancelled=(len(activas_grupo) == 0),
                     )
                     self._calcular_y_aplicar_altura_item(parent_item, is_child=False)
                     
-                    # Checkbox del lote con flags de PDF de sus integrantes
-                    folios_lote = [str(r[0]) for r in grupo_ord if r[0]]
-                    ids_lote = [r[8] for r in grupo_ord if len(r) > 8 and r[8]]
-                    flags_lote = [self._check_real_has_pdf(r[0], r) for r in grupo_ord]
-                    chk_p, _ = _make_chk(folios_lote, ids_lote, is_batch=True, pdf_flags=flags_lote)
+                    # Checkbox, ZIP y acciones de lote usan ÚNICAMENTE las órdenes activas (excluyendo CANCELADA)
+                    folios_todos_lote = [str(r[0]) for r in grupo_ord if r[0]]
+                    ids_todos_lote = [r[8] for r in grupo_ord if len(r) > 8 and r[8]]
+                    folios_lote = [str(r[0]) for r in activas_grupo if r[0]]
+                    ids_lote = [r[8] for r in activas_grupo if len(r) > 8 and r[8]]
+                    flags_lote = [self._check_real_has_pdf(r[0], r) for r in activas_grupo]
+                    chk_p, _chk_box_p = _make_chk(folios_lote, ids_lote, is_batch=True, pdf_flags=flags_lote)
+                    if not activas_grupo:
+                        _chk_box_p.setEnabled(False)
                     self._table.setItemWidget(parent_item, self._COL_CHK, chk_p)
 
-                    # Guardamos lista de folios y rango de consecutivos en parent_item para búsqueda
-                    consecs = [_extraer_consecutivo(f) for f in folios_lote if _extraer_consecutivo(f) is not None]
+                    # Guardamos lista completa de folios en parent_item para búsqueda rápida
+                    consecs = [_extraer_consecutivo(f) for f in folios_todos_lote if _extraer_consecutivo(f) is not None]
                     min_c = min(consecs) if consecs else None
                     max_c = max(consecs) if consecs else None
-                    parent_item.setData(self._COL_FOLIO, Qt.ItemDataRole.UserRole + 1, folios_lote)
+                    parent_item.setData(self._COL_FOLIO, Qt.ItemDataRole.UserRole + 1, folios_todos_lote)
                     parent_item.setData(self._COL_FOLIO, Qt.ItemDataRole.UserRole + 2, (min_c, max_c))
 
-                    # Acciones del lote → celda ACCIONES (col 10) de la fila padre
+                    # Acciones del lote → celda ACCIONES (col 10) de la fila padre (solo folios activos para PDF/Correo)
                     acts_p = self._build_action_cell_lote(
-                        lote_id=lote_id, all_os_ids=ids_lote, all_folios=folios_lote,
+                        lote_id=lote_id, all_os_ids=ids_todos_lote, all_folios=folios_lote,
                         folio_inicio=f_ini, folio_fin=f_fin,
                         modalidad=modalidad, estado=estado, sync_status=sync_status,
                         parent_item=parent_item,
-                        grupo_ord=grupo_ord,
+                        grupo_ord=activas_grupo,
                     )
                     self._set_action_cell(parent_item, acts_p)
 
@@ -4300,21 +4402,31 @@ class DashboardWidget(QWidget):
                         c_sync = str(row[11]) if len(row) > 11 and row[11] else "SYNCED"
                         c_sync_check = str(row[13]) if len(row) > 13 and row[13] else "ASIGNADA"
                         c_modal = str(row[6] or "").lower()
+                        c_is_canc = self._is_row_cancelada(row)
+                        c_motivo, c_por, c_fcanc = self._extraer_motivo_cancelacion_row(row)
 
-                        c_has_real_pdf = self._check_real_has_pdf(c_folio, row)
+                        c_has_real_pdf = False if c_is_canc else self._check_real_has_pdf(c_folio, row)
                         c_has_med = self._check_has_mediciones(row[17] if len(row) > 17 else None)
 
-                        # Si la orden proviene de tablet y no tiene PDF ni mediciones,
-                        # su badge de Estatus no debe mostrarse falsamente en verde "Cerrado",
-                        # sino en amarillo "En Proceso" / "Pendiente de Formato".
-                        is_tablet = ("digital" in c_modal or c_sync_check in ("SUBIDA_SERVIDOR", "AUDITADA_ADMIN", "RECIBIDA_TABLET"))
-                        if is_tablet and not c_has_real_pdf and not c_has_med:
-                            c_est_label = "Pendiente de Formato"
+                        c_etiqueta, c_specs, c_cca, c_dve, c_info_mail = self._extraer_orden_meta_de_row(row)
+                        c_canc_tt = ""
+                        if c_is_canc:
+                            c_est_label = "Cancelada"
+                            _mot_disp = c_motivo or "No utilizada en el lote"
+                            c_specs = f"No utilizada: {_mot_disp}" + (f" · Por: {c_por}" if c_por else "")
+                            c_canc_tt = f"Orden cancelada / no utilizada\nMotivo: {_mot_disp}"
+                            if c_por:
+                                c_canc_tt += f"\nRegistrado por: {c_por}"
+                            if c_fcanc:
+                                c_canc_tt += f"\nFecha: {c_fcanc[:16]}"
                         else:
-                            c_est_label = self._estado_label(c_est)
+                            is_tablet = ("digital" in c_modal or c_sync_check in ("SUBIDA_SERVIDOR", "AUDITADA_ADMIN", "RECIBIDA_TABLET"))
+                            if is_tablet and not c_has_real_pdf and not c_has_med:
+                                c_est_label = "Pendiente de Formato"
+                            else:
+                                c_est_label = self._estado_label(c_est)
 
                         c_sync_label = self._get_sync_label(c_est, c_sync)
-                        c_etiqueta, c_specs, c_cca, c_dve, c_info_mail = self._extraer_orden_meta_de_row(row)
 
                         child = QTreeWidgetItem(parent_item)
                         self._populate_tree_item(
@@ -4326,15 +4438,19 @@ class DashboardWidget(QWidget):
                             numero_cca=c_cca,
                             numero_dve=c_dve,
                             is_child=True,
-                            info_correo=c_info_mail,
+                            info_correo="" if c_is_canc else c_info_mail,
+                            is_cancelled=c_is_canc,
+                            cancel_tooltip=c_canc_tt,
                         )
                         self._calcular_y_aplicar_altura_item(child, is_child=True)
                         
-                        chk_c, _ = _make_chk([c_folio], [c_oid], is_batch=False, pdf_flags=[c_has_real_pdf])
+                        chk_c, _chk_box_c = _make_chk([c_folio], [c_oid], is_batch=False, pdf_flags=[c_has_real_pdf])
+                        if c_is_canc:
+                            _chk_box_c.setEnabled(False)
                         self._table.setItemWidget(child, self._COL_CHK, chk_c)
 
                         acts_child = self._build_action_cell(
-                            folio=c_folio, estado=c_est, os_id=c_oid,
+                            folio=c_folio, estado="CANCELADA" if c_is_canc else c_est, os_id=c_oid,
                             tiene_adjunto=bool(row[10]) if len(row) > 10 else False,
                             sync_status=c_sync, row_data=row,
                         )
@@ -4368,18 +4484,29 @@ class DashboardWidget(QWidget):
 
                     has_real_pdf = self._check_real_has_pdf(folio, row)
                     has_med      = self._check_has_mediciones(row[17] if len(row) > 17 else None)
+                    is_canc_ind  = self._is_row_cancelada(row)
+                    mot_ind, por_ind, fcanc_ind = self._extraer_motivo_cancelacion_row(row)
 
-                    # Si la orden proviene de tablet y no tiene PDF ni mediciones,
-                    # su badge de Estatus no debe mostrarse falsamente en verde "Cerrado",
-                    # sino en amarillo "En Proceso" / "Pendiente de Formato".
-                    is_tablet = ("digital" in modalidad.lower() or sync_check in ("SUBIDA_SERVIDOR", "AUDITADA_ADMIN", "RECIBIDA_TABLET"))
-                    if is_tablet and not has_real_pdf and not has_med:
-                        estado_label = "Pendiente de Formato"
+                    etiqueta_comp, specs_ind, num_cca, num_dve, info_mail_ind = self._extraer_orden_meta_de_row(row)
+                    canc_tt_ind = ""
+                    if is_canc_ind:
+                        has_real_pdf = False
+                        estado_label = "Cancelada"
+                        _m_ind = mot_ind or "No utilizada"
+                        specs_ind = f"No utilizada: {_m_ind}" + (f" · Por: {por_ind}" if por_ind else "")
+                        canc_tt_ind = f"Orden cancelada / no utilizada\nMotivo: {_m_ind}"
+                        if por_ind:
+                            canc_tt_ind += f"\nRegistrado por: {por_ind}"
+                        if fcanc_ind:
+                            canc_tt_ind += f"\nFecha: {fcanc_ind[:16]}"
                     else:
-                        estado_label = self._estado_label(estado)
+                        is_tablet = ("digital" in modalidad.lower() or sync_check in ("SUBIDA_SERVIDOR", "AUDITADA_ADMIN", "RECIBIDA_TABLET"))
+                        if is_tablet and not has_real_pdf and not has_med:
+                            estado_label = "Pendiente de Formato"
+                        else:
+                            estado_label = self._estado_label(estado)
 
                     sync_label   = self._get_sync_label(estado, sync_status)
-                    etiqueta_comp, specs_ind, num_cca, num_dve, info_mail_ind = self._extraer_orden_meta_de_row(row)
 
                     item = QTreeWidgetItem(self._table)
                     self._populate_tree_item(
@@ -4391,14 +4518,18 @@ class DashboardWidget(QWidget):
                         numero_cca=num_cca,
                         numero_dve=num_dve,
                         is_child=False,
-                        info_correo=info_mail_ind,
+                        info_correo="" if is_canc_ind else info_mail_ind,
+                        is_cancelled=is_canc_ind,
+                        cancel_tooltip=canc_tt_ind,
                     )
                     self._calcular_y_aplicar_altura_item(item, is_child=False)
-                    chk_w, _ = _make_chk([folio], [os_id], is_batch=False, pdf_flags=[has_real_pdf])
+                    chk_w, _chk_box_ind = _make_chk([folio], [os_id], is_batch=False, pdf_flags=[has_real_pdf])
+                    if is_canc_ind:
+                        _chk_box_ind.setEnabled(False)
                     self._table.setItemWidget(item, self._COL_CHK, chk_w)
 
                     acts = self._build_action_cell(
-                        folio=folio, estado=estado, os_id=os_id,
+                        folio=folio, estado="CANCELADA" if is_canc_ind else estado, os_id=os_id,
                         tiene_adjunto=bool(tiene_adj), sync_status=sync_status, row_data=row,
                     )
                     self._set_action_cell(item, acts)
@@ -4877,8 +5008,9 @@ class DashboardWidget(QWidget):
         lay.setContentsMargins(6, 0, 4, 0)
         lay.setSpacing(6)
 
-        has_real_pdf = self._check_real_has_pdf(folio, row_data)
-        is_osob_folio = str(folio or "").strip().upper().startswith(("OSOB-", "OSOCC-"))
+        is_canc_row = str(estado or "").strip().upper() in ("CANCELADA", "CANCELADO") or self._is_row_cancelada(row_data)
+        has_real_pdf = False if is_canc_row else self._check_real_has_pdf(folio, row_data)
+        is_osob_folio = str(folio or "").strip().upper().startswith(("OSOB-", "OSOCC-")) and not is_canc_row
         modalidad_row = str(row_data[6] or "FISICO").strip().upper() if row_data and len(row_data) > 6 else "FISICO"
 
         _BTN_SEC_STYLE = _BTN_TBL_SEC_QSS or """
@@ -4949,8 +5081,23 @@ class DashboardWidget(QWidget):
             btn_pdf.setToolTip(f"PDF aún no disponible para {folio}")
         lay.addWidget(btn_pdf)
 
-        # ── Acción 2: [ Descargar ] (si hay PDF) o [ Capturar ] (#C8102E) ────
-        if has_real_pdf:
+        # ── Acción 2: [ Descargar ] (si hay PDF), [ Reactivar ] (si cancelada) o [ Capturar ] (#C8102E) ────
+        if is_canc_row:
+            btn_canc_st = QPushButton("Reactivar" if self._is_admin() else "No usada")
+            btn_canc_st.setObjectName("btn_action_reactivar" if self._is_admin() else "btn_action_cancelled")
+            btn_canc_st.setFixedSize(92, 28)
+            if self._is_admin():
+                btn_canc_st.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn_canc_st.setStyleSheet(_BTN_SEC_STYLE)
+                btn_canc_st.setToolTip(f"Reactivar orden {folio} a EN_PROCESO")
+                btn_canc_st.clicked.connect(
+                    lambda _, fid=os_id, fl=folio: self._reactivar_orden_os(fid, fl)
+                )
+            else:
+                btn_canc_st.setEnabled(False)
+                btn_canc_st.setStyleSheet(_BTN_DISABLED_STYLE)
+            lay.addWidget(btn_canc_st)
+        elif has_real_pdf:
             btn_dl = QPushButton("Descargar")
             btn_dl.setObjectName("btn_action_download")
             btn_dl.setFixedSize(92, 28)
@@ -4987,27 +5134,41 @@ class DashboardWidget(QWidget):
         menu_more = QMenu(btn_more)
         menu_more.setStyleSheet(_menu_style)
 
-        if not has_real_pdf and is_osob_folio:
-            act_dl_osob = QAction("Descargar PDF", menu_more)
-            act_dl_osob.triggered.connect(
-                lambda _, fid=os_id, fl=folio, rd=row_data: self._descargar_pdf_os(fid, fl, row_data=rd)
-            )
-            menu_more.addAction(act_dl_osob)
+        if is_canc_row:
+            if self._is_admin():
+                act_react = QAction("Reactivar orden", menu_more)
+                act_react.triggered.connect(
+                    lambda _, fid=os_id, fl=folio: self._reactivar_orden_os(fid, fl)
+                )
+                menu_more.addAction(act_react)
+        else:
+            if not has_real_pdf and is_osob_folio:
+                act_dl_osob = QAction("Descargar PDF", menu_more)
+                act_dl_osob.triggered.connect(
+                    lambda _, fid=os_id, fl=folio, rd=row_data: self._descargar_pdf_os(fid, fl, row_data=rd)
+                )
+                menu_more.addAction(act_dl_osob)
 
-        lbl_mail = "Reenviar correo" if email_enviado else "Enviar por correo"
-        act_mail = QAction(lbl_mail, menu_more)
-        act_mail.triggered.connect(
-            lambda _, fl=folio, oid=os_id, em=correo_cliente, env=email_enviado:
-                self._on_click_email_os(fl, oid, em, env, None)
-        )
-        menu_more.addAction(act_mail)
-
-        if has_real_pdf:
-            act_rehacer = QAction("Rehacer captura / reemitir PDF", menu_more)
-            act_rehacer.triggered.connect(
-                lambda _, fid=os_id, fl=folio, rd=row_data: self._abrir_captura_digital(fid, fl, rd)
+            lbl_mail = "Reenviar correo" if email_enviado else "Enviar por correo"
+            act_mail = QAction(lbl_mail, menu_more)
+            act_mail.triggered.connect(
+                lambda _, fl=folio, oid=os_id, em=correo_cliente, env=email_enviado:
+                    self._on_click_email_os(fl, oid, em, env, None)
             )
-            menu_more.addAction(act_rehacer)
+            menu_more.addAction(act_mail)
+
+            if has_real_pdf:
+                act_rehacer = QAction("Rehacer captura / reemitir PDF", menu_more)
+                act_rehacer.triggered.connect(
+                    lambda _, fid=os_id, fl=folio, rd=row_data: self._abrir_captura_digital(fid, fl, rd)
+                )
+                menu_more.addAction(act_rehacer)
+            else:
+                act_marcar_no_uso = QAction("Marcar como no utilizada (Cancelar)", menu_more)
+                act_marcar_no_uso.triggered.connect(
+                    lambda _, fid=os_id, fl=folio: self._cancelar_orden_os(fid, fl)
+                )
+                menu_more.addAction(act_marcar_no_uso)
 
         if self._is_admin() and os_id:
             menu_more.addSeparator()
@@ -5036,6 +5197,117 @@ class DashboardWidget(QWidget):
         lay.addWidget(btn_more)
         lay.addStretch()
         return container
+
+    def _cancelar_orden_os(self, os_id, folio: str) -> None:
+        """Marca una orden sobrante no utilizada como CANCELADA sin eliminar el consecutivo de BD."""
+        from PyQt6.QtWidgets import QInputDialog
+        clean_folio = str(folio or "").strip()
+        if not clean_folio:
+            return
+        motivos = [
+            "Se asignaron folios de más",
+            "Equipo fuera de servicio / no disponible",
+            "Cliente canceló servicio de este equipo",
+            "Otro motivo",
+        ]
+        motivo_sel, ok = QInputDialog.getItem(
+            self,
+            f"Descartar orden no utilizada — {clean_folio}",
+            f"Selecciona el motivo por el que la orden {clean_folio} no se utilizó\n"
+            f"(el consecutivo se conservará en BD para auditoría):",
+            motivos,
+            0,
+            False,
+        )
+        if not ok or not motivo_sel:
+            return
+        if motivo_sel == "Otro motivo":
+            txt_otro, ok2 = QInputDialog.getText(
+                self, f"Motivo — {clean_folio}", "Describe brevemente el motivo:"
+            )
+            if not ok2:
+                return
+            motivo_sel = txt_otro.strip() or "No utilizada en el lote"
+
+        usuario_txt = "Administrador"
+        try:
+            from auth.session_context import session as _sess
+            if _sess and getattr(_sess, "nombre_completo", None):
+                usuario_txt = str(_sess.nombre_completo)
+        except Exception:
+            pass
+
+        if _DEPS_OK and _db_pool:
+            try:
+                conn = _db_pool.get_connection()
+                try:
+                    _asegurar_columnas_correo_bd_sync(conn)
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE ordenes_servicio
+                            SET estatus            = 'CANCELADA',
+                                estado             = 'CANCELADA',
+                                motivo_cancelacion = %s,
+                                cancelada_por      = %s,
+                                fecha_cancelacion  = NOW(),
+                                sync_version       = COALESCE(sync_version, 0) + 1,
+                                updated_at         = NOW()
+                            WHERE folio_os = %s OR id = %s
+                            """,
+                            (motivo_sel, usuario_txt, clean_folio, os_id),
+                        )
+                    conn.commit()
+                finally:
+                    _db_pool.release_connection(conn)
+            except Exception as exc_c:
+                QMessageBox.warning(self, "Error", f"No se pudo cancelar la orden {clean_folio}:\n{exc_c}")
+                return
+        self.refresh_data()
+
+    def _reactivar_orden_os(self, os_id, folio: str) -> None:
+        """Reactiva una orden CANCELADA devolviéndola a EN_PROCESO (Solo Admin)."""
+        if not self._is_admin():
+            QMessageBox.warning(self, "Acceso restringido", "Solo un Administrador puede reactivar órdenes canceladas.")
+            return
+        clean_folio = str(folio or "").strip()
+        resp = QMessageBox.question(
+            self,
+            f"Reactivar orden — {clean_folio}",
+            f"¿Deseas reactivar la orden {clean_folio} y devolverla a estado En Proceso?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if resp != QMessageBox.StandardButton.Yes:
+            return
+
+        if _DEPS_OK and _db_pool:
+            try:
+                conn = _db_pool.get_connection()
+                try:
+                    _asegurar_columnas_correo_bd_sync(conn)
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE ordenes_servicio
+                            SET estatus            = 'Asignada',
+                                estado             = 'EN_PROCESO',
+                                motivo_cancelacion = NULL,
+                                cancelada_por      = NULL,
+                                fecha_cancelacion  = NULL,
+                                sync_version       = COALESCE(sync_version, 0) + 1,
+                                updated_at         = NOW()
+                            WHERE folio_os = %s OR id = %s
+                            """,
+                            (clean_folio, os_id),
+                        )
+                    conn.commit()
+                finally:
+                    _db_pool.release_connection(conn)
+            except Exception as exc_r:
+                QMessageBox.warning(self, "Error", f"No se pudo reactivar la orden {clean_folio}:\n{exc_r}")
+                return
+        self.refresh_data()
 
     # =========================================================================
     # Manejadores y Slots de Envío de Correo (Órdenes y Lotes)
@@ -5610,6 +5882,8 @@ class DashboardWidget(QWidget):
                             LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
                             LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
                             WHERE os.folio_os = ANY(%s)
+                              AND UPPER(TRIM(COALESCE(os.estatus, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+                              AND UPPER(TRIM(COALESCE(os.estado, ''))) NOT IN ('CANCELADA', 'CANCELADO')
                             ORDER BY (COALESCE(NULLIF(os.pdf_b64, ''), NULLIF(os.pdf_base64, '')) IS NOT NULL) DESC,
                                      os.updated_at DESC NULLS LAST
                             """,
@@ -5635,6 +5909,8 @@ class DashboardWidget(QWidget):
                             LEFT JOIN cat_clientes cl ON os.id_cliente = cl.id
                             LEFT JOIN cat_tipo_servicio ts ON os.id_tipo_servicio = ts.id
                             WHERE os.id_lote = %s
+                              AND UPPER(TRIM(COALESCE(os.estatus, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+                              AND UPPER(TRIM(COALESCE(os.estado, ''))) NOT IN ('CANCELADA', 'CANCELADO')
                             ORDER BY os.folio_os ASC
                             """,
                             (str(lote_id or "").strip(),)

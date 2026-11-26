@@ -18,6 +18,7 @@ import '../services/rma_pdf_service.dart';
 import '../services/sync_service.dart';
 import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
+import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/signature_shield.dart';
 import 'observaciones_bascula_screen.dart';
 import 'observaciones_celda_screen.dart';
@@ -85,6 +86,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
   );
 
   late final TabController _tabFirmasCtrl;
+  late final ClienteCorreoController _correoCtrl = ClienteCorreoController();
   bool _saving = false;
   Uint8List? _firmaTecnicoExistente;
 
@@ -120,6 +122,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     _tabFirmasCtrl = TabController(length: 2, vsync: this);
     if (!_esOsocc && !_esOsob) {
       _cargarDatosIniciales();
+      _correoCtrl.inicializarDesdeOrden(widget.orden);
     }
   }
 
@@ -134,6 +137,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     _ctrlFirmaTecnico.dispose();
     _ctrlFirmaCliente.dispose();
     _tabFirmasCtrl.dispose();
+    _correoCtrl.dispose();
     super.dispose();
   }
 
@@ -355,11 +359,22 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
       return;
     }
 
-    // 3. Validar receptor y firma del cliente
+    // 3. Validar receptor, correo poka-yoke y firma del cliente
     final nombreReceptor = _nombreReceptorCtrl.text.trim();
     if (!exigirNombreRecibe(context, nombreReceptor)) {
       setState(() => _errNombreRecibe = true);
       _tabFirmasCtrl.animateTo(1);
+      return;
+    }
+
+    if (!_correoCtrl.isValido) {
+      _tabFirmasCtrl.animateTo(1);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: _red,
+          content: Text(kMsgPokaYokeCorreo),
+        ),
+      );
       return;
     }
 
@@ -388,6 +403,15 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
       ordenMutable['firma_cliente_nombre'] = nombreReceptor;
       ordenMutable['puesto_ing'] = _puestoReceptorCtrl.text.trim();
       ordenMutable['observaciones'] = _observacionesCtrl.text.trim();
+      final String loteIdRma = (widget.orden['id_lote'] ?? widget.orden['lote'] ?? '').toString().trim();
+      final String correoCapturado = await _correoCtrl.persistirEnOrdenYLote(
+        folio: folio,
+        loteId: loteIdRma,
+        ordenMutable: ordenMutable,
+      );
+      if (loteIdRma.isNotEmpty && nombreReceptor.isNotEmpty) {
+        LoteSession.registrarResponsable(loteIdRma, nombreReceptor, puesto: _puestoReceptorCtrl.text.trim());
+      }
       final rmaData = ordenMutable;
 
       widget.orden['fecha'] = fechaEjecucionHoy;
@@ -430,6 +454,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
         firmaCliBase64: firmaCliB64 ?? '',
         nombreIng: nombreReceptor,
         puestoIng: _puestoReceptorCtrl.text.trim(),
+        correoCliente: correoCapturado.isNotEmpty ? correoCapturado : null,
         fechaEjecucion: fechaEjecucionHoy,
         fechaCierre: fechaCierreIso,
         fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
@@ -452,6 +477,8 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
             'refacciones': itemsValidos,
             'nombre_receptor': nombreReceptor,
             'puesto_receptor': _puestoReceptorCtrl.text.trim(),
+            'correo_cliente': correoCapturado,
+            'correo_destino': correoCapturado,
           },
         );
       } catch (_) {}
@@ -650,7 +677,11 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 10),
+          ClienteCorreoPokaYokeCard(
+            controller: _correoCtrl,
+            loteId: (widget.orden['id_lote'] ?? widget.orden['lote'])?.toString(),
+          ),
           SizedBox(
             height: 150,
             width: double.infinity,
@@ -706,27 +737,36 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
           const SizedBox(width: 8),
         ],
       ),
-      bottomNavigationBar: SafeArea(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            border: Border(top: BorderSide(color: PesaColors.border)),
-          ),
-          child: ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _red,
-              foregroundColor: Colors.white,
-              minimumSize: const Size.fromHeight(48),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      bottomNavigationBar: AnimatedBuilder(
+        animation: _correoCtrl,
+        builder: (context, _) => SafeArea(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              border: Border(top: BorderSide(color: PesaColors.border)),
             ),
-            onPressed: _saving ? null : _finalizarRemision,
-            icon: _saving
-                ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                : const Icon(Icons.assignment_turned_in_rounded),
-            label: Text(
-              _saving ? 'Generando PDF y Firmando...' : 'Finalizar y Generar PDF Oficial',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ClienteCorreoLockBanner(controller: _correoCtrl),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _red,
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: (_saving || !_correoCtrl.isValido) ? null : _finalizarRemision,
+                  icon: _saving
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                      : const Icon(Icons.assignment_turned_in_rounded),
+                  label: Text(
+                    _saving ? 'Generando PDF y Firmando...' : 'Finalizar y Generar PDF Oficial',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                ),
+              ],
             ),
           ),
         ),

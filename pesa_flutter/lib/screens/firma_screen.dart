@@ -20,6 +20,7 @@ import '../services/auth_service.dart';
 import '../services/firma_tecnico_service.dart';
 import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
+import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/pesa_components.dart';
 import '../widgets/signature_shield.dart';
 
@@ -45,6 +46,7 @@ class _FirmaScreenState extends State<FirmaScreen>
   // ── Campos de texto para el ingeniero/cliente ─────────────────────────────
   final _nombreIngCtrl = TextEditingController();
   final _puestoIngCtrl = TextEditingController();
+  final _correoCtrl    = ClienteCorreoController();
   final _formKey        = GlobalKey<FormState>();
 
   bool _saving = false;
@@ -68,6 +70,7 @@ class _FirmaScreenState extends State<FirmaScreen>
     if (initialPuesto.isNotEmpty) {
       _puestoIngCtrl.text = initialPuesto;
     }
+    _correoCtrl.inicializarDesdeOrden(widget.capturaData);
     _cargarFirmasExistentes();
     _cargarContactosPlanta();
   }
@@ -138,12 +141,23 @@ class _FirmaScreenState extends State<FirmaScreen>
       }
     } else if (widget.osId > 0) {
       final osRow = await LocalDbService.instance.getOs(widget.osId);
+      if (osRow != null) {
+        await _correoCtrl.inicializarDesdeOrden({...osRow, ...widget.capturaData});
+      }
       final cliDb = (osRow?['firma_cliente'] ?? osRow?['firma_cliente_b64'] ?? '').toString().trim();
       if (cliDb.length > 50 && mounted) {
         setState(() {
           _firmaCliPrecargada = true;
           _firmaCliBase64Guardada = cliDb;
         });
+      }
+    } else {
+      final fol = (widget.capturaData['folio_os'] ?? widget.capturaData['folio'] ?? '').toString().trim();
+      if (fol.isNotEmpty) {
+        final osRow = await LocalDbService.instance.getOsByFolio(fol);
+        if (osRow != null) {
+          await _correoCtrl.inicializarDesdeOrden({...osRow, ...widget.capturaData});
+        }
       }
     }
   }
@@ -154,6 +168,7 @@ class _FirmaScreenState extends State<FirmaScreen>
     _ctrlCliente.dispose();
     _nombreIngCtrl.dispose();
     _puestoIngCtrl.dispose();
+    _correoCtrl.dispose();
     _tabCtrl.dispose();
     super.dispose();
   }
@@ -380,175 +395,188 @@ class _FirmaScreenState extends State<FirmaScreen>
   // ── Tab 2 — Firma del Ingeniero / Cliente ─────────────────────────────────
 
   Widget _buildTabCliente() {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Encabezado
-          Row(children: [
-            const Icon(Icons.person_outline, color: _red),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: Text('Firma del Ingeniero de Planta / Cliente',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
-            ),
-            _firmaCliPrecargada
-                ? _badgePrecargada('Validada')
-                : _firmaEstadoBadge(_ctrlCliente),
-          ]),
-          const SizedBox(height: 12),
-
-          // Campos de nombre y puesto (apilados en cover < 600dp, 2 cols en desplegado)
-          FoldableTwoColumn(
-            firstFlex: 3,
-            secondFlex: 2,
-            horizontalGap: 10,
-            verticalGap: 10,
-            first: TextFormField(
-              controller: _nombreIngCtrl,
-              textCapitalization: TextCapitalization.words,
-              autovalidateMode: AutovalidateMode.onUserInteraction,
-              decoration: const InputDecoration(
-                labelText: 'Nombre de quien recibe *',
-                hintText: 'Ing. Juan Pérez',
-                prefixIcon: Icon(Icons.badge_outlined),
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-              validator: validarNombreRecibe,
-            ),
-            second: TextFormField(
-              controller: _puestoIngCtrl,
-              textCapitalization: TextCapitalization.words,
-              decoration: const InputDecoration(
-                labelText: 'Puesto / Cargo',
-                hintText: 'Jefe de Produccion',
-                prefixIcon: Icon(Icons.work_outline),
-                border: OutlineInputBorder(),
-                isDense: true,
-              ),
-            ),
-          ),
-          // Chip de sugerencia de sesión de lote (si otra orden del mismo lote ya registró responsable)
-          Builder(
-            builder: (context) {
-              final String loteId = (widget.capturaData['id_lote'] ?? widget.capturaData['lote'] ?? '').toString().trim();
-              final String? respLote = LoteSession.getUltimoResponsable(loteId);
-              final String? puestoLote = LoteSession.getUltimoPuesto(loteId);
-              if (respLote == null || respLote.isEmpty) return const SizedBox.shrink();
-              return Padding(
-                padding: const EdgeInsets.only(top: 6.0),
-                child: Row(
-                  children: [
-                    const Icon(Icons.layers, size: 14, color: _red),
-                    const SizedBox(width: 4),
-                    const Text('Responsable del Lote: ',
-                        style: TextStyle(fontSize: 11, color: _red, fontWeight: FontWeight.bold)),
-                    ActionChip(
-                      visualDensity: VisualDensity.compact,
-                      backgroundColor: PesaColors.surfaceMuted,
-                      side: const BorderSide(color: _red),
-                      avatar: const Icon(Icons.touch_app, size: 13, color: _red),
-                      label: Text(respLote, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary)),
-                      onPressed: () {
-                        setState(() {
-                          _nombreIngCtrl.text = respLote;
-                          if (puestoLote != null && puestoLote.isNotEmpty) {
-                            _puestoIngCtrl.text = puestoLote;
-                          }
-                        });
-                      },
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          if (_contactosSugeridos.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Row(
+    final String loteId = (widget.capturaData['id_lote'] ?? widget.capturaData['lote'] ?? '').toString().trim();
+    return SigningScrollLock(
+      builder: (ctx, scrollPhysics, _) => LayoutBuilder(
+        builder: (context, constraints) {
+          final double canvasHeight = (constraints.maxHeight - 330).clamp(180.0, 320.0);
+          return SingleChildScrollView(
+            physics: scrollPhysics,
+            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Icon(Icons.history, size: 14, color: Colors.grey),
-                const SizedBox(width: 4),
-                const Text('Contactos registrados en planta: ',
-                    style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500)),
-                Expanded(
-                  child: SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: _contactosSugeridos.map((contacto) {
-                        final isSelected = _nombreIngCtrl.text.trim().toLowerCase() == contacto.toLowerCase();
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6),
-                          child: ActionChip(
+                // Encabezado
+                Row(children: [
+                  const Icon(Icons.person_outline, color: _red),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text('Firma del Ingeniero de Planta / Cliente',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  ),
+                  _firmaCliPrecargada
+                      ? _badgePrecargada('Validada')
+                      : _firmaEstadoBadge(_ctrlCliente),
+                ]),
+                const SizedBox(height: 12),
+
+                // Campos de nombre y puesto (apilados en cover < 600dp, 2 cols en desplegado)
+                FoldableTwoColumn(
+                  firstFlex: 3,
+                  secondFlex: 2,
+                  horizontalGap: 10,
+                  verticalGap: 10,
+                  first: TextFormField(
+                    controller: _nombreIngCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre de quien recibe *',
+                      hintText: 'Ing. Juan Pérez',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    validator: validarNombreRecibe,
+                  ),
+                  second: TextFormField(
+                    controller: _puestoIngCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Puesto / Cargo',
+                      hintText: 'Jefe de Produccion',
+                      prefixIcon: Icon(Icons.work_outline),
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                  ),
+                ),
+                // Chip de sugerencia de sesión de lote (si otra orden del mismo lote ya registró responsable)
+                Builder(
+                  builder: (context) {
+                    final String? respLote = LoteSession.getUltimoResponsable(loteId);
+                    final String? puestoLote = LoteSession.getUltimoPuesto(loteId);
+                    if (respLote == null || respLote.isEmpty) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 6.0),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.layers, size: 14, color: _red),
+                          const SizedBox(width: 4),
+                          const Text('Responsable del Lote: ',
+                              style: TextStyle(fontSize: 11, color: _red, fontWeight: FontWeight.bold)),
+                          ActionChip(
                             visualDensity: VisualDensity.compact,
-                            backgroundColor: isSelected ? PesaColors.surfaceMuted : Colors.white,
-                            side: BorderSide(color: isSelected ? _red : PesaColors.borderStrong),
-                            avatar: Icon(Icons.person_outline, size: 13, color: isSelected ? _red : PesaColors.textSecondary),
-                            label: Text(contacto, style: TextStyle(fontSize: 11.5, color: isSelected ? _red : PesaColors.textPrimary, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500)),
+                            backgroundColor: PesaColors.surfaceMuted,
+                            side: const BorderSide(color: _red),
+                            avatar: const Icon(Icons.touch_app, size: 13, color: _red),
+                            label: Text(respLote, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary)),
                             onPressed: () {
                               setState(() {
-                                _nombreIngCtrl.text = contacto;
+                                _nombreIngCtrl.text = respLote;
+                                if (puestoLote != null && puestoLote.isNotEmpty) {
+                                  _puestoIngCtrl.text = puestoLote;
+                                }
                               });
                             },
                           ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
+                if (_contactosSugeridos.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      const Icon(Icons.history, size: 14, color: Colors.grey),
+                      const SizedBox(width: 4),
+                      const Text('Contactos registrados en planta: ',
+                          style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500)),
+                      Expanded(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: _contactosSugeridos.map((contacto) {
+                              final isSelected = _nombreIngCtrl.text.trim().toLowerCase() == contacto.toLowerCase();
+                              return Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: ActionChip(
+                                  visualDensity: VisualDensity.compact,
+                                  backgroundColor: isSelected ? PesaColors.surfaceMuted : Colors.white,
+                                  side: BorderSide(color: isSelected ? _red : PesaColors.borderStrong),
+                                  avatar: Icon(Icons.person_outline, size: 13, color: isSelected ? _red : PesaColors.textSecondary),
+                                  label: Text(contacto, style: TextStyle(fontSize: 11.5, color: isSelected ? _red : PesaColors.textPrimary, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500)),
+                                  onPressed: () {
+                                    setState(() {
+                                      _nombreIngCtrl.text = contacto;
+                                    });
+                                  },
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 12),
+
+                // ── CANDADO POKA-YOKE: Correo del Cliente obligatorio justo encima del pad de firma ──
+                ClienteCorreoPokaYokeCard(
+                  controller: _correoCtrl,
+                  loteId: loteId,
+                ),
+
+                // Si la firma ya fue sincronizada previamente, mostrar estado validado
+                if (_firmaCliPrecargada) ...[
+                  PesaCard(
+                    padding: const EdgeInsets.all(24),
+                    child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+                      const PesaStatusBadge(
+                        label: 'Firma del cliente validada',
+                        dotColor: PesaColors.dotGreen,
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Firma del Cliente registrada previamente',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: PesaColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Esta orden ya cuenta con la firma del cliente sincronizada.\n'
+                        'No es necesario volver a solicitarla.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: PesaColors.textSecondary, fontSize: 13),
+                      ),
+                      const SizedBox(height: 18),
+                      OutlinedButton.icon(
+                        onPressed: () => setState(() {
+                          _firmaCliPrecargada     = false;
+                          _firmaCliBase64Guardada = null;
+                          _ctrlCliente.clear();
+                        }),
+                        icon: const Icon(Icons.edit_outlined, size: 16),
+                        label: const Text('Volver a firmar en esta orden'),
+                      ),
+                    ]),
+                  ),
+                ] else ...[
+                  SizedBox(height: canvasHeight, child: _buildCanvas(_ctrlCliente)),
+                  const SizedBox(height: 10),
+                  _buildClearBtn(_ctrlCliente, 'Cliente'),
+                ],
               ],
             ),
-          ],
-          const SizedBox(height: 12),
-
-          // Si la firma ya fue sincronizada previamente, mostrar estado validado
-          if (_firmaCliPrecargada) ...[
-            Expanded(
-              child: PesaCard(
-                padding: const EdgeInsets.all(24),
-                child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const PesaStatusBadge(
-                    label: 'Firma del cliente validada',
-                    dotColor: PesaColors.dotGreen,
-                  ),
-                  const SizedBox(height: 14),
-                  const Text(
-                    'Firma del Cliente registrada previamente',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 15,
-                      color: PesaColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    'Esta orden ya cuenta con la firma del cliente sincronizada.\n'
-                    'No es necesario volver a solicitarla.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: PesaColors.textSecondary, fontSize: 13),
-                  ),
-                  const SizedBox(height: 18),
-                  OutlinedButton.icon(
-                    onPressed: () => setState(() {
-                      _firmaCliPrecargada     = false;
-                      _firmaCliBase64Guardada = null;
-                      _ctrlCliente.clear();
-                    }),
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: const Text('Volver a firmar en esta orden'),
-                  ),
-                ]),
-              ),
-            ),
-          ] else ...[
-            Expanded(child: _buildCanvas(_ctrlCliente)),
-            const SizedBox(height: 10),
-            _buildClearBtn(_ctrlCliente, 'Cliente'),
-          ],
-        ],
+          );
+        },
       ),
     );
   }
@@ -594,70 +622,86 @@ class _FirmaScreenState extends State<FirmaScreen>
   // ── Barra de accion final ─────────────────────────────────────────────────
 
   Widget _buildActionBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
-              blurRadius: 12,
-              offset: const Offset(0, -3))
-        ],
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Row(children: [
-              _progressChip('Técnico', _ctrlTecnico, isPrecargada: _firmaTecPrecargada),
-              const SizedBox(width: 8),
-              _progressChip('Ing./Cliente', _ctrlCliente, isPrecargada: _firmaCliPrecargada),
-            ]),
+    return AnimatedBuilder(
+      animation: _correoCtrl,
+      builder: (_, __) {
+        final bool bloqueadoPorCorreo = !_correoCtrl.isValido;
+        return Container(
+          decoration: const BoxDecoration(
+            color: PesaColors.surface,
+            border: Border(top: BorderSide(color: PesaColors.border)),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
-            child: SafeArea(
-              child: Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                alignment: WrapAlignment.end,
-                children: [
-                  OutlinedButton.icon(
-                    icon: const Icon(Icons.refresh),
-                    label: const Text("Reintentar / Modificar"),
-                    onPressed: () {
-                      if (context.canPop()) {
-                        context.pop();
-                      } else {
-                        context.go('/os');
-                      }
-                    },
-                  ),
-                  ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFB81D24),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  children: [
+                    _progressChip('Técnico', _ctrlTecnico, isPrecargada: _firmaTecPrecargada),
+                    _progressChip('Ing./Cliente', _ctrlCliente, isPrecargada: _firmaCliPrecargada),
+                    PesaStatusBadge(
+                      label: _correoCtrl.isValido ? 'Correo: Listo' : 'Correo: Pendiente',
+                      dotColor: _correoCtrl.isValido ? PesaColors.dotGreen : PesaColors.dotRed,
                     ),
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 20, height: 20,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
-                        : const Icon(Icons.picture_as_pdf),
-                    label: const Text("📑 Regenerar y Reemitir PDF",
-                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
-                    onPressed: _saving ? null : _onFinalizar,
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+                child: ClienteCorreoLockBanner(controller: _correoCtrl),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+                child: SafeArea(
+                  top: false,
+                  child: Wrap(
+                    spacing: 12,
+                    runSpacing: 10,
+                    alignment: WrapAlignment.end,
+                    children: [
+                      OutlinedButton.icon(
+                        icon: const Icon(Icons.arrow_back_rounded, size: 18),
+                        label: const Text('Volver a Captura'),
+                        onPressed: () {
+                          if (context.canPop()) {
+                            context.pop();
+                          } else {
+                            context.go('/os');
+                          }
+                        },
+                      ),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: PesaColors.brand,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: PesaColors.surfaceMuted,
+                          disabledForegroundColor: PesaColors.textTertiary,
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                        ),
+                        icon: _saving
+                            ? const SizedBox(
+                                width: 18, height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : Icon(bloqueadoPorCorreo ? Icons.lock_outline_rounded : Icons.picture_as_pdf_outlined, size: 19),
+                        label: const Text('Confirmar Firma y Emitir PDF',
+                            style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.w700)),
+                        onPressed: (_saving || bloqueadoPorCorreo) ? null : _onFinalizar,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -774,112 +818,22 @@ class _FirmaScreenState extends State<FirmaScreen>
       LoteSession.registrarResponsable(loteId, nombreRecibe, puesto: _puestoIngCtrl.text);
     }
 
-    final bool esLote = loteId.isNotEmpty;
-    String correoCapturado = '';
-
-    // Para órdenes pertenecientes a un lote, NO pedir correo individualmente al terminar cada OS.
-    if (!esLote) {
-      // ── MODAL: Solicitar Correo del Cliente para envío automático de la OS individual ──
-      final String? emailPrevio = (widget.capturaData['correo_cliente'] ?? widget.capturaData['email_cliente'])?.toString().trim();
-      final emailTextCtrl = TextEditingController(text: emailPrevio ?? '');
-      final String lineaPreviewCorreo = formatearLineaCorreoOrden(widget.capturaData);
-
-      final bool? procedio = await showDialog<bool>(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.mark_email_read_rounded, color: Color(0xFFB81D24), size: 26),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Envío por Correo Electrónico',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (lineaPreviewCorreo.isNotEmpty) ...[
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Text(
-                        'Folios procesados:',
-                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF1D1D1F)),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        lineaPreviewCorreo,
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0B57D0), height: 1.4),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 10),
-              ],
-              const Text(
-                'Ingresa el correo electrónico del cliente para el envío automático del reporte en PDF al sincronizar:',
-                style: TextStyle(fontSize: 13, color: Color(0xFF374151), height: 1.4),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: emailTextCtrl,
-                keyboardType: TextInputType.emailAddress,
-                autofocus: true,
-                decoration: InputDecoration(
-                  labelText: 'Correo del Cliente',
-                  hintText: 'ejemplo@empresa.com',
-                  prefixIcon: const Icon(Icons.email_outlined, color: Color(0xFFB81D24)),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'CC obligatorio: recepcion@basculaspesa.com.mx\n(Funciona en modo Offline: se enviará al conectar a internet).',
-                style: TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Omitir', style: TextStyle(color: Colors.grey)),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFB81D24),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () => Navigator.of(ctx).pop(true),
-              child: const Text('Continuar y Guardar'),
-            ),
-          ],
-        ),
-      );
-
-      if (procedio != true) return;
-      correoCapturado = emailTextCtrl.text.trim();
-    } else {
-      // En lote se hereda si ya existía para mantener consistencia
-      correoCapturado = (widget.capturaData['correo_cliente'] ?? widget.capturaData['email_cliente'] ?? '').toString().trim();
+    // CANDADO POKA-YOKE DE CORREO DEL CLIENTE (obligatorio tanto en orden individual como en lote)
+    if (!_correoCtrl.isValido) {
+      _tabCtrl.animateTo(1);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(kMsgPokaYokeCorreo),
+        backgroundColor: PesaColors.brand,
+      ));
+      return;
     }
+
+    final String folioPersist = (widget.capturaData['folio_os'] ?? widget.capturaData['folio'] ?? '').toString().trim();
+    final String correoCapturado = await _correoCtrl.persistirEnOrdenYLote(
+      folio: folioPersist,
+      loteId: loteId,
+      ordenMutable: widget.capturaData,
+    );
 
     setState(() => _saving = true);
     String? pdfPath;
@@ -959,6 +913,9 @@ class _FirmaScreenState extends State<FirmaScreen>
         'puesto_ing':    puestoIng,
         'firma_cliente_nombre': nombreIng,
         'correo_cliente': correoCapturado.isNotEmpty ? correoCapturado : (osData['correo_cliente'] ?? ''),
+        'correo_destino': correoCapturado.isNotEmpty ? correoCapturado : (osData['correo_destino'] ?? osData['correo_cliente'] ?? ''),
+        'sin_correo_cliente': _correoCtrl.sinCorreoCliente,
+        'motivo_sin_correo': _correoCtrl.motivoSinCorreoEfectivo,
         'email_enviado': 0,
       };
       ordenMutable['fecha_creacion_logistica'] = ordenMutable['fecha_creacion_logistica'] ?? ordenMutable['fecha'];

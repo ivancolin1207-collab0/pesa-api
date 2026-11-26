@@ -23,6 +23,7 @@ import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
+import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/pesa_components.dart';
 import '../widgets/sync_check_badge.dart';
 import 'calibraciones_repositorio_view.dart';
@@ -735,7 +736,14 @@ class _OsListScreenState extends State<OsListScreen> {
   }
 
   // ── Helpers de Estado de Ordenes ──────────────────────────────────────────
+  static bool esCancelada(Map<String, dynamic> o) {
+    final e = (o['estado'] ?? '').toString().trim().toUpperCase();
+    final est = (o['estatus'] ?? '').toString().trim().toUpperCase();
+    return e == 'CANCELADA' || e == 'CANCELADO' || est == 'CANCELADA' || est == 'CANCELADO';
+  }
+
   static bool tieneDocumento(Map<String, dynamic> o) {
+    if (esCancelada(o)) return false;
     final folioStr = (o['folio_os'] as String? ?? o['folio'] as String? ?? '').trim();
     final String? pdfPath = (o['pdf_path'] ?? o['pdf_path_local'])?.toString().trim();
     final String? pdfUrl = o['pdf_url']?.toString().trim();
@@ -788,11 +796,8 @@ class _OsListScreenState extends State<OsListScreen> {
   int get _kpiTotal => _filtered.length;
 
   int get _kpiProceso => _filtered.where((o) {
-    if (tienePdfReal(o)) return false;
-    final e = (o['estado'] as String? ?? '').trim().toUpperCase();
-    final est = (o['estatus'] as String? ?? '').trim().toUpperCase();
-    final isCancelada = e == 'CANCELADA' || e == 'CANCELADO' || est == 'CANCELADO';
-    return !isCancelada;
+    if (tienePdfReal(o) || esCancelada(o)) return false;
+    return true;
   }).length;
 
   int get _kpiCerrado => _filtered.where((o) => tienePdfReal(o)).length;
@@ -1654,21 +1659,23 @@ class _OsListScreenState extends State<OsListScreen> {
       if (folio.isEmpty) return;
     }
 
-    // REGLA ESTRICTA DE LOTES: solo órdenes terminadas (firmadas/cerradas) con PDF existente.
-    // Las OS pendientes o sin formato del lote se ignoran por completo (ni se citan ni se adjuntan).
+    // REGLA ESTRICTA DE LOTES Y ÓRDENES SOBRANTES:
+    // 1) Las órdenes CANCELADAS nunca se adjuntan ni aparecen en el correo.
+    // 2) Si en un lote hay completadas > 0 y pendientes sin usar > 0, ofrecer
+    //    Cierre Inteligente en 1 Toque para descartar las sobrantes y enviar las listas.
     final List<Map<String, dynamic>> itemsBase =
         esLote ? await _hijasLoteDesdeSqlite(loteId, items) : items;
-    final vistosFoliosEnvio = <String>{};
-    final List<Map<String, dynamic>> itemsEnvio = [];
-    for (final o in (esLote ? itemsBase.where((o) => tieneDocumento(o)) : itemsBase)) {
+
+    final vistosUnicos = <String>{};
+    final List<Map<String, dynamic>> itemsUnicos = [];
+    for (final o in itemsBase) {
       final f = folioDe(o);
-      if (f.isNotEmpty && vistosFoliosEnvio.add(f)) {
-        itemsEnvio.add(o);
+      if (f.isNotEmpty && vistosUnicos.add(f)) {
+        itemsUnicos.add(o);
       }
     }
-    final int omitidas = itemsBase.map(folioDe).where((f) => f.isNotEmpty).toSet().length - itemsEnvio.length;
 
-    // Ordenar naturalmente del 1 al N por número de folio (ej. OS-26-810, OS-26-811, ...)
+    // Ordenar naturalmente del 1 al N por número de folio
     int compararFolioNatural(String a, String b) {
       final reg = RegExp(r'(\d+|\D+)');
       final pa = reg.allMatches(a.toUpperCase()).map((m) => m.group(0)!).toList();
@@ -1683,7 +1690,241 @@ class _OsListScreenState extends State<OsListScreen> {
       return pa.length.compareTo(pb.length);
     }
 
-    itemsEnvio.sort((a, b) => compararFolioNatural(folioDe(a), folioDe(b)));
+    itemsUnicos.sort((a, b) => compararFolioNatural(folioDe(a), folioDe(b)));
+
+    int canceladasCount = itemsUnicos.where(esCancelada).length;
+    final List<Map<String, dynamic>> activas = itemsUnicos.where((o) => !esCancelada(o)).toList();
+    final List<Map<String, dynamic>> completadas = activas.where(tieneDocumento).toList();
+    final List<Map<String, dynamic>> pendientes = activas.where((o) => !tieneDocumento(o)).toList();
+
+    if (!esLote && itemsUnicos.isNotEmpty && esCancelada(itemsUnicos.first)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Esta orden fue marcada como no utilizada (Cancelada) y no se envía por correo.'),
+            backgroundColor: PesaColors.textSecondary,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (esLote && completadas.isEmpty) {
+      if (mounted) {
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: PesaColors.surface,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            title: const Row(
+              children: [
+                Icon(Icons.info_outline_rounded, color: _kCarmineRed, size: 24),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Lote sin órdenes listas para enviar',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _kTextPrim),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              activas.isEmpty
+                  ? 'Todas las órdenes de este lote están marcadas como no utilizadas ($canceladasCount canceladas).'
+                  : 'Aún no hay ninguna orden completada con PDF firmado en este lote (${activas.length} activas pendientes).',
+              style: const TextStyle(fontSize: 13.5, height: 1.4, color: _kTextSec),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Entendido'),
+              ),
+            ],
+          ),
+        );
+      }
+      return;
+    }
+
+    // ── CIERRE INTELIGENTE EN 1 TOQUE (completadas > 0 y pendientes > 0 en Lote) ──
+    if (esLote && completadas.isNotEmpty && pendientes.isNotEmpty) {
+      if (!mounted) return;
+      final foliosPendientes = pendientes.map(folioDe).where((f) => f.isNotEmpty).toList();
+      String motivoSmart = _motivosCancelacionRapidos.first;
+      final otroSmartCtrl = TextEditingController();
+      bool procesandoDescarteMasivo = false;
+
+      final bool? descartarYEnviar = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (sCtx) => StatefulBuilder(
+          builder: (ctx, setSmartState) {
+            final bool requiereOtroTxt = motivoSmart == 'Otro motivo';
+            final String motivoEfectivo = requiereOtroTxt ? otroSmartCtrl.text.trim() : motivoSmart;
+            final bool motivoOk = motivoEfectivo.length >= 3;
+
+            return AlertDialog(
+              backgroundColor: PesaColors.surface,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.layers_clear_outlined, color: _kCarmineRed, size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '¿Enviar solo las ${completadas.length} órdenes completadas?',
+                      style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: _kTextPrim),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Quedan ${pendientes.length} orden(es) sin llenar en este lote (${foliosPendientes.join(', ')}). '
+                      'Puedes descartarlas automáticamente sin borrar su consecutivo y enviar únicamente los ${completadas.length} reportes terminados.',
+                      style: const TextStyle(fontSize: 13, height: 1.4, color: _kTextSec),
+                    ),
+                    const SizedBox(height: 14),
+                    const Text(
+                      'Motivo de órdenes no utilizadas (1 toque):',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _kTextPrim),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: _motivosCancelacionRapidos.map((op) {
+                        final sel = motivoSmart == op;
+                        return ChoiceChip(
+                          label: Text(op),
+                          selected: sel,
+                          showCheckmark: false,
+                          selectedColor: _kTextPrim,
+                          backgroundColor: PesaColors.surfaceMuted,
+                          side: BorderSide(color: sel ? _kTextPrim : PesaColors.borderStrong),
+                          labelStyle: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
+                            color: sel ? Colors.white : _kTextPrim,
+                          ),
+                          onSelected: procesandoDescarteMasivo
+                              ? null
+                              : (_) => setSmartState(() => motivoSmart = op),
+                        );
+                      }).toList(),
+                    ),
+                    if (requiereOtroTxt) ...[
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: otroSmartCtrl,
+                        onChanged: (_) => setSmartState(() {}),
+                        decoration: InputDecoration(
+                          labelText: 'Especifica el motivo *',
+                          hintText: 'Ej. Báscula desmontada por mantenimiento',
+                          isDense: true,
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
+              actions: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _kCarmineRed,
+                          foregroundColor: Colors.white,
+                          disabledBackgroundColor: PesaColors.surfaceMuted,
+                          disabledForegroundColor: PesaColors.textTertiary,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        icon: procesandoDescarteMasivo
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.check_circle_outline_rounded, size: 18),
+                        label: Text(
+                          procesandoDescarteMasivo
+                              ? 'Descartando sobrantes…'
+                              : 'Descartar ${pendientes.length} sin usar y Enviar ${completadas.length}',
+                          style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                        ),
+                        onPressed: (procesandoDescarteMasivo || !motivoOk)
+                            ? null
+                            : () async {
+                                setSmartState(() => procesandoDescarteMasivo = true);
+                                final auth = context.read<AuthService>();
+                                final syncSvc = context.read<SyncService>();
+                                final usuarioNom = (auth.displayName.isNotEmpty
+                                        ? auth.displayName
+                                        : (auth.username ?? 'Técnico'))
+                                    .trim();
+                                for (final pOrd in pendientes) {
+                                  final fPend = folioDe(pOrd);
+                                  if (fPend.isEmpty) continue;
+                                  await syncSvc.cancelarOrdenYSincronizar(
+                                    folio: fPend,
+                                    motivo: motivoEfectivo,
+                                    usuario: usuarioNom,
+                                  );
+                                }
+                                if (ctx.mounted) {
+                                  Navigator.of(ctx).pop(true);
+                                }
+                              },
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      height: 42,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _kTextPrim,
+                          side: const BorderSide(color: PesaColors.borderStrong),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: procesandoDescarteMasivo ? null : () => Navigator.of(ctx).pop(false),
+                        child: const Text(
+                          'Volver para llenarlas',
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      otroSmartCtrl.dispose();
+      if (descartarYEnviar != true) {
+        await _loadLocal();
+        return;
+      }
+      canceladasCount += pendientes.length;
+      await _loadLocal();
+    }
+
+    final List<Map<String, dynamic>> itemsEnvio = esLote ? completadas : activas;
+    if (itemsEnvio.isEmpty) return;
 
     final List<String> foliosEnvio = itemsEnvio.map(folioDe).where((f) => f.isNotEmpty).toList();
     final List<String> etiquetasEnvio = itemsEnvio
@@ -1694,73 +1935,55 @@ class _OsListScreenState extends State<OsListScreen> {
         .map(extraerMetaCorreoOrden)
         .toList();
 
-    if (esLote && itemsEnvio.isEmpty) {
-      if (mounted) {
-        await showDialog<void>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: const Row(
-              children: [
-                Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 26),
-                SizedBox(width: 10),
-                Expanded(child: Text('Lote sin órdenes listas', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
-              ],
-            ),
-            content: Text(
-              'Ninguna orden de este lote está completada con PDF para enviar.\n\n'
-              'Órdenes en el lote: ${itemsBase.length}',
-              style: const TextStyle(fontSize: 13, height: 1.4),
-            ),
-            actions: [
-              TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Entendido')),
-            ],
-          ),
-        );
-      }
-      return;
-    }
+    final bool yaEnviado = itemsEnvio.isNotEmpty && itemsEnvio.any(esCorreoEnviadoOrden);
 
-    final bool yaEnviado = itemsEnvio.isNotEmpty &&
-        itemsEnvio.any(esCorreoEnviadoOrden);
-
-    // 1. Obtener correo registrado real si existe (orden -> catálogo de clientes -> órdenes hermanas)
+    // 1. Obtener correo capturado en firma poka-yoke o catálogo frecuente
     String correoActual = '';
+    bool soloRecepcionInicial = false;
+    String motivoSinCorreoInicial = '';
+
     for (final it in itemsEnvio) {
+      final bool sinC = it['sin_correo_cliente'] == true ||
+          it['sin_correo_cliente'] == 1 ||
+          it['sin_correo_cliente'] == '1';
+      final String motC = (it['motivo_sin_correo'] ?? '').toString().trim();
       for (final k in const ['correo_destino', 'correo_cliente', 'email_cliente']) {
         final c = (it[k] ?? '').toString().trim();
-        final low = c.toLowerCase();
-        if (c.contains('@') &&
-            low != 'ivancolin1207@gmail.com' &&
-            low != 'cliente' &&
-            low != 'sin registrar' &&
-            low != 'destinatario registrado' &&
-            low != 'none' &&
-            low != 'null') {
-          correoActual = c;
+        if (c.toUpperCase().startsWith('PENDIENTE')) {
+          soloRecepcionInicial = true;
+          if (motC.isNotEmpty) motivoSinCorreoInicial = motC;
+          break;
+        }
+        if (esCorreoClienteValido(c)) {
+          correoActual = normalizarCorreosCliente(c);
           break;
         }
       }
-      if (correoActual.isNotEmpty) break;
+      if (sinC && correoActual.isEmpty) {
+        soloRecepcionInicial = true;
+        if (motC.isNotEmpty) motivoSinCorreoInicial = motC;
+      }
+      if (correoActual.isNotEmpty) {
+        soloRecepcionInicial = false;
+        break;
+      }
     }
 
-    final String clientePreview = itemsEnvio.isNotEmpty
-        ? (itemsEnvio.first['cliente'] ?? 'Cliente').toString().trim()
-        : 'Cliente';
-    if (correoActual.isEmpty && clientePreview.isNotEmpty) {
-      try {
-        final catCli = await LocalDbService.instance.getCatalogoClientes();
-        for (final cli in catCli) {
-          final nom = (cli['nombre'] ?? '').toString().trim();
-          final em = (cli['email'] ?? '').toString().trim();
-          if (nom.toLowerCase() == clientePreview.toLowerCase() &&
-              em.contains('@') &&
-              em.toLowerCase() != 'ivancolin1207@gmail.com') {
-            correoActual = em;
-            break;
-          }
-        }
-      } catch (_) {}
+    final firstItem = itemsEnvio.first;
+    final String clientePreview = (firstItem['cliente'] ?? 'Cliente').toString().trim();
+    final int? clienteIdPreview = int.tryParse('${firstItem['id_cliente'] ?? firstItem['cliente_id'] ?? ''}');
+    final int? sucursalIdPreview = int.tryParse('${firstItem['sucursal_id'] ?? firstItem['id_sucursal'] ?? ''}');
+    final String sucursalNomPreview = (firstItem['sucursal'] ?? firstItem['direccion'] ?? '').toString().trim();
+
+    final List<String> correosFrecuentes = await LocalDbService.instance.getCorreosFrecuentesCliente(
+      clienteId: clienteIdPreview,
+      clienteNombre: clientePreview,
+      sucursalId: sucursalIdPreview,
+      sucursalNombre: sucursalNomPreview,
+    );
+
+    if (correoActual.isEmpty && !soloRecepcionInicial && correosFrecuentes.isNotEmpty) {
+      correoActual = correosFrecuentes.first;
     }
 
     final (asuntoPreview, _) = armarCorreoInstitucional(
@@ -1769,9 +1992,12 @@ class _OsListScreenState extends State<OsListScreen> {
       esLote: esLote,
     );
 
-    // Modal de captura si falta correo o para confirmar/editar destinatario
     final formKey = GlobalKey<FormState>();
     final emailCtrl = TextEditingController(text: correoActual);
+    bool soloRecepcionModal = soloRecepcionInicial;
+    String motivoSinCorreoModal = motivoSinCorreoInicial.isNotEmpty
+        ? motivoSinCorreoInicial
+        : 'Cliente sin correo en planta';
     bool isSendingModal = false;
 
     // Encolado offline en SQLite (email_status = 'cola')
@@ -1792,6 +2018,7 @@ class _OsListScreenState extends State<OsListScreen> {
             'email_enviado': 0,
             'email_status': 'cola',
             'correo_cliente': destino,
+            'correo_destino': destino,
           });
         }
       }
@@ -1800,14 +2027,14 @@ class _OsListScreenState extends State<OsListScreen> {
         setState(() {
           _all = _all.map((m) {
             final f = folioDe(m);
-            if (foliosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
+            if (foliosSet.contains(f)) {
               return {...m, 'email_enviado': 0, 'email_status': 'cola', 'correo_cliente': destino, 'correo_destino': destino};
             }
             return m;
           }).toList();
           _filtered = _filtered.map((m) {
             final f = folioDe(m);
-            if (foliosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
+            if (foliosSet.contains(f)) {
               return {...m, 'email_enviado': 0, 'email_status': 'cola', 'correo_cliente': destino, 'correo_destino': destino};
             }
             return m;
@@ -1823,6 +2050,7 @@ class _OsListScreenState extends State<OsListScreen> {
       }
     }
 
+    if (!mounted) return;
     await showDialog<void>(
       context: context,
       barrierDismissible: !isSendingModal,
@@ -1833,7 +2061,7 @@ class _OsListScreenState extends State<OsListScreen> {
             child: AlertDialog(
               backgroundColor: Colors.white,
               surfaceTintColor: Colors.transparent,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               title: Row(
                 children: [
                   Icon(
@@ -1845,395 +2073,439 @@ class _OsListScreenState extends State<OsListScreen> {
                   Expanded(
                     child: Text(
                       esLote
-                          ? (yaEnviado ? 'Reenviar Lote por Correo' : 'Enviar Lote por Correo')
-                          : (yaEnviado ? 'Reenviar por Correo — $folio' : 'Enviar por Correo — $folio'),
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _kTextPrim),
+                          ? (yaEnviado ? 'Reenviar Lote por Correo' : 'Confirmación Final de Envío de Lote')
+                          : (yaEnviado ? 'Reenviar Reporte — $folio' : 'Confirmar Envío de Reporte — $folio'),
+                      style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: _kTextPrim),
                     ),
                   ),
                 ],
               ),
-              content: Form(
-                key: formKey,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (esLote) ...[
-                      Text(
-                        'Se enviará un SOLO correo con ${itemsEnvio.length} reporte(s) PDF firmado(s).'
-                        '${omitidas > 0 ? '\n$omitidas orden(es) del lote sin realizar se omitirán del correo.' : ''}',
-                        style: const TextStyle(fontSize: 13, height: 1.4, color: _kTextSec),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    if (foliosEnvio.isNotEmpty) ...[
-                      Container(
-                        width: double.infinity,
-                        constraints: const BoxConstraints(maxHeight: 165),
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
-                        child: SingleChildScrollView(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              const Text(
-                                'Asunto del correo:',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w700,
-                                  color: _kTextSec,
-                                ),
+              content: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: SingleChildScrollView(
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (esLote) ...[
+                          Text(
+                            'Se enviará un SOLO correo institucional con ${itemsEnvio.length} reporte(s) PDF firmado(s).'
+                            '${canceladasCount > 0 ? ' ($canceladasCount orden(es) no utilizada(s) excluida(s)).' : ''}',
+                            style: const TextStyle(fontSize: 13, height: 1.4, color: _kTextSec),
+                          ),
+                          const SizedBox(height: 10),
+                        ],
+                        if (foliosEnvio.isNotEmpty) ...[
+                          Container(
+                            width: double.infinity,
+                            constraints: const BoxConstraints(maxHeight: 160),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: PesaColors.surfaceMuted,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: PesaColors.border),
+                            ),
+                            child: SingleChildScrollView(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Text(
+                                    'ASUNTO Y FOLIOS ACTIVOS A ENVIAR',
+                                    style: TextStyle(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: _kTextSec,
+                                      letterSpacing: 0.4,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    asuntoPreview,
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: _kTextPrim,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    etiquetasEnvio.isNotEmpty
+                                        ? etiquetasEnvio.join('\n')
+                                        : 'Folios (${foliosEnvio.length}): ${foliosEnvio.join(', ')}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: _kTextPrim,
+                                      height: 1.4,
+                                    ),
+                                  ),
+                                ],
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                asuntoPreview,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: _kTextPrim,
-                                  height: 1.35,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+                        if (!soloRecepcionModal) ...[
+                          TextFormField(
+                            controller: emailCtrl,
+                            keyboardType: TextInputType.emailAddress,
+                            enabled: !isSendingModal,
+                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _kTextPrim),
+                            validator: (val) {
+                              if (soloRecepcionModal) return null;
+                              final v = (val ?? '').trim();
+                              if (v.isEmpty) return 'Ingresa o selecciona el correo del cliente';
+                              if (!esCorreoClienteValido(v)) {
+                                return 'Ingresa un correo válido del cliente (puedes separar varios con coma)';
+                              }
+                              return null;
+                            },
+                            decoration: InputDecoration(
+                              labelText: 'Destinatario (Cliente)',
+                              hintText: 'cliente@empresa.com',
+                              prefixIcon: const Icon(Icons.alternate_email_rounded, color: _kCarmineRed, size: 19),
+                              suffixIcon: emailCtrl.text.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear_rounded, size: 17),
+                                      onPressed: isSendingModal
+                                          ? null
+                                          : () => setModalState(() => emailCtrl.clear()),
+                                    )
+                                  : null,
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                            ),
+                            onChanged: (_) => setModalState(() {}),
+                          ),
+                          if (correosFrecuentes.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Correos frecuentes del cliente (toca para elegir):',
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _kTextSec),
+                            ),
+                            const SizedBox(height: 5),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: correosFrecuentes.map((c) {
+                                final activo = emailCtrl.text.trim().toLowerCase() == c.toLowerCase();
+                                return ActionChip(
+                                  visualDensity: VisualDensity.compact,
+                                  backgroundColor: activo ? _kTextPrim : PesaColors.surfaceMuted,
+                                  side: BorderSide(color: activo ? _kTextPrim : PesaColors.borderStrong),
+                                  label: Text(
+                                    c,
+                                    style: TextStyle(
+                                      fontSize: 11.5,
+                                      fontWeight: activo ? FontWeight.w700 : FontWeight.w500,
+                                      color: activo ? Colors.white : _kTextPrim,
+                                    ),
+                                  ),
+                                  onPressed: isSendingModal
+                                      ? null
+                                      : () => setModalState(() {
+                                            emailCtrl.text = c;
+                                          }),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                          const SizedBox(height: 8),
+                          const Text(
+                            'CC institucional automática: recepcion@basculaspesa.com.mx',
+                            style: TextStyle(fontSize: 11.5, color: _kTextSec),
+                          ),
+                        ] else ...[
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: PesaColors.surfaceMuted,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: PesaColors.borderStrong),
+                            ),
+                            child: Text(
+                              'Envío exclusivo de respaldo a recepcion@basculaspesa.com.mx\n'
+                              'Motivo registrado: $motivoSinCorreoModal',
+                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _kTextPrim, height: 1.35),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 6),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(6),
+                          onTap: isSendingModal
+                              ? null
+                              : () => setModalState(() => soloRecepcionModal = !soloRecepcionModal),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            child: Row(
+                              children: [
+                                SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: Checkbox(
+                                    value: soloRecepcionModal,
+                                    activeColor: _kTextPrim,
+                                    onChanged: isSendingModal
+                                        ? null
+                                        : (v) => setModalState(() => soloRecepcionModal = v ?? false),
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                'ID (${foliosEnvio.length}): ${foliosEnvio.join(', ')}',
-                                style: const TextStyle(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: _kCarmineRed,
-                                  height: 1.4,
+                                const SizedBox(width: 8),
+                                const Expanded(
+                                  child: Text(
+                                    'El cliente no cuenta con correo (enviar respaldo solo a recepción)',
+                                    style: TextStyle(fontSize: 11.5, color: _kTextSec, fontWeight: FontWeight.w500),
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                    ],
-                    const Text(
-                      'Se enviará desde ivancolin1207@gmail.com con CC obligatoria a recepcion@basculaspesa.com.mx',
-                      style: TextStyle(fontSize: 12, color: _kTextSec, height: 1.35),
+                      ],
                     ),
-                    const SizedBox(height: 14),
-                    TextFormField(
-                      controller: emailCtrl,
-                      keyboardType: TextInputType.emailAddress,
-                      enabled: !isSendingModal,
-                      autofocus: true,
-                      validator: (val) {
-                        final v = (val ?? '').trim();
-                        if (v.isEmpty) return 'Ingresa el correo del cliente';
-                        if (!v.contains('@') || !v.contains('.')) return 'Correo electrónico inválido';
-                        if (v.toLowerCase() == 'ivancolin1207@gmail.com') {
-                          return 'ivancolin1207@gmail.com es el remitente. Ingresa el correo del cliente.';
-                        }
-                        return null;
-                      },
-                      decoration: InputDecoration(
-                        labelText: 'Correo del Cliente',
-                        hintText: 'cliente@empresa.com',
-                        prefixIcon: const Icon(Icons.alternate_email, color: _kCarmineRed),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
               ),
+              actionsPadding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
               actions: [
                 TextButton(
                   onPressed: isSendingModal ? null : () => Navigator.of(ctx).pop(),
                   child: const Text('Cancelar'),
                 ),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _kCarmineRed,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  icon: isSendingModal
-                      ? const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : Icon(yaEnviado ? Icons.mark_email_read_rounded : Icons.send, size: 16),
-                  label: Text(
-                    isSendingModal
-                        ? 'Enviando...'
-                        : (yaEnviado
-                            ? (esLote ? 'Reenviar Lote' : 'Reenviar Correo')
-                            : (esLote ? 'Finalizar y Enviar Lote' : 'Enviar Ahora')),
-                  ),
-                  onPressed: isSendingModal
-                      ? null
-                      : () async {
-                          if (!(formKey.currentState?.validate() ?? true)) return;
-                          final destino = emailCtrl.text.trim();
+                SizedBox(
+                  height: 46,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _kCarmineRed,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 18),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: isSendingModal
+                        ? const SizedBox(
+                            width: 15,
+                            height: 15,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : Icon(yaEnviado ? Icons.mark_email_read_rounded : Icons.send_rounded, size: 17),
+                    label: Text(
+                      isSendingModal
+                          ? 'Enviando reportes…'
+                          : (yaEnviado ? 'Confirmar y Reenviar Reportes' : 'Confirmar y Enviar Reportes'),
+                      style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w700),
+                    ),
+                    onPressed: isSendingModal
+                        ? null
+                        : () async {
+                            if (!soloRecepcionModal && !(formKey.currentState?.validate() ?? true)) return;
+                            final String destino = soloRecepcionModal
+                                ? kDestinoSoloRecepcion
+                                : normalizarCorreosCliente(emailCtrl.text.trim());
 
-                          if (esLote) {
-                            final totalValidas = foliosEnvio.length;
-                            final bool? confirmar = await showDialog<bool>(
-                              context: ctx,
-                              barrierDismissible: false,
-                              builder: (cCtx) => AlertDialog(
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                title: const Row(
-                                  children: [
-                                    Icon(Icons.mark_email_read_rounded, color: Color(0xFFB81D24), size: 24),
-                                    SizedBox(width: 8),
-                                    Expanded(
-                                      child: Text(
-                                        'Confirmar Envío de Lote',
-                                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                content: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      'Se enviarán $totalValidas órdenes de servicio al correo $destino con copia a recepcion@basculaspesa.com.mx:',
-                                      style: const TextStyle(fontSize: 13, height: 1.4),
-                                    ),
-                                    if (etiquetasEnvio.isNotEmpty) ...[
-                                      const SizedBox(height: 10),
-                                      Container(
-                                        width: double.infinity,
-                                        constraints: const BoxConstraints(maxHeight: 150),
-                                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFF8FAFC),
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                                        ),
-                                        child: SingleChildScrollView(
-                                          child: Text(
-                                            etiquetasEnvio.join('\n'),
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.bold,
-                                              color: Color(0xFF0B57D0),
-                                              height: 1.5,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                    const SizedBox(height: 10),
-                                    const Text(
-                                      '¿Desea continuar?',
-                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                                    ),
-                                  ],
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.of(cCtx).pop(false),
-                                    child: const Text('Cancelar'),
-                                  ),
-                                  ElevatedButton(
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFFB81D24),
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                                    ),
-                                    onPressed: () => Navigator.of(cCtx).pop(true),
-                                    child: const Text('Confirmar y Enviar'),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (confirmar != true) return;
-                          }
+                            setModalState(() => isSendingModal = true);
+                            setState(() => _estaEnviandoEmail = true);
 
-                          setModalState(() => isSendingModal = true);
-                          setState(() => _estaEnviandoEmail = true);
+                            try {
+                              if (foliosEnvio.isNotEmpty) {
+                                await LocalDbService.instance.guardarCorreoEnOrdenYLote(
+                                  folio: foliosEnvio.first,
+                                  loteId: esLote ? loteId : null,
+                                  correo: destino,
+                                  sinCorreoCliente: soloRecepcionModal,
+                                  motivoSinCorreo: soloRecepcionModal ? motivoSinCorreoModal : null,
+                                );
+                              }
 
-                          try {
-                            // Marcar en SQLite email_status = 'enviando' inmediatamente
-                            for (final f in foliosEnvio) {
-                              await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'enviando', correo: destino);
-                            }
+                              for (final f in foliosEnvio) {
+                                await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'enviando', correo: destino);
+                              }
 
-                            // Verificar conectividad a internet
-                            final connResults = await Connectivity().checkConnectivity();
-                            final isOnline = connResults.any((r) => r != ConnectivityResult.none);
-                            if (!isOnline) {
-                              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
-                              await encolarLocal('sin conectividad', destino);
-                              return;
-                            }
+                              final connResults = await Connectivity().checkConnectivity();
+                              final isOnline = connResults.any((r) => r != ConnectivityResult.none);
+                              if (!isOnline) {
+                                if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                                await encolarLocal('sin conectividad', destino);
+                                return;
+                              }
 
-                            // Sincronizar campos actualizados de equipo/CCA/DVE y PDF final antes de disparar el correo
-                            await context.read<SyncService>().asegurarPdfsVigentesEnServidor(foliosEnvio);
+                              await context.read<SyncService>().asegurarPdfsVigentesEnServidor(foliosEnvio);
 
-                            final Map<String, dynamic> res = esLote
-                                ? await ApiService.instance.enviarEmailLote(
-                                    loteId,
-                                    correo: destino,
-                                    forzar: true,
-                                    folios: foliosEnvio,
-                                    ordenesMeta: ordenesMetaEnvio,
-                                    timeout: const Duration(seconds: 25),
-                                  )
-                                : await ApiService.instance.enviarEmailOrden(
-                                    folio,
-                                    correo: destino,
-                                    forzar: true,
-                                    ordenesMeta: ordenesMetaEnvio,
-                                    timeout: const Duration(seconds: 25),
-                                  );
+                              final Map<String, dynamic> res = esLote
+                                  ? await ApiService.instance.enviarEmailLote(
+                                      loteId,
+                                      correo: soloRecepcionModal ? '' : destino,
+                                      forzar: true,
+                                      folios: foliosEnvio,
+                                      ordenesMeta: ordenesMetaEnvio,
+                                      sinCorreoCliente: soloRecepcionModal,
+                                      motivoSinCorreo: soloRecepcionModal ? motivoSinCorreoModal : null,
+                                      timeout: const Duration(seconds: 25),
+                                    )
+                                  : await ApiService.instance.enviarEmailOrden(
+                                      folio,
+                                      correo: soloRecepcionModal ? '' : destino,
+                                      forzar: true,
+                                      ordenesMeta: ordenesMetaEnvio,
+                                      sinCorreoCliente: soloRecepcionModal,
+                                      motivoSinCorreo: soloRecepcionModal ? motivoSinCorreoModal : null,
+                                      timeout: const Duration(seconds: 25),
+                                    );
 
-                            // Cerrar modal SIEMPRE al terminar
-                            if (Navigator.of(ctx).canPop()) {
-                              Navigator.of(ctx).pop();
-                            }
+                              if (Navigator.of(ctx).canPop()) {
+                                Navigator.of(ctx).pop();
+                              }
 
-                            final bool exitoEnvio = res['ok'] == true || res['status'] == 'already_sent';
-                            if (!exitoEnvio) {
-                              throw CorreoRechazadoException((res['motivo'] ?? res['error'] ?? 'Error desconocido').toString());
-                            }
+                              final bool exitoEnvio = res['ok'] == true || res['status'] == 'already_sent';
+                              if (!exitoEnvio) {
+                                throw CorreoRechazadoException((res['motivo'] ?? res['error'] ?? 'Error desconocido').toString());
+                              }
 
-                            final List<String> confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
-                                ? (res['folios'] as List).map((e) => e.toString()).toSet().toList()
-                                : foliosEnvio.toSet().toList();
+                              final List<String> confirmados = (res['folios'] is List && (res['folios'] as List).isNotEmpty)
+                                  ? (res['folios'] as List).map((e) => e.toString()).toSet().toList()
+                                  : foliosEnvio.toSet().toList();
 
-                            final nowStr = (res['fecha_envio_correo']?.toString().trim().isNotEmpty == true)
-                                ? formatearFechaHoraMexico(res['fecha_envio_correo'])
-                                : formatearFechaHoraMexico(DateTime.now().toUtc());
-                            final String ccResp = (res['correo_cc']?.toString().trim().isNotEmpty == true)
-                                ? res['correo_cc'].toString().trim()
-                                : 'recepcion@basculaspesa.com.mx';
+                              final nowStr = (res['fecha_envio_correo']?.toString().trim().isNotEmpty == true)
+                                  ? formatearFechaHoraMexico(res['fecha_envio_correo'])
+                                  : formatearFechaHoraMexico(DateTime.now().toUtc());
+                              final String ccResp = (res['correo_cc']?.toString().trim().isNotEmpty == true)
+                                  ? res['correo_cc'].toString().trim()
+                                  : 'recepcion@basculaspesa.com.mx';
+                              final String destinoMostrar = soloRecepcionModal
+                                  ? 'recepcion@basculaspesa.com.mx (respaldo recepción)'
+                                  : destino;
 
-                            for (final f in confirmados) {
-                              await LocalDbService.instance.updateEmailStatus(
-                                f,
-                                enviado: true,
-                                status: 'enviado',
-                                correo: destino,
-                                fechaEnvio: nowStr,
-                                cc: ccResp,
-                              );
+                              for (final f in confirmados) {
+                                await LocalDbService.instance.updateEmailStatus(
+                                  f,
+                                  enviado: true,
+                                  status: 'enviado',
+                                  correo: destino,
+                                  fechaEnvio: nowStr,
+                                  cc: ccResp,
+                                );
+                                if (mounted) {
+                                  context.read<SyncService>().updateLocalOrder(f, {
+                                    'email_enviado': 1,
+                                    'correo_enviado': 1,
+                                    'email_status': 'enviado',
+                                    'fecha_envio_email': nowStr,
+                                    'fecha_envio_correo': nowStr,
+                                    'correo_cliente': destino,
+                                    'correo_destino': destino,
+                                    'correo_cc': ccResp,
+                                  });
+                                }
+                              }
+
                               if (mounted) {
-                                context.read<SyncService>().updateLocalOrder(f, {
-                                  'email_enviado': 1,
-                                  'correo_enviado': 1,
-                                  'email_status': 'enviado',
-                                  'fecha_envio_email': nowStr,
-                                  'fecha_envio_correo': nowStr,
-                                  'correo_cliente': destino,
-                                  'correo_destino': destino,
-                                  'correo_cc': ccResp,
+                                final confirmadosSet = confirmados.toSet();
+                                setState(() {
+                                  _all = _all.map((m) {
+                                    final f = folioDe(m);
+                                    if (confirmadosSet.contains(f)) {
+                                      return {
+                                        ...m,
+                                        'email_enviado': 1,
+                                        'correo_enviado': 1,
+                                        'email_status': 'enviado',
+                                        'fecha_envio_email': nowStr,
+                                        'fecha_envio_correo': nowStr,
+                                        'correo_cliente': destino,
+                                        'correo_destino': destino,
+                                        'correo_cc': ccResp,
+                                      };
+                                    }
+                                    return m;
+                                  }).toList();
+                                  _filtered = _filtered.map((m) {
+                                    final f = folioDe(m);
+                                    if (confirmadosSet.contains(f)) {
+                                      return {
+                                        ...m,
+                                        'email_enviado': 1,
+                                        'correo_enviado': 1,
+                                        'email_status': 'enviado',
+                                        'fecha_envio_email': nowStr,
+                                        'fecha_envio_correo': nowStr,
+                                        'correo_cliente': destino,
+                                        'correo_destino': destino,
+                                        'correo_cc': ccResp,
+                                      };
+                                    }
+                                    return m;
+                                  }).toList();
                                 });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: const Color(0xFF2E7D32),
+                                    content: Text(
+                                      'Correo enviado con éxito a $destinoMostrar'
+                                      '${esLote ? ' (${confirmados.length} órdenes activas)' : ''}',
+                                    ),
+                                  ),
+                                );
+                                await _loadLocal();
+                              }
+                            } on TimeoutException {
+                              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                              for (final f in foliosEnvio) {
+                                await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+                              }
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Tiempo de espera agotado con el servidor al enviar correo (25s).'),
+                                    backgroundColor: Colors.deepOrange,
+                                  ),
+                                );
+                              }
+                            } on CorreoSinConexionException catch (e) {
+                              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                              await encolarLocal(e.mensaje, destino);
+                            } on CorreoEndpointNoDisponibleException catch (e) {
+                              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                              await encolarLocal(e.mensaje, destino);
+                            } on CorreoRechazadoException catch (e) {
+                              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                              for (final f in foliosEnvio) {
+                                await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+                              }
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: Colors.redAccent,
+                                    content: Text('Error al enviar: ${e.mensaje}'),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                              for (final f in foliosEnvio) {
+                                await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
+                              }
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Tiempo de espera agotado o error de red: $e'),
+                                    backgroundColor: Colors.deepOrange,
+                                  ),
+                                );
+                              }
+                            } finally {
+                              if (mounted) {
+                                setState(() => _estaEnviandoEmail = false);
+                              } else {
+                                _estaEnviandoEmail = false;
                               }
                             }
-
-                            if (mounted) {
-                              final confirmadosSet = confirmados.toSet();
-                              setState(() {
-                                _all = _all.map((m) {
-                                  final f = folioDe(m);
-                                  if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
-                                    return {
-                                      ...m,
-                                      'email_enviado': 1,
-                                      'correo_enviado': 1,
-                                      'email_status': 'enviado',
-                                      'fecha_envio_email': nowStr,
-                                      'fecha_envio_correo': nowStr,
-                                      'correo_cliente': destino,
-                                      'correo_destino': destino,
-                                      'correo_cc': ccResp,
-                                    };
-                                  }
-                                  return m;
-                                }).toList();
-                                _filtered = _filtered.map((m) {
-                                  final f = folioDe(m);
-                                  if (confirmadosSet.contains(f) || (esLote && (m['id_lote'] ?? m['lote'])?.toString().trim() == loteId)) {
-                                    return {
-                                      ...m,
-                                      'email_enviado': 1,
-                                      'correo_enviado': 1,
-                                      'email_status': 'enviado',
-                                      'fecha_envio_email': nowStr,
-                                      'fecha_envio_correo': nowStr,
-                                      'correo_cliente': destino,
-                                      'correo_destino': destino,
-                                      'correo_cc': ccResp,
-                                    };
-                                  }
-                                  return m;
-                                }).toList();
-                              });
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  backgroundColor: const Color(0xFF2E7D32),
-                                  content: Text('Correo enviado con éxito a $destino' + (esLote ? ' (${confirmados.length} órdenes en lote)' : '')),
-                                ),
-                              );
-                              await _loadLocal();
-                            }
-                          } on TimeoutException {
-                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
-                            for (final f in foliosEnvio) {
-                              await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
-                            }
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Tiempo de espera agotado con el servidor al enviar correo (20s).'),
-                                  backgroundColor: Colors.deepOrange,
-                                ),
-                              );
-                            }
-                          } on CorreoSinConexionException catch (e) {
-                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
-                            await encolarLocal(e.mensaje, destino);
-                          } on CorreoEndpointNoDisponibleException catch (e) {
-                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
-                            await encolarLocal(e.mensaje, destino);
-                          } on CorreoRechazadoException catch (e) {
-                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
-                            for (final f in foliosEnvio) {
-                              await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
-                            }
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  backgroundColor: Colors.redAccent,
-                                  content: Text('Error al enviar: ${e.mensaje}'),
-                                ),
-                              );
-                            }
-                          } catch (e) {
-                            if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
-                            for (final f in foliosEnvio) {
-                              await LocalDbService.instance.updateEmailStatus(f, enviado: false, status: 'cola', correo: destino);
-                            }
-                            if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text('Tiempo de espera agotado o error de red: $e'),
-                                  backgroundColor: Colors.deepOrange,
-                                ),
-                              );
-                            }
-                          } finally {
-                            if (mounted) {
-                              setState(() => _estaEnviandoEmail = false);
-                            } else {
-                              _estaEnviandoEmail = false;
-                            }
-                          }
-                        },
+                          },
+                  ),
                 ),
               ],
             ),
@@ -2241,6 +2513,247 @@ class _OsListScreenState extends State<OsListScreen> {
         },
       ),
     );
+  }
+
+  static const List<String> _motivosCancelacionRapidos = [
+    'Se asignaron folios de más',
+    'Equipo fuera de servicio / no disponible',
+    'Cliente canceló servicio de este equipo',
+    'Otro motivo',
+  ];
+
+  /// Modal minimalista estilo Apple en 1 toque para marcar una orden sobrante como "No utilizada" (CANCELADA).
+  Future<void> _mostrarModalDescartarOrden(BuildContext context, Map<String, dynamic> os) async {
+    final String folio = ((os['folio_os'] ?? os['folio'])?.toString() ?? '').trim();
+    if (folio.isEmpty) return;
+    if (tieneDocumento(os)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se puede marcar como no utilizada una orden que ya tiene PDF firmado.')),
+      );
+      return;
+    }
+
+    String motivoSel = _motivosCancelacionRapidos.first;
+    final otroCtrl = TextEditingController();
+
+    final String? motivoConfirmado = await showDialog<String>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (ctx, setModalSt) {
+          final bool esOtro = motivoSel == 'Otro motivo';
+          final String motFinal = esOtro ? otroCtrl.text.trim() : motivoSel;
+          final bool valido = motFinal.length >= 3;
+
+          return AlertDialog(
+            backgroundColor: PesaColors.surface,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                const Icon(Icons.remove_circle_outline_rounded, color: _kCarmineRed, size: 22),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Marcar $folio como no utilizada',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _kTextPrim),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'El folio conservará su consecutivo para auditoría, se excluirá del correo del lote y no contará como orden pendiente.',
+                    style: TextStyle(fontSize: 12.5, height: 1.4, color: _kTextSec),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Selecciona el motivo:',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _kTextPrim),
+                  ),
+                  const SizedBox(height: 8),
+                  for (final op in _motivosCancelacionRapidos)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(8),
+                        onTap: () => setModalSt(() => motivoSel = op),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: motivoSel == op ? PesaColors.surfaceMuted : Colors.white,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: motivoSel == op ? _kTextPrim : PesaColors.border,
+                              width: motivoSel == op ? 1.4 : 1.0,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                motivoSel == op ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
+                                size: 18,
+                                color: motivoSel == op ? _kCarmineRed : PesaColors.textTertiary,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  op,
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: motivoSel == op ? FontWeight.w700 : FontWeight.w500,
+                                    color: _kTextPrim,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (esOtro) ...[
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: otroCtrl,
+                      autofocus: true,
+                      onChanged: (_) => setModalSt(() {}),
+                      decoration: InputDecoration(
+                        labelText: 'Describe brevemente el motivo *',
+                        isDense: true,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Volver'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _kCarmineRed,
+                  foregroundColor: Colors.white,
+                  disabledBackgroundColor: PesaColors.surfaceMuted,
+                  disabledForegroundColor: PesaColors.textTertiary,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: !valido ? null : () => Navigator.of(ctx).pop(motFinal),
+                child: const Text('Confirmar No Utilizada'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    otroCtrl.dispose();
+    if (motivoConfirmado == null || motivoConfirmado.isEmpty || !mounted) return;
+
+    final auth = context.read<AuthService>();
+    final usuarioNom = (auth.displayName.isNotEmpty ? auth.displayName : (auth.username ?? 'Técnico')).trim();
+    final okServer = await context.read<SyncService>().cancelarOrdenYSincronizar(
+          folio: folio,
+          motivo: motivoConfirmado,
+          usuario: usuarioNom,
+        );
+
+    if (!mounted) return;
+    setState(() {
+      _all = _all.map((m) {
+        final f = ((m['folio_os'] ?? m['folio'])?.toString() ?? '').trim();
+        if (f == folio) {
+          return {
+            ...m,
+            'estatus': 'CANCELADA',
+            'estado': 'CANCELADA',
+            'motivo_cancelacion': motivoConfirmado,
+            'cancelada_por': usuarioNom,
+          };
+        }
+        return m;
+      }).toList();
+    });
+    await _applyFilters();
+    await _loadLocal();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: _kTextPrim,
+          content: Text(
+            okServer
+                ? 'Orden $folio marcada como no utilizada ($motivoConfirmado)'
+                : 'Orden $folio marcada como no utilizada (se sincronizará al conectar)',
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Reactiva una orden previamente marcada como CANCELADA (solo Administradores).
+  Future<void> _reactivarOrdenCancelada(BuildContext context, Map<String, dynamic> os) async {
+    final String folio = ((os['folio_os'] ?? os['folio'])?.toString() ?? '').trim();
+    if (folio.isEmpty) return;
+
+    final bool? conf = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: PesaColors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        title: Text('Reactivar $folio', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+        content: const Text(
+          '¿Deseas reactivar esta orden para que vuelva a estar disponible para captura?',
+          style: TextStyle(fontSize: 13.5, color: _kTextSec),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _kCarmineRed,
+              foregroundColor: Colors.white,
+              elevation: 0,
+            ),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Reactivar Orden'),
+          ),
+        ],
+      ),
+    );
+    if (conf != true || !mounted) return;
+
+    final okServer = await context.read<SyncService>().reactivarOrdenYSincronizar(folio);
+    if (!mounted) return;
+    setState(() {
+      _all = _all.map((m) {
+        final f = ((m['folio_os'] ?? m['folio'])?.toString() ?? '').trim();
+        if (f == folio) {
+          return {
+            ...m,
+            'estatus': 'Asignada',
+            'estado': 'EN_PROCESO',
+            'motivo_cancelacion': '',
+          };
+        }
+        return m;
+      }).toList();
+    });
+    await _applyFilters();
+    await _loadLocal();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF2E7D32),
+          content: Text(okServer ? 'Orden $folio reactivada con éxito' : 'Orden $folio reactivada localmente'),
+        ),
+      );
+    }
   }
 
   /// Órdenes hijas del lote leídas de SQLite local (PDF/estatus frescos), fusionadas con memoria.
@@ -2608,7 +3121,8 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
 
     if (p.quickStatus != 'Todas') {
       final estUp = '${os['estado'] ?? ''} ${os['estatus'] ?? ''}'.toUpperCase();
-      final bool hasPdf = os['has_pdf'] == 1 ||
+      final bool isCanc = estUp.contains('CANCEL');
+      final bool hasPdf = !isCanc && (os['has_pdf'] == 1 ||
           os['has_pdf'] == '1' ||
           os['has_pdf'] == true ||
           os['pdf_subido'] == 1 ||
@@ -2618,10 +3132,10 @@ List<Map<String, dynamic>> _filterIsolate(_FilterParams p) {
           estUp.contains('CERRAD') ||
           estUp.contains('COMPLET') ||
           estUp.contains('FINALIZ') ||
-          estUp.contains('ESCAN');
+          estUp.contains('ESCAN'));
       if (p.quickStatus == 'Cerradas' && !hasPdf) return false;
-      if (p.quickStatus == 'Pendientes' && hasPdf) return false;
-      if (p.quickStatus == 'En Proceso' && (hasPdf || estUp.contains('CANCEL'))) return false;
+      if (p.quickStatus == 'Pendientes' && (hasPdf || isCanc)) return false;
+      if (p.quickStatus == 'En Proceso' && (hasPdf || isCanc)) return false;
     }
 
     // 3. Filtros por Tipo de Servicio y Empresa / Cliente (con soporte de Lotes)
@@ -3208,17 +3722,23 @@ class _MobileOsCard extends StatelessWidget {
     final modalidad = (os['modalidad'] as String? ?? 'DIGITAL').toUpperCase();
     final syncSt    = (os['sync_status'] as String? ?? '');
 
-    final bool pdfReal = _OsListScreenState.tienePdfReal(os);
-    final bool noIniciada = _OsListScreenState.sinIniciar(os);
+    final bool isCancelada = _OsListScreenState.esCancelada(os);
+    final bool pdfReal = !isCancelada && _OsListScreenState.tienePdfReal(os);
+    final bool noIniciada = !isCancelada && _OsListScreenState.sinIniciar(os);
     final bool isFisico = esModalidadFisica(os['modalidad'] as String?);
+    final String loteRef = ((os['id_lote'] ?? os['lote'])?.toString() ?? '').trim();
+    final bool perteneceALote = loteRef.isNotEmpty && loteRef.toLowerCase() != 'null' && loteRef.toLowerCase() != 'none';
+    final bool esAdmin = AuthService.usuarioActual?.isAdmin == true || context.read<AuthService>().isAdmin;
 
     final String estatusRemoto = (os['estatus'] ?? os['estado'] ?? '').toString().trim();
     final bool isCerrado = pdfReal;
 
-    final String estatusLabel = isCerrado
-        ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
-        : (noIniciada ? 'Sin Formato' : 'En Proceso');
-    final Color estatusFg = _kTextPrim;
+    final String estatusLabel = isCancelada
+        ? 'Cancelada'
+        : (isCerrado
+            ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
+            : (noIniciada ? 'Sin Formato' : 'En Proceso'));
+    final Color estatusFg = isCancelada ? PesaColors.textSecondary : _kTextPrim;
     final Color estatusBg = PesaColors.surfaceMuted;
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
@@ -3235,16 +3755,18 @@ class _MobileOsCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: _kCardBg,
+        color: isCancelada ? PesaColors.surfaceMuted : _kCardBg,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: _kBorder, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.02),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: isCancelada
+            ? const []
+            : [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.02),
+                  blurRadius: 4,
+                  offset: const Offset(0, 2),
+                ),
+              ],
       ),
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -3265,10 +3787,11 @@ class _MobileOsCard extends StatelessWidget {
                       children: [
                         Text(
                           folioStr.isNotEmpty ? folioStr : '—',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF111827),
+                            color: isCancelada ? PesaColors.textTertiary : const Color(0xFF111827),
+                            decoration: isCancelada ? TextDecoration.lineThrough : null,
                             height: 1.25,
                           ),
                         ),
@@ -3436,7 +3959,40 @@ class _MobileOsCard extends StatelessWidget {
           const SizedBox(height: 12),
 
           // Fila Inferior (Acciones ergonómicas táctiles — paleta corporativa minimalista Básculas PESA)
-          if (isCerrado) ...[
+          if (isCancelada) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: PesaColors.border),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.remove_circle_outline_rounded, size: 15, color: PesaColors.textSecondary),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'No utilizada: ${(os['motivo_cancelacion'] ?? '').toString().trim().isNotEmpty ? os['motivo_cancelacion'].toString().trim() : 'Descartada del lote'}',
+                      style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  if (esAdmin)
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        foregroundColor: _kTextPrim,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      ),
+                      onPressed: () => context.findAncestorStateOfType<_OsListScreenState>()?._reactivarOrdenCancelada(context, os),
+                      icon: const Icon(Icons.restore_rounded, size: 15),
+                      label: const Text('Reactivar', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700)),
+                    ),
+                ],
+              ),
+            ),
+          ] else if (isCerrado) ...[
             // A) TIENE PDF REAL GENERADO O ADJUNTADO
             Row(
               children: [
@@ -3670,6 +4226,32 @@ class _MobileOsCard extends StatelessWidget {
                     ),
                   ),
                 ),
+                if (perteneceALote || esAdmin) ...[
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: SizedBox(
+                      height: 40,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.white,
+                          foregroundColor: const Color(0xFF0F172A),
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(horizontal: 4),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(6),
+                            side: const BorderSide(color: Color(0xFFCBD5E1)),
+                          ),
+                        ),
+                        onPressed: () => context.findAncestorStateOfType<_OsListScreenState>()?._mostrarModalDescartarOrden(context, os),
+                        icon: const Icon(Icons.remove_circle_outline_rounded, size: 15),
+                        label: const Text(
+                          'No se usó',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
                 if (!noIniciada) ...[
                   const SizedBox(width: 8),
                   Expanded(
@@ -3731,6 +4313,11 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
   @override
   Widget build(BuildContext context) {
     final count = widget.group.items.length;
+    final cancelledCount = widget.group.items.where(_OsListScreenState.esCancelada).length;
+    final activeCount = (count - cancelledCount).clamp(0, count);
+    final doneCount = widget.group.items
+        .where((o) => !_OsListScreenState.esCancelada(o) && _OsListScreenState.tienePdfReal(o))
+        .length;
     final first = widget.group.items.first;
 
     return Container(
@@ -3757,7 +4344,7 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                       border: Border.all(color: const Color(0xFFCBD5E1)),
                     ),
                     child: Text(
-                      'LOTE · $count OS',
+                      cancelledCount > 0 ? 'LOTE · $activeCount/$count activas' : 'LOTE · $count OS',
                       style: const TextStyle(color: _kTextPrim, fontSize: 10, fontWeight: FontWeight.w700),
                     ),
                   ),
@@ -3818,8 +4405,9 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
             child: PesaBatchProgressBar(
-              completed: widget.group.items.where(_OsListScreenState.tienePdfReal).length,
+              completed: doneCount,
               total: count,
+              cancelled: cancelledCount,
             ),
           ),
           Builder(
@@ -4159,7 +4747,11 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
 
     if (group.isLote) {
       final count = group.items.length;
-      final done = group.items.where(_OsListScreenState.tienePdfReal).length;
+      final cancelledCount = group.items.where(_OsListScreenState.esCancelada).length;
+      final activeCount = (count - cancelledCount).clamp(0, count);
+      final done = group.items
+          .where((o) => !_OsListScreenState.esCancelada(o) && _OsListScreenState.tienePdfReal(o))
+          .length;
       final rango = (first['rango_lote'] ?? '').toString().trim();
       final estLote = estadoCorreoLote(group.items);
 
@@ -4191,7 +4783,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                       border: Border.all(color: PesaColors.borderStrong),
                     ),
                     child: Text(
-                      'LOTE · $count OS',
+                      cancelledCount > 0 ? 'LOTE · $activeCount/$count activas' : 'LOTE · $count OS',
                       style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: _kTextPrim),
                     ),
                   ),
@@ -4234,7 +4826,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 7),
-              PesaBatchProgressBar(completed: done, total: count),
+              PesaBatchProgressBar(completed: done, total: count, cancelled: cancelledCount),
               if (estLote == 'enviado') ...[
                 const SizedBox(height: 5),
                 const PesaStatusBadge(
@@ -4252,8 +4844,9 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
     // Orden individual
     final os = first;
     final folioStr = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
-    final isCerrado = _OsListScreenState.tienePdfReal(os);
-    final noIniciada = _OsListScreenState.sinIniciar(os);
+    final isCancelada = _OsListScreenState.esCancelada(os);
+    final isCerrado = !isCancelada && _OsListScreenState.tienePdfReal(os);
+    final noIniciada = !isCancelada && _OsListScreenState.sinIniciar(os);
     final ccaVal = extraerNumeroCca(os);
     final dveVal = extraerNumeroDve(os);
     final specsStr = construirEspecificacionesInstrumento(os);
@@ -4264,7 +4857,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(11),
         decoration: BoxDecoration(
-          color: isSelected ? PesaColors.surfaceMuted : _kCardBg,
+          color: isSelected ? PesaColors.surfaceMuted : (isCancelada ? PesaColors.surfaceMuted : _kCardBg),
           borderRadius: BorderRadius.circular(10),
           border: Border(
             left: BorderSide(
@@ -4286,19 +4879,24 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                     folioStr.isNotEmpty ? folioStr : '—',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w800,
-                      color: _kTextPrim,
+                      color: isCancelada ? PesaColors.textTertiary : _kTextPrim,
+                      decoration: isCancelada ? TextDecoration.lineThrough : null,
                     ),
                   ),
                 ),
                 const SizedBox(width: 6),
                 PesaStatusBadge(
-                  label: isCerrado ? 'Cerrado' : (noIniciada ? 'Sin Formato' : 'En Proceso'),
-                  dotColor: isCerrado
-                      ? PesaColors.dotGreen
-                      : (noIniciada ? PesaColors.dotRed : PesaColors.dotAmber),
+                  label: isCancelada
+                      ? 'Cancelada'
+                      : (isCerrado ? 'Cerrado' : (noIniciada ? 'Sin Formato' : 'En Proceso')),
+                  dotColor: isCancelada
+                      ? PesaColors.dotNeutral
+                      : (isCerrado
+                          ? PesaColors.dotGreen
+                          : (noIniciada ? PesaColors.dotRed : PesaColors.dotAmber)),
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 ),
               ],
@@ -4556,8 +5154,12 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
 
   Widget _buildSingleOsDetailPane(BuildContext context, Map<String, dynamic> os) {
     final folioStr = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
-    final isCerrado = _OsListScreenState.tienePdfReal(os);
-    final noIniciada = _OsListScreenState.sinIniciar(os);
+    final isCancelada = _OsListScreenState.esCancelada(os);
+    final isCerrado = !isCancelada && _OsListScreenState.tienePdfReal(os);
+    final noIniciada = !isCancelada && _OsListScreenState.sinIniciar(os);
+    final esAdmin = AuthService.usuarioActual?.isAdmin == true || context.read<AuthService>().isAdmin;
+    final loteRef = ((os['id_lote'] ?? os['lote'])?.toString() ?? '').trim();
+    final perteneceALote = loteRef.isNotEmpty && loteRef.toLowerCase() != 'null' && loteRef.toLowerCase() != 'none';
     final isFisico = esModalidadFisica(os['modalidad'] as String?);
     final ccaVal = extraerNumeroCca(os);
     final dveVal = extraerNumeroDve(os);
@@ -4633,10 +5235,14 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                               crossAxisAlignment: WrapCrossAlignment.center,
                               children: [
                                 PesaStatusBadge(
-                                  label: isCerrado ? 'Cerrado' : (noIniciada ? 'Sin Formato' : 'En Proceso'),
-                                  dotColor: isCerrado
-                                      ? PesaColors.dotGreen
-                                      : (noIniciada ? PesaColors.dotRed : PesaColors.dotAmber),
+                                  label: isCancelada
+                                      ? 'Cancelada'
+                                      : (isCerrado ? 'Cerrado' : (noIniciada ? 'Sin Formato' : 'En Proceso')),
+                                  dotColor: isCancelada
+                                      ? PesaColors.dotNeutral
+                                      : (isCerrado
+                                          ? PesaColors.dotGreen
+                                          : (noIniciada ? PesaColors.dotRed : PesaColors.dotAmber)),
                                 ),
                                 TipoServicioBadge(os: os),
                                 SyncCheckBadge(
@@ -4689,7 +5295,26 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      if (!isCerrado) ...[
+                      if (isCancelada) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: PesaColors.surfaceMuted,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: PesaColors.border),
+                          ),
+                          child: Text(
+                            'No utilizada: ${(os['motivo_cancelacion'] ?? '').toString().trim().isNotEmpty ? os['motivo_cancelacion'].toString().trim() : 'Descartada del lote'}',
+                            style: const TextStyle(fontSize: 12.5, color: PesaColors.textSecondary, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                        if (esAdmin)
+                          OutlinedButton.icon(
+                            onPressed: () => state._reactivarOrdenCancelada(context, os),
+                            icon: const Icon(Icons.restore_rounded, size: 17),
+                            label: const Text('Reactivar orden'),
+                          ),
+                      ] else if (!isCerrado) ...[
                         if (isFisico)
                           ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
@@ -4718,6 +5343,12 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                           icon: const Icon(Icons.upload_file_rounded, size: 17),
                           label: const Text('Subir PDF manual'),
                         ),
+                        if (perteneceALote || esAdmin)
+                          OutlinedButton.icon(
+                            onPressed: () => state._mostrarModalDescartarOrden(context, os),
+                            icon: const Icon(Icons.remove_circle_outline_rounded, size: 17),
+                            label: const Text('No se usó'),
+                          ),
                         if (!noIniciada)
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
@@ -4861,7 +5492,11 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
   Widget _buildLoteDetailPane(BuildContext context, _OsGroup group) {
     final first = group.items.first;
     final count = group.items.length;
-    final done = group.items.where(_OsListScreenState.tienePdfReal).length;
+    final cancelledCount = group.items.where(_OsListScreenState.esCancelada).length;
+    final activeCount = (count - cancelledCount).clamp(0, count);
+    final done = group.items
+        .where((o) => !_OsListScreenState.esCancelada(o) && _OsListScreenState.tienePdfReal(o))
+        .length;
     final cliente = (first['cliente'] ?? 'Cliente del Lote').toString().trim();
     final sucursal = (first['sucursal'] ?? '').toString().trim();
     final tec = (first['tecnico_nombre'] ?? first['tecnico'] ?? 'Sin asignar').toString().trim();
@@ -4900,7 +5535,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                                   border: Border.all(color: PesaColors.borderStrong),
                                 ),
                                 child: Text(
-                                  'LOTE · $count OS',
+                                  cancelledCount > 0 ? 'LOTE · $activeCount/$count activas' : 'LOTE · $count OS',
                                   style: const TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w800,
@@ -4934,7 +5569,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 12),
-                PesaBatchProgressBar(completed: done, total: count),
+                PesaBatchProgressBar(completed: done, total: count, cancelled: cancelledCount),
                 const SizedBox(height: 14),
                 SizedBox(
                   height: 46,
@@ -4959,7 +5594,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                               ? 'Reenviar Lote ($done PDFs)'
                               : (estLote == 'cola'
                                   ? 'Lote en cola (Offline)'
-                                  : 'Finalizar y Enviar Lote ($done/$count)')),
+                                  : 'Finalizar y Enviar Lote ($done/$activeCount)')),
                     ),
                     onPressed: enviando ? null : () => state._procesarEnvioCorreo(item: group, esLote: true),
                   ),
@@ -5756,15 +6391,23 @@ class _OsRow extends StatelessWidget {
     final isEven    = index % 2 == 0;
     final String tecnicoNombre = (os['tecnico_nombre'] ?? os['tecnico'] ?? '').toString().trim();
 
-    final bool hasDoc = _OsListScreenState.tieneDocumento(os);
+    final bool isCancelada = _OsListScreenState.esCancelada(os);
+    final bool hasDoc = !isCancelada && _OsListScreenState.tieneDocumento(os);
+    final bool esAdmin = AuthService.usuarioActual?.isAdmin == true || context.read<AuthService>().isAdmin;
+    final String loteRef = ((os['id_lote'] ?? os['lote'])?.toString() ?? '').trim();
+    final bool perteneceALote = loteRef.isNotEmpty && loteRef.toLowerCase() != 'null' && loteRef.toLowerCase() != 'none';
 
     final String estatusRemoto = (os['estatus'] ?? os['estado'] ?? '').toString().trim();
     final bool isCerrado = hasDoc;
 
-    final String estatusLabel = isCerrado
-        ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
-        : 'Pend. Formato';
-    final Color estatusFg = isCerrado ? const Color(0xFF0F172A) : const Color(0xFF334155);
+    final String estatusLabel = isCancelada
+        ? 'Cancelada'
+        : (isCerrado
+            ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
+            : 'Pend. Formato');
+    final Color estatusFg = isCancelada
+        ? PesaColors.textSecondary
+        : (isCerrado ? const Color(0xFF0F172A) : const Color(0xFF334155));
     final Color estatusBg = const Color(0xFFF8FAFC);
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
@@ -6012,7 +6655,21 @@ class _OsRow extends StatelessWidget {
                 spacing: 6.0,    // Espacio horizontal entre botones
                 runSpacing: 6.0, // Salto de línea limpio si no cabe por el sidebar
                 children: [
-                  if (isCerrado) ...[
+                  if (isCancelada) ...[
+                    Text(
+                      'No utilizada: ${(os['motivo_cancelacion'] ?? '').toString().trim().isNotEmpty ? os['motivo_cancelacion'].toString().trim() : 'Descartada del lote'}',
+                      style: const TextStyle(fontSize: 11, color: PesaColors.textSecondary, fontWeight: FontWeight.w600),
+                    ),
+                    if (esAdmin)
+                      _buildBtnAccion(
+                        label: "Reactivar",
+                        icon: Icons.restore_rounded,
+                        color: Colors.white,
+                        fg: const Color(0xFF0F172A),
+                        side: const BorderSide(color: Color(0xFFCBD5E1)),
+                        onPressed: () => context.findAncestorStateOfType<_OsListScreenState>()?._reactivarOrdenCancelada(context, os),
+                      ),
+                  ] else if (isCerrado) ...[
                     _buildBtnAccion(
                       label: "Ver PDF",
                       icon: Icons.picture_as_pdf_outlined,
@@ -6107,6 +6764,15 @@ class _OsRow extends StatelessWidget {
                       side: const BorderSide(color: Color(0xFFCBD5E1)),
                       onPressed: () => onSubirPdfManual(context, os),
                     ),
+                    if (perteneceALote || esAdmin)
+                      _buildBtnAccion(
+                        label: "No se usó",
+                        icon: Icons.remove_circle_outline_rounded,
+                        color: Colors.white,
+                        fg: const Color(0xFF0F172A),
+                        side: const BorderSide(color: Color(0xFFCBD5E1)),
+                        onPressed: () => context.findAncestorStateOfType<_OsListScreenState>()?._mostrarModalDescartarOrden(context, os),
+                      ),
                   ],
                 ],
               ),
@@ -6146,6 +6812,11 @@ class _LoteRowState extends State<_LoteRow> {
   Widget build(BuildContext context) {
     final first = widget.group.items.first;
     final count = widget.group.items.length;
+    final cancelledCount = widget.group.items.where(_OsListScreenState.esCancelada).length;
+    final activeCount = (count - cancelledCount).clamp(0, count);
+    final doneCount = widget.group.items
+        .where((o) => !_OsListScreenState.esCancelada(o) && _OsListScreenState.tienePdfReal(o))
+        .length;
     final String tecnicoNombre = (first['tecnico_nombre'] ?? first['tecnico'] ?? '').toString().trim();
 
     return Column(
@@ -6182,7 +6853,10 @@ class _LoteRowState extends State<_LoteRow> {
                               borderRadius: BorderRadius.circular(4),
                               border: Border.all(color: const Color(0xFFCBD5E1)),
                             ),
-                            child: Text('LOTE • $count OS', style: const TextStyle(color: _kTextPrim, fontSize: 9.5, fontWeight: FontWeight.w700)),
+                            child: Text(
+                              cancelledCount > 0 ? 'LOTE • $activeCount/$count activas' : 'LOTE • $count OS',
+                              style: const TextStyle(color: _kTextPrim, fontSize: 9.5, fontWeight: FontWeight.w700),
+                            ),
                           ),
                           if ((first['rango_lote'] ?? '').toString().trim().isNotEmpty) ...[
                             const SizedBox(width: 6),
@@ -6259,8 +6933,9 @@ class _LoteRowState extends State<_LoteRow> {
                               child: SizedBox(
                                 width: 200,
                                 child: PesaBatchProgressBar(
-                                  completed: widget.group.items.where(_OsListScreenState.tienePdfReal).length,
+                                  completed: doneCount,
                                   total: count,
+                                  cancelled: cancelledCount,
                                 ),
                               ),
                             ),

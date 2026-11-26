@@ -199,7 +199,7 @@ class SyncService extends ChangeNotifier {
           estatus == 'COMPLETADA' ||
           hasLocalPdf;
 
-      final isCancelada = estado == 'CANCELADA' || estado == 'CANCELADO' || estatus == 'CANCELADO';
+      final isCancelada = estado == 'CANCELADA' || estado == 'CANCELADO' || estatus == 'CANCELADA' || estatus == 'CANCELADO';
 
       if (isCerrada) {
         cerrado++;
@@ -432,13 +432,21 @@ class SyncService extends ChangeNotifier {
         debugPrint('[Sync PUSH pendientes] Error ignorado: $e');
       }
 
-      // Reintentar resets que fallaron por red offline en el ciclo anterior
+      // Reintentar resets y cancelaciones que fallaron por red offline en el ciclo anterior
       try {
         final resets = await _pushResetsPendientes()
             .timeout(const Duration(seconds: 10), onTimeout: () => 0);
         if (resets > 0) debugPrint('[Sync PUSH RESET] $resets resets propagados al servidor');
       } catch (e) {
         debugPrint('[Sync PUSH RESET] Error ignorado: $e');
+      }
+
+      try {
+        final canc = await _pushCancelacionesPendientes()
+            .timeout(const Duration(seconds: 12), onTimeout: () => 0);
+        if (canc > 0) debugPrint('[Sync PUSH CANCELAR] $canc cancelaciones/reactivaciones sincronizadas');
+      } catch (e) {
+        debugPrint('[Sync PUSH CANCELAR] Error ignorado: $e');
       }
 
       try {
@@ -764,6 +772,114 @@ class SyncService extends ChangeNotifier {
     }
   }
 
+  /// Sincroniza en segundo plano las cancelaciones/reactivaciones encoladas sin red.
+  Future<int> _pushCancelacionesPendientes() async {
+    try {
+      final db = LocalDbService.instance;
+      final cola = await db.getColaCancelaciones();
+      if (cola.isEmpty) return 0;
+      int ok = 0;
+      for (final item in cola) {
+        final folio = (item['folio_os'] ?? '').toString().trim();
+        final accion = (item['accion'] ?? 'cancelar').toString().trim().toLowerCase();
+        if (folio.isEmpty) continue;
+        try {
+          if (accion == 'reactivar') {
+            await ApiService.instance.reactivarOrden(folio).timeout(const Duration(seconds: 10));
+          } else {
+            await ApiService.instance.cancelarOrden(
+              folio,
+              motivo: (item['motivo'] ?? 'Se asignaron folios de más').toString(),
+              usuario: item['usuario']?.toString(),
+              timeout: const Duration(seconds: 10),
+            );
+          }
+          await db.eliminarDeColaCancelaciones(folio);
+          ok++;
+        } catch (e) {
+          debugPrint('[SYNC PUSH CANCELAR] Pendiente $folio ($accion): $e');
+        }
+      }
+      if (ok > 0) notifyListeners();
+      return ok;
+    } catch (e) {
+      debugPrint('[SYNC PUSH CANCELAR] Error: $e');
+      return 0;
+    }
+  }
+
+  /// Marca una orden sobrante como CANCELADA en SQLite local y en Render (o encola offline si no hay red).
+  Future<bool> cancelarOrdenYSincronizar({
+    required String folio,
+    required String motivo,
+    required String usuario,
+  }) async {
+    final cleanFolio = folio.trim();
+    if (cleanFolio.isEmpty) return false;
+    final nowFmt = DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now());
+
+    await LocalDbService.instance.cancelarOrdenLocal(
+      folio: cleanFolio,
+      motivo: motivo,
+      usuario: usuario,
+      sincronizadoServidor: false,
+    );
+    updateLocalOrder(cleanFolio, {
+      'estatus': 'CANCELADA',
+      'estado': 'CANCELADA',
+      'motivo_cancelacion': motivo,
+      'cancelada_por': usuario,
+      'fecha_cancelacion': nowFmt,
+    });
+
+    bool serverOk = false;
+    try {
+      final conn = await Connectivity().checkConnectivity();
+      if (conn.any((r) => r != ConnectivityResult.none)) {
+        await ApiService.instance.cancelarOrden(
+          cleanFolio,
+          motivo: motivo,
+          usuario: usuario,
+        );
+        await LocalDbService.instance.eliminarDeColaCancelaciones(cleanFolio);
+        serverOk = true;
+      }
+    } catch (e) {
+      debugPrint('[Sync cancelarOrdenYSincronizar] Encolada offline para $cleanFolio: $e');
+    }
+    return serverOk;
+  }
+
+  /// Reactiva una orden CANCELADA devolviéndola a EN_PROCESO (Solo Admin).
+  Future<bool> reactivarOrdenYSincronizar(String folio) async {
+    final cleanFolio = folio.trim();
+    if (cleanFolio.isEmpty) return false;
+    await LocalDbService.instance.reactivarOrdenLocal(
+      folio: cleanFolio,
+      sincronizadoServidor: false,
+    );
+    updateLocalOrder(cleanFolio, {
+      'estatus': 'Asignada',
+      'estado': 'EN_PROCESO',
+      'motivo_cancelacion': '',
+      'cancelada_por': '',
+      'fecha_cancelacion': null,
+    });
+
+    bool serverOk = false;
+    try {
+      final conn = await Connectivity().checkConnectivity();
+      if (conn.any((r) => r != ConnectivityResult.none)) {
+        await ApiService.instance.reactivarOrden(cleanFolio);
+        await LocalDbService.instance.eliminarDeColaCancelaciones(cleanFolio);
+        serverOk = true;
+      }
+    } catch (e) {
+      debugPrint('[Sync reactivarOrdenYSincronizar] Encolada offline para $cleanFolio: $e');
+    }
+    return serverOk;
+  }
+
   /// Sube UNA orden al servidor. Retorna true si fue confirmada por Render.
   Future<bool> _subirUnaOrden(Map<String, dynamic> os) async {
     final db    = LocalDbService.instance;
@@ -793,6 +909,10 @@ class SyncService extends ChangeNotifier {
 
       final estLocal     = (os['estado']  as String? ?? '').toUpperCase().trim();
       final estatusLocal = (os['estatus'] as String? ?? '').toUpperCase().trim();
+      if (estLocal == 'CANCELADA' || estLocal == 'CANCELADO' || estatusLocal == 'CANCELADA' || estatusLocal == 'CANCELADO') {
+        await _pushCancelacionesPendientes();
+        return true;
+      }
       final cerradaLocal = {'CERRADO','CERRADA','COMPLETADA','COMPLETADA_DIGITAL','COMPLETADA_FISICA','FIRMADA'}.contains(estLocal)
                         || {'CERRADO','CERRADA','COMPLETADA'}.contains(estatusLocal);
 

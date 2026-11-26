@@ -123,6 +123,11 @@ class LocalDbService {
       fecha_servicio         TEXT,
       fecha_cierre           TEXT,
       fecha_creacion_logistica TEXT,
+      motivo_cancelacion     TEXT,
+      cancelada_por          TEXT,
+      fecha_cancelacion      TEXT,
+      sin_correo_cliente     INTEGER DEFAULT 0,
+      motivo_sin_correo      TEXT,
       updated_at             TEXT
     )
   ''';
@@ -428,6 +433,11 @@ class LocalDbService {
             'fecha_servicio': 'TEXT',
             'fecha_cierre': 'TEXT',
             'fecha_creacion_logistica': 'TEXT',
+            'motivo_cancelacion': 'TEXT',
+            'cancelada_por': 'TEXT',
+            'fecha_cancelacion': 'TEXT',
+            'sin_correo_cliente': 'INTEGER DEFAULT 0',
+            'motivo_sin_correo': 'TEXT',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -605,15 +615,28 @@ class LocalDbService {
     try {
       await db.execute('''
         CREATE TABLE IF NOT EXISTS catalogo_clientes (
-          id              INTEGER PRIMARY KEY,
-          nombre          TEXT NOT NULL,
-          razon_social    TEXT,
-          rfc             TEXT,
-          correo          TEXT,
-          telefono        TEXT,
-          direccion       TEXT,
-          sucursales_json TEXT,
-          updated_at      TEXT
+          id                      INTEGER PRIMARY KEY,
+          nombre                  TEXT NOT NULL,
+          razon_social            TEXT,
+          rfc                     TEXT,
+          correo                  TEXT,
+          correos_frecuentes_json TEXT,
+          telefono                TEXT,
+          direccion               TEXT,
+          sucursales_json         TEXT,
+          updated_at              TEXT
+        )
+      ''');
+      try {
+        await db.execute('ALTER TABLE catalogo_clientes ADD COLUMN correos_frecuentes_json TEXT');
+      } catch (_) {}
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS cola_cancelaciones (
+          folio_os   TEXT PRIMARY KEY,
+          accion     TEXT NOT NULL DEFAULT 'cancelar',
+          motivo     TEXT,
+          usuario    TEXT,
+          updated_at TEXT NOT NULL
         )
       ''');
       await db.execute('''
@@ -878,6 +901,11 @@ class LocalDbService {
         final f = (r['folio_os'] as String? ?? '').trim();
         if (f.isNotEmpty) protegidos.add(f);
       }
+      final cancPend = await db.rawQuery('SELECT folio_os FROM cola_cancelaciones');
+      for (final r in cancPend) {
+        final f = (r['folio_os'] as String? ?? '').trim();
+        if (f.isNotEmpty) protegidos.add(f);
+      }
     } catch (e) {
       debugPrint('[LocalDB] insertOrdenesBatch: no se pudo leer protegidos ($e)');
     }
@@ -932,10 +960,18 @@ class LocalDbService {
 
         final bool esCerrada = hasPdfRemoto;
         final String rawEstatus = (raw['estatus'] ?? '').toString().trim();
+        final String rawEstado = (raw['estado'] ?? '').toString().trim();
+        final bool esCanceladaRemota = !esCerrada &&
+            (rawEstatus.toUpperCase() == 'CANCELADA' ||
+                rawEstatus.toUpperCase() == 'CANCELADO' ||
+                rawEstado.toUpperCase() == 'CANCELADA' ||
+                rawEstado.toUpperCase() == 'CANCELADO');
         final String finalEstatus = esCerrada
             ? 'Cerrado'
-            : (rawEstatus.isNotEmpty ? rawEstatus : 'Asignada');
-        final String finalEstado = esCerrada ? 'COMPLETADA_DIGITAL' : 'PROCESO';
+            : (esCanceladaRemota ? 'CANCELADA' : (rawEstatus.isNotEmpty ? rawEstatus : 'Asignada'));
+        final String finalEstado = esCerrada
+            ? 'COMPLETADA_DIGITAL'
+            : (esCanceladaRemota ? 'CANCELADA' : 'PROCESO');
 
         final mapped = <String, dynamic>{
           'id':                _toIntOrNull(raw['id']),
@@ -1019,6 +1055,11 @@ class LocalDbService {
             'fecha_envio_correo': formatearFechaHoraMexico(raw['fecha_envio_correo'] ?? raw['fecha_envio_email']),
           if ((raw['fecha_envio_email'] ?? raw['fecha_envio_correo']) != null && (raw['fecha_envio_email'] ?? raw['fecha_envio_correo']).toString().trim().isNotEmpty)
             'fecha_envio_email':  formatearFechaHoraMexico(raw['fecha_envio_email'] ?? raw['fecha_envio_correo']),
+          if (raw['motivo_cancelacion'] != null) 'motivo_cancelacion': raw['motivo_cancelacion'].toString(),
+          if (raw['cancelada_por'] != null) 'cancelada_por': raw['cancelada_por'].toString(),
+          if (raw['fecha_cancelacion'] != null) 'fecha_cancelacion': raw['fecha_cancelacion'].toString(),
+          if (raw['sin_correo_cliente'] != null) 'sin_correo_cliente': _toBoolInt(raw['sin_correo_cliente']),
+          if (raw['motivo_sin_correo'] != null) 'motivo_sin_correo': raw['motivo_sin_correo'].toString(),
           'is_synced':         1,
           'is_dirty':          0,
           'updated_at':        raw['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
@@ -1356,11 +1397,15 @@ class LocalDbService {
     }
 
     final String modNorm = normalizarModalidad(data['modalidad']);
+    final String srvEstadoRaw = (data['estado'] ?? '').toString().trim().toUpperCase();
+    final String srvEstatusRaw = (data['estatus'] ?? '').toString().trim().toUpperCase();
+    final bool srvEsCancelada = srvEstadoRaw.startsWith('CANCEL') || srvEstatusRaw.startsWith('CANCEL');
 
     final row = <String, dynamic>{
       'folio_os':          folio,
       'id_tecnico':        idTecnicoFinal,
-      'estado':            data['estado']?.toString() ?? 'PROCESO',
+      'estado':            srvEsCancelada ? 'CANCELADA' : (data['estado']?.toString() ?? 'PROCESO'),
+      'estatus':           srvEsCancelada ? 'CANCELADA' : (data['estatus']?.toString() ?? 'Asignada'),
       'modalidad':         modNorm,
       'fecha':             data['fecha']?.toString(),
       'cliente':           cliente,
@@ -1453,6 +1498,16 @@ class LocalDbService {
       },
       'is_synced':         (data['is_synced'] == 1 || data['is_synced'] == true || data['sync_status'] == 'SINCRONIZADO' || data['sync_check_status'] == 'SUBIDA_SERVIDOR' || data['sync_check_status'] == 'AUDITADA_ADMIN' || data['sync_check_status'] == 'ABIERTO') ? 1 : 0,
       'updated_at':        data['updated_at']?.toString(),
+      if (data['motivo_cancelacion'] != null)
+        'motivo_cancelacion': data['motivo_cancelacion'].toString(),
+      if (data['cancelada_por'] != null)
+        'cancelada_por': data['cancelada_por'].toString(),
+      if (data['fecha_cancelacion'] != null)
+        'fecha_cancelacion': data['fecha_cancelacion'].toString(),
+      if (data['sin_correo_cliente'] != null)
+        'sin_correo_cliente': _toBoolInt(data['sin_correo_cliente']),
+      if (data['motivo_sin_correo'] != null)
+        'motivo_sin_correo': data['motivo_sin_correo'].toString(),
     };
 
     try {
@@ -1472,6 +1527,34 @@ class LocalDbService {
         final String exEstatus = (ex['estatus'] as String? ?? '').toUpperCase().trim();
         final String exEstado = (ex['estado'] as String? ?? '').toUpperCase().trim();
 
+        bool pendCancelacionLocal = false;
+        try {
+          final pendCanc = await db.query(
+            'cola_cancelaciones',
+            where: 'folio_os = ?',
+            whereArgs: [folio],
+            limit: 1,
+          );
+          pendCancelacionLocal = pendCanc.isNotEmpty;
+        } catch (_) {}
+
+        if (pendCancelacionLocal || ((exEstatus == 'CANCELADA' || exEstado == 'CANCELADA') && !srvEsCancelada && localIsDirty == 1)) {
+          await db.update(
+            'ordenes_servicio',
+            {
+              'estatus': 'CANCELADA',
+              'estado': 'CANCELADA',
+              if (ex['motivo_cancelacion'] != null) 'motivo_cancelacion': ex['motivo_cancelacion'],
+              if (ex['cancelada_por'] != null) 'cancelada_por': ex['cancelada_por'],
+              if (ex['fecha_cancelacion'] != null) 'fecha_cancelacion': ex['fecha_cancelacion'],
+            },
+            where: 'folio_os = ? OR folio = ?',
+            whereArgs: [folio, folio],
+          );
+          lastUpsertError = null;
+          return true;
+        }
+
         final bool statusIsClosed = exEstatus == 'CERRADO' ||
             exEstatus == 'CERRADA' ||
             exEstatus == 'COMPLETADA' ||
@@ -1482,7 +1565,10 @@ class LocalDbService {
         final bool pdfDiskExists = await checkPdfExistsOnDisk(folio, pdfPath);
         final bool hasLocalChanges = localIsDirty == 1;
 
-        final bool localIsClosed = statusIsClosed || hasPdfPath || hasPdfB64 || pdfDiskExists || hasLocalChanges;
+        final bool tienePdfFirmadoLocal = statusIsClosed && (hasPdfPath || hasPdfB64 || pdfDiskExists);
+        final bool localIsClosed = srvEsCancelada
+            ? tienePdfFirmadoLocal
+            : (statusIsClosed || hasPdfPath || hasPdfB64 || pdfDiskExists || hasLocalChanges);
 
         // REGLA 1 (REGLA DE ORO): CANDADO ESTRICTO CONTRA SOBRESCRITURA
         // SI la orden local ya está cerrada o fue trabajada localmente (tiene cambios pendientes o PDF):
@@ -3833,6 +3919,13 @@ class LocalDbService {
               'razon_social': razon,
               'rfc': (c['rfc'] ?? '').toString().trim(),
               'correo': correoCli,
+              'correos_frecuentes_json': jsonEncode(
+                (c['correos_frecuentes'] as List?)
+                        ?.map((e) => e.toString().trim())
+                        .where((e) => e.isNotEmpty)
+                        .toList() ??
+                    const <String>[],
+              ),
               'telefono': (c['telefono'] ?? '').toString().trim(),
               'direccion': dirCli,
               'sucursales_json': jsonEncode(cleanNested),
@@ -4552,6 +4645,323 @@ class LocalDbService {
       where: 'folio_os = ?',
       whereArgs: [folio.trim()],
     );
+  }
+
+  // ── Poka-Yoke: Correos frecuentes, propagación en lote y cancelación limpia ──
+
+  /// Devuelve correos frecuentes deduplicados para un cliente/sucursal desde SQLite
+  /// (`catalogo_sucursales`, `catalogo_clientes` y `ordenes_servicio`).
+  Future<List<String>> getCorreosFrecuentesCliente({
+    int? clienteId,
+    String? clienteNombre,
+    int? sucursalId,
+    String? sucursalNombre,
+  }) async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+
+    final rx = RegExp(r'^[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}$');
+    final vistos = <String>{};
+    final salida = <String>[];
+
+    void addRaw(dynamic raw) {
+      if (raw == null) return;
+      for (final tok in raw.toString().split(RegExp(r'[,;\s]+'))) {
+        final cand = tok.trim();
+        final low = cand.toLowerCase();
+        if (cand.isEmpty ||
+            low == 'ivancolin1207@gmail.com' ||
+            low == 'recepcion@basculaspesa.com.mx' ||
+            low.startsWith('pendiente')) {
+          continue;
+        }
+        if (rx.hasMatch(cand) && vistos.add(low) && salida.length < 8) {
+          salida.add(cand);
+        }
+      }
+    }
+
+    try {
+      if (sucursalId != null && sucursalId > 0) {
+        final sucRows = await db.query(
+          'catalogo_sucursales',
+          where: 'sucursal_id = ? OR id = ?',
+          whereArgs: [sucursalId, sucursalId],
+        );
+        for (final r in sucRows) {
+          addRaw(r['correo']);
+        }
+        final osSuc = await db.rawQuery('''
+          SELECT COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) AS c
+          FROM ordenes_servicio
+          WHERE sucursal_id = ? AND COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+          ORDER BY local_id DESC LIMIT 20
+        ''', [sucursalId]);
+        for (final r in osSuc) {
+          addRaw(r['c']);
+        }
+      }
+
+      if (clienteId != null && clienteId > 0) {
+        final cliRows = await db.query(
+          'catalogo_clientes',
+          where: 'id = ?',
+          whereArgs: [clienteId],
+          limit: 1,
+        );
+        for (final r in cliRows) {
+          addRaw(r['correo']);
+          final frecJson = r['correos_frecuentes_json']?.toString();
+          if (frecJson != null && frecJson.isNotEmpty) {
+            try {
+              final dec = jsonDecode(frecJson);
+              if (dec is List) {
+                for (final e in dec) addRaw(e);
+              }
+            } catch (_) {}
+          }
+        }
+        final osCli = await db.rawQuery('''
+          SELECT COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) AS c
+          FROM ordenes_servicio
+          WHERE id_cliente = ? AND COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+          ORDER BY local_id DESC LIMIT 25
+        ''', [clienteId]);
+        for (final r in osCli) {
+          addRaw(r['c']);
+        }
+      }
+
+      final cliNom = (clienteNombre ?? '').trim();
+      if (cliNom.isNotEmpty) {
+        final cliByName = await db.rawQuery(
+          'SELECT correo, correos_frecuentes_json FROM catalogo_clientes WHERE LOWER(TRIM(nombre)) = LOWER(?) OR LOWER(TRIM(razon_social)) = LOWER(?) LIMIT 3',
+          [cliNom, cliNom],
+        );
+        for (final r in cliByName) {
+          addRaw(r['correo']);
+          final frecJson = r['correos_frecuentes_json']?.toString();
+          if (frecJson != null && frecJson.isNotEmpty) {
+            try {
+              final dec = jsonDecode(frecJson);
+              if (dec is List) {
+                for (final e in dec) addRaw(e);
+              }
+            } catch (_) {}
+          }
+        }
+        final osNom = await db.rawQuery('''
+          SELECT COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) AS c
+          FROM ordenes_servicio
+          WHERE LOWER(TRIM(cliente)) = LOWER(?)
+            AND COALESCE(NULLIF(TRIM(correo_destino), ''), NULLIF(TRIM(correo_cliente), '')) LIKE '%@%'
+          ORDER BY local_id DESC LIMIT 30
+        ''', [cliNom]);
+        for (final r in osNom) {
+          addRaw(r['c']);
+        }
+      }
+    } catch (e) {
+      debugPrint('[LocalDB] getCorreosFrecuentesCliente error: $e');
+    }
+
+    return salida;
+  }
+
+  /// Busca si otra orden hermana del mismo lote ya tiene correo o excepción "Solo recepción" guardada.
+  Future<Map<String, dynamic>?> obtenerCorreoHeredadoLote({
+    required String folio,
+    String? loteId,
+  }) async {
+    final db = await _ensureInit();
+    try {
+      String effLote = (loteId ?? '').trim();
+      if (effLote.isEmpty && folio.trim().isNotEmpty) {
+        final r0 = await db.query(
+          'ordenes_servicio',
+          columns: ['id_lote', 'correo_destino', 'correo_cliente', 'sin_correo_cliente', 'motivo_sin_correo'],
+          where: 'folio_os = ? OR folio = ?',
+          whereArgs: [folio.trim(), folio.trim()],
+          limit: 1,
+        );
+        if (r0.isNotEmpty) {
+          final cSelf = (r0.first['correo_destino'] ?? r0.first['correo_cliente'] ?? '').toString().trim();
+          final scSelf = _toInt(r0.first['sin_correo_cliente'], 0) == 1;
+          if (scSelf || cSelf.contains('@') || cSelf.toUpperCase().startsWith('PENDIENTE')) {
+            return {
+              'correo': cSelf,
+              'sin_correo': scSelf,
+              'motivo': (r0.first['motivo_sin_correo'] ?? '').toString(),
+            };
+          }
+          effLote = (r0.first['id_lote'] ?? '').toString().trim();
+        }
+      }
+      if (effLote.isEmpty || effLote.toLowerCase() == 'null') return null;
+
+      final siblings = await db.rawQuery('''
+        SELECT correo_destino, correo_cliente, sin_correo_cliente, motivo_sin_correo
+        FROM ordenes_servicio
+        WHERE id_lote = ?
+          AND UPPER(TRIM(COALESCE(estatus, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+        ORDER BY updated_at DESC, local_id DESC
+      ''', [effLote]);
+      for (final s in siblings) {
+        final corr = (s['correo_destino'] ?? s['correo_cliente'] ?? '').toString().trim();
+        final sc = _toInt(s['sin_correo_cliente'], 0) == 1;
+        if (sc || corr.contains('@') || corr.toUpperCase().startsWith('PENDIENTE')) {
+          return {
+            'correo': corr,
+            'sin_correo': sc,
+            'motivo': (s['motivo_sin_correo'] ?? '').toString(),
+          };
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Guarda el correo del cliente en la orden actual y lo propaga a todas las órdenes
+  /// activas (no canceladas) del mismo lote en SQLite.
+  Future<void> guardarCorreoEnOrdenYLote({
+    required String folio,
+    String? loteId,
+    required String correo,
+    bool sinCorreoCliente = false,
+    String? motivoSinCorreo,
+  }) async {
+    final db = await _ensureInit();
+    final f = folio.trim();
+    final c = correo.trim();
+    if (f.isEmpty || c.isEmpty) return;
+
+    final updates = <String, dynamic>{
+      'correo_cliente': c,
+      'correo_destino': c,
+      'sin_correo_cliente': sinCorreoCliente ? 1 : 0,
+      if (motivoSinCorreo != null) 'motivo_sin_correo': motivoSinCorreo.trim(),
+    };
+    await db.update(
+      'ordenes_servicio',
+      updates,
+      where: 'folio_os = ? OR folio = ?',
+      whereArgs: [f, f],
+    );
+
+    final lid = (loteId ?? '').trim();
+    if (lid.isNotEmpty && lid.toLowerCase() != 'null') {
+      await db.rawUpdate('''
+        UPDATE ordenes_servicio
+        SET correo_cliente     = ?,
+            correo_destino     = ?,
+            sin_correo_cliente = ?,
+            motivo_sin_correo  = ?
+        WHERE id_lote = ?
+          AND UPPER(TRIM(COALESCE(estatus, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+          AND UPPER(TRIM(COALESCE(estado, ''))) NOT IN ('CANCELADA', 'CANCELADO')
+          AND COALESCE(email_enviado, 0) = 0
+      ''', [c, c, sinCorreoCliente ? 1 : 0, motivoSinCorreo?.trim() ?? '', lid]);
+    }
+  }
+
+  /// Marca una orden sobrante como CANCELADA en SQLite local (sin eliminar consecutivo)
+  /// y opcionalmente la encola en `cola_cancelaciones` para sincronizar con Render.
+  Future<void> cancelarOrdenLocal({
+    required String folio,
+    required String motivo,
+    required String usuario,
+    bool sincronizadoServidor = false,
+  }) async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final f = folio.trim();
+    if (f.isEmpty) return;
+    final nowIso = DateTime.now().toIso8601String();
+    final fechaMx = formatearFechaHoraMexico(DateTime.now().toUtc());
+
+    await db.update(
+      'ordenes_servicio',
+      {
+        'estatus': 'CANCELADA',
+        'estado': 'CANCELADA',
+        'motivo_cancelacion': motivo.trim(),
+        'cancelada_por': usuario.trim(),
+        'fecha_cancelacion': fechaMx,
+        'updated_at': nowIso,
+      },
+      where: 'folio_os = ? OR folio = ?',
+      whereArgs: [f, f],
+    );
+
+    if (!sincronizadoServidor) {
+      await db.insert(
+        'cola_cancelaciones',
+        {
+          'folio_os': f,
+          'accion': 'cancelar',
+          'motivo': motivo.trim(),
+          'usuario': usuario.trim(),
+          'updated_at': nowIso,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } else {
+      await eliminarDeColaCancelaciones(f);
+    }
+  }
+
+  /// Reactiva una orden CANCELADA devolviéndola a EN_PROCESO en SQLite local.
+  Future<void> reactivarOrdenLocal({
+    required String folio,
+    bool sincronizadoServidor = false,
+  }) async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    final f = folio.trim();
+    if (f.isEmpty) return;
+    final nowIso = DateTime.now().toIso8601String();
+
+    await db.update(
+      'ordenes_servicio',
+      {
+        'estatus': 'Asignada',
+        'estado': 'EN_PROCESO',
+        'motivo_cancelacion': null,
+        'cancelada_por': null,
+        'fecha_cancelacion': null,
+        'updated_at': nowIso,
+      },
+      where: 'folio_os = ? OR folio = ?',
+      whereArgs: [f, f],
+    );
+
+    if (!sincronizadoServidor) {
+      await db.insert(
+        'cola_cancelaciones',
+        {
+          'folio_os': f,
+          'accion': 'reactivar',
+          'motivo': '',
+          'usuario': '',
+          'updated_at': nowIso,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    } else {
+      await eliminarDeColaCancelaciones(f);
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getColaCancelaciones() async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    return await db.query('cola_cancelaciones', orderBy: 'updated_at ASC');
+  }
+
+  Future<void> eliminarDeColaCancelaciones(String folio) async {
+    final db = await _ensureInit();
+    await _asegurarTablasCatalogosAdmin(db);
+    await db.delete('cola_cancelaciones', where: 'folio_os = ?', whereArgs: [folio.trim()]);
   }
 
   // ── UUID v4 simple ────────────────────────────────────────────────────────

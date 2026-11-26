@@ -114,7 +114,7 @@ async def list_os(
         or username_c == "ivancolin1207"
     )
 
-    extra_filter = "AND (os.estado IS NULL OR UPPER(TRIM(os.estado)) != 'CANCELADA')"
+    extra_filter = "AND (os.estado IS NULL OR UPPER(TRIM(os.estado)) NOT IN ('ELIMINADO', 'ELIMINADA'))"
     params: list = []
 
     if not is_admin:
@@ -175,8 +175,9 @@ async def list_os(
 
     rows = await db.fetch(
         f"""
-        SELECT sub.folio_os, sub.fecha, sub.estado, sub.modalidad,
-               sub.cliente, sub.tecnico, sub.sync_version
+        SELECT sub.folio_os, sub.fecha, sub.estado, sub.estatus, sub.modalidad,
+               sub.cliente, sub.tecnico, sub.sync_version,
+               sub.motivo_cancelacion, sub.cancelada_por, sub.fecha_cancelacion
         FROM (
             SELECT DISTINCT ON (os.folio_os)
                    os.id,
@@ -184,10 +185,14 @@ async def list_os(
                    os.folio_os,
                    COALESCE(os.fecha::text, '') AS fecha,
                    COALESCE(os.estado, 'PROCESO') AS estado,
+                   COALESCE(os.estatus, os.estado, 'PROCESO') AS estatus,
                    COALESCE(os.modalidad, 'DIGITAL') AS modalidad,
                    COALESCE(cl.razon_social, os.cliente, '') AS cliente,
                    COALESCE(tc.nombre_completo, '') AS tecnico,
-                   COALESCE(os.sync_version, 1) AS sync_version
+                   COALESCE(os.sync_version, 1) AS sync_version,
+                   COALESCE(os.motivo_cancelacion, '') AS motivo_cancelacion,
+                   COALESCE(os.cancelada_por, '') AS cancelada_por,
+                   os.fecha_cancelacion::text AS fecha_cancelacion
             FROM ordenes_servicio os
             LEFT JOIN (SELECT DISTINCT ON (id) id, razon_social FROM cat_clientes ORDER BY id) cl ON os.id_cliente = cl.id
             LEFT JOIN cat_tecnicos tc ON os.id_tecnico = tc.id
@@ -881,5 +886,32 @@ async def reset_toma_endpoint(
 ):
     from pesa_api.routers.catalogos import reset_toma_orden
     return await reset_toma_orden(folio=folio_os, db=db, current_user=current_user)
+
+
+@router.patch("/{folio_os}/cancelar", summary="Cancelar / descartar orden sobrante de un lote")
+@router.post("/{folio_os}/cancelar", include_in_schema=False)
+@_safe_endpoint("CANCELAR OS")
+async def cancelar_os_alias(
+    folio_os: str,
+    body: Optional[dict] = None,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    from pesa_api.routers.catalogos import CancelarOrdenBody, ejecutar_cancelar_orden
+    parsed = CancelarOrdenBody(**body) if isinstance(body, dict) else None
+    return await ejecutar_cancelar_orden(folio_os, parsed, db, current_user)
+
+
+@router.patch("/{folio_os}/reactivar", summary="Reactivar orden cancelada (Solo Admin)")
+@router.post("/{folio_os}/reactivar", include_in_schema=False)
+@_safe_endpoint("REACTIVAR OS")
+async def reactivar_os_alias(
+    folio_os: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    from pesa_api.routers.catalogos import ejecutar_reactivar_orden
+    return await ejecutar_reactivar_orden(folio_os, db, current_user)
+
 
 
