@@ -143,17 +143,22 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
         idTecnico: widget.idTecnico,
       );
 
-      // 2. Persistencia en PostgreSQL / Render cuando hay sesión + idTecnico
+      // 2. Persistencia en PostgreSQL / Render (Content-Type: application/json + Bearer token)
       bool syncWarning = false;
       String? syncDetail;
-      if (widget.sincronizarServidor &&
-          widget.idTecnico > 0 &&
-          ApiService.instance.isAuthenticated) {
+      if (widget.sincronizarServidor) {
         try {
-          await ApiService.instance.guardarFirmaPerfil(
+          final confirmedB64 = await ApiService.instance.guardarFirmaPerfilConRespuesta(
             widget.idTecnico,
             base64Firma,
           );
+          if (confirmedB64.isNotEmpty) {
+            await FirmaTecnicoService.instance.saveFirma(
+              widget.username,
+              confirmedB64,
+              idTecnico: widget.idTecnico,
+            );
+          }
         } catch (e) {
           syncWarning = true;
           syncDetail = e.toString().replaceFirst('Exception: ', '');
@@ -168,11 +173,12 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
       messenger?.showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          backgroundColor: syncWarning ? PesaColors.dotAmber : PesaColors.textPrimary,
+          duration: Duration(seconds: syncWarning ? 6 : 3),
+          backgroundColor: syncWarning ? PesaColors.brand : PesaColors.textPrimary,
           content: Text(
             syncWarning
-                ? 'Firma guardada en el dispositivo; pendiente sincronizar con servidor ($syncDetail)'
-                : 'Firma guardada correctamente',
+                ? 'Guardada en dispositivo; error en servidor: $syncDetail'
+                : 'Firma guardada y sincronizada correctamente (200 OK)',
             style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
           ),
         ),

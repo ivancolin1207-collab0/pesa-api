@@ -1,6 +1,6 @@
 // lib/screens/mi_firma_screen.dart
-// Pantalla de gestión de firma personal del técnico con estética industrial Básculas PESA.
-// Persiste localmente (SecureStorage/archivo) y sincroniza vía PUT/POST /api/v1/usuarios/{id}/firma.
+// Pantalla de gestión de firma personal del usuario/técnico con paridad 1:1 Windows y Render.
+// Persiste en SharedPreferences/SecureStorage/PNG y sincroniza vía PUT /api/v1/usuarios/{id}/firma.
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -9,6 +9,7 @@ import 'package:signature/signature.dart';
 import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/firma_tecnico_service.dart';
+import '../services/local_db_service.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/app_shell.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
@@ -33,6 +34,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
   bool _guardando = false;
   bool _isSigning = false;
   String? _firmaActual;
+  int _firmaPreviewRevision = 0;
   String? _statusMsg;
   bool _statusIsError = false;
 
@@ -53,17 +55,71 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
     try {
       final auth = context.read<AuthService>();
       final username = auth.username ?? '';
-      final idTec = auth.idTecnico ?? 0;
-      final firma = await FirmaTecnicoService.instance.getFirma(
+      final idTec = auth.idTecnico ?? AuthService.resolveKnownIdTecnico(username) ?? 0;
+
+      // 1. Carga inmediata local
+      var firma = await FirmaTecnicoService.instance.getFirma(
         username,
         idTecnico: idTec,
       );
-      if (mounted) setState(() => _firmaActual = firma);
+      if (mounted && firma != null && firma.isNotEmpty) {
+        setState(() {
+          _firmaActual = firma;
+          _firmaPreviewRevision++;
+          _cargando = false;
+        });
+      }
+
+      // 2. Sincronizar desde PostgreSQL / Render en segundo plano para reflejar paridad con Windows
+      final cloud = await FirmaTecnicoService.instance.syncFirmaFromCloud(username, idTec);
+      if (mounted && cloud != null && cloud.isNotEmpty && cloud != _firmaActual) {
+        setState(() {
+          _firmaActual = cloud;
+          _firmaPreviewRevision++;
+        });
+      }
     } catch (e) {
       debugPrint('[MiFirma] Error cargando firma: $e');
     } finally {
       if (mounted) setState(() => _cargando = false);
     }
+  }
+
+  Future<void> _mostrarDialogoErrorServidor(String detalle) async {
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: PesaColors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: PesaColors.brand),
+        ),
+        title: const Row(
+          children: [
+            Icon(Icons.error_outline_rounded, color: PesaColors.brand, size: 22),
+            SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Error al sincronizar firma con servidor',
+                style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
+              ),
+            ),
+          ],
+        ),
+        content: SelectableText(
+          'La firma se guardó localmente en este dispositivo, pero el servidor devolvió un error:\n\n$detalle',
+          style: const TextStyle(fontSize: 13, color: PesaColors.textPrimary, height: 1.4),
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _guardarFirma() async {
@@ -84,8 +140,11 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
 
     try {
       final auth = context.read<AuthService>();
-      final username = auth.username ?? '';
-      final idTec = auth.idTecnico ?? 0;
+      final username = auth.username ?? AuthService.usuarioActual?.username ?? '';
+      final idTec = auth.idTecnico ??
+          AuthService.usuarioActual?.id ??
+          AuthService.resolveKnownIdTecnico(username) ??
+          0;
 
       Uint8List? bytes = await _ctrl.toPngBytes(width: 560, height: 220);
       bytes ??= await _ctrl.toPngBytes();
@@ -93,57 +152,90 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
         throw Exception('No se pudo exportar la firma como imagen PNG.');
       }
 
-      final b64 = base64Encode(bytes);
+      var b64 = base64Encode(bytes);
 
-      // 1. Persistencia local garantizada
+      // 1. Guardar inmediatamente en almacenamiento local (SharedPreferences + SecureStorage + PNG)
       await FirmaTecnicoService.instance.saveFirma(
         username,
         b64,
         idTecnico: idTec,
       );
 
-      // 2. Persistencia en PostgreSQL / Render
+      // Actualizar también las órdenes locales del usuario en SQLite
+      if (idTec > 0) {
+        try {
+          final sqldb = await LocalDbService.instance.database;
+          await sqldb.rawUpdate(
+            'UPDATE ordenes_servicio SET firma_tecnico = ?, firma_tecnico_b64 = ? WHERE id_tecnico = ?',
+            [b64, b64, idTec],
+          );
+        } catch (_) {}
+      }
+
+      // 2. Persistir en PostgreSQL / Render enviando Content-Type: application/json + Bearer token
       bool serverOk = false;
       String? syncErr;
-      if (idTec > 0 && ApiService.instance.isAuthenticated) {
-        try {
-          serverOk = await ApiService.instance.guardarFirmaPerfil(idTec, b64);
-        } catch (e) {
-          syncErr = e.toString().replaceFirst('Exception: ', '');
-          debugPrint('[MiFirma] Error sync servidor: $syncErr');
+      try {
+        final confirmedB64 = await ApiService.instance.guardarFirmaPerfilConRespuesta(idTec, b64);
+        if (confirmedB64.isNotEmpty) {
+          b64 = confirmedB64;
+          await FirmaTecnicoService.instance.saveFirma(
+            username,
+            b64,
+            idTecnico: idTec,
+          );
         }
+        serverOk = true;
+      } catch (e) {
+        syncErr = e.toString().replaceFirst('Exception: ', '');
+        debugPrint('[MiFirma] Error sync servidor: $syncErr');
       }
 
       if (!mounted) return;
       setState(() {
         _firmaActual = b64;
+        _firmaPreviewRevision++;
         _ctrl.clear();
-        _statusIsError = !serverOk && syncErr != null;
+        _statusIsError = !serverOk;
         _statusMsg = serverOk
-            ? 'Firma guardada correctamente y sincronizada con el servidor.'
-            : (syncErr != null
-                ? 'Firma guardada en dispositivo. Error al sincronizar: $syncErr'
-                : 'Firma guardada correctamente en el dispositivo.');
+            ? 'Firma actualizada correctamente en el dispositivo y en el servidor.'
+            : 'Guardada localmente, error en servidor: $syncErr';
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           behavior: SnackBarBehavior.floating,
-          backgroundColor: (!serverOk && syncErr != null)
-              ? PesaColors.dotAmber
-              : PesaColors.textPrimary,
-          content: const Text(
-            'Firma guardada correctamente',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+          duration: Duration(seconds: serverOk ? 3 : 6),
+          backgroundColor: serverOk ? PesaColors.textPrimary : PesaColors.brand,
+          content: Text(
+            serverOk
+                ? 'Firma actualizada y sincronizada con éxito (200 OK)'
+                : 'Error en servidor al actualizar firma: $syncErr',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
           ),
         ),
       );
+
+      if (!serverOk && syncErr != null) {
+        await _mostrarDialogoErrorServidor(syncErr);
+      }
     } catch (e) {
+      final errTxt = e.toString().replaceFirst('Exception: ', '');
       if (mounted) {
         setState(() {
           _statusIsError = true;
-          _statusMsg = 'Error al guardar la firma: ${e.toString().replaceFirst('Exception: ', '')}';
+          _statusMsg = 'Error al guardar la firma: $errTxt';
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: PesaColors.brand,
+            content: Text(
+              'Error al guardar la firma: $errTxt',
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+            ),
+          ),
+        );
       }
     } finally {
       if (mounted) setState(() => _guardando = false);
@@ -152,16 +244,18 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
 
   Future<void> _abrirModalFirma() async {
     final auth = context.read<AuthService>();
+    final username = auth.username ?? '';
     final bytes = await CapturFirmaTecnicoDialog.capturarBytes(
       context,
-      username: auth.username ?? '',
-      nombreCompleto: auth.nombreCompleto ?? auth.username ?? 'Técnico',
-      idTecnico: auth.idTecnico ?? 0,
+      username: username,
+      nombreCompleto: auth.nombreCompleto ?? username.ifEmptyFallback('Técnico'),
+      idTecnico: auth.idTecnico ?? AuthService.resolveKnownIdTecnico(username) ?? 0,
       permitirCancelar: true,
     );
     if (bytes != null && bytes.isNotEmpty && mounted) {
       setState(() {
         _firmaActual = base64Encode(bytes);
+        _firmaPreviewRevision++;
         _statusIsError = false;
         _statusMsg = 'Firma guardada correctamente y actualizada en tu perfil.';
       });
@@ -190,6 +284,13 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                   onPressed: () => AppShell.toggleMenu(context),
                 ),
                 title: const Text('Mi Firma Digital'),
+                actions: [
+                  IconButton(
+                    tooltip: 'Recargar firma desde servidor',
+                    icon: const Icon(Icons.sync_rounded, color: PesaColors.textPrimary),
+                    onPressed: _cargando ? null : _cargarFirmaActual,
+                  ),
+                ],
               ),
         body: SafeArea(
           child: Center(
@@ -335,12 +436,19 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
               ],
             ),
           ),
-          if (isWide)
+          if (isWide) ...[
+            IconButton(
+              tooltip: 'Sincronizar desde servidor',
+              onPressed: _cargando ? null : _cargarFirmaActual,
+              icon: const Icon(Icons.sync_rounded, color: PesaColors.textPrimary),
+            ),
+            const SizedBox(width: 6),
             OutlinedButton.icon(
               onPressed: _abrirModalFirma,
               icon: const Icon(Icons.open_in_new_rounded, size: 16),
               label: const Text('Modal amplio'),
             ),
+          ],
         ],
       ),
     );
@@ -350,9 +458,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
     Uint8List? previewBytes;
     if (_firmaActual != null && _firmaActual!.isNotEmpty) {
       try {
-        final clean = _firmaActual!.contains(',')
-            ? _firmaActual!.split(',').last.trim()
-            : _firmaActual!.trim();
+        final clean = FirmaTecnicoService.limpiarBase64(_firmaActual!);
         previewBytes = base64Decode(clean);
       } catch (_) {}
     }
@@ -402,6 +508,8 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
               ),
               child: Image.memory(
                 previewBytes,
+                key: ValueKey('firma_rev_$_firmaPreviewRevision'),
+                gaplessPlayback: false,
                 fit: BoxFit.contain,
                 errorBuilder: (_, __, ___) => const Center(
                   child: Text(
@@ -529,6 +637,10 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
       ),
     );
   }
+}
+
+extension _NonEmptyStrExt on String {
+  String ifEmptyFallback(String fallback) => trim().isEmpty ? fallback : this;
 }
 
 class _MiFirmaGuidePainter extends CustomPainter {

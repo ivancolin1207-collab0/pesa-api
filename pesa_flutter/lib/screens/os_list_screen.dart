@@ -200,6 +200,8 @@ class _OsListScreenState extends State<OsListScreen> {
   String  _query     = '';
   final   _searchCtrl = TextEditingController();
   Timer?  _searchDebounceTimer;
+  Timer?  _remoteSearchDebounceTimer;
+  bool    _searchingRemote = false;
 
   // ── Vista: Mis Órdenes vs Repositorio de Calibraciones (solo supervisión) ──
   bool _vistaRepositorio = false;
@@ -263,7 +265,7 @@ class _OsListScreenState extends State<OsListScreen> {
     final usuario = AuthService.usuarioActual;
     final isAdmin = auth.isAdmin || (usuario != null && usuario.isAdmin);
     if (isAdmin) {
-      _vistaRepositorio = true;
+      _vistaRepositorio = false;
       _tecnico = null;
     }
 
@@ -331,7 +333,7 @@ class _OsListScreenState extends State<OsListScreen> {
   /// Sincronización completamente silenciosa — SIN modal bloqueante.
   /// El usuario puede seguir navegando sin interrupciones.
   /// Al terminar muestra un SnackBar compacto flotante (3-4s).
-  Future<void> _sincronizarOrdenesServidor() async {
+  Future<void> _sincronizarOrdenesServidor({bool forceFull = false}) async {
     if (!mounted) return;
     if (_syncDialogOpen) return; // guard doble-llamada
 
@@ -345,10 +347,8 @@ class _OsListScreenState extends State<OsListScreen> {
           syncSvc.forceResetSync();
           await Future.delayed(const Duration(milliseconds: 100));
         }
-        // NO resetear last_sync_time aquí: preservar la diferencial rápida.
-        // Solo en primer arranque (last_sync == null) se hace pull completo.
 
-        await context.read<SyncService>().performSync();
+        await context.read<SyncService>().performSync(forceFull: forceFull);
 
         if (!mounted) return;
 
@@ -360,22 +360,27 @@ class _OsListScreenState extends State<OsListScreen> {
 
         final sync = context.read<SyncService>();
 
-        // ── SnackBar flotante: éxito ─────────────────────────────────────
+        // ── SnackBar flotante: éxito o sincronización parcial ────────────
         if (sync.state == SyncState.success) {
-          final totalOS = _all.length;
+          final hasWarn = sync.syncWarnings.isNotEmpty;
+          final msgText = hasWarn
+              ? 'Sincronizado (${sync.syncedOrdersCount} OS, ${sync.syncedClientesCount} clientes) · Aviso: ${sync.syncWarnings.join(" · ")}'
+              : sync.syncSummaryLabel;
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Row(children: [
-              const Icon(Icons.check_circle_outline, color: Colors.white, size: 16),
+              Icon(
+                hasWarn ? Icons.info_outline_rounded : Icons.check_circle_outline,
+                color: Colors.white,
+                size: 16,
+              ),
               const SizedBox(width: 8),
               Expanded(child: Text(
-                totalOS > 0
-                    ? 'Sincronizado — $totalOS órdenes'
-                    : sync.message.isNotEmpty ? sync.message : 'Sincronizado',
-                style: const TextStyle(fontSize: 13),
+                msgText,
+                style: const TextStyle(fontSize: 12.5),
               )),
             ]),
-            backgroundColor: const Color(0xFF2E7D32),
-            duration: const Duration(seconds: 3),
+            backgroundColor: hasWarn ? const Color(0xFFB45309) : const Color(0xFF2E7D32),
+            duration: Duration(seconds: hasWarn ? 5 : 3),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             margin: const EdgeInsets.all(12),
@@ -402,7 +407,7 @@ class _OsListScreenState extends State<OsListScreen> {
             action: SnackBarAction(
               label: 'Reintentar',
               textColor: Colors.white70,
-              onPressed: () => _sincronizarOrdenesServidor(),
+              onPressed: () => _sincronizarOrdenesServidor(forceFull: true),
             ),
           ));
           if (mounted) await _loadLocal();
@@ -488,6 +493,7 @@ class _OsListScreenState extends State<OsListScreen> {
   @override
   void dispose() {
     _searchDebounceTimer?.cancel();
+    _remoteSearchDebounceTimer?.cancel();
     context.read<SyncService>().removeListener(_onSyncChanged);
     _searchCtrl.dispose();
     super.dispose();
@@ -495,11 +501,36 @@ class _OsListScreenState extends State<OsListScreen> {
 
   void _onSearchQueryChanged(String value) {
     _searchDebounceTimer?.cancel();
-    _searchDebounceTimer = Timer(const Duration(milliseconds: 250), () {
+    _searchDebounceTimer = Timer(const Duration(milliseconds: 200), () {
       if (!mounted) return;
       setState(() => _query = value);
       _applyFilters();
     });
+
+    _remoteSearchDebounceTimer?.cancel();
+    final trimmed = value.trim();
+    if (trimmed.length >= 2) {
+      _remoteSearchDebounceTimer = Timer(const Duration(milliseconds: 450), () async {
+        if (!mounted) return;
+        setState(() => _searchingRemote = true);
+        try {
+          final hits = await ApiService.instance.buscarOrdenesServidor(trimmed, limit: 80);
+          if (hits.isNotEmpty && mounted) {
+            await LocalDbService.instance.insertOrdenesBatch(hits);
+            if (mounted) {
+              await context.read<SyncService>().cargarOrdenes();
+              await _loadLocal();
+            }
+          }
+        } catch (e) {
+          debugPrint('[Dashboard Remote Search] $e');
+        } finally {
+          if (mounted) setState(() => _searchingRemote = false);
+        }
+      });
+    } else if (_searchingRemote && mounted) {
+      setState(() => _searchingRemote = false);
+    }
   }
 
   void _onSyncChanged() {
@@ -2332,8 +2363,12 @@ class _OsListScreenState extends State<OsListScreen> {
   }
 
   Widget _selectorVista(bool repoActivo) {
+    final isAdmin = context.watch<AuthService>().isAdmin;
     return LayoutBuilder(builder: (context, c) {
       final compacto = c.maxWidth < kFoldableCoverBreakpoint;
+      final labelOrdenes = isAdmin
+          ? (compacto ? 'Órdenes' : 'Todas las Órdenes')
+          : (compacto ? 'Mis Órdenes' : 'Mis Órdenes Asignadas');
       return Container(
         color: _kBgColor,
         padding: EdgeInsets.fromLTRB(compacto ? 12 : 24, 10, compacto ? 12 : 24, 4),
@@ -2346,7 +2381,7 @@ class _OsListScreenState extends State<OsListScreen> {
               ButtonSegment<bool>(
                 value: false,
                 icon: const Icon(Icons.assignment_outlined, size: 17),
-                label: Text(compacto ? 'Mis Órdenes' : 'Mis Órdenes Asignadas'),
+                label: Text(labelOrdenes),
               ),
               ButtonSegment<bool>(
                 value: true,
@@ -2746,6 +2781,68 @@ class _MobilePhoneDashboard extends StatelessWidget {
               ],
             ),
           ),
+
+          // ── 1.5 BARRA DE ESTADO DE SINCRONIZACIÓN + ACCIÓN MANUAL ────────
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFC),
+              border: Border(bottom: BorderSide(color: _kBorder)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  sync.syncWarnings.isNotEmpty
+                      ? Icons.warning_amber_rounded
+                      : Icons.cloud_done_outlined,
+                  size: 14,
+                  color: sync.syncWarnings.isNotEmpty
+                      ? const Color(0xFFB45309)
+                      : _kTextSec,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    sync.syncWarnings.isNotEmpty
+                        ? '${sync.syncSummaryLabel} · ${sync.syncWarnings.first}'
+                        : sync.syncSummaryLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      color: _kTextSec,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: sync.state == SyncState.syncing
+                      ? null
+                      : () => state._sincronizarOrdenesServidor(forceFull: true),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                    child: Text(
+                      sync.state == SyncState.syncing ? 'Sincronizando…' : 'Sincronizar ahora',
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        color: _kCarmineRed,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (state._searchingRemote)
+            const LinearProgressIndicator(
+              minHeight: 2,
+              color: _kCarmineRed,
+              backgroundColor: Color(0xFFE2E8F0),
+            ),
 
           // ── 2. KPI SUMMARY (Grid 2x2 Corporativo — cifras en carbón tabular) ─
           Container(
@@ -3793,10 +3890,16 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
       children: [
         _Header(
           sync: sync,
-          onSync: state._sincronizarOrdenesServidor,
+          onSync: () => state._sincronizarOrdenesServidor(forceFull: true),
           onLongPressSync: () => state._mostrarMenuSincronizacion(context),
           onRefresh: state._loadLocal,
         ),
+        if (state._searchingRemote)
+          const LinearProgressIndicator(
+            minHeight: 2,
+            color: _kCarmineRed,
+            backgroundColor: Color(0xFFE2E8F0),
+          ),
         Expanded(
           child: FoldableTwoPane(
             startFraction: 0.42,
@@ -5081,15 +5184,15 @@ class _Header extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
-              children: const [
-                Text(
+              children: [
+                const Text(
                   'Resumen Operativo de Servicios',
                   style: TextStyle(color: _kTextPrim, fontWeight: FontWeight.w800, fontSize: 15),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  'Órdenes de Servicio, Revisiones e Inventarios',
-                  style: TextStyle(color: _kTextSec, fontSize: 10),
+                  sync.syncSummaryLabel,
+                  style: const TextStyle(color: _kTextSec, fontSize: 11),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -5120,7 +5223,7 @@ class _Header extends StatelessWidget {
                   )
                 : const Icon(Icons.sync, size: 15),
             label: Text(
-              sync.state == SyncState.syncing ? 'Cancelar' : 'Sincronizar',
+              sync.state == SyncState.syncing ? 'Cancelar' : 'Sincronizar ahora',
               style: const TextStyle(fontSize: 11),
             ),
           ),

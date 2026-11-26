@@ -80,19 +80,17 @@ class ApiService {
   /// Ping al servidor para despertarlo (Cold Start en Render)
   /// Retorna true si responde 200 OK
   Future<bool> pingServer() async {
-    try {
-      debugPrint('[API] Enviando ping a $_baseUrl/health ...');
-      // Intentamos con un timeout de 60s para cold start
-      var resp = await http.get(Uri.parse('$_baseUrl/health')).timeout(const Duration(seconds: 60));
-      if (resp.statusCode == 200) return true;
-      
-      debugPrint('[API] /health fallo. Intentando /api/v1/ping ...');
-      resp = await http.get(Uri.parse('$_baseUrl/api/v1/ping')).timeout(const Duration(seconds: 60));
-      return resp.statusCode == 200;
-    } catch (e) {
-      debugPrint('[API] Falló el ping al servidor: $e');
-      return false;
+    for (final path in ['/', '/health', '/api/v1/ping']) {
+      try {
+        final resp = await http
+            .get(Uri.parse('$_baseUrl$path'))
+            .timeout(const Duration(seconds: 25));
+        if (resp.statusCode == 200) return true;
+      } catch (e) {
+        debugPrint('[API] Falló el ping a $_baseUrl$path: $e');
+      }
     }
+    return false;
   }
 
   /// Intenta autenticarse contra el servidor.
@@ -544,13 +542,20 @@ class ApiService {
     String? updatedAfter,
     int? tecnicoId,
     String? tecnicoNombre,
+    String? q,
+    int? limit,
   }) async {
     final queryParams = <String, String>{};
 
-    final dateParam = updatedAfter ?? (since != null ? since.toUtc().toIso8601String() : null);
-    if (dateParam != null && dateParam.trim().isNotEmpty) {
-      queryParams['since'] = dateParam.trim();
-      queryParams['updated_after'] = dateParam.trim();
+    final cleanQ = q?.trim();
+    if (cleanQ != null && cleanQ.isNotEmpty) {
+      queryParams['q'] = cleanQ;
+    } else {
+      final dateParam = updatedAfter ?? (since != null ? since.toUtc().toIso8601String() : null);
+      if (dateParam != null && dateParam.trim().isNotEmpty) {
+        queryParams['since'] = dateParam.trim();
+        queryParams['updated_after'] = dateParam.trim();
+      }
     }
 
     if (tecnicoId != null && tecnicoId > 0) {
@@ -559,9 +564,12 @@ class ApiService {
     if (tecnicoNombre != null && tecnicoNombre.trim().isNotEmpty) {
       queryParams['tecnico_nombre'] = tecnicoNombre.trim();
     }
+    if (limit != null && limit > 0) {
+      queryParams['limit'] = limit.toString();
+    }
 
-    // Si updatedAfter == null y no hay fecha: consultar directamente GET /api/v1/ordenes sin filtros de fecha
-    final endpointPath = (dateParam == null || dateParam.trim().isEmpty)
+    final bool hasIncrementalDate = queryParams.containsKey('since');
+    final endpointPath = (cleanQ != null && cleanQ.isNotEmpty) || !hasIncrementalDate
         ? '/api/v1/ordenes'
         : '/api/v1/sync/pull';
 
@@ -570,25 +578,29 @@ class ApiService {
         ? baseUri.replace(queryParameters: queryParams)
         : baseUri;
 
-    debugPrint('[SyncPull] → URL: $uri');
-    debugPrint('[SyncPull] → Token presente: ${_token != null}');
-    debugPrint('[SyncPull] → Timeout: ${_syncTimeout.inSeconds}s');
+    debugPrint('[SyncPull] → URL: $uri (token=${_token != null})');
 
     try {
-      final resp = await _getWithRetry(uri, timeout: _syncTimeout);
+      var resp = await _getWithRetry(uri, timeout: _syncTimeout);
+      if (resp.statusCode == 404 && endpointPath == '/api/v1/ordenes') {
+        final altUri = Uri.parse('$_baseUrl/api/ordenes').replace(
+          queryParameters: queryParams.isNotEmpty ? queryParams : null,
+        );
+        resp = await _getWithRetry(altUri, timeout: _syncTimeout);
+      }
 
       debugPrint('[SyncPull] ← HTTP ${resp.statusCode}');
 
       if (resp.statusCode == 200) {
-        final list = jsonDecode(resp.body) as List;
+        final list = jsonDecode(utf8.decode(resp.bodyBytes)) as List;
         debugPrint('[SyncPull] ✅ ${list.length} OS recibidas');
-        return list.cast<Map<String, dynamic>>();
+        return list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
       } else {
-        final msg = "Error ${resp.statusCode}: ${resp.body}";
-        debugPrint("[SYNC ERROR] $msg");
+        final det = _detalleError(utf8.decode(resp.bodyBytes, allowMalformed: true));
+        final msg = 'HTTP ${resp.statusCode} - $det';
+        debugPrint('[SYNC ERROR] $msg');
         throw HttpException(msg);
       }
-
     } on TimeoutException catch (e) {
       debugPrint('[SyncPull] ⏱ TIMEOUT (${_syncTimeout.inSeconds}s): $e');
       rethrow;
@@ -606,11 +618,28 @@ class ApiService {
     String? updatedAfter,
     int? tecnicoId,
     String? tecnicoNombre,
+    String? q,
+    int? limit,
   }) async {
     return syncPull(
       updatedAfter: updatedAfter,
       tecnicoId: tecnicoId,
       tecnicoNombre: tecnicoNombre,
+      q: q,
+      limit: limit,
+    );
+  }
+
+  /// Búsqueda directa en servidor (?q=...) por folio, cliente, marca, modelo, serie, CCA o DVE.
+  Future<List<Map<String, dynamic>>> buscarOrdenesServidor(
+    String query, {
+    int limit = 150,
+  }) async {
+    final clean = query.trim();
+    if (clean.isEmpty) return const [];
+    return syncPull(
+      q: clean,
+      limit: limit,
     );
   }
 
@@ -1143,101 +1172,236 @@ class ApiService {
 
   // ── Catálogo Unificado de Administración y Guardado Parcial de Equipo ────
 
-  /// Descarga en una sola llamada todos los catálogos de Administración:
+  String? _lastCatalogError;
+  String? get lastCatalogError => _lastCatalogError;
+
+  static Map<String, dynamic> _normalizarSucursalMap(Map raw, {int? defaultClienteId, String defaultClienteNombre = ''}) {
+    final s = Map<String, dynamic>.from(raw);
+    final sid = int.tryParse('${s['id'] ?? s['sucursal_id'] ?? ''}');
+    final cid = int.tryParse('${s['cliente_id'] ?? s['id_cliente'] ?? ''}') ?? defaultClienteId;
+    final nom = (s['nombre'] ?? s['nombre_sucursal'] ?? s['planta'] ?? s['sucursal'] ?? '').toString().trim();
+    final dir = (s['direccion'] ?? '').toString().trim();
+    final effNom = nom.isNotEmpty ? nom : dir;
+    final effDir = dir.isNotEmpty ? dir : nom;
+    final correo = (s['correo'] ?? s['email'] ?? '').toString().trim();
+    final contacto = (s['contacto'] ?? s['contacto_nombre'] ?? '').toString().trim();
+    final tel = (s['telefono'] ?? s['contacto_telefono'] ?? '').toString().trim();
+    return {
+      ...s,
+      'id': sid,
+      'sucursal_id': sid,
+      'cliente_id': cid,
+      'cliente_nombre': (s['cliente_nombre'] ?? s['cliente'] ?? defaultClienteNombre).toString().trim(),
+      'nombre': effNom,
+      'nombre_sucursal': effNom,
+      'planta': (s['planta'] ?? effNom).toString().trim(),
+      'direccion': effDir,
+      'correo': correo,
+      'contacto': contacto,
+      'contacto_nombre': contacto,
+      'telefono': tel,
+      'contacto_telefono': tel,
+    };
+  }
+
+  static Map<String, dynamic> _normalizarClienteMap(Map raw, [List<Map<String, dynamic>> extraSucs = const []]) {
+    final c = Map<String, dynamic>.from(raw);
+    final cid = int.tryParse('${c['id'] ?? c['id_cliente'] ?? ''}') ?? 0;
+    final nom = (c['nombre'] ?? c['razon_social'] ?? '').toString().trim();
+    final razon = (c['razon_social'] ?? nom).toString().trim();
+    final correo = (c['correo'] ?? c['email'] ?? '').toString().trim();
+    final dirBase = (c['direccion'] ?? '').toString().trim();
+
+    final rawNested = (c['sucursales'] as List?) ?? (c['direcciones'] as List?) ?? const [];
+    final seen = <String>{};
+    final sucs = <Map<String, dynamic>>[];
+
+    void pushSuc(Map rawSuc) {
+      final norm = _normalizarSucursalMap(rawSuc, defaultClienteId: cid, defaultClienteNombre: razon);
+      final n = (norm['nombre'] ?? '').toString().trim();
+      final d = (norm['direccion'] ?? '').toString().trim();
+      if (n.isEmpty && d.isEmpty) return;
+      final key = '${n.toLowerCase()}|${d.toLowerCase()}';
+      if (seen.add(key)) sucs.add(norm);
+    }
+
+    for (final s in rawNested.whereType<Map>()) {
+      pushSuc(s);
+    }
+    for (final s in extraSucs) {
+      pushSuc(s);
+    }
+    if (dirBase.isNotEmpty &&
+        !sucs.any((s) =>
+            (s['direccion'] ?? '').toString().toLowerCase() == dirBase.toLowerCase() ||
+            (s['nombre'] ?? '').toString().toLowerCase() == dirBase.toLowerCase())) {
+      pushSuc({
+        'id': null,
+        'cliente_id': cid,
+        'nombre': dirBase.length <= 80 ? dirBase : 'Matriz / Principal',
+        'planta': 'Matriz / Principal',
+        'direccion': dirBase,
+        'correo': correo,
+      });
+    }
+
+    return {
+      ...c,
+      'id': cid,
+      'nombre': nom.isNotEmpty ? nom : razon,
+      'razon_social': razon.isNotEmpty ? razon : nom,
+      'correo': correo,
+      'email': correo,
+      'direccion': dirBase,
+      'sucursales': sucs,
+      'direcciones': sucs,
+    };
+  }
+
+  /// Descarga los catálogos de Administración con manejo individual resiliente (sin Future.wait que aborte todo):
   /// clientes (con sus direcciones/sucursales anidadas), técnicos activos,
   /// tipos de servicio, tipos de instrumento e historial de instrumentos.
   Future<Map<String, dynamic>?> getAdminCatalogos() async {
+    _lastCatalogError = null;
+    final endpointErrors = <String>[];
+
     for (final path in ['/api/admin/catalogos', '/api/v1/admin/catalogos']) {
       try {
         final uri = Uri.parse('$_baseUrl$path');
         debugPrint('[API] getAdminCatalogos → $uri');
-        final resp = await _getWithRetry(uri, timeout: const Duration(seconds: 25));
+        final resp = await _getWithRetry(uri, timeout: const Duration(seconds: 35));
         if (resp.statusCode == 200) {
           final dec = jsonDecode(utf8.decode(resp.bodyBytes));
-          if (dec is Map<String, dynamic>) return dec;
-          if (dec is Map) return Map<String, dynamic>.from(dec);
-        } else if (resp.statusCode != 404) {
-          debugPrint('[API] getAdminCatalogos HTTP ${resp.statusCode}');
+          final map = dec is Map<String, dynamic>
+              ? dec
+              : (dec is Map ? Map<String, dynamic>.from(dec) : null);
+          if (map != null) {
+            final rawCli = (map['clientes'] as List?) ?? const [];
+            final rawSuc = (map['sucursales'] as List?) ?? const [];
+            final sucsNorm = rawSuc.whereType<Map>().map((s) => _normalizarSucursalMap(s)).toList();
+            final sucsByCli = <int, List<Map<String, dynamic>>>{};
+            for (final s in sucsNorm) {
+              final cid = s['cliente_id'] as int?;
+              if (cid != null && cid > 0) {
+                sucsByCli.putIfAbsent(cid, () => []).add(s);
+              }
+            }
+            final clientesNorm = rawCli.whereType<Map>().map((c) {
+              final cid = int.tryParse('${c['id'] ?? c['id_cliente'] ?? ''}') ?? 0;
+              return _normalizarClienteMap(c, sucsByCli[cid] ?? const []);
+            }).toList();
+            return {
+              ...map,
+              'clientes': clientesNorm,
+              'sucursales': sucsNorm,
+            };
+          }
+        } else {
+          final det = _detalleError(utf8.decode(resp.bodyBytes, allowMalformed: true));
+          endpointErrors.add('$path: HTTP ${resp.statusCode} - $det');
+          debugPrint('[API] getAdminCatalogos ($path) HTTP ${resp.statusCode}: $det');
         }
       } catch (e) {
+        endpointErrors.add('$path: $e');
         debugPrint('[API] getAdminCatalogos ($path) error: $e');
       }
     }
 
-    // Fallback compatible con servidores que aún no exponen /api/admin/catalogos:
-    // descarga en paralelo los catálogos individuales y anida las sucursales por cliente.
+    // Fallback resiliente: cada catálogo se descarga en su propio try/catch independiente.
+    List<Map<String, dynamic>> clientes = [];
+    List<Map<String, dynamic>> sucursales = [];
+    List<Map<String, dynamic>> tecnicos = [];
+    List<Map<String, dynamic>> tiposSvc = [];
+    List<Map<String, dynamic>> tiposInst = [];
+    List<Map<String, dynamic>> marcasModelos = [];
+
     try {
-      final results = await Future.wait<List<Map<String, dynamic>>>([
-        getCatalogo('/api/v1/clientes').catchError((_) => <Map<String, dynamic>>[]),
-        getCatalogo('/api/v1/sucursales').catchError((_) => <Map<String, dynamic>>[]),
-        getCatalogo('/api/v1/tecnicos').catchError((_) => <Map<String, dynamic>>[]),
-        getCatalogo('/api/v1/tipos-servicio').catchError((_) => <Map<String, dynamic>>[]),
-        getCatalogo('/api/v1/tipos-instrumento').catchError((_) => <Map<String, dynamic>>[]),
-        getMarcasModelos().catchError((_) => <Map<String, dynamic>>[]),
-      ]);
-
-      final clientes = results[0];
-      final sucursales = results[1];
-      final tecnicos = results[2];
-      final tiposSvc = results[3];
-      final tiposInst = results[4];
-      final marcasModelos = results[5];
-
-      if (clientes.isEmpty && tecnicos.isEmpty) return null;
-
-      final sucsByCli = <int, List<Map<String, dynamic>>>{};
-      for (final s in sucursales) {
-        final cid = int.tryParse('${s['cliente_id'] ?? s['id_cliente'] ?? ''}');
-        if (cid != null && cid > 0) {
-          sucsByCli.putIfAbsent(cid, () => []).add(s);
-        }
-      }
-
-      final clientesEnriquecidos = clientes.map((c) {
-        final cid = int.tryParse('${c['id'] ?? c['id_cliente'] ?? ''}') ?? 0;
-        final list = List<Map<String, dynamic>>.from(sucsByCli[cid] ?? const []);
-        final dirBase = (c['direccion'] ?? '').toString().trim();
-        if (dirBase.isNotEmpty && !list.any((s) => (s['direccion'] ?? '') == dirBase)) {
-          list.insert(0, {
-            'id': null,
-            'cliente_id': cid,
-            'nombre': 'Matriz',
-            'direccion': dirBase,
-          });
-        }
-        return {
-          ...c,
-          'sucursales': list,
-        };
-      }).toList();
-
-      final historial = marcasModelos
-          .map((mm) => {
-                'cliente': '',
-                'sucursal': '',
-                'marca': (mm['marca'] ?? '').toString(),
-                'modelo': (mm['modelo'] ?? '').toString(),
-                'serie': '',
-                'id_indicador': '',
-                'capacidad_maxima': '',
-                'division_minima': '',
-                'ubicacion': '',
-                'tipo_instrumento': '',
-              })
-          .toList();
-
-      return {
-        'clientes': clientesEnriquecidos,
-        'sucursales': sucursales,
-        'tecnicos': tecnicos,
-        'tipos_servicio': tiposSvc,
-        'tipos_instrumento': tiposInst,
-        'historial_instrumentos': historial,
-      };
+      clientes = await getCatalogo('/api/v1/clientes');
     } catch (e) {
-      debugPrint('[API] Fallback getAdminCatalogos falló: $e');
+      try {
+        clientes = await getCatalogo('/api/clientes');
+      } catch (e2) {
+        endpointErrors.add('clientes: $e2');
+      }
+    }
+    try {
+      sucursales = await getCatalogo('/api/v1/sucursales');
+    } catch (_) {
+      try {
+        sucursales = await getCatalogo('/api/sucursales');
+      } catch (e2) {
+        debugPrint('[API] Fallback sucursales: $e2');
+      }
+    }
+    try {
+      tecnicos = await getCatalogo('/api/v1/tecnicos');
+    } catch (e) {
+      endpointErrors.add('tecnicos: $e');
+    }
+    try {
+      tiposSvc = await getCatalogo('/api/v1/tipos-servicio');
+    } catch (_) {}
+    try {
+      tiposInst = await getCatalogo('/api/v1/tipos-instrumento');
+    } catch (_) {}
+    try {
+      marcasModelos = await getMarcasModelos();
+    } catch (_) {}
+
+    if (clientes.isEmpty && tecnicos.isEmpty) {
+      _lastCatalogError = endpointErrors.isNotEmpty
+          ? endpointErrors.first
+          : 'Catálogos vacíos o sin respuesta del servidor';
       return null;
     }
+
+    final sucsNorm = sucursales.map((s) => _normalizarSucursalMap(s)).toList();
+    final sucsByCli = <int, List<Map<String, dynamic>>>{};
+    for (final s in sucsNorm) {
+      final cid = s['cliente_id'] as int?;
+      if (cid != null && cid > 0) {
+        sucsByCli.putIfAbsent(cid, () => []).add(s);
+      }
+    }
+
+    final clientesEnriquecidos = clientes.map((c) {
+      final cid = int.tryParse('${c['id'] ?? c['id_cliente'] ?? ''}') ?? 0;
+      return _normalizarClienteMap(c, sucsByCli[cid] ?? const []);
+    }).toList();
+
+    final allSucs = <Map<String, dynamic>>[];
+    for (final c in clientesEnriquecidos) {
+      final list = (c['sucursales'] as List?)?.whereType<Map<String, dynamic>>() ?? const [];
+      allSucs.addAll(list);
+    }
+
+    final historial = marcasModelos
+        .map((mm) => {
+              'cliente': '',
+              'sucursal': '',
+              'marca': (mm['marca'] ?? '').toString(),
+              'modelo': (mm['modelo'] ?? '').toString(),
+              'serie': '',
+              'id_indicador': '',
+              'capacidad_maxima': '',
+              'division_minima': '',
+              'ubicacion': '',
+              'tipo_instrumento': '',
+            })
+        .toList();
+
+    if (endpointErrors.isNotEmpty && clientesEnriquecidos.isEmpty) {
+      _lastCatalogError = endpointErrors.join(' | ');
+    }
+
+    return {
+      'clientes': clientesEnriquecidos,
+      'sucursales': allSucs.isNotEmpty ? allSucs : sucsNorm,
+      'tecnicos': tecnicos,
+      'tipos_servicio': tiposSvc,
+      'tipos_instrumento': tiposInst,
+      'historial_instrumentos': historial,
+    };
   }
 
   /// Envía actualización ligera y parcial de datos de instrumento (`PATCH /api/ordenes/{folio}/instrumento`)
@@ -1344,53 +1508,83 @@ class ApiService {
 
   String get baseUrl => _baseUrl;
 
-  // ── Firma de perfil del técnico (v3.1) ───────────────────────────────────
+  // ── Firma de perfil del técnico (Paridad 1:1 Windows y Render) ───────────
 
-  /// Guarda la firma de perfil permanente del técnico en el servidor.
-  /// [idTecnico] es el ID del técnico en cat_tecnicos.
-  /// [firmaBase64] es el trazo PNG en Base64.
-  /// Retorna true si se guardó correctamente.
-  Future<bool> guardarFirmaPerfil(int idTecnico, String firmaBase64) async {
-    debugPrint('[API] guardarFirmaPerfil → /api/v1/usuarios/$idTecnico/firma');
-    if (idTecnico <= 0) {
-      throw Exception('ID de técnico inválido ($idTecnico)');
-    }
-    final cleanB64 = firmaBase64.contains(',') ? firmaBase64.split(',').last.trim() : firmaBase64.trim();
-    if (cleanB64.length < 32) {
-      throw Exception('La imagen de firma está vacía o corrupta');
-    }
-    final uri = Uri.parse('$_baseUrl/api/v1/usuarios/$idTecnico/firma');
-    final body = jsonEncode({
-      'firma_digital': cleanB64,
-      'firma_base64':  cleanB64,
-      'firma':         cleanB64,
-    });
-
-    Future<http.Response> doPut() =>
-        http.put(uri, headers: _authHeaders, body: body).timeout(_connTimeout);
-    Future<http.Response> doPost() =>
-        http.post(uri, headers: _authHeaders, body: body).timeout(_connTimeout);
-
-    var resp = await doPut();
-    if (resp.statusCode == 405 || resp.statusCode == 404) {
-      debugPrint('[API] PUT retornó ${resp.statusCode}, intentando POST...');
-      resp = await doPost();
-    } else if (resp.statusCode == 401) {
-      final ok = await silentRefresh();
-      if (ok) {
-        resp = await doPut();
-        if (resp.statusCode == 405 || resp.statusCode == 404) {
-          resp = await doPost();
-        }
+  /// Guarda la firma de perfil permanente del usuario/técnico en PostgreSQL (cat_tecnicos.firma_digital)
+  /// enviando Content-Type: application/json + Authorization: Bearer <token> y retorna el Base64 confirmado.
+  Future<String> guardarFirmaPerfilConRespuesta(int idTecnico, String firmaBase64) async {
+    if (_token == null) {
+      await loadSavedToken();
+      if (_token == null) {
+        await _renovarSesionSilenciosa();
       }
     }
 
-    if (resp.statusCode == 200 || resp.statusCode == 201) {
-      debugPrint('[API] ✅ Firma de perfil guardada para técnico $idTecnico');
-      return true;
+    final cleanB64 = firmaBase64.contains(',')
+        ? firmaBase64.split(',').last.trim().replaceAll(RegExp(r'\s+'), '')
+        : firmaBase64.trim().replaceAll(RegExp(r'\s+'), '');
+    if (cleanB64.length < 32) {
+      throw Exception('La imagen de firma está vacía o corrupta');
     }
-    debugPrint('[API] ❌ guardarFirmaPerfil: HTTP ${resp.statusCode} — ${resp.body}');
-    throw Exception('Error servidor HTTP ${resp.statusCode}: ${resp.body}');
+
+    final body = jsonEncode({
+      'firma_base64':  cleanB64,
+      'firma_digital': cleanB64,
+      'firma_png':     cleanB64,
+      'firma':         cleanB64,
+    });
+
+    final candidatePaths = <String>[
+      if (idTecnico > 0) '/api/v1/usuarios/$idTecnico/firma',
+      '/api/v1/usuarios/me/firma',
+      if (idTecnico > 0) '/api/usuarios/$idTecnico/firma',
+      '/api/usuarios/me/firma',
+    ];
+
+    int lastStatus = 0;
+    String lastDetail = 'Sin respuesta del servidor';
+
+    for (final pth in candidatePaths) {
+      final uri = Uri.parse('$_baseUrl$pth');
+      debugPrint('[API] guardarFirmaPerfil → PUT $uri (headers: Content-Type=application/json, auth=${_token != null})');
+
+      http.Response resp = await _putWithRetry(uri, body, timeout: _connTimeout);
+      if (resp.statusCode == 405 || resp.statusCode == 404) {
+        debugPrint('[API] PUT $pth retornó ${resp.statusCode} → intentando POST...');
+        resp = await _postWithRetry(uri, body, timeout: _connTimeout);
+      }
+
+      lastStatus = resp.statusCode;
+      final respText = utf8.decode(resp.bodyBytes, allowMalformed: true);
+      lastDetail = _detalleError(respText);
+
+      if (resp.statusCode == 200 || resp.statusCode == 201) {
+        debugPrint('[API] ✅ Firma guardada en servidor vía $pth (HTTP ${resp.statusCode})');
+        try {
+          final decoded = jsonDecode(respText);
+          if (decoded is Map) {
+            final serverB64 = (decoded['firma_base64'] ?? decoded['firma_digital'] ?? '').toString().trim();
+            if (serverB64.length >= 32) {
+              return serverB64.contains(',') ? serverB64.split(',').last.trim() : serverB64;
+            }
+          }
+        } catch (_) {}
+        return cleanB64;
+      }
+
+      if (resp.statusCode != 404) {
+        debugPrint('[API] ❌ guardarFirmaPerfil ($pth): HTTP ${resp.statusCode} — $lastDetail');
+        throw Exception('HTTP $lastStatus - $lastDetail');
+      }
+    }
+
+    throw Exception('HTTP $lastStatus - $lastDetail');
+  }
+
+  /// Compatibilidad booleana: retorna true si se guardó en el servidor o lanza excepción con código HTTP y detalle.
+  Future<bool> guardarFirmaPerfil(int idTecnico, String firmaBase64) async {
+    await guardarFirmaPerfilConRespuesta(idTecnico, firmaBase64);
+    return true;
   }
 
   // ── CRUD Administrativo (Clientes, Sucursales y Asignación de OS) ────────
@@ -1449,7 +1643,10 @@ class ApiService {
       if (resp.statusCode == 200) {
         final raw = jsonDecode(utf8.decode(resp.bodyBytes));
         if (raw is List) {
-          return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+          return raw
+              .whereType<Map>()
+              .map((e) => _normalizarSucursalMap(e, defaultClienteId: clienteId))
+              .toList();
         }
       }
     }
@@ -1540,16 +1737,17 @@ class ApiService {
 
   /// Consulta al servidor si el técnico con [idTecnico] tiene firma registrada en cat_tecnicos.
   Future<bool> verificarFirmaPerfil(int idTecnico) async {
-    debugPrint('[API] verificarFirmaPerfil → /api/v1/usuarios/$idTecnico/firma');
+    final path = idTecnico > 0 ? '/api/v1/usuarios/$idTecnico/firma' : '/api/v1/usuarios/me/firma';
+    debugPrint('[API] verificarFirmaPerfil → $path');
     try {
-      final uri = Uri.parse('$_baseUrl/api/v1/usuarios/$idTecnico/firma');
+      final uri = Uri.parse('$_baseUrl$path');
       final resp = await _getWithRetry(uri, timeout: _connTimeout);
       if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        final data = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
         final tiene = data['tiene_firma'] == true ||
             (data['firma_digital'] != null && data['firma_digital'].toString().length > 50) ||
             (data['firma_base64'] != null && data['firma_base64'].toString().length > 50);
-        debugPrint('[API] verificarFirmaPerfil id=$idTecnico → tiene_firma: $tiene');
+        debugPrint('[API] verificarFirmaPerfil ($path) → tiene_firma: $tiene');
         return tiene;
       }
       debugPrint('[API] verificarFirmaPerfil: HTTP ${resp.statusCode}');
@@ -1561,25 +1759,31 @@ class ApiService {
 
   /// Obtiene la firma de perfil guardada del técnico en el servidor.
   Future<String?> obtenerFirmaPerfil(int idTecnico) async {
-    if (idTecnico <= 0) return null;
-    final uri = Uri.parse('$_baseUrl/api/v1/usuarios/$idTecnico/firma');
-    debugPrint('[API] obtenerFirmaPerfil → $uri');
-    try {
-      final resp = await _getWithRetry(uri, timeout: _connTimeout);
-      if (resp.statusCode == 200) {
-        final data = jsonDecode(resp.body) as Map<String, dynamic>;
-        String? b64 = data['firma_digital'] as String? ??
-            data['firma_base64'] as String? ??
-            data['firma_url'] as String? ??
-            data['firma'] as String?;
-        if (b64 != null && b64.trim().isNotEmpty) {
-          final clean = b64.trim();
-          final pure = clean.contains(',') ? clean.split(',').last : clean;
-          return pure.trim();
+    final paths = <String>[
+      if (idTecnico > 0) '/api/v1/usuarios/$idTecnico/firma',
+      '/api/v1/usuarios/me/firma',
+    ];
+    for (final pth in paths) {
+      final uri = Uri.parse('$_baseUrl$pth');
+      debugPrint('[API] obtenerFirmaPerfil → $uri');
+      try {
+        final resp = await _getWithRetry(uri, timeout: _connTimeout);
+        if (resp.statusCode == 200) {
+          final data = jsonDecode(utf8.decode(resp.bodyBytes)) as Map<String, dynamic>;
+          final String? b64 = data['firma_base64'] as String? ??
+              data['firma_digital'] as String? ??
+              data['firma_url'] as String? ??
+              data['firma'] as String?;
+          if (b64 != null && b64.trim().isNotEmpty) {
+            final clean = b64.trim();
+            final pure = clean.contains(',') ? clean.split(',').last : clean;
+            return pure.trim();
+          }
+          return null;
         }
+      } catch (e) {
+        debugPrint('[API] Error en obtenerFirmaPerfil ($pth): $e');
       }
-    } catch (e) {
-      debugPrint('[API] Error en obtenerFirmaPerfil id=$idTecnico: $e');
     }
     return null;
   }

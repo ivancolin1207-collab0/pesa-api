@@ -148,6 +148,9 @@ class LocalDbService {
   Future<void> _asegurarTablaBorradores(Database db) async {
     try {
       await db.execute(_createTableBorradoresSql);
+      try {
+        await db.execute('ALTER TABLE ordenes_servicio ADD COLUMN id INTEGER');
+      } catch (_) {}
       await _limpiarLoteInstrumentosClonados(db);
       await _limpiarBorradoresOsobCorruptos(db);
       _borradoresVerificada = true;
@@ -928,10 +931,14 @@ class LocalDbService {
                                   (pdfPathRaw != null && pdfPathRaw.isNotEmpty && File(pdfPathRaw).existsSync() && File(pdfPathRaw).lengthSync() > 500);
 
         final bool esCerrada = hasPdfRemoto;
-        final String finalEstatus = esCerrada ? 'Cerrado' : 'Asignada';
+        final String rawEstatus = (raw['estatus'] ?? '').toString().trim();
+        final String finalEstatus = esCerrada
+            ? 'Cerrado'
+            : (rawEstatus.isNotEmpty ? rawEstatus : 'Asignada');
         final String finalEstado = esCerrada ? 'COMPLETADA_DIGITAL' : 'PROCESO';
 
         final mapped = <String, dynamic>{
+          'id':                _toIntOrNull(raw['id']),
           'folio_os':          folio,
           'folio':             folio,
           'id_tecnico':        idTecnicoFinal,
@@ -1696,9 +1703,9 @@ class LocalDbService {
 
   Future<List<Map<String, dynamic>>> getAllOs() async {
     final db = await _ensureInit();
-    // Ordenar por local_id descendente (más recientes arriba) y fecha
+    // Ordenar cronológicamente (fecha DESC, id de servidor DESC, local_id DESC)
     return await db.rawQuery(
-      "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
+      "SELECT * FROM ordenes_servicio ORDER BY COALESCE(NULLIF(TRIM(fecha), ''), '') DESC, COALESCE(id, 0) DESC, local_id DESC",
     );
   }
 
@@ -1714,12 +1721,12 @@ class LocalDbService {
     // Admin: (idTecnico null o <= 0 Y nombreTecnico vacío) -> devuelve todas
     if ((idTecnico == null || idTecnico <= 0) && userNorm.isEmpty) {
       return await db.rawQuery(
-        "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
+        "SELECT * FROM ordenes_servicio ORDER BY COALESCE(NULLIF(TRIM(fecha), ''), '') DESC, COALESCE(id, 0) DESC, local_id DESC",
       );
     }
 
     final all = await db.rawQuery(
-      "SELECT * FROM ordenes_servicio ORDER BY local_id DESC, fecha DESC",
+      "SELECT * FROM ordenes_servicio ORDER BY COALESCE(NULLIF(TRIM(fecha), ''), '') DESC, COALESCE(id, 0) DESC, local_id DESC",
     );
     return all.where((o) {
       final oId = int.tryParse(o['id_tecnico']?.toString() ?? '');
@@ -3708,6 +3715,44 @@ class LocalDbService {
 
   // ── Catálogos Completos de Administración + Historial de Instrumentos + Cola Parcial ──
 
+  Future<int> getConteoCatalogoClientes() async {
+    try {
+      final db = await _ensureInit();
+      await _asegurarTablasCatalogosAdmin(db);
+      final n = Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM catalogo_clientes'),
+          ) ??
+          0;
+      return n;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Map<String, dynamic> _parseSucursalRow(Map raw, {int? fallbackClienteId, String fallbackClienteNombre = ''}) {
+    final s = Map<String, dynamic>.from(raw);
+    final sid = _toIntOrNull(s['id'] ?? s['sucursal_id']);
+    final cid = _toIntOrNull(s['cliente_id'] ?? s['id_cliente']) ?? fallbackClienteId;
+    final sNom = (s['nombre'] ?? s['nombre_sucursal'] ?? s['planta'] ?? s['sucursal'] ?? '').toString().trim();
+    final sDir = (s['direccion'] ?? '').toString().trim();
+    final effNom = sNom.isNotEmpty ? sNom : sDir;
+    final effDir = sDir.isNotEmpty ? sDir : sNom;
+    return {
+      'id': sid,
+      'sucursal_id': sid,
+      'cliente_id': cid ?? 0,
+      'cliente_nombre': (s['cliente_nombre'] ?? s['cliente'] ?? fallbackClienteNombre).toString().trim(),
+      'nombre': effNom,
+      'nombre_sucursal': effNom,
+      'planta': (s['planta'] ?? effNom).toString().trim(),
+      'direccion': effDir,
+      'ciudad': (s['ciudad'] ?? '').toString().trim(),
+      'contacto': (s['contacto'] ?? s['contacto_nombre'] ?? '').toString().trim(),
+      'telefono': (s['telefono'] ?? s['contacto_telefono'] ?? '').toString().trim(),
+      'correo': (s['correo'] ?? s['email'] ?? '').toString().trim(),
+    };
+  }
+
   /// Persiste de forma atómica el payload completo de `GET /api/admin/catalogos`
   /// (clientes con todas sus direcciones/sucursales, técnicos, tipos de servicio,
   /// tipos de instrumento e historial de instrumentos para autocompletado).
@@ -3717,7 +3762,7 @@ class LocalDbService {
     final nowIso = DateTime.now().toUtc().toIso8601String();
 
     final rawClientes = (data['clientes'] as List?) ?? const [];
-    final rawSucursales = (data['sucursales'] as List?) ?? const [];
+    final rawSucursales = (data['sucursales'] as List?) ?? (data['direcciones'] as List?) ?? const [];
     final rawTecnicos = (data['tecnicos'] as List?) ?? const [];
     final rawTiposSvc = (data['tipos_servicio'] as List?) ?? const [];
     final rawTiposInst = (data['tipos_instrumento'] as List?) ?? const [];
@@ -3729,6 +3774,10 @@ class LocalDbService {
       if (rawClientes.isNotEmpty) {
         batch.delete('catalogo_clientes');
         batch.delete('catalogo_sucursales');
+        final seenClientIds = <int>{};
+        final seenClientNames = <String>{};
+        final insertedSucKeys = <String>{};
+
         for (final item in rawClientes) {
           if (item is! Map) continue;
           final c = Map<String, dynamic>.from(item);
@@ -3736,36 +3785,76 @@ class LocalDbService {
           if (cid == null || cid <= 0) continue;
           final nombre = (c['nombre'] ?? c['razon_social'] ?? '').toString().trim();
           if (nombre.isEmpty) continue;
-          final nestedSucs = (c['sucursales'] as List?) ?? const [];
+          final razon = (c['razon_social'] ?? nombre).toString().trim();
+          final normKey = razon.toLowerCase();
+          if (!seenClientIds.add(cid) || !seenClientNames.add(normKey)) continue;
+
+          final correoCli = (c['correo'] ?? c['email'] ?? '').toString().trim();
+          final dirCli = (c['direccion'] ?? '').toString().trim();
+          final rawNested = (c['sucursales'] as List?) ?? (c['direcciones'] as List?) ?? const [];
+
+          final cleanNested = <Map<String, dynamic>>[];
+          final seenPerCli = <String>{};
+          for (final sItem in rawNested) {
+            if (sItem is! Map) continue;
+            final parsed = _parseSucursalRow(sItem, fallbackClienteId: cid, fallbackClienteNombre: razon);
+            final n = (parsed['nombre'] ?? '').toString().trim();
+            final d = (parsed['direccion'] ?? '').toString().trim();
+            if (n.isEmpty && d.isEmpty) continue;
+            if (seenPerCli.add('${n.toLowerCase()}|${d.toLowerCase()}')) {
+              cleanNested.add(parsed);
+            }
+          }
+          if (dirCli.isNotEmpty &&
+              !cleanNested.any((s) =>
+                  (s['direccion'] ?? '').toString().toLowerCase() == dirCli.toLowerCase() ||
+                  (s['nombre'] ?? '').toString().toLowerCase() == dirCli.toLowerCase())) {
+            cleanNested.add({
+              'id': null,
+              'sucursal_id': null,
+              'cliente_id': cid,
+              'cliente_nombre': razon,
+              'nombre': dirCli.length <= 80 ? dirCli : 'Matriz / Principal',
+              'nombre_sucursal': 'Matriz / Principal',
+              'planta': 'Matriz / Principal',
+              'direccion': dirCli,
+              'ciudad': '',
+              'contacto': (c['contacto_nombre'] ?? '').toString().trim(),
+              'telefono': (c['telefono'] ?? '').toString().trim(),
+              'correo': correoCli,
+            });
+          }
+
           batch.insert(
             'catalogo_clientes',
             {
               'id': cid,
               'nombre': nombre,
-              'razon_social': (c['razon_social'] ?? nombre).toString().trim(),
+              'razon_social': razon,
               'rfc': (c['rfc'] ?? '').toString().trim(),
-              'correo': (c['correo'] ?? c['email'] ?? '').toString().trim(),
+              'correo': correoCli,
               'telefono': (c['telefono'] ?? '').toString().trim(),
-              'direccion': (c['direccion'] ?? '').toString().trim(),
-              'sucursales_json': jsonEncode(nestedSucs),
+              'direccion': dirCli,
+              'sucursales_json': jsonEncode(cleanNested),
               'updated_at': nowIso,
             },
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
-          for (final sItem in nestedSucs) {
-            if (sItem is! Map) continue;
-            final s = Map<String, dynamic>.from(sItem);
-            final sNom = (s['nombre'] ?? s['sucursal'] ?? '').toString().trim();
+
+          for (final s in cleanNested) {
+            final sNom = (s['nombre'] ?? '').toString().trim();
             final sDir = (s['direccion'] ?? '').toString().trim();
             if (sNom.isEmpty && sDir.isEmpty) continue;
+            final skey = '$cid|${sNom.toLowerCase()}|${sDir.toLowerCase()}';
+            if (!insertedSucKeys.add(skey)) continue;
             batch.insert(
               'catalogo_sucursales',
               {
                 'sucursal_id': _toIntOrNull(s['id'] ?? s['sucursal_id']),
                 'cliente_id': cid,
-                'cliente_nombre': nombre,
+                'cliente_nombre': razon,
                 'nombre': sNom.isNotEmpty ? sNom : sDir,
-                'direccion': sDir,
+                'direccion': sDir.isNotEmpty ? sDir : sNom,
                 'ciudad': (s['ciudad'] ?? '').toString().trim(),
                 'contacto': (s['contacto'] ?? '').toString().trim(),
                 'telefono': (s['telefono'] ?? '').toString().trim(),
@@ -3775,28 +3864,54 @@ class LocalDbService {
             );
           }
         }
-      }
 
-      if (rawSucursales.isNotEmpty) {
+        if (rawSucursales.isNotEmpty) {
+          for (final sItem in rawSucursales) {
+            if (sItem is! Map) continue;
+            final parsed = _parseSucursalRow(sItem);
+            final cid = _toIntOrNull(parsed['cliente_id']) ?? 0;
+            final sNom = (parsed['nombre'] ?? '').toString().trim();
+            final sDir = (parsed['direccion'] ?? '').toString().trim();
+            if (sNom.isEmpty && sDir.isEmpty) continue;
+            final skey = '$cid|${sNom.toLowerCase()}|${sDir.toLowerCase()}';
+            if (!insertedSucKeys.add(skey)) continue;
+            batch.insert(
+              'catalogo_sucursales',
+              {
+                'sucursal_id': _toIntOrNull(parsed['id'] ?? parsed['sucursal_id']),
+                'cliente_id': cid,
+                'cliente_nombre': (parsed['cliente_nombre'] ?? '').toString().trim(),
+                'nombre': sNom.isNotEmpty ? sNom : sDir,
+                'direccion': sDir.isNotEmpty ? sDir : sNom,
+                'ciudad': (parsed['ciudad'] ?? '').toString().trim(),
+                'contacto': (parsed['contacto'] ?? '').toString().trim(),
+                'telefono': (parsed['telefono'] ?? '').toString().trim(),
+                'correo': (parsed['correo'] ?? '').toString().trim(),
+              },
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          }
+        }
+      } else if (rawSucursales.isNotEmpty) {
         for (final sItem in rawSucursales) {
           if (sItem is! Map) continue;
-          final s = Map<String, dynamic>.from(sItem);
-          final cid = _toIntOrNull(s['cliente_id'] ?? s['id_cliente']);
-          final sNom = (s['nombre'] ?? s['sucursal'] ?? '').toString().trim();
-          final sDir = (s['direccion'] ?? '').toString().trim();
+          final parsed = _parseSucursalRow(sItem);
+          final cid = _toIntOrNull(parsed['cliente_id']) ?? 0;
+          final sNom = (parsed['nombre'] ?? '').toString().trim();
+          final sDir = (parsed['direccion'] ?? '').toString().trim();
           if (sNom.isEmpty && sDir.isEmpty) continue;
           batch.insert(
             'catalogo_sucursales',
             {
-              'sucursal_id': _toIntOrNull(s['id'] ?? s['sucursal_id']),
-              'cliente_id': cid ?? 0,
-              'cliente_nombre': (s['cliente_nombre'] ?? s['cliente'] ?? '').toString().trim(),
+              'sucursal_id': _toIntOrNull(parsed['id'] ?? parsed['sucursal_id']),
+              'cliente_id': cid,
+              'cliente_nombre': (parsed['cliente_nombre'] ?? '').toString().trim(),
               'nombre': sNom.isNotEmpty ? sNom : sDir,
-              'direccion': sDir,
-              'ciudad': (s['ciudad'] ?? '').toString().trim(),
-              'contacto': (s['contacto'] ?? '').toString().trim(),
-              'telefono': (s['telefono'] ?? '').toString().trim(),
-              'correo': (s['correo'] ?? '').toString().trim(),
+              'direccion': sDir.isNotEmpty ? sDir : sNom,
+              'ciudad': (parsed['ciudad'] ?? '').toString().trim(),
+              'contacto': (parsed['contacto'] ?? '').toString().trim(),
+              'telefono': (parsed['telefono'] ?? '').toString().trim(),
+              'correo': (parsed['correo'] ?? '').toString().trim(),
             },
             conflictAlgorithm: ConflictAlgorithm.replace,
           );
@@ -3981,7 +4096,7 @@ class LocalDbService {
     final seen = <String>{};
 
     void addBranch(Map<String, dynamic> raw) {
-      final nom = (raw['nombre'] ?? raw['sucursal'] ?? '').toString().trim();
+      final nom = (raw['nombre'] ?? raw['nombre_sucursal'] ?? raw['planta'] ?? raw['sucursal'] ?? '').toString().trim();
       final dir = (raw['direccion'] ?? '').toString().trim();
       if (nom.isEmpty && dir.isEmpty) return;
       final key = '${nom.toLowerCase()}|${dir.toLowerCase()}';
@@ -3992,10 +4107,12 @@ class LocalDbService {
         'sucursal_id': _toIntOrNull(raw['sucursal_id'] ?? raw['id']),
         'cliente_id': _toIntOrNull(raw['cliente_id']),
         'nombre': nom.isNotEmpty ? nom : dir,
+        'nombre_sucursal': nom.isNotEmpty ? nom : dir,
         'direccion': dir.isNotEmpty ? dir : nom,
+        'correo': (raw['correo'] ?? raw['email'] ?? '').toString().trim(),
         'ciudad': (raw['ciudad'] ?? '').toString().trim(),
-        'contacto': (raw['contacto'] ?? '').toString().trim(),
-        'telefono': (raw['telefono'] ?? '').toString().trim(),
+        'contacto': (raw['contacto'] ?? raw['contacto_nombre'] ?? '').toString().trim(),
+        'telefono': (raw['telefono'] ?? raw['contacto_telefono'] ?? '').toString().trim(),
       });
     }
 

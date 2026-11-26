@@ -30,37 +30,78 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
 
   final _searchCtrl = TextEditingController();
   Timer? _searchDebounce;
+  Timer? _remoteSearchDebounce;
   String _query = '';
   String _filtroFormato = 'TODOS';
   List<Map<String, dynamic>> _all = [];
   bool _loading = true;
+  bool _searchingRemote = false;
   String? _selectedKey;
 
   @override
   void initState() {
     super.initState();
     _load();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final sync = context.read<SyncService>();
+      if (sync.orders.isEmpty && sync.state != SyncState.syncing) {
+        sync.performSync().then((_) {
+          if (mounted) _load();
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
     _searchDebounce?.cancel();
+    _remoteSearchDebounce?.cancel();
     _searchCtrl.dispose();
     super.dispose();
   }
 
   void _onSearchChanged(String v) {
     _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 250), () {
+    _remoteSearchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 200), () {
       if (mounted) setState(() => _query = v);
     });
+
+    final trimmed = v.trim();
+    if (trimmed.length >= 2) {
+      _remoteSearchDebounce = Timer(const Duration(milliseconds: 420), () {
+        _buscarEnServidor(trimmed);
+      });
+    } else if (_searchingRemote && mounted) {
+      setState(() => _searchingRemote = false);
+    }
+  }
+
+  Future<void> _buscarEnServidor(String q) async {
+    if (!mounted) return;
+    setState(() => _searchingRemote = true);
+    try {
+      final remotos = await ApiService.instance
+          .buscarOrdenesServidor(q, limit: 150)
+          .timeout(const Duration(seconds: 15));
+      if (!mounted || _searchCtrl.text.trim() != q) return;
+      if (remotos.isNotEmpty) {
+        await LocalDbService.instance.insertOrdenesBatch(remotos);
+        await _load(silent: true);
+      }
+    } catch (e) {
+      debugPrint('[BuscarHistorial] Búsqueda remota omitida ($q): $e');
+    } finally {
+      if (mounted) setState(() => _searchingRemote = false);
+    }
   }
 
   String _rowKey(Map<String, dynamic> os) =>
       (os['folio_os'] ?? os['folio'] ?? os['local_id'] ?? '').toString().trim();
 
-  Future<void> _load() async {
-    setState(() => _loading = true);
+  Future<void> _load({bool silent = false}) async {
+    if (!silent && mounted) setState(() => _loading = true);
     try {
       final auth = context.read<AuthService>();
       final usuario = AuthService.usuarioActual;
@@ -152,6 +193,8 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
   }
 
   Widget _buildHeader(BuildContext context, List<Map<String, dynamic>> rows, bool cover) {
+    final sync = context.watch<SyncService>();
+    final syncLabel = sync.syncSummaryLabel;
     return Container(
       padding: EdgeInsets.fromLTRB(cover ? 12 : 18, 12, cover ? 12 : 18, 12),
       decoration: const BoxDecoration(
@@ -191,7 +234,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                     ),
                   ),
                   Text(
-                    '${rows.length} de ${_all.length} registros · Folio, Marca, Modelo, S/N, ID, CCA o DVE',
+                    '${rows.length} de ${_all.length} registros · $syncLabel',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary),
@@ -199,16 +242,53 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                 ],
               ),
             ),
-            IconButton(
-              tooltip: 'Sincronizar y actualizar',
-              constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
-              icon: const Icon(Icons.sync_rounded, color: PesaColors.textPrimary),
+            const SizedBox(width: 6),
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: PesaColors.textPrimary,
+                side: const BorderSide(color: _border),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                minimumSize: const Size(0, 40),
+              ),
+              icon: sync.state == SyncState.syncing
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: _red),
+                    )
+                  : const Icon(Icons.sync_rounded, size: 16, color: PesaColors.textPrimary),
+              label: Text(
+                cover ? 'Sincronizar' : 'Sincronizar ahora',
+                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+              ),
               onPressed: () async {
-                await context.read<SyncService>().performSync();
+                final syncSvc = context.read<SyncService>();
+                if (syncSvc.state == SyncState.syncing) {
+                  syncSvc.forceResetSync();
+                }
+                await syncSvc.performSync(forceFull: true);
                 await _load();
+                if (!context.mounted) return;
+                final warns = syncSvc.syncWarnings;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    behavior: SnackBarBehavior.floating,
+                    backgroundColor: warns.isNotEmpty ? PesaColors.brand : PesaColors.textPrimary,
+                    content: Text(
+                      warns.isNotEmpty
+                          ? 'Sincronización con alertas: ${warns.join(" · ")}'
+                          : syncSvc.syncSummaryLabel,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                );
               },
             ),
           ]),
+          if (_searchingRemote) ...[
+            const SizedBox(height: 6),
+            const LinearProgressIndicator(minHeight: 2, color: _red, backgroundColor: PesaColors.surfaceMuted),
+          ],
           const SizedBox(height: 10),
           ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 44),

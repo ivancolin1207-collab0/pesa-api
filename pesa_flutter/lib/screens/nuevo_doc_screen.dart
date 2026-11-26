@@ -213,21 +213,75 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     String clienteNombre, {
     bool autoSelectFirst = true,
   }) async {
-    final sucs = await LocalDbService.instance.getCatalogoSucursales(
+    final sucsLocal = await LocalDbService.instance.getCatalogoSucursales(
       clienteId: clienteId,
       clienteNombre: clienteNombre,
     );
+
+    // Combinar también con las sucursales/direcciones anidadas en memoria del cliente seleccionado
+    final merged = <Map<String, dynamic>>[];
+    final seen = <String>{};
+    void addSuc(Map raw) {
+      final m = Map<String, dynamic>.from(raw);
+      final nom = (m['nombre'] ?? m['nombre_sucursal'] ?? m['planta'] ?? m['sucursal'] ?? '').toString().trim();
+      final dir = (m['direccion'] ?? '').toString().trim();
+      if (nom.isEmpty && dir.isEmpty) return;
+      final key = '${nom.toLowerCase()}|${dir.toLowerCase()}';
+      if (!seen.add(key)) return;
+      merged.add({
+        ...m,
+        'id': int.tryParse('${m['id'] ?? m['sucursal_id'] ?? ''}'),
+        'nombre': nom.isNotEmpty ? nom : dir,
+        'planta': (m['planta'] ?? (nom.isNotEmpty ? nom : dir)).toString().trim(),
+        'direccion': dir.isNotEmpty ? dir : nom,
+        'correo': (m['correo'] ?? m['email'] ?? '').toString().trim(),
+      });
+    }
+
+    for (final s in sucsLocal) {
+      addSuc(s);
+    }
+    final cliMatch = _clientes.where((c) => int.tryParse('${c['id'] ?? 0}') == clienteId);
+    if (cliMatch.isNotEmpty) {
+      final cObj = cliMatch.first;
+      final nested = (cObj['sucursales'] as List?) ?? (cObj['direcciones'] as List?) ?? const [];
+      for (final s in nested.whereType<Map>()) {
+        addSuc(s);
+      }
+      final dirFiscal = (cObj['direccion'] ?? '').toString().trim();
+      if (dirFiscal.isNotEmpty) {
+        addSuc({
+          'id': null,
+          'cliente_id': clienteId,
+          'nombre': dirFiscal.length <= 80 ? dirFiscal : 'Matriz / Principal',
+          'planta': 'Matriz / Principal',
+          'direccion': dirFiscal,
+          'correo': (cObj['correo'] ?? cObj['email'] ?? '').toString().trim(),
+        });
+      }
+    }
+
+    // Si aún está vacío y hay red, consultar directamente al servidor las sucursales del cliente
+    if (merged.isEmpty && clienteId > 0) {
+      try {
+        final remoteSucs = await ApiService.instance.getSucursalesCliente(clienteId);
+        for (final s in remoteSucs) {
+          addSuc(s);
+        }
+      } catch (_) {}
+    }
+
     final hist = await LocalDbService.instance.getHistorialInstrumentos(
       clienteId: clienteId,
       cliente: clienteNombre,
     );
     if (!mounted) return;
     setState(() {
-      _sucursalesCliente = sucs;
+      _sucursalesCliente = merged;
       _historialInstrumentos = hist;
       if (autoSelectFirst) {
-        if (sucs.isNotEmpty) {
-          final first = sucs.first;
+        if (merged.isNotEmpty) {
+          final first = merged.first;
           _sucursalId = first['id'] as int?;
           final nom = (first['nombre'] ?? '').toString().trim();
           final dir = (first['direccion'] ?? '').toString().trim();
@@ -1099,6 +1153,67 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
             ]),
             const SizedBox(height: 8),
             if (_sucursalesCliente.isNotEmpty) ...[
+              DropdownButtonFormField<int>(
+                value: () {
+                  final idx = _sucursalesCliente.indexWhere((s) {
+                    final sNom = (s['nombre'] ?? '').toString().trim();
+                    final sDir = (s['direccion'] ?? '').toString().trim();
+                    return (_sucursalId != null && s['id'] == _sucursalId) ||
+                        (_sucursalCtrl.text.trim() == sNom && _direccionCtrl.text.trim() == sDir);
+                  });
+                  return idx >= 0 ? idx : 0;
+                }(),
+                isExpanded: true,
+                decoration: InputDecoration(
+                  labelText: 'Seleccionar dirección / sucursal registrada (${_sucursalesCliente.length})',
+                  prefixIcon: const Icon(Icons.place_outlined, size: 19, color: _red),
+                  filled: true,
+                  fillColor: Colors.white,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: _border),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: _border),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: _red, width: 1.8),
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                ),
+                items: List.generate(_sucursalesCliente.length, (idx) {
+                  final s = _sucursalesCliente[idx];
+                  final sNom = (s['nombre'] ?? '').toString().trim();
+                  final sDir = (s['direccion'] ?? '').toString().trim();
+                  final label = (sDir.isNotEmpty && sDir.toLowerCase() != sNom.toLowerCase())
+                      ? '$sNom — $sDir'
+                      : (sDir.isNotEmpty ? sDir : sNom);
+                  return DropdownMenuItem<int>(
+                    value: idx,
+                    child: Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                    ),
+                  );
+                }),
+                onChanged: (idx) {
+                  if (idx == null || idx < 0 || idx >= _sucursalesCliente.length) return;
+                  final s = _sucursalesCliente[idx];
+                  final sNom = (s['nombre'] ?? '').toString().trim();
+                  final sDir = (s['direccion'] ?? '').toString().trim();
+                  setState(() {
+                    _sucursalId = s['id'] as int?;
+                    _sucursalCtrl.text = sNom.isNotEmpty ? sNom : sDir;
+                    _direccionCtrl.text = sDir.isNotEmpty ? sDir : sNom;
+                  });
+                  _refrescarHistorialEquipo();
+                },
+              ),
+              const SizedBox(height: 10),
               SizedBox(
                 height: 66,
                 child: ListView.separated(

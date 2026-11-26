@@ -14,6 +14,7 @@ import 'package:http/http.dart' as http;
 import 'api_service.dart';
 import 'auth_service.dart';
 import 'local_db_service.dart';
+import 'firma_tecnico_service.dart';
 import 'metrology_helper.dart';
 export 'metrology_helper.dart' show formatearLineaCorreoOrden, extraerMetaCorreoOrden;
 import 'package:intl/intl.dart';
@@ -45,10 +46,21 @@ class SyncService extends ChangeNotifier {
   String?   _errorMessage;
   int       _pending   = 0;
   DateTime? _lastSync;
+  int       _clientesCount = 0;
+  List<String> _syncWarnings = [];
   StreamSubscription? _connSub;
   Timer?    _syncWatchdog;  // [FIX-CUELGUE] Watchdog: libera el lock si sync excede 90s
 
   String? get errorMessage => _errorMessage;
+  int get syncedOrdersCount => _orders.length;
+  int get syncedClientesCount => _clientesCount;
+  List<String> get syncWarnings => List.unmodifiable(_syncWarnings);
+
+  String get syncSummaryLabel {
+    final hhmm = _lastSync != null ? DateFormat('HH:mm').format(_lastSync!.toLocal()) : null;
+    final prefix = hhmm != null ? 'Última sincronización: $hhmm' : 'Caché local';
+    return '$prefix (${_orders.length} órdenes, $_clientesCount clientes)';
+  }
 
   // ── Aviso de correos despachados desde la cola offline ──
   int _correosDespachadosSeq = 0;
@@ -125,7 +137,8 @@ class SyncService extends ChangeNotifier {
       }
 
       setOrdersFromPull(localDbOrders);
-      debugPrint('[Sync] Dashboard recargado incondicionalmente desde SQLite: ${localDbOrders.length} OS');
+      _clientesCount = await db.getConteoCatalogoClientes();
+      debugPrint('[Sync] Dashboard recargado incondicionalmente desde SQLite: ${localDbOrders.length} OS, $_clientesCount clientes');
       notifyListeners();
     } catch (e) {
       debugPrint('[Sync cargarOrdenes] Error: $e');
@@ -315,13 +328,13 @@ class SyncService extends ChangeNotifier {
     isSyncing = true;
     notifyListeners();
 
-    // Watchdog de 20s — libera el lock aunque todo lo demás falle
+    // Watchdog de 90s — tolera cold-start de Render sin cortar descargas legítimas
     _syncWatchdog?.cancel();
-    _syncWatchdog = Timer(const Duration(seconds: 20), () {
+    _syncWatchdog = Timer(const Duration(seconds: 90), () {
       if (_state == SyncState.syncing || isSyncing) {
-        debugPrint('[Sync] ⚠️ WATCHDOG 20s: forzando liberación del lock');
+        debugPrint('[Sync] ⚠️ WATCHDOG 90s: forzando liberación del lock');
         _state    = SyncState.error;
-        _message  = 'Tiempo agotado. Toca para reintentar.';
+        _message  = 'Tiempo agotado (90s). Toca para reintentar.';
         isSyncing = false;
         notifyListeners();
       }
@@ -506,156 +519,134 @@ class SyncService extends ChangeNotifier {
         updatedAfter = null;
       }
 
-      _message = 'Descargando órdenes...';
+      _message = 'Descargando órdenes y catálogos...';
       notifyListeners();
 
+      final moduleWarnings = <String>[];
+      int pullCount = 0;
+
+      // Detectar cambio de usuario/rol para que al entrar como Admin descargue todas las OS recientes sin filtro previo
+      final usuarioSync = AuthService.usuarioActual;
+      final currentUsername = (usuarioSync?.username ?? '').trim().toLowerCase();
+      final rolSync = (usuarioSync?.rol ?? ApiService.instance.userRole ?? '').toLowerCase();
+      final esAdminSync = UsuarioActual.esRolAdmin(rolSync, currentUsername) ||
+          rolSync.contains('logist') ||
+          rolSync.contains('recep');
+
+      final prevSyncUser = prefs.getString('last_sync_user') ?? '';
+      if (forceFull ||
+          (currentUsername.isNotEmpty && prevSyncUser != currentUsername) ||
+          (esAdminSync && conteoLocal < 20)) {
+        updatedAfter = null;
+        await prefs.remove('last_sync_timestamp');
+      }
+
+      // ── Módulo 2.1: Órdenes de Servicio (aislado en su propio try/catch) ───
       try {
-        // Catálogos lazy + Catálogos Admin completos (clientes, sucursales, técnicos, historial de equipos)
-        final existingCli = await LocalDbService.instance.getCatalogoClientes();
-        final existingSuc = await LocalDbService.instance.getCatalogoSucursales();
-        final usuarioSync = AuthService.usuarioActual;
-        final rolSync = (usuarioSync?.rol ?? ApiService.instance.userRole ?? '').toLowerCase();
-        final esAdminSync = rolSync.contains('admin') ||
-            rolSync.contains('logist') ||
-            rolSync.contains('recep') ||
-            (usuarioSync?.username.toLowerCase() == 'ivancolin1207');
-        final bool requiereCatAdmin = forceFull ||
-            catalogStale ||
-            existingCli.isEmpty ||
-            existingSuc.isEmpty ||
-            esAdminSync;
-
-        int pullCount = 0;
-        final parallelTasks = <Future<void>>[
-          _pullNuevos(updatedAfter: updatedAfter)
-              .timeout(
-                const Duration(seconds: 25),
-                onTimeout: () {
-                  debugPrint('[Sync PULL] TIMEOUT 25s — sirviendo datos locales inmediatamente');
-                  _fallbackCargarLocal();
-                  return 0;
-                },
-              )
-              .then((c) => pullCount = c),
-          if (requiereCatAdmin)
-            _pullAdminCatalogos()
-                .timeout(const Duration(seconds: 18), onTimeout: () => false)
-                .then((_) {})
-                .catchError((_) {}),
-          if (catalogStale || forceFull)
-            _pullMarcasModelos()
-                .timeout(const Duration(seconds: 8), onTimeout: () {})
-                .then((_) => LocalDbService.instance.setLastCatalogSyncTime(DateTime.now().toUtc()))
-                .catchError((_) {}),
-        ];
-
-        await Future.wait(parallelTasks);
-
-        _lastSync = DateTime.now();
-        await _refreshPending();
-        _state   = SyncState.success;
-        _message = pullCount > 0
-            ? 'Sincronizado ($pullCount nuevas OS)'
-            : 'Sincronizado — sin cambios nuevos';
-
-        if (AuthService.esSupervisorCalibracionActual) {
-          unawaited(_refrescarRepositorioCalibraciones());
+        pullCount = await _pullNuevos(updatedAfter: updatedAfter)
+            .timeout(const Duration(seconds: 40));
+        if (currentUsername.isNotEmpty) {
+          await prefs.setString('last_sync_user', currentUsername);
         }
-
-      } on TimeoutException catch (e) {
-        _state   = SyncState.offline;
-        _errorMessage = 'Timeout: ${e.message ?? '20s agotados'}';
-        _message = _errorMessage!;
-        debugPrint('[SYNC ERROR] $_errorMessage');
-        notifyListeners();
+      } on TimeoutException {
+        moduleWarnings.add('Sync órdenes: Timeout (40s)');
         await _fallbackCargarLocal();
-
       } on SocketException catch (e) {
-        _state   = SyncState.offline;
-        _errorMessage = 'Sin conexión: ${e.message}';
-        _message = _errorMessage!;
-        debugPrint('[SYNC ERROR] $_errorMessage');
-        notifyListeners();
+        moduleWarnings.add('Sync órdenes: Sin red (${e.message})');
         await _fallbackCargarLocal();
-
       } on HttpException catch (e) {
-        final msg = e.message;
-        debugPrint('[SYNC ERROR] HTTP: $msg');
-        if (msg.contains('401')) {
-          // 1. NO mostrar el cartel "Sesión expirada (401). Vuelve a iniciar sesión."
-          // 2. Invocar automáticamente en segundo plano _renovarSesionSilenciosa()
-          bool refreshed = false;
-          try {
-            refreshed = await _renovarSesionSilenciosa()
-                .timeout(const Duration(seconds: 30), onTimeout: () => false);
-          } catch (_) {}
-
+        if (e.message.contains('401')) {
+          final refreshed = await _renovarSesionSilenciosa()
+              .timeout(const Duration(seconds: 25), onTimeout: () => false);
           if (refreshed) {
             try {
-              // 3. Reintentar de inmediato subida de órdenes, PDFs, cola de correos y pull
-              try {
-                await _pushPendientes().timeout(const Duration(seconds: 25), onTimeout: () => 0);
-              } catch (_) {}
-              try {
-                await _subirPdfsPendientes().timeout(const Duration(seconds: 60), onTimeout: () => 0);
-              } catch (_) {}
-              try {
-                final emailsRetry = await _pushEmailsPendientes().timeout(const Duration(seconds: 120), onTimeout: () => 0);
-                if (emailsRetry > 0) {
-                  _ultimosCorreosDespachados = emailsRetry;
-                  _correosDespachadosSeq++;
-                }
-              } catch (_) {}
-
-              final pullRetry = await _pullNuevos(updatedAfter: updatedAfter)
-                  .timeout(const Duration(seconds: 25), onTimeout: () => 0);
-              _lastSync = DateTime.now();
-              await _refreshPending();
-              _state   = SyncState.success;
-              _errorMessage = null;
-              _message = pullRetry > 0
-                  ? 'Sincronizado ✓ ($pullRetry nuevas OS)'
-                  : 'Sincronizado ✓ Sin cambios nuevos';
-              notifyListeners();
-            } catch (retryErr) {
-              debugPrint('[SYNC ERROR] Error en reintento post-refresh: $retryErr');
+              pullCount = await _pullNuevos(updatedAfter: updatedAfter)
+                  .timeout(const Duration(seconds: 35));
+            } catch (eRetry) {
+              moduleWarnings.add('Sync órdenes: $eRetry');
               await _fallbackCargarLocal();
-              _state = SyncState.success;
-              _errorMessage = null;
-              _message = 'Datos locales disponibles';
-              notifyListeners();
             }
-          } else if (ApiService.instance.credentialsRevoked) {
-            // 4. Solo si las credenciales fueron revocadas o el usuario fue dado de baja en el servidor, mostrar aviso
-            _state   = SyncState.error;
-            _errorMessage = 'Acceso revocado o usuario dado de baja en el servidor.';
-            _message = _errorMessage!;
-            notifyListeners();
-            await _fallbackCargarLocal();
           } else {
-            // Sin mostrar cartel 401: mantener sesión local y reintentar en el siguiente ciclo
+            moduleWarnings.add('Sync órdenes: Sesión no renovada (${e.message})');
             await _fallbackCargarLocal();
-            _state   = SyncState.success;
-            _errorMessage = null;
-            _message = 'Datos locales sincronizados';
-            notifyListeners();
           }
         } else {
-          _state   = SyncState.error;
-          _errorMessage = msg;
-          _message = msg;
-          notifyListeners();
+          moduleWarnings.add('Sync órdenes: ${e.message}');
           await _fallbackCargarLocal();
         }
-
-      } catch (pullErr, pullSt) {
-        final msg = 'Error: $pullErr';
-        debugPrint('[SYNC ERROR] Inesperado en PULL: $msg\n$pullSt');
-        _state   = SyncState.error;
-        _errorMessage = msg;
-        _message = msg;
-        notifyListeners();
+      } catch (e) {
+        moduleWarnings.add('Sync órdenes: $e');
         await _fallbackCargarLocal();
+      }
+
+      // ── Módulo 2.2: Clientes, Direcciones/Sucursales y Técnicos (aislado) ──
+      try {
+        final existingCliCount = await LocalDbService.instance.getConteoCatalogoClientes();
+        final existingSuc = await LocalDbService.instance.getCatalogoSucursales();
+        final bool requiereCatAdmin = forceFull ||
+            catalogStale ||
+            existingCliCount == 0 ||
+            existingSuc.isEmpty ||
+            esAdminSync;
+        if (requiereCatAdmin) {
+          final okCat = await _pullAdminCatalogos()
+              .timeout(const Duration(seconds: 35), onTimeout: () => false);
+          if (!okCat && ApiService.instance.lastCatalogError != null) {
+            moduleWarnings.add('Sync clientes: ${ApiService.instance.lastCatalogError}');
+          }
+        }
+        _clientesCount = await LocalDbService.instance.getConteoCatalogoClientes();
+      } catch (e) {
+        moduleWarnings.add('Sync clientes: $e');
+      }
+
+      // ── Módulo 2.3: Marcas y Modelos (aislado) ────────────────────────────
+      if (catalogStale || forceFull) {
+        try {
+          await _pullMarcasModelos().timeout(const Duration(seconds: 12));
+          await LocalDbService.instance.setLastCatalogSyncTime(DateTime.now().toUtc());
+        } catch (e) {
+          debugPrint('[Sync Marcas/Modelos] Aviso: $e');
+        }
+      }
+
+      // ── Módulo 2.4: Perfil y Firma Digital (aislado) ──────────────────────
+      try {
+        final idTecSync = usuarioSync?.id ?? ApiService.instance.lastIdTecnico ?? 0;
+        if (currentUsername.isNotEmpty || idTecSync > 0) {
+          await FirmaTecnicoService.instance
+              .syncFirmaFromCloud(currentUsername, idTecSync)
+              .timeout(const Duration(seconds: 12), onTimeout: () => null);
+        }
+      } catch (e) {
+        moduleWarnings.add('Sync firma: $e');
+      }
+
+      await cargarOrdenes();
+      _clientesCount = await LocalDbService.instance.getConteoCatalogoClientes();
+      _syncWarnings = moduleWarnings;
+      _lastSync = DateTime.now();
+      await _refreshPending();
+
+      if (moduleWarnings.isEmpty) {
+        _state = SyncState.success;
+        _errorMessage = null;
+        _message = pullCount > 0
+            ? 'Sincronizado ($pullCount OS actualizadas, $_clientesCount clientes)'
+            : syncSummaryLabel;
+      } else if (_orders.isNotEmpty || _clientesCount > 0) {
+        _state = SyncState.success;
+        _errorMessage = moduleWarnings.join(' · ');
+        _message = 'Sincronización parcial: $_errorMessage';
+      } else {
+        _state = SyncState.error;
+        _errorMessage = moduleWarnings.join(' · ');
+        _message = _errorMessage!;
+      }
+      notifyListeners();
+
+      if (AuthService.esSupervisorCalibracionActual) {
+        unawaited(_refrescarRepositorioCalibraciones());
       }
 
     } catch (e, st) {
@@ -688,7 +679,7 @@ class SyncService extends ChangeNotifier {
           final countNow = await LocalDbService.instance.getConteoTotal();
           if (countNow > 0) {
             final prefs = await SharedPreferences.getInstance();
-            await prefs.setString('last_sync_timestamp', DateTime.now().toIso8601String());
+            await prefs.setString('last_sync_timestamp', DateTime.now().toUtc().toIso8601String());
           }
         } catch (_) {}
       }
@@ -1729,10 +1720,17 @@ class SyncService extends ChangeNotifier {
           remota['fecha_envio_correo'] ?? remota['fecha_envio_email'],
         );
 
+        final int? srvId = int.tryParse('${remota['id'] ?? ''}');
+        final String? srvFecha = remota['fecha']?.toString();
+        final String? srvDireccion = remota['direccion']?.toString();
+
         // 2. UPDATE directo en ordenes_servicio
         final updatedCount = await sqldb.rawUpdate('''
           UPDATE ordenes_servicio 
-          SET estatus = ?, 
+          SET id = COALESCE(?, id),
+              fecha = COALESCE(NULLIF(?, ''), fecha),
+              direccion = COALESCE(NULLIF(?, ''), direccion),
+              estatus = ?, 
               estado = CASE WHEN ? = 1 THEN 'COMPLETADA_DIGITAL' ELSE COALESCE(?, estado) END,
               tecnico = ?, 
               id_tecnico = COALESCE(?, id_tecnico),
@@ -1756,6 +1754,9 @@ class SyncService extends ChangeNotifier {
               fecha_envio_email = COALESCE(NULLIF(?, ''), fecha_envio_email, fecha_envio_correo)
           WHERE folio_os = ? OR folio = ?
         ''', [
+          srvId,
+          srvFecha ?? '',
+          srvDireccion ?? '',
           estatusFinal,
           hasPdfVal,
           estadoFinal,
@@ -1821,14 +1822,17 @@ class SyncService extends ChangeNotifier {
 
         if (updatedCount == 0) {
           await sqldb.insert('ordenes_servicio', {
+            'id': srvId,
             'folio_os': folio,
             'folio': folio,
+            'fecha': srvFecha,
             'estatus': estatusFinal,
             'estado': estadoFinal,
             'tecnico': tecnicoFinal,
             'id_tecnico': idTecnicoVal,
             'cliente': (remota['cliente'] ?? remota['cliente_nombre'] ?? '').toString(),
             'sucursal': (remota['sucursal'] ?? remota['sucursal_nombre'] ?? '').toString(),
+            'direccion': srvDireccion,
             'tipo_servicio': (remota['tipo_servicio'] ?? remota['tipo_servicio_nombre'] ?? '').toString(),
             'has_pdf': hasPdfVal,
             'pdf_url': pdfUrlFinal,
@@ -1841,15 +1845,15 @@ class SyncService extends ChangeNotifier {
             'partidas': partidasVal,
             'tipo_documento': tipoDocVal,
             'datos_tecnicos_json': dtVal,
-            'updated_at': remota['updated_at']?.toString() ?? DateTime.now().toIso8601String(),
+            'updated_at': remota['updated_at']?.toString() ?? DateTime.now().toUtc().toIso8601String(),
           });
         }
       }
 
-      // Solo DESPUÉS de confirmar que se insertaron registros con éxito, actualizar:
+      // Solo DESPUÉS de confirmar que se insertaron registros con éxito, actualizar en UTC:
       if (insertedCount > 0) {
-        await prefs.setString('last_sync_timestamp', DateTime.now().toIso8601String());
-        await db.setLastSyncTime(DateTime.now());
+        await prefs.setString('last_sync_timestamp', DateTime.now().toUtc().toIso8601String());
+        await db.setLastSyncTime(DateTime.now().toUtc());
       }
 
       // ── Refrescar dashboard incondicionalmente desde SQLite ──────────────

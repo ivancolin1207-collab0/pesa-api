@@ -220,6 +220,7 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
   List<Map<String, dynamic>> _clientes = [];
   bool _loading = true;
   String _query = '';
+  String? _errorMsg;
 
   @override
   bool get wantKeepAlive => true;
@@ -237,7 +238,12 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
   }
 
   Future<void> reload({bool forceRemote = false}) async {
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _errorMsg = null;
+      });
+    }
     try {
       var local = await LocalDbService.instance.getCatalogoClientes();
       if (forceRemote || local.isEmpty) {
@@ -245,6 +251,8 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
         if (adminData != null && adminData.isNotEmpty) {
           await LocalDbService.instance.guardarCatalogosAdmin(adminData);
           local = await LocalDbService.instance.getCatalogoClientes();
+        } else if (local.isEmpty && ApiService.instance.lastCatalogError != null) {
+          _errorMsg = ApiService.instance.lastCatalogError;
         }
       }
       if (mounted) {
@@ -253,8 +261,13 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
           _loading = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _loading = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _errorMsg = e.toString();
+          _loading = false;
+        });
+      }
     }
   }
 
@@ -458,12 +471,24 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
           child: _loading
               ? const Center(child: CircularProgressIndicator(color: PesaColors.brand))
               : filtered.isEmpty
-                  ? PesaEmptyState(
-                      icon: Icons.business_outlined,
-                      title: 'Sin clientes coincidentes',
-                      subtitle: widget.isAdmin
-                          ? 'Crea un nuevo cliente o sincroniza desde el servidor.'
-                          : 'Sincroniza catálogos para actualizar el directorio.',
+                  ? Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        PesaEmptyState(
+                          icon: _errorMsg != null ? Icons.cloud_off_rounded : Icons.business_outlined,
+                          title: _errorMsg != null ? 'Error al cargar clientes' : 'Sin clientes coincidentes',
+                          subtitle: _errorMsg ??
+                              (widget.isAdmin
+                                  ? 'Crea un nuevo cliente o sincroniza desde el servidor.'
+                                  : 'Sincroniza catálogos para actualizar el directorio.'),
+                        ),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: () => reload(forceRemote: true),
+                          icon: const Icon(Icons.sync_rounded, size: 17),
+                          label: const Text('Sincronizar ahora'),
+                        ),
+                      ],
                     )
                   : RefreshIndicator(
                       color: PesaColors.brand,
@@ -586,23 +611,40 @@ class _SucursalesSheetState extends State<_SucursalesSheet> {
 
   Future<void> _loadSucursales() async {
     if (mounted) setState(() => _loading = true);
+    final merged = <Map<String, dynamic>>[];
+    final seen = <String>{};
+
+    void addSuc(Map<String, dynamic> raw) {
+      final nom = (raw['nombre'] ?? raw['nombre_sucursal'] ?? raw['planta'] ?? raw['sucursal'] ?? '').toString().trim();
+      final dir = (raw['direccion'] ?? '').toString().trim();
+      if (nom.isEmpty && dir.isEmpty) return;
+      final key = '${nom.toLowerCase()}|${dir.toLowerCase()}';
+      if (seen.contains(key)) return;
+      seen.add(key);
+      merged.add({
+        ...raw,
+        'nombre': nom.isNotEmpty ? nom : dir,
+        'nombre_sucursal': nom.isNotEmpty ? nom : dir,
+        'direccion': dir.isNotEmpty ? dir : nom,
+        'contacto': (raw['contacto'] ?? raw['contacto_nombre'] ?? '').toString().trim(),
+        'telefono': (raw['telefono'] ?? raw['contacto_telefono'] ?? '').toString().trim(),
+      });
+    }
+
     try {
       final remote = await ApiService.instance.getSucursalesCliente(widget.clienteId);
-      if (mounted) {
-        setState(() {
-          _sucs = remote;
-          _loading = false;
-        });
-      }
-      return;
+      for (final r in remote) addSuc(r);
     } catch (_) {}
+
     final local = await LocalDbService.instance.getCatalogoSucursales(
       clienteId: widget.clienteId,
       clienteNombre: widget.clienteNombre,
     );
+    for (final l in local) addSuc(l);
+
     if (mounted) {
       setState(() {
-        _sucs = local;
+        _sucs = merged;
         _loading = false;
       });
     }
