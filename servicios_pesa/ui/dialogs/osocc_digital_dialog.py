@@ -96,7 +96,7 @@ class OsoccDigitalDialog(QDialog):
             | Qt.WindowType.WindowCloseButtonHint
             | Qt.WindowType.WindowMinMaxButtonsHint
         )
-        self.setStyleSheet("QDialog { background: #F5F6FA; }")
+        self.setStyleSheet("QDialog { background: #F5F5F7; }")
         self._load_db_data()
         self._setup_ui()
         self._populate_initial_values()
@@ -105,8 +105,7 @@ class OsoccDigitalDialog(QDialog):
         if not _db_pool or not self._folio:
             return
         try:
-            conn = _db_pool.get_connection()
-            try:
+            with _db_pool.transaction() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
@@ -142,9 +141,6 @@ class OsoccDigitalDialog(QDialog):
                                 self._os_data[k] = v
                         if not self._os_id and db_map.get("id"):
                             self._os_id = int(db_map["id"])
-                conn.commit()
-            finally:
-                _db_pool.release_connection(conn)
         except Exception as exc:
             logger.warning("OsoccDigitalDialog._load_db_data error: %s", exc)
 
@@ -153,24 +149,27 @@ class OsoccDigitalDialog(QDialog):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # Header oscuro institucional
+        # Header minimalista corporativo Apple — Básculas PESA
         hdr = QFrame()
         hdr.setObjectName("osocc_hdr")
-        hdr.setStyleSheet("QFrame#osocc_hdr { background: #111827; padding: 12px 18px; } QFrame#osocc_hdr QLabel { border: none; background: transparent; }")
+        hdr.setStyleSheet(
+            "QFrame#osocc_hdr { background: #1D1D1F; padding: 12px 18px; border-bottom: 1px solid #2C2C2E; } "
+            "QFrame#osocc_hdr QLabel { border: none; background: transparent; }"
+        )
         hl = QHBoxLayout(hdr)
         lbl_title = QLabel(
-            f"<span style='color:#FFFFFF; font-size:13pt; font-weight:800;'>"
+            f"<span style='color:#FFFFFF; font-size:13pt; font-weight:700;'>"
             f"FORMATO DE DIAGNÓSTICO Y REVISIÓN DE CELDA DE CARGA</span><br>"
-            f"<span style='color:#38BDF8; font-size:10pt; font-weight:700;'>"
+            f"<span style='color:#E5E5EA; font-size:10pt; font-weight:700;'>"
             f"Folio: {self._folio}</span>"
-            f"<span style='color:#D1D5DB; font-size:9.5pt;'>  |  Fecha: {datetime.now().strftime('%d / %m / %Y')}</span>"
+            f"<span style='color:#AEAEB2; font-size:9.5pt;'>  |  Fecha: {datetime.now().strftime('%d / %m / %Y')}</span>"
         )
         hl.addWidget(lbl_title, 1)
 
         badge = QLabel("OSOCC DIGITAL")
         badge.setStyleSheet(
-            "background: #0284C7; color: white; font-weight: 800; font-size: 9pt; "
-            "padding: 5px 12px; border-radius: 6px;"
+            "background: #C8102E; color: #FFFFFF; font-weight: 700; font-size: 9pt; "
+            "padding: 5px 12px; border-radius: 8px; border: none;"
         )
         hl.addWidget(badge, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         root.addWidget(hdr)
@@ -366,14 +365,14 @@ class OsoccDigitalDialog(QDialog):
         # Barra inferior
         ftr = QFrame()
         ftr.setObjectName("osocc_ftr")
-        ftr.setStyleSheet("QFrame#osocc_ftr { background: #FFFFFF; border-top: 1px solid #E5E7EB; padding: 10px 18px; } QFrame#osocc_ftr QLabel { border: none; background: transparent; }")
+        ftr.setStyleSheet("QFrame#osocc_ftr { background: #FFFFFF; border-top: 1px solid #E5E5EA; padding: 10px 18px; } QFrame#osocc_ftr QLabel { border: none; background: transparent; }")
         fl = QHBoxLayout(ftr)
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.clicked.connect(self.reject)
         btn_save = QPushButton("Finalizar y Generar PDF Oficial (OSOCC)")
         btn_save.setStyleSheet(
-            "QPushButton { background: #C8102E; color: white; font-weight: 700; "
-            "padding: 10px 24px; border-radius: 8px; font-size: 13px; border: none; }"
+            "QPushButton { background: #C8102E; color: #FFFFFF; font-weight: 600; "
+            "padding: 10px 24px; border-radius: 10px; font-size: 13px; border: none; }"
             "QPushButton:hover { background: #A60D26; }"
         )
         btn_save.clicked.connect(self._on_guardar)
@@ -556,8 +555,7 @@ class OsoccDigitalDialog(QDialog):
 
         if _db_pool:
             try:
-                conn = _db_pool.get_connection()
-                try:
+                with _db_pool.transaction() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
                             """
@@ -591,9 +589,6 @@ class OsoccDigitalDialog(QDialog):
                                 self._folio,
                             ),
                         )
-                    conn.commit()
-                finally:
-                    _db_pool.release_connection(conn)
             except Exception as exc:
                 logger.warning("No se pudo actualizar ordenes_servicio para %s: %s", self._folio, exc)
 

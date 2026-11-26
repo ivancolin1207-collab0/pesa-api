@@ -240,12 +240,12 @@ class LPFormWidget(QWidget):
         self._btn_cancel = QPushButton("Cancelar")
         self._btn_cancel.clicked.connect(self._on_cancel)
         
-        self._btn_pdf = QPushButton("📄 Generar PDF")
+        self._btn_pdf = QPushButton("Generar PDF")
         self._btn_pdf.setStyleSheet("background-color:#E5E5EA; color:#1D1D1F; font-weight:bold; padding:8px 16px; border-radius:6px;")
         self._btn_pdf.clicked.connect(self._generate_pdf)
         self._btn_pdf.setEnabled(self._is_edit) # Solo activo si ya se guardó
         
-        self._btn_save = QPushButton("💾 Guardar LP")
+        self._btn_save = QPushButton("Guardar LP")
         self._btn_save.setStyleSheet("background-color:#007AFF; color:white; font-weight:bold; padding:8px 16px; border-radius:6px;")
         self._btn_save.clicked.connect(self._on_save)
 
@@ -543,4 +543,4 @@ class LPFormWidget(QWidget):
             QMessageBox.critical(self, "Error PDF", f"No se pudo generar el PDF:\n{exc}")
         finally:
             self._btn_pdf.setEnabled(True)
-            self._btn_pdf.setText("📄 Generar PDF")
+            self._btn_pdf.setText("Generar PDF")

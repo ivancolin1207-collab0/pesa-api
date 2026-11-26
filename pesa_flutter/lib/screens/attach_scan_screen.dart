@@ -488,7 +488,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: _border),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05),
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05),
                     blurRadius: 8, offset: const Offset(0, 2))],
               ),
               child: ListView.separated(
@@ -501,7 +501,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
                     leading: Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
+                          color: const Color(0xFFF5F5F7),
                           border: Border.all(color: _border),
                           borderRadius: BorderRadius.circular(6)),
                       child: const Icon(Icons.assignment_outlined,
@@ -547,7 +547,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: const Color(0xFFF5F5F7),
                   border: Border.all(color: _border),
                   borderRadius: BorderRadius.circular(16)),
               child: const Icon(Icons.document_scanner, size: 56, color: _red),
@@ -870,7 +870,7 @@ class _StepDot extends StatelessWidget {
         decoration: BoxDecoration(
           color: isDone ? const Color(0xFFC8102E)
               : isActive ? const Color(0xFFFFF5F6)
-              : const Color(0xFFF8FAFC),
+              : const Color(0xFFF5F5F7),
           shape: BoxShape.circle,
           border: Border.all(color: color, width: 2),
         ),

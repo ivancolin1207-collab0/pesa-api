@@ -341,11 +341,12 @@ class LoginDialog(QDialog):
 
         try:
             self._eye_action = QAction(field)
-            self._eye_action.setText("👁")
+            self._eye_action.setText("Ver")
             self._eye_action.setCheckable(True)
             self._eye_action.toggled.connect(
-                lambda visible, f=field: f.setEchoMode(
-                    QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password
+                lambda visible, f=field, act=self._eye_action: (
+                    f.setEchoMode(QLineEdit.EchoMode.Normal if visible else QLineEdit.EchoMode.Password),
+                    act.setText("Ocultar" if visible else "Ver"),
                 )
             )
             field.addAction(self._eye_action, QLineEdit.ActionPosition.TrailingPosition)
@@ -424,7 +425,8 @@ class LoginDialog(QDialog):
                 padding: 0px 14px;
                 font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
                 font-size: 14px;
-                selection-background-color: rgba(184, 29, 36, 0.15);
+                selection-background-color: #E5E5EA;
+                selection-color: #1D1D1F;
             }}
             QLineEdit#login_input:focus {{
                 border: 1.5px solid {_RED};
@@ -641,7 +643,7 @@ class LoginDialog(QDialog):
                                 from PyQt6.QtWidgets import QMessageBox
                                 QMessageBox.warning(
                                     None,
-                                    "⚠️  Firma Digital Requerida",
+                                    "Firma Digital Requerida",
                                     f"Hola {user_dict.get('nombre_completo', username)},\n\n"
                                     "No se encontró tu firma digital registrada en el sistema.\n\n"
                                     "Para ingresar al sistema de escritorio de Windows, "

@@ -85,6 +85,7 @@ class LocalDbService {
       sucursal_id            INTEGER,
       holograma_anterior     TEXT,
       holograma_actualizado  TEXT,
+      hologramas             TEXT,
       funcionamiento         TEXT,
       puntos_apoyo           INTEGER DEFAULT 4,
       usa_sustitucion        INTEGER DEFAULT 0,
@@ -382,6 +383,7 @@ class LocalDbService {
             'sucursal_id': 'INTEGER',
             'holograma_anterior': 'TEXT',
             'holograma_actualizado': 'TEXT',
+            'hologramas': 'TEXT',
             'funcionamiento': 'TEXT',
             'puntos_apoyo': 'INTEGER DEFAULT 4',
             'usa_sustitucion': 'INTEGER DEFAULT 0',
@@ -756,6 +758,7 @@ class LocalDbService {
       'CREATE INDEX IF NOT EXISTS idx_ordenes_folio ON ordenes_servicio(folio_os)',
       'CREATE INDEX IF NOT EXISTS idx_ordenes_folio_alt ON ordenes_servicio(folio)',
       'CREATE INDEX IF NOT EXISTS idx_ordenes_lote ON ordenes_servicio(id_lote)',
+      'CREATE INDEX IF NOT EXISTS idx_ordenes_tecnico ON ordenes_servicio(id_tecnico)',
       'CREATE INDEX IF NOT EXISTS idx_ordenes_estatus ON ordenes_servicio(estatus)',
       'CREATE INDEX IF NOT EXISTS idx_ordenes_fecha ON ordenes_servicio(fecha DESC)',
       'CREATE INDEX IF NOT EXISTS idx_ordenes_cliente ON ordenes_servicio(cliente)',
@@ -3807,6 +3810,20 @@ class LocalDbService {
       await _asegurarTablasCatalogosAdmin(db);
       final n = Sqflite.firstIntValue(
             await db.rawQuery('SELECT COUNT(*) FROM catalogo_clientes'),
+          ) ??
+          0;
+      return n;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<int> getConteoCatalogoSucursales() async {
+    try {
+      final db = await _ensureInit();
+      await _asegurarTablasCatalogosAdmin(db);
+      final n = Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM catalogo_sucursales'),
           ) ??
           0;
       return n;

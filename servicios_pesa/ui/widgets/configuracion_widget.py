@@ -173,7 +173,7 @@ class ConfiguracionWidget(QWidget):
     # ── Tarjeta de conexión ───────────────────────────────────────────────────
     def _build_connection_card(self) -> QFrame:
         card, lay = _section_card()
-        lay.addWidget(_section_title("Estado de Conexión", "🔌"))
+        lay.addWidget(_section_title("Estado de Conexión", ""))
         lay.addWidget(_sep())
 
         row = QHBoxLayout()
@@ -194,14 +194,14 @@ class ConfiguracionWidget(QWidget):
             QPushButton {
                 background: #FFFFFF;
                 color: #111827;
-                border: 1px solid #CBD5E1;
+                border: 1px solid #D2D2D7;
                 border-radius: 7px;
                 font-size: 12px;
                 font-weight: 600;
                 padding: 0 14px;
                 min-height: 30px;
             }
-            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
+            QPushButton:hover { background: #F5F5F7; border-color: #9CA3AF; }
         """)
         btn_reconectar.clicked.connect(self._check_connection)
         row.addWidget(btn_reconectar)
@@ -218,7 +218,7 @@ class ConfiguracionWidget(QWidget):
     # ── Info de BD ────────────────────────────────────────────────────────────
     def _build_db_info_card(self) -> QFrame:
         card, lay = _section_card()
-        lay.addWidget(_section_title("Parámetros de Base de Datos", "🗄️"))
+        lay.addWidget(_section_title("Parámetros de Base de Datos", ""))
         lay.addWidget(_sep())
 
         host = _DB_CFG.get("host", "—")
@@ -235,7 +235,7 @@ class ConfiguracionWidget(QWidget):
     # ── Info del sistema ──────────────────────────────────────────────────────
     def _build_sysinfo_card(self) -> QFrame:
         card, lay = _section_card()
-        lay.addWidget(_section_title("Información del Sistema", "💻"))
+        lay.addWidget(_section_title("Información del Sistema", ""))
         lay.addWidget(_sep())
 
         try:
@@ -305,7 +305,7 @@ class ConfiguracionWidget(QWidget):
         # ── Sección: Gestión de Secuencia de Folios ────────────────────────────────
         lay.addWidget(_sep())
 
-        lbl_seq_title = QLabel("🔢  Gestión de Secuencia de Folios")
+        lbl_seq_title = QLabel("Gestión de Secuencia de Folios")
         lbl_seq_title.setStyleSheet(
             f"font-size: 13px; font-weight: 700; color: {_DARK}; background: transparent;"
         )
@@ -355,7 +355,7 @@ class ConfiguracionWidget(QWidget):
         grid_row.addStretch()
         lay.addLayout(grid_row)
 
-        btn_save_seq = QPushButton("✓  Guardar Consecutivos")
+        btn_save_seq = QPushButton("Guardar Consecutivos")
         btn_save_seq.setFixedHeight(36)
         btn_save_seq.setFixedWidth(210)
         btn_save_seq.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -383,7 +383,7 @@ class ConfiguracionWidget(QWidget):
         action_row.setSpacing(16)
 
         col_desc = QVBoxLayout()
-        lbl_action_title = QLabel("🗑️  Reiniciar Folios y Datos de Prueba")
+        lbl_action_title = QLabel("Reiniciar Folios y Datos de Prueba")
         lbl_action_title.setStyleSheet(
             f"font-size: 13px; font-weight: 700; color: {_DARK}; background: transparent;"
         )
@@ -424,7 +424,7 @@ class ConfiguracionWidget(QWidget):
             QPushButton:disabled {
                 color: #9CA3AF;
                 border-color: #E5E7EB;
-                background: #F8FAFC;
+                background: #F5F5F7;
             }
         """)
         self.btn_reset.clicked.connect(self._on_reset_clicked)
@@ -566,13 +566,13 @@ class ConfiguracionWidget(QWidget):
         # ── Primera confirmación ───────────────────────────────────────────────
         resp = QMessageBox.warning(
             self,
-            "⚠️  Reiniciar Folios y Datos de Prueba",
+            "Reiniciar Folios y Datos de Prueba",
             f"¿Estás seguro de que deseas eliminar TODAS las OS, RMA y RE de prueba\n"
             f"y reiniciar los consecutivos de folios a 1?\n\n"
             f"• Se eliminarán todas las órdenes de servicio\n"
             f"• Se eliminarán todos los adjuntos y detalles metrológicos\n"
             f"• Los folios volverán a iniciar desde OS-{anio_corto}-1\n\n"
-            f"⚠️  Esta acción es IRREVERSIBLE y no se puede deshacer.",
+            f"Esta acción es IRREVERSIBLE y no se puede deshacer.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,    # Botón por defecto: No
         )
@@ -613,7 +613,7 @@ class ConfiguracionWidget(QWidget):
 
             # Mostrar resultado
             self._lbl_reset_result.setText(
-                f"✅  {resultado}  —  "
+                f"{resultado}  —  "
                 f"{datetime.datetime.now().strftime('%H:%M:%S')}"
             )
             self._lbl_reset_result.setStyleSheet(
@@ -623,7 +623,7 @@ class ConfiguracionWidget(QWidget):
             # Confirmación de éxito
             QMessageBox.information(
                 self,
-                "✅ Reset Completado",
+                "Reset Completado",
                 f"Folios y datos de prueba reiniciados correctamente.\n\n"
                 f"El siguiente folio será:  OS-{anio_corto}-1\n\n"
                 f"{resultado}",
@@ -636,7 +636,7 @@ class ConfiguracionWidget(QWidget):
         except Exception as exc:
             self._reset_progress.setVisible(False)
             self.btn_reset.setEnabled(True)
-            self._lbl_reset_result.setText(f"❌  Error: {exc}")
+            self._lbl_reset_result.setText(f"Error: {exc}")
             self._lbl_reset_result.setStyleSheet(
                 f"font-size: 11px; background: transparent; color: {_RED};"
             )

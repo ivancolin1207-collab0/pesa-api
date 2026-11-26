@@ -608,28 +608,28 @@ class CapturaDigitalDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
 
         # Botón Reiniciar Captura
-        btn_reset = QPushButton("🔄  Reiniciar Captura")
+        btn_reset = QPushButton("Reiniciar Captura")
         btn_reset.setStyleSheet(
             "QPushButton {"
-            "  background: #FFF3E0; color: #E65100;"
-            "  border: 1px solid #FFCC80;"
-            "  border-radius: 8px; font-size: 10pt; font-weight: 600;"
+            "  background: #FFFFFF; color: #C8102E;"
+            "  border: 1px solid #D2D2D7;"
+            "  border-radius: 10px; font-size: 10pt; font-weight: 600;"
             "  padding: 8px 18px;"
             "}"
-            "QPushButton:hover { background: #FFE0B2; }"
+            "QPushButton:hover { background: #F2F2F7; border-color: #C8102E; }"
         )
         btn_reset.clicked.connect(self._on_reiniciar_captura)
 
-        self._btn_borrador = QPushButton("\U0001f4be  Guardar Borrador")
+        self._btn_borrador = QPushButton("Guardar Borrador")
         self._btn_borrador.setStyleSheet(
             "QPushButton {"
-            "  background: #F5F5F7; color: #374151;"
-            "  border: 1px solid #D1D5DB;"
-            "  border-radius: 8px; font-size: 11pt; font-weight: 600;"
+            "  background: #FFFFFF; color: #1D1D1F;"
+            "  border: 1px solid #D2D2D7;"
+            "  border-radius: 10px; font-size: 10.5pt; font-weight: 600;"
             "  padding: 8px 18px;"
             "}"
-            "QPushButton:hover { background: #E5E7EB; }"
-            "QPushButton:disabled { color: #9CA3AF; }"
+            "QPushButton:hover { background: #F2F2F7; border-color: #8E8E93; }"
+            "QPushButton:disabled { color: #8E8E93; background: #F5F5F7; }"
         )
         self._btn_borrador.clicked.connect(self._on_guardar_borrador)
 
@@ -1200,7 +1200,7 @@ class CapturaDigitalDialog(QDialog):
                     "antes de generar el PDF final."
                 )
                 self._btn_guardar.setEnabled(True)
-                self._btn_guardar.setText("🖨  Guardar y Generar PDF Final")
+                self._btn_guardar.setText("Guardar y Generar PDF Final")
                 return
 
             # Filtrar filas vacías (sin carga/valor nominal) antes de guardar/PDF
@@ -1337,7 +1337,7 @@ class CapturaDigitalDialog(QDialog):
             f"Ocurrio un error durante el guardado:\n\n{err_msg}"
         )
         self._btn_guardar.setEnabled(True)
-        self._btn_guardar.setText("💾  Guardar y Generar PDF Final")
+        self._btn_guardar.setText("Guardar y Generar PDF Final")
 
     def _persistir_en_bd(
         self, datos_json: dict, obs: str, nuevo_estado: str

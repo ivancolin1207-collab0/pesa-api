@@ -107,11 +107,15 @@ from reportlab.lib.colors import HexColor
 try:
     from reportlab.lib.pagesizes import letter
     from reportlab.lib import colors
+    from reportlab.lib.utils import simpleSplit
     from reportlab.pdfgen import canvas as rl_canvas
     _RL_OK = True
 except ImportError:
     _RL_OK = False
+    simpleSplit = None
     logger.warning("ReportLab no instalado: pip install reportlab")
+
+_REPORTLAB_AVAILABLE = _RL_OK
 
 # ---------------------------------------------------------------------------
 # Rutas de imágenes — compatible con código fuente Y PyInstaller (_MEIPASS)
@@ -146,6 +150,27 @@ def _resolver_ruta_asset(nombre_archivo: str) -> "Optional[Path]":
             logger.debug("Asset encontrado: %s", cand)
             return cand
     logger.warning("Asset no encontrado: %s", nombre_archivo)
+    return None
+
+
+def _find_asset(*nombres: str) -> "Optional[str]":
+    """Busca el primer asset existente entre varios nombres candidatos y retorna su ruta str."""
+    for nombre in nombres:
+        if not nombre:
+            continue
+        p = _resolver_ruta_asset(nombre)
+        if p is not None and p.exists():
+            return str(p)
+    # Fallback hacia los logos principales ya resueltos
+    joined = " ".join(nombres).lower()
+    if any(k in joined for k in ("rice", "rl")):
+        rl = _resolve_rice_lake()
+        if rl and rl.exists():
+            return str(rl)
+    if any(k in joined for k in ("pesa", "bp", "logo")):
+        lp = _resolve_logo("logo_pesa")
+        if lp and lp.exists():
+            return str(lp)
     return None
 
 # Mantener compatibilidad con código que usa _IMG_DIR
@@ -188,6 +213,9 @@ _BLACK      = colors.black
 _WHITE      = colors.white
 # Color de alerta para campos oblig. vacíos (etiqueta en rojo normativo NOM)
 _FIELD_ALERT = colors.HexColor("#C8102E")
+_CREAM_BG    = colors.HexColor("#F5F5F7")
+_GRAY_ROW    = colors.HexColor("#F2F2F7")
+_GREEN_OK    = colors.HexColor("#16A34A")
 
 
 # ---------------------------------------------------------------------------
@@ -814,17 +842,23 @@ class OsPdfGenerator:
         # CCA e Inicial J/I/A SOLO si el servicio contiene 'calibraci' explicitamente.
         # Servicios de Inspeccion pura, Mantenimiento, Revision o Entrega Refacciones
         # NO incluyen casillas de calibrador ni numero CCA.
-        tiene_calibracion = "calibraci" in servicio_norm or bool(_re_reg.search(r"\bcca\b", servicio_norm))
+        tiene_calibracion = "calibraci" in servicio_norm or bool(re.search(r"\bcca\b", servicio_norm))
         tiene_inspeccion  = (
             "inspecci" in servicio_norm
             or "verifica" in servicio_norm
-            or bool(_re_reg.search(r"\bdve\b", servicio_norm))
+            or bool(re.search(r"\bdve\b", servicio_norm))
         )
 
         # Fallback solo cuando la orden heredada carece de tipo_servicio explícito
         if not servicio_norm:
-            tiene_calibracion = bool(_numero_cca)
-            tiene_inspeccion  = bool(_numero_dve or _holo_ant or _holo_act)
+            tiene_calibracion = bool(
+                str(os_data.get("numero_cca") or os_data.get("numero_certificado") or os_data.get("cca") or "").strip()
+            )
+            tiene_inspeccion  = bool(
+                str(os_data.get("numero_dve") or os_data.get("folio_dve") or "").strip()
+                or str(os_data.get("holograma_anterior") or "").strip()
+                or str(os_data.get("holograma_actualizado") or "").strip()
+            )
 
         mostrar_cca        = tiene_calibracion   # CCA solo con calibración
         mostrar_hologramas = tiene_inspeccion    # Hologramas y DVE solo con inspección
@@ -956,13 +990,11 @@ class OsPdfGenerator:
             y -= fila_h
 
         # ── Fila 3 (condicional): CCA / DVE / Hologramas ──────────────────────────────
-        import re as _re_reg
-
         def _limp_reg_pdf(val) -> str:
             s = str(val or "").strip()
             if not s or s.lower() in {"none", "null", "n/a", "na", "--", "-"}:
                 return ""
-            if _re_reg.match(r"^(CCA|DVE)\.\d{2}\.?$", s, flags=_re_reg.IGNORECASE):
+            if re.match(r"^(CCA|DVE)\.\d{2}\.?$", s, flags=re.IGNORECASE):
                 return ""
             return s
 
@@ -3882,6 +3914,78 @@ class OsoccPdfGenerator(OsobPdfGenerator):
         ("DANADA", "DAÑADA / DESCALIBRADA (Sobrecarga, galgas abiertas o fuga - FUERA DE SERVICIO)"),
     ]
 
+    def _normalize_data(self, raw_data: dict) -> dict:
+        """Compatibilidad con OsobPdfGenerator._unpack_data para normalizar payload OSOCC."""
+        return self._unpack_data(raw_data)
+
+    @staticmethod
+    def _draw_bp_fallback(c, x: float, y: float) -> None:
+        c.setFillColor(_RED)
+        c.setFont("Helvetica-Bold", 11)
+        c.drawString(x, y + 10, "BÁSCULAS PESA")
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica", 6)
+        c.drawString(x, y + 2, "Pesaje, Sistemas y Automatización")
+
+    @staticmethod
+    def _draw_rl_fallback(c, x: float, y: float) -> None:
+        c.setFillColor(_DARK_HDR)
+        c.setFont("Helvetica-Bold", 9)
+        c.drawRightString(x + 104, y + 10, "RICE LAKE")
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica", 5.8)
+        c.drawRightString(x + 104, y + 2, "WEIGHING SYSTEMS")
+
+    def _draw_sec_hdr(self, c, y: float, title: str, right_label: str = "") -> float:
+        bar_h = 12.5
+        c.setFillColor(_DARK_HDR)
+        c.rect(self.ML, y - bar_h, self.CW, bar_h, fill=1, stroke=0)
+        c.setFillColor(_RED)
+        c.rect(self.ML, y - bar_h, 4.0, bar_h, fill=1, stroke=0)
+        c.setFillColor(_WHITE)
+        c.setFont("Helvetica-Bold", 6.8)
+        c.drawString(self.ML + 8, y - bar_h + 3.6, title)
+        if right_label:
+            c.setFillColor(_GRAY_LIGHT)
+            c.setFont("Helvetica", 5.9)
+            c.drawRightString(self.ML + self.CW - 5, y - bar_h + 3.8, right_label)
+        return y - bar_h
+
+    def _draw_footer(self, c) -> None:
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica", 5.8)
+        c.drawString(self.ML, 10, "BÁSCULAS PESA — Pesaje, Sistemas y Automatización  |  Formato Oficial OSOCC")
+        c.drawRightString(self.ML + self.CW, 10, "recepcion@basculaspesa.com.mx")
+
+    @staticmethod
+    def _fmt_fecha(raw_fecha) -> str:
+        from datetime import datetime as _dt
+        s = str(raw_fecha or "").strip()
+        if not s:
+            return _dt.now().strftime("%d / %m / %Y")
+        for fmt_in in ("%Y-%m-%d", "%Y-%m-%dT%H:%M:%S", "%d/%m/%Y", "%d-%m-%Y"):
+            try:
+                return _dt.strptime(s[:19], fmt_in).strftime("%d / %m / %Y")
+            except ValueError:
+                continue
+        return s[:16]
+
+    @staticmethod
+    def _draw_labeled_cell(c, x: float, top_y: float, w: float, h: float, lbl: str, val: str) -> None:
+        c.setFillColor(_WHITE)
+        c.setStrokeColor(_GRAY_MED)
+        c.setLineWidth(0.4)
+        c.rect(x, top_y - h, w, h, fill=1, stroke=1)
+        c.setFillColor(_GRAY_DARK)
+        c.setFont("Helvetica-Bold", 5.4)
+        c.drawString(x + 4, top_y - 6.0, lbl)
+        val_s = str(val or "").strip()
+        if val_s:
+            c.setFillColor(_BLACK)
+            c.setFont("Helvetica-Bold", 6.8)
+            max_ch = max(12, int((w - 8) / 3.9))
+            c.drawString(x + 4, top_y - h + 2.8, val_s[:max_ch])
+
     def generate(
         self,
         os_data: dict,
@@ -3896,7 +4000,12 @@ class OsoccPdfGenerator(OsobPdfGenerator):
         folio = d.get("folio_os") or "OSOCC-26-001"
 
         if output_path is None:
-            output_dir = Path(PDFS_DIR)
+            try:
+                from config import PDFS_DIR as _cfg_pdfs_dir
+                output_dir = Path(_cfg_pdfs_dir)
+            except Exception:
+                import tempfile
+                output_dir = Path(tempfile.gettempdir())
             output_dir.mkdir(parents=True, exist_ok=True)
             output_path = str(output_dir / f"{folio}.pdf")
         else:

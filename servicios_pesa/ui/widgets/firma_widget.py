@@ -148,7 +148,7 @@ class DrawingCanvas(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         self.setStyleSheet(
             "QWidget#pesa_signature_canvas { "
-            "background: #FFFFFF; border: 1.5px solid #CBD5E1; border-radius: 8px; }"
+            "background: #FFFFFF; border: 1.5px solid #D2D2D7; border-radius: 8px; }"
         )
 
     def set_base64_image(self, b64_data: str) -> bool:

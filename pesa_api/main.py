@@ -57,18 +57,38 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_b64       TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_cca    VARCHAR(100)",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_dve    VARCHAR(100)",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS hologramas    TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_no_excentricidad VARCHAR(100)",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS capacidad_maxima DOUBLE PRECISION",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS division_minima DOUBLE PRECISION",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS tipo_instrumento VARCHAR(150)",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_enviado BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cliente TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_destino TEXT",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_cancelacion TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS cancelada_por TEXT",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_cancelacion TIMESTAMP",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sin_correo_cliente BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_sin_correo TEXT",
                 "ALTER TABLE ordenes_servicio DROP CONSTRAINT IF EXISTS chk_os_estado",
+                """UPDATE ordenes_servicio
+                   SET correo_destino = CASE
+                       WHEN correo_cliente IS NOT NULL AND correo_cliente LIKE '%@%'
+                            AND LOWER(TRIM(correo_cliente)) NOT IN ('cliente', 'sin registrar', 'destinatario registrado')
+                       THEN TRIM(correo_cliente)
+                       ELSE NULL
+                   END
+                   WHERE LOWER(TRIM(COALESCE(correo_destino, ''))) IN ('cliente', 'sin registrar', 'destinatario registrado')""",
+                """UPDATE ordenes_servicio os
+                   SET correo_destino = COALESCE(
+                       NULLIF(TRIM(os.correo_cliente), ''),
+                       (SELECT NULLIF(TRIM(cs.email), '') FROM cliente_sucursales cs WHERE cs.id = os.sucursal_id AND cs.email LIKE '%@%' LIMIT 1),
+                       (SELECT NULLIF(TRIM(cc.email), '') FROM cat_clientes cc WHERE cc.id = os.id_cliente AND cc.email LIKE '%@%' LIMIT 1)
+                   )
+                   WHERE os.correo_enviado = TRUE
+                     AND (os.correo_destino IS NULL OR TRIM(os.correo_destino) = '')""",
                 """CREATE TABLE IF NOT EXISTS catalogo_marcas_modelos (
                     id SERIAL PRIMARY KEY,
                     marca VARCHAR(100) NOT NULL,

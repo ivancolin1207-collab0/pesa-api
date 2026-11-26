@@ -14,7 +14,7 @@ Características:
     - Genera PDF local en TABLET_PDF_DIR
 
 Acceso:
-    - Desde DashboardWidget → botón "📱 Abrir en Tablet"
+    - Desde DashboardWidget → botón "Abrir en Tablet"
     - Desde BatchGeneratorWidget → botón táctil
 """
 from __future__ import annotations
@@ -583,7 +583,7 @@ class DrawingCanvas(QWidget):
             f.setPointSize(12)
             painter.setFont(f)
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
-                             f"✍  {self._placeholder}")
+                             f"{self._placeholder}")
             return
 
         pen = QPen(QColor(_DARK), 2.5, Qt.PenStyle.SolidLine,
@@ -966,7 +966,7 @@ class TomDigitalDialog(QDialog):
         self._os_data  = os_data if isinstance(os_data, dict) else {}
         self._os_id    = os_id
 
-        self.setWindowTitle(f"📱  Formulario Táctil — {folio_os}")
+        self.setWindowTitle(f"Formulario Táctil — {folio_os}")
         self.setWindowState(Qt.WindowState.WindowMaximized)
         self.setStyleSheet(f"background: {_BG};")
 
@@ -1203,7 +1203,7 @@ class TomDigitalDialog(QDialog):
 
     def _update_mode_badge(self) -> None:
         if _HAS_SYNC and _sync_manager and _sync_manager.is_online():
-            self._lbl_modo.setText("  🟢  Conectado — PostgreSQL  ")
+            self._lbl_modo.setText("Conectado — PostgreSQL")
             self._lbl_modo.setStyleSheet("""
                 background: rgba(52,199,89,0.15);
                 color: #34C759;
@@ -1211,7 +1211,7 @@ class TomDigitalDialog(QDialog):
                 border-radius: 8px; padding: 0 12px;
             """)
         else:
-            self._lbl_modo.setText("  🟡  Offline — SQLite Local  ")
+            self._lbl_modo.setText("Offline — SQLite Local")
             self._lbl_modo.setStyleSheet("""
                 background: rgba(255,159,10,0.15);
                 color: #FF9F0A;
@@ -1248,7 +1248,7 @@ class TomDigitalDialog(QDialog):
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(12)
 
-        lay.addWidget(self._build_section_header("🔧", "Datos del Instrumento", _BLUE))
+        lay.addWidget(self._build_section_header("", "Datos del Instrumento", _BLUE))
 
         grid = QGridLayout()
         grid.setSpacing(10)
@@ -1340,7 +1340,7 @@ class TomDigitalDialog(QDialog):
         _calib_lay.setContentsMargins(14, 10, 14, 10)
         _calib_lay.setSpacing(8)
 
-        _lbl_calib_hdr = QLabel("🛡️  Datos de Calibración  (NOM-010-SCFI-2020)")
+        _lbl_calib_hdr = QLabel("Datos de Calibración  (NOM-010-SCFI-2020)")
         _lbl_calib_hdr.setStyleSheet(
             "font-size: 13px; font-weight: 700; color: #C8102E; background: transparent;"
         )
@@ -1437,7 +1437,7 @@ class TomDigitalDialog(QDialog):
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(10)
 
-        lay.addWidget(self._build_section_header("📝", "Observaciones del Servicio", _GRAY))
+        lay.addWidget(self._build_section_header("", "Observaciones del Servicio", _GRAY))
 
         self._txt_obs = QTextEdit()
         self._txt_obs.setPlaceholderText(
@@ -1478,7 +1478,7 @@ class TomDigitalDialog(QDialog):
         lay.setContentsMargins(20, 16, 20, 16)
         lay.setSpacing(14)
 
-        lay.addWidget(self._build_section_header("✍️", "Firmas Digitales", _GREEN))
+        lay.addWidget(self._build_section_header("", "Firmas Digitales", _GREEN))
 
         firmas_row = QHBoxLayout()
         firmas_row.setSpacing(16)
@@ -1529,7 +1529,7 @@ class TomDigitalDialog(QDialog):
             col.addWidget(canvas, stretch=1)
 
             # Botón limpiar
-            btn_clear = QPushButton("🗑️  Limpiar firma")
+            btn_clear = QPushButton("Limpiar firma")
             btn_clear.setFixedHeight(44)
             btn_clear.setStyleSheet(f"""
                 QPushButton {{
@@ -1567,7 +1567,7 @@ class TomDigitalDialog(QDialog):
         lay.setSpacing(12)
 
         # Indicador de guardado local
-        self._lbl_save_status = QLabel("  📋  Los datos se guardan localmente hasta sincronizar")
+        self._lbl_save_status = QLabel("  Los datos se guardan localmente hasta sincronizar")
         self._lbl_save_status.setStyleSheet(
             "font-size: 12px; color: #86868B; background: transparent;"
         )
@@ -1582,13 +1582,13 @@ class TomDigitalDialog(QDialog):
             QPushButton {
                 background: #FFFFFF;
                 color: #111827;
-                border: 1px solid #CBD5E1;
+                border: 1px solid #D2D2D7;
                 border-radius: 8px;
                 font-size: 14px;
                 font-weight: 600;
                 padding: 0 20px;
             }
-            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
+            QPushButton:hover { background: #F5F5F7; border-color: #9CA3AF; }
         """)
         btn_draft.clicked.connect(lambda: self._on_guardar(draft=True))
         lay.addWidget(btn_draft)
@@ -1611,7 +1611,7 @@ class TomDigitalDialog(QDialog):
             QPushButton:hover {
                 background: #A60D26;
             }
-            QPushButton:disabled { background: #CBD5E1; color: #9CA3AF; }
+            QPushButton:disabled { background: #D2D2D7; color: #9CA3AF; }
         """)
         self._btn_save.clicked.connect(lambda: self._on_guardar(draft=False))
         lay.addWidget(self._btn_save)
@@ -1784,13 +1784,13 @@ class TomDigitalDialog(QDialog):
 
     def _on_save_finished(self, draft: bool, folio: str, pdf_path: str):
         self._btn_save.setEnabled(True)
-        self._btn_save.setText("  💾   Guardar y Generar PDF en Tablet  ")
+        self._btn_save.setText("   Guardar y Generar PDF en Tablet  ")
         
         mode_msg = "borrador guardado" if draft else "servicio completado"
         pdf_msg  = f"\n\nPDF generado:\n{pdf_path}" if pdf_path else ""
         QMessageBox.information(
             self,
-            "✅ Guardado",
+            "Guardado",
             f"Orden {folio}: {mode_msg}.{pdf_msg}\n\n"
             f"{'Los datos se sincronizarán al conectarse a la red de oficina.' if not draft else ''}"
         )
@@ -1800,7 +1800,7 @@ class TomDigitalDialog(QDialog):
 
     def _on_save_error(self, err_msg: str):
         self._btn_save.setEnabled(True)
-        self._btn_save.setText("  💾   Guardar y Generar PDF en Tablet  ")
+        self._btn_save.setText("   Guardar y Generar PDF en Tablet  ")
         QMessageBox.critical(
             self, "Error al Guardar",
             f"Error inesperado:\n{err_msg}\n\nRevisa los logs para más detalles."

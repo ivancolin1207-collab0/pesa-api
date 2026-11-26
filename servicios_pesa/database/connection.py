@@ -229,6 +229,10 @@ class DatabasePool:
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_no_excentricidad VARCHAR(100);",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_cca VARCHAR(100);",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS numero_dve VARCHAR(100);",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS hologramas TEXT;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_enviado BOOLEAN DEFAULT FALSE;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS correo_cc TEXT;",
+            "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_envio_correo TIMESTAMPTZ;",
             # Campos de Tipo de Estructura (RE)
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS tipo_estructura TEXT;",
             "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS tipo_instalacion_camionera TEXT;",

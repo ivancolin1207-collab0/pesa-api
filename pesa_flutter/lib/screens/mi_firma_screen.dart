@@ -561,15 +561,19 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
             children: [
               const Icon(Icons.edit_outlined, size: 16, color: PesaColors.textSecondary),
               const SizedBox(width: 8),
-              const Text(
-                'Nueva Firma',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  fontSize: 14,
-                  color: PesaColors.textPrimary,
+              const Expanded(
+                child: Text(
+                  'Nueva Firma',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: PesaColors.textPrimary,
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               AnimatedBuilder(
                 animation: _ctrl,
                 builder: (_, __) => PesaStatusBadge(

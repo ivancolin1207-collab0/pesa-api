@@ -21,8 +21,8 @@ bool exigirNombreRecibe(BuildContext context, String nombreRecibe, {String? clie
   if (t.isEmpty || t.length < 3) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('⚠️ Es obligatorio ingresar el nombre de la persona que recibe el servicio.'),
-        backgroundColor: Colors.redAccent,
+        content: Text('Es obligatorio ingresar el nombre de la persona que recibe el servicio.'),
+        backgroundColor: Color(0xFFC8102E),
       ),
     );
     return false;
@@ -30,8 +30,8 @@ bool exigirNombreRecibe(BuildContext context, String nombreRecibe, {String? clie
   if (esRazonSocialEmpresa(t, clienteEmpresa)) {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('⚠️ Ingrese el nombre de la persona que recibe (Ingeniero / Responsable), no la razón social de la empresa.'),
-        backgroundColor: Colors.redAccent,
+        content: Text('Ingrese el nombre de la persona que recibe (Ingeniero / Responsable), no la razón social de la empresa.'),
+        backgroundColor: Color(0xFFC8102E),
       ),
     );
     return false;

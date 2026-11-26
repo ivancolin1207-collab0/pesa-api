@@ -276,7 +276,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: const Color(0xFFF5F5F7),
             border: Border.all(color: _kBorder),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -325,11 +325,11 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+              borderSide: const BorderSide(color: Color(0xFFD2D2D7)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFFCBD5E1)),
+              borderSide: const BorderSide(color: Color(0xFFD2D2D7)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
@@ -462,8 +462,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                           folio,
                           style: cell.copyWith(fontWeight: FontWeight.w800, fontSize: 12, color: const Color(0xFF111827)),
                         ),
-                        if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF0F172A), const Color(0xFFF8FAFC)),
-                        if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF0F172A), const Color(0xFFF8FAFC)),
+                        if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF1D1D1F), const Color(0xFFF5F5F7)),
+                        if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF1D1D1F), const Color(0xFFF5F5F7)),
                       ],
                     ),
                     if (specs.isNotEmpty) ...[
@@ -481,9 +481,9 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                         decoration: const BoxDecoration(
-                          color: Color(0xFFF8FAFC),
+                          color: Color(0xFFF5F5F7),
                           border: Border(
-                            left: BorderSide(color: Color(0xFF0F172A), width: 3),
+                            left: BorderSide(color: Color(0xFF1D1D1F), width: 3),
                             top: BorderSide(color: Color(0xFFE2E8F0)),
                             right: BorderSide(color: Color(0xFFE2E8F0)),
                             bottom: BorderSide(color: Color(0xFFE2E8F0)),
@@ -548,7 +548,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: const Color(0xFFCBD5E1)),
+          border: Border.all(color: const Color(0xFFD2D2D7)),
         ),
         child: Text(
           val.toUpperCase().startsWith(pfx.toUpperCase()) ? val : '$pfx: $val',
@@ -582,7 +582,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                 Expanded(
                   child: Text(
                     folioCard.isNotEmpty ? folioCard : '—',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF0F172A)),
+                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF1D1D1F)),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -594,8 +594,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   spacing: 6,
                   runSpacing: 4,
                   children: [
-                    if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF0F172A), const Color(0xFFF8FAFC)),
-                    if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF0F172A), const Color(0xFFF8FAFC)),
+                    if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF1D1D1F), const Color(0xFFF5F5F7)),
+                    if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF1D1D1F), const Color(0xFFF5F5F7)),
                   ],
                 ),
               ],
@@ -609,7 +609,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                 ),
               ],
               const SizedBox(height: 4),
-              Text((r['cliente'] ?? '—').toString(), style: const TextStyle(fontSize: 13, color: Color(0xFF0F172A))),
+              Text((r['cliente'] ?? '—').toString(), style: const TextStyle(fontSize: 13, color: Color(0xFF1D1D1F))),
               const SizedBox(height: 2),
               Text('Técnico: ${(r['tecnico'] ?? '—')}',
                   style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
@@ -621,9 +621,9 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: const BoxDecoration(
-                    color: Color(0xFFF8FAFC),
+                    color: Color(0xFFF5F5F7),
                     border: Border(
-                      left: BorderSide(color: Color(0xFF0F172A), width: 3),
+                      left: BorderSide(color: Color(0xFF1D1D1F), width: 3),
                       top: BorderSide(color: Color(0xFFE2E8F0)),
                       right: BorderSide(color: Color(0xFFE2E8F0)),
                       bottom: BorderSide(color: Color(0xFFE2E8F0)),
@@ -671,7 +671,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         key: Key('calib_ver_pdf_$folio'),
         style: btnStyle.copyWith(
           foregroundColor: const WidgetStatePropertyAll(_kDarkInk),
-          side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFCBD5E1))),
+          side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFD2D2D7))),
         ),
         onPressed: busy ? null : () => _verPdf(r),
         icon: busy
@@ -684,7 +684,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         key: Key('calib_descargar_$folio'),
         style: btnStyle.copyWith(
           foregroundColor: const WidgetStatePropertyAll(_kDarkInk),
-          side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFCBD5E1))),
+          side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFD2D2D7))),
         ),
         onPressed: busy ? null : () => _descargar(r),
         icon: const Icon(Icons.download_outlined, size: 15, color: _kDarkInk),

@@ -498,6 +498,14 @@ def _nombre_tipo_documento_correo(folios: list[str]) -> str:
     return "Orden de Servicio"
 
 
+def _es_cancelada_orden_correo(o: dict) -> bool:
+    if not isinstance(o, dict):
+        return False
+    est = str(o.get("estatus") or "").strip().upper()
+    edo = str(o.get("estado") or "").strip().upper()
+    return est in {"CANCELADA", "CANCELADO"} or edo in {"CANCELADA", "CANCELADO"}
+
+
 def construir_asunto_y_cuerpo_correo(
     ordenes_lote: list[dict],
     cliente: str,
@@ -505,10 +513,11 @@ def construir_asunto_y_cuerpo_correo(
 ) -> tuple[str, str, str, list[str]]:
     """
     Construye (subject, cuerpo_html, cuerpo_texto, folios) con:
+      - Exclusión estricta de órdenes con estatus/estado CANCELADA.
       - Asunto:
           * 1 doc:  '{Tipo} {folios[0]} - {cliente} | Básculas PESA'
           * Lote:   '{Tipo} {folios[0]} a {folios[-1]} - {cliente} | Básculas PESA'
-      - Tabla HTML dinámica:
+      - Tabla HTML dinámica (paleta Apple Minimalista #1D1D1F / #E5E5EA / #F5F5F7):
           * Columnas fijas: # | ID | Marca | Modelo | ID / Equipo
           * Columna CCA solo si tiene_cca es True; columna DVE solo si tiene_dve es True
           * Celdas vacías completamente limpias ('') sin guiones '-' ni '—'.
@@ -516,7 +525,8 @@ def construir_asunto_y_cuerpo_correo(
     import html as _html
     import re as _re
 
-    filas_raw = [_extraer_campos_tabla_correo(o) for o in (ordenes_lote or []) if o]
+    activas = [o for o in (ordenes_lote or []) if o and not _es_cancelada_orden_correo(o)]
+    filas_raw = [_extraer_campos_tabla_correo(o) for o in activas]
     filas_por_folio: dict[str, dict[str, str]] = {}
     filas_sin_folio: list[dict[str, str]] = []
     for f in filas_raw:
@@ -567,10 +577,10 @@ def construir_asunto_y_cuerpo_correo(
         )
 
     th_style = (
-        "border: 1px solid #E2E8F0; padding: 10px 12px; background-color: #F8FAFC; "
-        "color: #0F172A; font-weight: 700; font-size: 12px; text-align: left;"
+        "border: 1px solid #E5E5EA; padding: 10px 12px; background-color: #F5F5F7; "
+        "color: #1D1D1F; font-weight: 700; font-size: 12px; text-align: left;"
     )
-    td_base = "border: 1px solid #E2E8F0; padding: 9px 12px; font-size: 13px; color: #0F172A; vertical-align: middle;"
+    td_base = "border: 1px solid #E5E5EA; padding: 9px 12px; font-size: 13px; color: #1D1D1F; vertical-align: middle;"
 
     headers_html = [
         f'<th style="{th_style} text-align: center; width: 38px;">#</th>',
@@ -588,14 +598,14 @@ def construir_asunto_y_cuerpo_correo(
     tr_html_list: list[str] = []
     lineas_txt_list: list[str] = []
     for idx, f in enumerate(filas_ordenadas, start=1):
-        bg = "#FFFFFF" if idx % 2 == 1 else "#F8FAFC"
+        bg = "#FFFFFF" if idx % 2 == 1 else "#F5F5F7"
         folio_esc = _html.escape(f["folio"]) if f["folio"] else ""
         marca_esc = _html.escape(f["marca"]) if f["marca"] else ""
         modelo_esc = _html.escape(f["modelo"]) if f["modelo"] else ""
         id_esc = _html.escape(f["id_indicador"]) if f["id_indicador"] else ""
 
         celdas_fila = [
-            f'<td style="{td_base} text-align: center; font-weight: 600; color: #475569; width: 38px;">{idx}</td>',
+            f'<td style="{td_base} text-align: center; font-weight: 600; color: #6E6E73; width: 38px;">{idx}</td>',
             f'<td style="{td_base} font-weight: 700; color: #C8102E; white-space: nowrap;">{folio_esc}</td>',
             f'<td style="{td_base}">{marca_esc}</td>',
             f'<td style="{td_base}">{modelo_esc}</td>',
@@ -603,14 +613,14 @@ def construir_asunto_y_cuerpo_correo(
         ]
         if tiene_cca:
             if f["cca"]:
-                cca_cell = f'<span style="color: #0F172A; font-weight: 600; font-size: 12px;">{_html.escape(f["cca"])}</span>'
+                cca_cell = f'<span style="color: #1D1D1F; font-weight: 600; font-size: 12px;">{_html.escape(f["cca"])}</span>'
             else:
                 cca_cell = ""
             celdas_fila.append(f'<td style="{td_base}">{cca_cell}</td>')
 
         if tiene_dve:
             if f["dve"]:
-                dve_cell = f'<span style="color: #0F172A; font-weight: 600; font-size: 12px;">{_html.escape(f["dve"])}</span>'
+                dve_cell = f'<span style="color: #1D1D1F; font-weight: 600; font-size: 12px;">{_html.escape(f["dve"])}</span>'
             else:
                 dve_cell = ""
             celdas_fila.append(f'<td style="{td_base}">{dve_cell}</td>')
@@ -648,16 +658,16 @@ recepcion@basculaspesa.com.mx
 
     cuerpo_html = f"""
             <html>
-            <body style="font-family: 'Segoe UI', Arial, Helvetica, sans-serif; color: #0F172A; line-height: 1.55; margin: 0; padding: 16px; background-color: #F8FAFC;">
-                <div style="max-width: 880px; margin: 0 auto; background-color: #FFFFFF; border-radius: 8px; overflow: hidden; border: 1px solid #E2E8F0;">
+            <body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, Helvetica, sans-serif; color: #1D1D1F; line-height: 1.55; margin: 0; padding: 16px; background-color: #F5F5F7;">
+                <div style="max-width: 880px; margin: 0 auto; background-color: #FFFFFF; border-radius: 10px; overflow: hidden; border: 1px solid #E5E5EA;">
                     <div style="background-color: #C8102E; padding: 20px 24px; text-align: left;">
                         <h1 style="color: #FFFFFF; margin: 0; font-size: 22px; font-weight: 700; letter-spacing: 0.2px;">Básculas PESA</h1>
                     </div>
                     <div style="padding: 24px; background-color: #FFFFFF;">
-                        <p style="margin-top: 0; font-size: 14.5px; color: #0F172A;">Estimado cliente <strong>{cliente_esc}</strong>,</p>
-                        <p style="font-size: 14px; color: #475569;">{intro_html}</p>
+                        <p style="margin-top: 0; font-size: 14.5px; color: #1D1D1F;">Estimado cliente <strong>{cliente_esc}</strong>,</p>
+                        <p style="font-size: 14px; color: #6E6E73;">{intro_html}</p>
                         <div style="overflow-x: auto; margin: 18px 0;">
-                            <table style="border-collapse: collapse; width: 100%; border: 1px solid #E2E8F0;">
+                            <table style="border-collapse: collapse; width: 100%; border: 1px solid #E5E5EA;">
                                 <thead>
                                     <tr>
                                         {thead_cols_str}
@@ -668,9 +678,9 @@ recepcion@basculaspesa.com.mx
                                 </tbody>
                             </table>
                         </div>
-                        <p style="font-size: 14px; color: #475569;">{cierre_html}</p>
-                        <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 24px 0;">
-                        <p style="font-size: 12px; color: #475569; margin: 0;">
+                        <p style="font-size: 14px; color: #6E6E73;">{cierre_html}</p>
+                        <hr style="border: none; border-top: 1px solid #E5E5EA; margin: 24px 0;">
+                        <p style="font-size: 12px; color: #6E6E73; margin: 0;">
                             Este es un correo automático emitido por el sistema institucional de Básculas PESA.<br>
                             Para cualquier aclaración o seguimiento, favor de responder con copia a
                             <a href="mailto:recepcion@basculaspesa.com.mx" style="color: #C8102E; text-decoration: none; font-weight: 600;">recepcion@basculaspesa.com.mx</a>.

@@ -999,9 +999,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF5F5),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _pesaRed.withOpacity(0.35)),
+                    color: const Color(0xFFF5F5F7),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: _pesaRed.withValues(alpha: 0.35)),
                   ),
                   child: Wrap(
                     spacing: 10,
@@ -1107,7 +1107,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: const Color(0xFFF5F5F7),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.grey.shade300),
                   ),
@@ -1159,7 +1159,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF111827),
                       backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFCBD5E1), width: 1.2),
+                      side: const BorderSide(color: Color(0xFFD2D2D7), width: 1.2),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _guardandoParcial

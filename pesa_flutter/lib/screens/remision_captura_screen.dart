@@ -798,12 +798,13 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: _red.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(6),
+                          color: const Color(0xFFF2F2F7),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFE5E5EA)),
                         ),
                         child: const Text(
                           'RMA DIGITAL',
-                          style: TextStyle(color: _red, fontWeight: FontWeight.bold, fontSize: 11),
+                          style: TextStyle(color: _red, fontWeight: FontWeight.w700, fontSize: 11),
                         ),
                       ),
                     ],

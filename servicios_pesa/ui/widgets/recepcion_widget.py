@@ -173,7 +173,7 @@ class LoteEditDialog(QDialog):
         root.setContentsMargins(24, 24, 24, 24)
 
         # ── Título ────────────────────────────────────────────────────────────
-        title = QLabel("✏  Lote de Recepción")
+        title = QLabel("Lote de Recepción")
         title.setStyleSheet(
             "font-size: 18px; font-weight: 700; color: #1D1D1F;"
         )
@@ -290,7 +290,7 @@ class LoteEditDialog(QDialog):
         btn_cancel.clicked.connect(self.reject)
         btn_row.addWidget(btn_cancel)
 
-        self._btn_save = QPushButton("💾  Guardar")
+        self._btn_save = QPushButton("Guardar")
         self._btn_save.setFixedSize(130, 36)
         self._btn_save.setStyleSheet(self._btn_primary_style())
         self._btn_save.clicked.connect(self._on_save)
@@ -412,7 +412,7 @@ class LoteEditDialog(QDialog):
     def _apply_field_styles(self):
         field_style = """
             QLineEdit, QTextEdit, QSpinBox, QComboBox, QDateEdit {
-                background: #F8FAFC; border: 1.5px solid #D1D5DB;
+                background: #F5F5F7; border: 1.5px solid #D1D5DB;
                 border-radius: 8px; padding: 6px 10px;
                 font-size: 13px; color: #1D1D1F; min-height: 32px;
             }
@@ -562,7 +562,7 @@ class BloqueFecha(QFrame):
             # Factura — alerta roja si vacía
             factura = lote.get("numero_factura")
             if not factura or str(factura).strip() == "":
-                item_fac = CeldaEstado("  ⚠ Sin factura  ", _CELL_ERR_BG, _CELL_ERR_FG)
+                item_fac = CeldaEstado("  Sin factura  ", _CELL_ERR_BG, _CELL_ERR_FG)
             elif str(factura).strip().upper() == "N/A":
                 item_fac = CeldaEstado("  N/A  ", _CELL_NA_BG, _CELL_NA_FG)
             else:
@@ -595,7 +595,7 @@ class BloqueFecha(QFrame):
             txt_imp, bg_imp, fg_imp = _bool_icon(impresa if impresa is not None else None)
             item_imp = CeldaEstado(txt_imp, bg_imp, fg_imp)
             if impresa:
-                item_imp.setBackground(QColor("#F8FAFC"))
+                item_imp.setBackground(QColor("#F5F5F7"))
                 item_imp.setForeground(QColor("#111827"))
                 item_imp.setText("  ✓ Entregado  ")
             else:
@@ -617,7 +617,7 @@ class BloqueFecha(QFrame):
             cell_lay.setContentsMargins(4, 2, 4, 2)
             cell_lay.setSpacing(4)
 
-            btn_edit = QPushButton("✏")
+            btn_edit = QPushButton("Editar")
             btn_edit.setFixedSize(30, 30)
             btn_edit.setToolTip("Editar este lote")
             btn_edit.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -627,7 +627,7 @@ class BloqueFecha(QFrame):
 
             puede_completar = bool(lote.get("puede_completar") or lote.get("entrega_impresa_recibida"))
 
-            btn_ok = QPushButton("✔")
+            btn_ok = QPushButton("OK")
             btn_ok.setFixedSize(30, 30)
             btn_ok.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_ok.setEnabled(puede_completar)
@@ -635,13 +635,13 @@ class BloqueFecha(QFrame):
                 btn_ok.setToolTip("Marcar lote como COMPLETADO")
                 btn_ok.setStyleSheet(self._btn_icon_style(_GREEN))
             else:
-                btn_ok.setToolTip("⚠ Requiere confirmar Entrega Impresa primero")
+                btn_ok.setToolTip("Requiere confirmar Entrega Impresa primero")
                 btn_ok.setStyleSheet(self._btn_icon_style(_GRAY))
             btn_ok.clicked.connect(lambda _, lid=lid: self.accion_completar.emit(lid))
             cell_lay.addWidget(btn_ok)
 
             # Toggle rápido de Entrega Impresa
-            btn_imp = QPushButton("📄")
+            btn_imp = QPushButton("Impresa")
             btn_imp.setFixedSize(30, 30)
             btn_imp.setCursor(Qt.CursorShape.PointingHandCursor)
             estado_imp = bool(lote.get("entrega_impresa_recibida"))
@@ -664,7 +664,7 @@ class BloqueFecha(QFrame):
             btn_alta_eq.setFixedSize(30, 30)
             btn_alta_eq.setCursor(Qt.CursorShape.PointingHandCursor)
             btn_alta_eq.setToolTip(
-                "➕ Dar de Alta Equipo en el catálogo de esta planta"
+                "+ Dar de Alta Equipo en el catálogo de esta planta"
             )
             btn_alta_eq.setStyleSheet(self._btn_icon_style("#9B59B6"))
             btn_alta_eq.clicked.connect(
@@ -704,14 +704,14 @@ class BloqueFecha(QFrame):
                 padding: 4px 8px;
             }
             QTableWidget::item:selected {
-                background: #F8FAFC;
+                background: #F5F5F7;
                 color: #111827;
             }
             QTableWidget::item:alternate {
-                background: #F8FAFC;
+                background: #F5F5F7;
             }
             QHeaderView::section {
-                background: #F1F5F9;
+                background: #F2F2F7;
                 color: #374151;
                 font-size: 11px;
                 font-weight: 700;
@@ -795,7 +795,7 @@ class ResumenKPIBar(QFrame):
             ("realizadas",  "OS Realizadas",      _GREEN),
             ("en_blanco",   "OS en Blanco",       _AMBER),
             ("impresos",    "Impresas ✓",         _GREEN),
-            ("sin_factura", "Sin Factura ⚠",      _RED),
+            ("sin_factura", "Sin Factura ",      _RED),
         ]
         for i, (key, label, color) in enumerate(items):
             if i > 0:
@@ -902,10 +902,10 @@ class RecepcionWidget(QWidget):
         self._scroll.setStyleSheet("""
             QScrollArea { border: none; background: transparent; }
             QScrollBar:vertical {
-                background: #F1F5F9; width: 8px; border-radius: 4px;
+                background: #F2F2F7; width: 8px; border-radius: 4px;
             }
             QScrollBar::handle:vertical {
-                background: #CBD5E1; border-radius: 4px; min-height: 20px;
+                background: #D2D2D7; border-radius: 4px; min-height: 20px;
             }
         """)
 
@@ -934,7 +934,7 @@ class RecepcionWidget(QWidget):
         lay.setSpacing(12)
 
         # Ícono + título
-        lbl_icon = QLabel("📋")
+        lbl_icon = QLabel("")
         lbl_icon.setStyleSheet("font-size: 28px; background: transparent;")
         lay.addWidget(lbl_icon)
 
@@ -1013,7 +1013,7 @@ class RecepcionWidget(QWidget):
         lay.addStretch()
 
         # Botón semana actual
-        btn_semana = QPushButton("📅 Semana actual")
+        btn_semana = QPushButton("Semana actual")
         btn_semana.setFixedHeight(32)
         btn_semana.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_semana.setStyleSheet(self._btn_filter_style())
@@ -1021,7 +1021,7 @@ class RecepcionWidget(QWidget):
         lay.addWidget(btn_semana)
 
         # Botón mes actual
-        btn_mes = QPushButton("🗓 Mes actual")
+        btn_mes = QPushButton("Mes actual")
         btn_mes.setFixedHeight(32)
         btn_mes.setCursor(Qt.CursorShape.PointingHandCursor)
         btn_mes.setStyleSheet(self._btn_filter_style())
@@ -1029,7 +1029,7 @@ class RecepcionWidget(QWidget):
         lay.addWidget(btn_mes)
 
         # Botón actualizar
-        self._btn_refresh = QPushButton("🔄 Actualizar")
+        self._btn_refresh = QPushButton("Actualizar")
         self._btn_refresh.setFixedHeight(32)
         self._btn_refresh.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_refresh.setStyleSheet("""
@@ -1051,7 +1051,7 @@ class RecepcionWidget(QWidget):
         aviso.setObjectName("recepcion_aviso")
         aviso.setStyleSheet("""
             QFrame#recepcion_aviso {
-                background: #F8FAFC;
+                background: #F5F5F7;
                 border: 1px solid #C8102E;
                 border-radius: 8px;
             }
@@ -1063,7 +1063,7 @@ class RecepcionWidget(QWidget):
         lay.setSpacing(10)
 
         lbl = QLabel(
-            "⚠️  REGLA ESTRICTA:  Sin importar la modalidad (Digital o Físico), el técnico DEBE entregar "
+            "REGLA ESTRICTA:  Sin importar la modalidad (Digital o Físico), el técnico DEBE entregar "
             "la versión impresa con firmas físicas en Recepción. La OS no puede marcarse COMPLETADA sin confirmar la entrega."
         )
         lbl.setStyleSheet(
@@ -1086,7 +1086,7 @@ class RecepcionWidget(QWidget):
             fecha_hasta = self._dt_hasta.date().toString("yyyy-MM-dd")
 
             if not _HAS_REPO or recepcion_repo is None:
-                self._show_placeholder("⚠", "Base de datos no disponible",
+                self._show_placeholder("", "Base de datos no disponible",
                     "No se pudo conectar al repositorio de recepción.")
                 return
 
@@ -1106,13 +1106,13 @@ class RecepcionWidget(QWidget):
 
             n_total = sum(len(v) for v in por_fecha.values())
             self._lbl_status.setText(
-                f"✅  {n_total} lotes cargados en {len(por_fecha)} fechas  |  "
+                f"{n_total} lotes cargados en {len(por_fecha)} fechas  |  "
                 f"Rango: {fecha_desde} → {fecha_hasta}"
             )
 
         except Exception as exc:
             logger.exception("Error al cargar datos de recepción")
-            self._lbl_status.setText(f"❌ Error: {exc}")
+            self._lbl_status.setText(f"Error: {exc}")
         finally:
             self._btn_refresh.setEnabled(True)
 
@@ -1266,7 +1266,7 @@ class RecepcionWidget(QWidget):
         if resultado.get("ok"):
             n = resultado.get("os_actualizadas", 0)
             QMessageBox.information(
-                self, "✅ Lote Completado",
+                self, "Lote Completado",
                 f"El lote ha sido marcado como COMPLETADO.\n"
                 f"{n} OS actualizadas al estado COMPLETADA."
             )
@@ -1274,7 +1274,7 @@ class RecepcionWidget(QWidget):
         else:
             error = resultado.get("error", "Error desconocido")
             QMessageBox.warning(
-                self, "⚠ No se puede completar",
+                self, "No se puede completar",
                 f"REGLA ESTRICTA:\n\n{error}\n\n"
                 "Confirme primero la entrega del documento impreso firmado."
             )
@@ -1327,7 +1327,7 @@ class RecepcionWidget(QWidget):
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.setSpacing(12)
 
-        lbl_icon = QLabel("📋")
+        lbl_icon = QLabel("")
         lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_icon.setStyleSheet("font-size: 48px; background: transparent;")
         lay.addWidget(lbl_icon)
@@ -1375,7 +1375,7 @@ class RecepcionWidget(QWidget):
     def _date_field_style() -> str:
         return """
             QDateEdit {
-                background: #F8FAFC; border: 1.5px solid #D1D5DB;
+                background: #F5F5F7; border: 1.5px solid #D1D5DB;
                 border-radius: 7px; padding: 4px 8px;
                 font-size: 12px; color: #1D1D1F; min-height: 28px;
             }

@@ -56,7 +56,7 @@ class EquipoSearchWidget(QWidget):
 
     El widget muestra:
       ┌──────────────────────────────────────┬──────────┐
-      │  🔍  ID de Equipo  (campo de texto)  │  Buscar  │
+      │  ID de Equipo  (campo de texto)  │  Buscar  │
       └──────────────────────────────────────┴──────────┘
       [Chip con nombre del equipo encontrado — si aplica]
     """
@@ -193,33 +193,34 @@ class EquipoSearchWidget(QWidget):
                 font-size: 14px;
             }}
             QPushButton#btn_limpiar_equipo:hover {{
-                background: #FFF5F6;
+                background: #F2F2F7;
                 border-color: {_RED};
                 color: {_RED};
             }}
 
             /* Chip del equipo encontrado */
             QFrame#equipo_chip {{
-                background: #F8FAFC;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
+                background: #F5F5F7;
+                border: 1px solid #E5E5EA;
+                border-radius: 10px;
             }}
             QLabel#chip_icon {{
-                font-size: 16px;
-                color: #111827;
+                font-size: 12px;
+                font-weight: 700;
+                color: #1D1D1F;
             }}
             QLabel#chip_text {{
                 font-size: 11px;
-                color: #111827;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                color: #1D1D1F;
+                font-family: 'Segoe UI Variable', 'Segoe UI', Arial, sans-serif;
                 font-weight: 600;
             }}
 
             /* Chip de error */
             QFrame#equipo_chip_error {{
-                background: #FEF2F2;
-                border: 1.5px solid #FCA5A5;
-                border-radius: 8px;
+                background: #F5F5F7;
+                border: 1px solid #C8102E;
+                border-radius: 10px;
             }}
 
             /* Status */
@@ -344,7 +345,8 @@ class EquipoSearchWidget(QWidget):
         folio   = datos.get("ultima_os_folio", "")
         folio_s = f" — Última OS: {folio}" if folio else ""
 
-        self.lbl_chip_icon.setText("✅")
+        self.lbl_chip_icon.setText("●")
+        self.lbl_chip_icon.setStyleSheet("color: #34C759; font-size: 10px; background: transparent; border: none;")
         self.lbl_chip_text.setText(
             f"{datos['id_equipo']}  ·  {marca} {modelo}{folio_s}"
         )
@@ -352,9 +354,9 @@ class EquipoSearchWidget(QWidget):
         self.chip.setObjectName("equipo_chip")
         self.chip.setStyleSheet("""
             QFrame#equipo_chip {
-                background: #F8FAFC;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
+                background: #F5F5F7;
+                border: 1px solid #E5E5EA;
+                border-radius: 10px;
             }
             QFrame#equipo_chip QLabel {
                 border: none;
@@ -365,23 +367,24 @@ class EquipoSearchWidget(QWidget):
 
         self.lbl_status.setVisible(True)
         self.lbl_status.setText(
-            f"✓ Datos autocargados desde el historial del equipo  |  "
+            f"Datos autocargados desde el historial del equipo  |  "
             f"Alcance: {datos.get('alcance_max', '—')}  "
             f"Div.mín.: {datos.get('div_minima', '—')}"
         )
 
     def _show_not_found(self, id_eq: str) -> None:
-        """Muestra un chip rojo indicando que el equipo no existe aún."""
-        self.lbl_chip_icon.setText("➕")
+        """Muestra un chip neutro indicando que el equipo no existe aún."""
+        self.lbl_chip_icon.setText("+")
+        self.lbl_chip_icon.setStyleSheet("color: #C8102E; font-size: 13px; font-weight: 700; background: transparent; border: none;")
         self.lbl_chip_text.setText(
             f"ID \"{id_eq}\" no encontrado — se creará al guardar esta OS"
         )
         self.chip.setObjectName("equipo_chip")
         self.chip.setStyleSheet("""
             QFrame#equipo_chip {
-                background: #F8FAFC;
-                border: 1px solid #CBD5E1;
-                border-radius: 8px;
+                background: #F5F5F7;
+                border: 1px solid #E5E5EA;
+                border-radius: 10px;
             }
             QFrame#equipo_chip QLabel {
                 border: none;

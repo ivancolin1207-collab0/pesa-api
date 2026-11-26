@@ -195,7 +195,7 @@ class ScannerWidget(QWidget):
             os_data = orden_servicio_repo.get_by_folio(folio)
 
             if not os_data:
-                self._lbl_os_info.setText(f"❌  No se encontró la OS: {folio}")
+                self._lbl_os_info.setText(f"No se encontró la OS: {folio}")
                 self._lbl_os_info.setStyleSheet("color:#FF3B30; font-size:12px;")
                 self._selected_os = None
             else:
@@ -205,13 +205,13 @@ class ScannerWidget(QWidget):
 
                 self._selected_os = dict(os_data)
                 self._lbl_os_info.setText(
-                    f"✅  {folio}  |  {cliente}  |  {fecha}  |  Estado: {estado}"
+                    f"{folio}  |  {cliente}  |  {fecha}  |  Estado: {estado}"
                 )
                 self._lbl_os_info.setStyleSheet("color:#34C759; font-size:12px; font-weight:600;")
 
                 if estado == "ESCANEADA":
                     self._lbl_os_info.setText(
-                        self._lbl_os_info.text() + "\n⚠️  Esta OS ya tiene un escaneo. Se sobreescribirá."
+                        self._lbl_os_info.text() + "\nEsta OS ya tiene un escaneo. Se sobreescribirá."
                     )
                     self._lbl_os_info.setStyleSheet("color:#FF9F0A; font-size:12px;")
 
@@ -235,7 +235,7 @@ class ScannerWidget(QWidget):
             from pathlib import Path
             size_kb = Path(path).stat().st_size // 1024
             ext = Path(path).suffix.upper()
-            self._lbl_file_info.setText(f"✅  {Path(path).name}  ({ext}, {size_kb} KB)")
+            self._lbl_file_info.setText(f"{Path(path).name}  ({ext}, {size_kb} KB)")
             self._lbl_file_info.setStyleSheet("color:#34C759; font-size:12px; font-weight:600;")
         self._update_attach_btn()
 
@@ -262,7 +262,7 @@ class ScannerWidget(QWidget):
             QMessageBox.information(
                 self,
                 "Éxito",
-                f"✅ Escaneo adjuntado correctamente.\n\n"
+                f"Escaneo adjuntado correctamente.\n\n"
                 f"Archivo: {result['nombre_archivo']}\n"
                 f"MD5: {result['hash_md5']}\n"
                 f"Tamaño: {result['tamano_bytes'] // 1024} KB\n\n"

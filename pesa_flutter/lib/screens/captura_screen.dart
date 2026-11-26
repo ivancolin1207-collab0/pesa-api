@@ -2818,7 +2818,7 @@ class _ServicioBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8FAFC),
+        color: const Color(0xFFF5F5F7),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(color: rules.sinTipo ? const Color(0xFF94A3B8) : const Color(0xFFE2E8F0)),
       ),
@@ -2831,7 +2831,7 @@ class _ServicioBanner extends StatelessWidget {
           children: [
             Text(
               'Tipo de Servicio: ${rules.etiquetaLarga}',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF0F172A)),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF1D1D1F)),
             ),
             if (nombreReal.isNotEmpty && nombreReal != rules.etiquetaLarga)
               Padding(
@@ -2842,13 +2842,13 @@ class _ServicioBanner extends StatelessWidget {
             const SizedBox(height: 6),
             Wrap(spacing: 6, children: [
               if (rules.esRemision)
-                const _Badge('Remisión — solo datos operativos', Color(0xFF0F172A)),
+                const _Badge('Remisión — solo datos operativos', Color(0xFF1D1D1F)),
               if (rules.esRevisionCeldas)
-                const _Badge('Revisión de Celdas', Color(0xFF0F172A)),
+                const _Badge('Revisión de Celdas', Color(0xFF1D1D1F)),
               if (rules.tieneCalibracion)
-                const _Badge('CCA requerido', Color(0xFF0F172A)),
+                const _Badge('CCA requerido', Color(0xFF1D1D1F)),
               if (rules.tieneInspeccion)
-                const _Badge('Hologramas + DVE', Color(0xFF0F172A)),
+                const _Badge('Hologramas + DVE', Color(0xFF1D1D1F)),
               if (rules.sinTipo)
                 const _Badge('Sin tipo — sincroniza antes de capturar', Color(0xFF334155))
               else if (rules.esSoloAjuste && !rules.esRemision && !rules.esRevisionCeldas)
@@ -2870,8 +2870,8 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
     decoration: BoxDecoration(
-      color: const Color(0xFFF8FAFC),
-      border: Border.all(color: const Color(0xFFCBD5E1)),
+      color: const Color(0xFFF5F5F7),
+      border: Border.all(color: const Color(0xFFD2D2D7)),
       borderRadius: BorderRadius.circular(4),
     ),
     child: Text(text, style: TextStyle(fontSize: 10, color: color,

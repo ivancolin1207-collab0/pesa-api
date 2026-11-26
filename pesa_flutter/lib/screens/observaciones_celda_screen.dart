@@ -1190,14 +1190,14 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: const Color(0xFFF5F5F7),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: const Color(0xFFD2D2D7)),
                   ),
                   child: Text(
                     'FOLIO: $folio',
                     style: const TextStyle(
-                      color: Color(0xFF0F172A),
+                      color: Color(0xFF1D1D1F),
                       fontWeight: FontWeight.w800,
                       fontSize: 13.5,
                     ),
@@ -1206,28 +1206,28 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: const Color(0xFFF5F5F7),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: const Color(0xFFE2E8F0)),
                   ),
                   child: Text(
                     'Fecha: $fecha',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF0F172A)),
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF1D1D1F)),
                   ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: const Color(0xFFF5F5F7),
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: const Color(0xFFD2D2D7)),
                   ),
                   child: const Text(
                     'OSOCC DIGITAL (1 CELDA)',
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF0F172A),
+                      color: Color(0xFF1D1D1F),
                     ),
                   ),
                 ),
@@ -1261,11 +1261,11 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                         selected: _destinoTipo == 'Stock',
                         showCheckmark: false,
                         selectedColor: const Color(0xFFC8102E),
-                        backgroundColor: const Color(0xFFF8FAFC),
+                        backgroundColor: const Color(0xFFF5F5F7),
                         labelStyle: TextStyle(
                           fontSize: 12,
                           fontWeight: _destinoTipo == 'Stock' ? FontWeight.bold : FontWeight.normal,
-                          color: _destinoTipo == 'Stock' ? Colors.white : const Color(0xFF0F172A),
+                          color: _destinoTipo == 'Stock' ? Colors.white : const Color(0xFF1D1D1F),
                         ),
                         onSelected: (_) {
                           setState(() {
@@ -1283,11 +1283,11 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                         selected: _destinoTipo == 'Cliente',
                         showCheckmark: false,
                         selectedColor: const Color(0xFFC8102E),
-                        backgroundColor: const Color(0xFFF8FAFC),
+                        backgroundColor: const Color(0xFFF5F5F7),
                         labelStyle: TextStyle(
                           fontSize: 12,
                           fontWeight: _destinoTipo == 'Cliente' ? FontWeight.bold : FontWeight.normal,
-                          color: _destinoTipo == 'Cliente' ? Colors.white : const Color(0xFF0F172A),
+                          color: _destinoTipo == 'Cliente' ? Colors.white : const Color(0xFF1D1D1F),
                         ),
                         onSelected: (_) {
                           setState(() {

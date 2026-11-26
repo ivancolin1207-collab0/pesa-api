@@ -277,15 +277,15 @@ class REFormWidget(QWidget):
         hdr.setStyleSheet("background:#F2F2F7; border-bottom:1px solid #D1D1D6;")
         hl = QHBoxLayout(hdr)
         hl.setContentsMargins(24, 0, 24, 0)
-        t = QLabel("⚖️  Reporte de Revisión de Básculas — RE")
+        t = QLabel("Reporte de Revisión de Básculas — RE")
         t.setStyleSheet("font-size:18px; font-weight:800; color:#1D1D1F;")
         hl.addWidget(t)
         hl.addStretch()
         root.addWidget(hdr)
 
         self._tabs = QTabWidget()
-        self._tabs.addTab(self._build_form_tab(), "📋  Nuevo Reporte")
-        self._tabs.addTab(self._build_historial_tab(), "📄  Historial")
+        self._tabs.addTab(self._build_form_tab(), "Nuevo Reporte")
+        self._tabs.addTab(self._build_historial_tab(), "Historial")
         root.addWidget(self._tabs)
 
     # ══════════════════════════════════════════════════════════════════════════
@@ -693,7 +693,7 @@ class REFormWidget(QWidget):
         lbl_est.setStyleSheet("color:#86868B; font-size:10px; font-weight:700;")
         estatus_row.addWidget(lbl_est)
 
-        self._btn_completa  = QPushButton("✓  REVISIÓN COMPLETA")
+        self._btn_completa  = QPushButton("REVISIÓN COMPLETA")
         self._btn_pendiente = QPushButton("⏳  PENDIENTE")
         self._btn_parcial   = QPushButton("◑  PARCIAL")
 
@@ -742,13 +742,13 @@ class REFormWidget(QWidget):
         layout.addWidget(btn_limpiar)
         layout.addStretch()
 
-        self._btn_pdf = QPushButton("📄  Generar PDF")
+        self._btn_pdf = QPushButton("Generar PDF")
         self._btn_pdf.setFixedWidth(150)
         self._btn_pdf.setEnabled(False)
         self._btn_pdf.clicked.connect(self._generate_pdf)
         layout.addWidget(self._btn_pdf)
 
-        self._btn_guardar = QPushButton("💾  Guardar Reporte")
+        self._btn_guardar = QPushButton("Guardar Reporte")
         self._btn_guardar.setProperty("class", "primary")
         self._btn_guardar.setFixedWidth(160)
         self._btn_guardar.clicked.connect(self._save)
@@ -1001,7 +1001,7 @@ class REFormWidget(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudo guardar:\n{exc}")
         finally:
             self._btn_guardar.setEnabled(True)
-            self._btn_guardar.setText("💾  Guardar Reporte")
+            self._btn_guardar.setText("Guardar Reporte")
 
     def _generate_pdf(self) -> None:
         rev_id = getattr(self, "_last_revision_id", None)
@@ -1046,7 +1046,7 @@ class REFormWidget(QWidget):
             QMessageBox.critical(self, "Error PDF", str(exc))
         finally:
             self._btn_pdf.setEnabled(True)
-            self._btn_pdf.setText("📄  Generar PDF")
+            self._btn_pdf.setText("Generar PDF")
 
     def _clear_form(self) -> None:
         self._lbl_folio.setText("— NUEVO —")

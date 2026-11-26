@@ -414,17 +414,16 @@ class PdfService {
     final holoAnt  = _s(os, 'holograma_anterior', _s(os, 'hologramaAnterior', ''));
     final holoNue  = _s(os, 'holograma_actualizado', _s(os, 'holograma_nuevo', _s(os, 'hologramaNuevo', '')));
 
-    // Reglas por tipo de servicio real + visibilidad automática siempre que CCA y/o DVE se capturen.
+    // Regla estricta NOM-010-SCFI / PESA v4.0 (paridad 1:1 con Python os_pdf_generator.py):
+    // - CCA aparece únicamente cuando el servicio incluye Calibración (rules.pideCca).
+    // - DVE + Hologramas aparecen ÚNICAMENTE cuando el servicio incluye Inspección (rules.pideDve).
     final rules = tsr.getRules(
       id: int.tryParse('${os['id_tipo_servicio'] ?? ''}'),
       nombre: (os['tipo_servicio'] ?? os['tipo_servicio_nombre'])?.toString(),
       folio: os['folio']?.toString(),
     );
-    final bool mostrarCca = rules.pideCca || cca.isNotEmpty;
-    final bool mostrarDve = rules.pideDve ||
-        folioDve.isNotEmpty ||
-        holoAnt.isNotEmpty ||
-        holoNue.isNotEmpty;
+    final bool mostrarCca = rules.pideCca;
+    final bool mostrarDve = rules.pideDve;
 
     final j = os['jia_j'] == true || os['inicial_calibrador'] == 'J';
     final i = os['jia_i'] == true || os['inicial_calibrador'] == 'I';

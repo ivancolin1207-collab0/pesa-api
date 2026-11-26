@@ -1252,6 +1252,7 @@ async def crear_orden(
                     alcance_max, div_minima, instrumento_capacidad, instrumento_division,
                     numero_cca, numero_dve, aplica_excentricidad, motivo_no_excentricidad,
                     id_lote, rango_lote, datos_tecnicos_json,
+                    correo_destino, correo_cliente,
                     observaciones, sync_check_status, sync_version, updated_at
                 ) VALUES (
                     $1, $2, $3, $4,
@@ -1262,7 +1263,8 @@ async def crear_orden(
                     $18, $19, $20, $21,
                     $22, $23, $24, $25,
                     $26, $27, $28,
-                    $29, 'ASIGNADA', 1, NOW()
+                    $29, $30,
+                    $31, 'ASIGNADA', 1, NOW()
                 )
                 ON CONFLICT (folio_os) DO NOTHING
                 """,
@@ -1294,6 +1296,8 @@ async def crear_orden(
                 id_lote_val,
                 rango_lote_val,
                 f_dt,
+                correo_in,
+                correo_in,
                 body.observaciones or "",
             )
         except Exception as exc_ins:

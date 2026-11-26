@@ -382,9 +382,9 @@ class FolioInstrumentoDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor("#F8FAFC"))
+            painter.fillRect(option.rect, QColor("#F5F5F7"))
         elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor("#F8FAFC"))
+            painter.fillRect(option.rect, QColor("#F5F5F7"))
         else:
             painter.fillRect(option.rect, QColor("#FFFFFF"))
 
@@ -442,9 +442,9 @@ class WordWrapTextDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor("#F8FAFC"))
+            painter.fillRect(option.rect, QColor("#F5F5F7"))
         elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor("#F8FAFC"))
+            painter.fillRect(option.rect, QColor("#F5F5F7"))
         else:
             painter.fillRect(option.rect, QColor("#FFFFFF"))
 
@@ -481,23 +481,23 @@ class WordWrapTextDelegate(QStyledItemDelegate):
 # Delegate para badges de estado (pintado directo con QPainter)
 # =============================================================================
 class StatusBadgeDelegate(QStyledItemDelegate):
-    """Pinta etiquetas corporativas neutras (#F8FAFC / #CBD5E1 / #111827) con punto semántico 6px solo en estatus."""
+    """Pinta etiquetas corporativas neutras (#F5F5F7 / #D2D2D7 / #111827) con punto semántico 6px solo en estatus."""
 
     def _resolve_colors(self, text: str, col_idx: int = -1) -> tuple[str, str, str, Optional[str]]:
         """Retorna (bg_hex, fg_hex, border_hex, dot_hex_or_None)."""
         lower = str(text or "").strip().lower()
         # Solo la columna ESTATUS (col 8) lleva punto semántico de 6px; servicio/modalidad son neutros.
         if col_idx != 8:
-            return ("#F8FAFC", "#111827", "#E5E7EB", None)
+            return ("#F5F5F7", "#111827", "#E5E7EB", None)
         if "cancel" in lower:
-            return ("#F8FAFC", "#C8102E", "#CBD5E1", "#C8102E")
+            return ("#F5F5F7", "#C8102E", "#D2D2D7", "#C8102E")
         if "pend" in lower or "sin tipo" in lower or "asig" in lower:
-            return ("#F8FAFC", "#111827", "#CBD5E1", "#C8102E")
+            return ("#F5F5F7", "#111827", "#D2D2D7", "#C8102E")
         if "proceso" in lower:
-            return ("#F8FAFC", "#111827", "#CBD5E1", "#D97706")
+            return ("#F5F5F7", "#111827", "#D2D2D7", "#D97706")
         if any(tok in lower for tok in ("cerrad", "complet", "escan", "finaliz", "terminad", "firmad")):
-            return ("#F8FAFC", "#111827", "#CBD5E1", "#16A34A")
-        return ("#F8FAFC", "#111827", "#CBD5E1", "#6B7280")
+            return ("#F5F5F7", "#111827", "#D2D2D7", "#16A34A")
+        return ("#F5F5F7", "#111827", "#D2D2D7", "#6B7280")
 
     def _abbreviate(self, text: str) -> str:
         """Mantiene textos legibles y sin truncamiento dentro de la etiqueta."""
@@ -538,7 +538,7 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
-            painter.fillRect(option.rect, QColor("#F8FAFC"))
+            painter.fillRect(option.rect, QColor("#F5F5F7"))
         else:
             painter.fillRect(option.rect, QColor("#FFFFFF"))
 
@@ -603,7 +603,7 @@ class StatusBadgeDelegate(QStyledItemDelegate):
 class SyncCheckDelegate(QStyledItemDelegate):
     """
     Renderiza visualmente el estado de sincronización como etiqueta neutra
-    (#F8FAFC / #CBD5E1 / #111827) con punto semántico circular de 6px:
+    (#F5F5F7 / #D2D2D7 / #111827) con punto semántico circular de 6px:
       - ASIGNADA:        punto rojo #C8102E   — Asignada en Servidor
       - RECIBIDA_TABLET: punto ámbar #D97706  — Recibida en Tablet / En campo
       - SUBIDA_SERVIDOR: punto verde #16A34A  — Recibida en Servidor / Concluida
@@ -614,40 +614,40 @@ class SyncCheckDelegate(QStyledItemDelegate):
             "text": "Asignada",
             "dot": "#C8102E",
             "fg": "#111827",
-            "bg": "#F8FAFC",
-            "border": "#CBD5E1",
+            "bg": "#F5F5F7",
+            "border": "#D2D2D7",
             "tooltip": "Asignada en Servidor (Pendiente de descarga en tablet)",
         },
         "RECIBIDA_TABLET": {
             "text": "En tablet",
             "dot": "#D97706",
             "fg": "#111827",
-            "bg": "#F8FAFC",
-            "border": "#CBD5E1",
+            "bg": "#F5F5F7",
+            "border": "#D2D2D7",
             "tooltip": "Recibida en Tablet / Tomada en campo offline",
         },
         "SUBIDA_SERVIDOR": {
             "text": "Recibida",
             "dot": "#16A34A",
             "fg": "#111827",
-            "bg": "#F8FAFC",
-            "border": "#CBD5E1",
+            "bg": "#F5F5F7",
+            "border": "#D2D2D7",
             "tooltip": "Recibida en Servidor / Concluida con PDF",
         },
         "RECIBIDA_SERVIDOR": {
             "text": "Recibida",
             "dot": "#16A34A",
             "fg": "#111827",
-            "bg": "#F8FAFC",
-            "border": "#CBD5E1",
+            "bg": "#F5F5F7",
+            "border": "#D2D2D7",
             "tooltip": "Recibida en Servidor / Concluida con PDF",
         },
         "AUDITADA_ADMIN": {
             "text": "Abierto",
             "dot": "#16A34A",
             "fg": "#111827",
-            "bg": "#F8FAFC",
-            "border": "#CBD5E1",
+            "bg": "#F5F5F7",
+            "border": "#D2D2D7",
             "tooltip": "Abierto por Administración / Oficina en Windows",
         },
     }
@@ -671,7 +671,7 @@ class SyncCheckDelegate(QStyledItemDelegate):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
-            painter.fillRect(option.rect, QColor("#F8FAFC"))
+            painter.fillRect(option.rect, QColor("#F5F5F7"))
         else:
             painter.fillRect(option.rect, QColor("#FFFFFF"))
 
@@ -944,7 +944,7 @@ class KPICard(QFrame):
                     border-radius: 12px;
                 }
                 QFrame#kpi_card:hover {
-                    background: #F8FAFC;
+                    background: #F5F5F7;
                 }
             """)
         else:
@@ -955,8 +955,8 @@ class KPICard(QFrame):
                     border-radius: 12px;
                 }
                 QFrame#kpi_card:hover {
-                    background: #F8FAFC;
-                    border-color: #CBD5E1;
+                    background: #F5F5F7;
+                    border-color: #D2D2D7;
                 }
             """)
         if hasattr(self, "_lbl_active_tag"):
@@ -1808,9 +1808,9 @@ class DashboardWidget(QWidget):
         "QPushButton:hover{background:#1F2937;border-color:#1F2937;}"
     )
     _BTN_DESCARGAR_STYLE = (
-        "QPushButton{background:#FFFFFF;color:#111827;border:1px solid #CBD5E1;"
+        "QPushButton{background:#FFFFFF;color:#111827;border:1px solid #D2D2D7;"
         "border-radius:6px;font-size:8.5pt;font-weight:700;padding:0 8px;min-height:26px;}"
-        "QPushButton:hover{background:#F8FAFC;border-color:#9CA3AF;}QPushButton:pressed{background:#F3F4F6;}"
+        "QPushButton:hover{background:#F5F5F7;border-color:#9CA3AF;}QPushButton:pressed{background:#F3F4F6;}"
     )
 
     # -- Indices de columna de la QTableWidget (0-based) ----------------------
@@ -2456,18 +2456,18 @@ class DashboardWidget(QWidget):
             QPushButton {
                 background: #FFFFFF;
                 color: #0F172A;
-                border: 1px solid #CBD5E1;
+                border: 1px solid #D2D2D7;
                 border-radius: 6px;
                 font-size: 9pt;
                 font-weight: 600;
                 padding: 0 12px;
             }
             QPushButton:enabled:hover {
-                background: #F1F5F9;
+                background: #F2F2F7;
                 border-color: #94A3B8;
             }
             QPushButton:disabled {
-                background: #F8FAFC;
+                background: #F5F5F7;
                 color: #94A3B8;
                 border: 1px solid #E2E8F0;
             }
@@ -2519,13 +2519,13 @@ class DashboardWidget(QWidget):
             QPushButton {
                 background: #FFFFFF;
                 color: #111827;
-                border: 1px solid #CBD5E1;
+                border: 1px solid #D2D2D7;
                 border-radius: 6px;
                 font-size: 9pt;
                 font-weight: 600;
                 padding: 0 12px;
             }
-            QPushButton:hover { background: #F8FAFC; border-color: #9CA3AF; }
+            QPushButton:hover { background: #F5F5F7; border-color: #9CA3AF; }
         """)
         self._btn_cargar_mas.clicked.connect(self._on_cargar_mas_clicked)
 
@@ -2535,7 +2535,7 @@ class DashboardWidget(QWidget):
         self._btn_mostrar_todos.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_mostrar_todos.setStyleSheet("""
             QPushButton {
-                background: #F8FAFC;
+                background: #F5F5F7;
                 color: #0F172A;
                 border: 1px solid #E2E8F0;
                 border-radius: 6px;
@@ -2543,7 +2543,7 @@ class DashboardWidget(QWidget):
                 font-weight: 600;
                 padding: 0 12px;
             }
-            QPushButton:hover { background: #F1F5F9; border-color: #CBD5E1; }
+            QPushButton:hover { background: #F2F2F7; border-color: #D2D2D7; }
         """)
         self._btn_mostrar_todos.clicked.connect(self._on_mostrar_todos_clicked)
         thead_lay.addWidget(self._btn_cargar_mas)
@@ -2658,7 +2658,7 @@ class DashboardWidget(QWidget):
         # Colocar el checkbox maestro dentro de la cabecera col 0
         QTimer.singleShot(0, lambda: self._place_header_checkbox(table))
 
-        # Estilo corporativo minimalista Básculas PESA v3.2 (cabecera #F9FAFB, divisores #F3F4F6, hover #F8FAFC)
+        # Estilo corporativo minimalista Básculas PESA v3.2 (cabecera #F9FAFB, divisores #F3F4F6, hover #F5F5F7)
         table.setStyleSheet("""
             QTreeWidget {
                 background: #FFFFFF;
@@ -2667,7 +2667,7 @@ class DashboardWidget(QWidget):
                 font-size: 13px;
                 color: #111827;
                 outline: none;
-                selection-background-color: #F8FAFC;
+                selection-background-color: #F5F5F7;
                 selection-color: #111827;
             }
             QTreeWidget::item {
@@ -2679,10 +2679,10 @@ class DashboardWidget(QWidget):
                 color: #111827;
             }
             QTreeWidget::item:hover {
-                background: #F8FAFC;
+                background: #F5F5F7;
             }
             QTreeWidget::item:selected {
-                background: #F8FAFC;
+                background: #F5F5F7;
                 color: #111827;
             }
             QHeaderView::section {
@@ -3803,7 +3803,7 @@ class DashboardWidget(QWidget):
           1) Fila superior (QHBoxLayout): Folio en negrita (#111827) + píldoras CCA y/o DVE + addStretch()
           2) Fila media (QLabel con setWordWrap(True)): Marca · Modelo · SN · ID · Ubicación sin truncar.
           3) Fila inferior (QLabel verde suave con setWordWrap(True)):
-             '✉ Enviado el DD/MM/YYYY HH:mm a: correo@cliente.com (CC: recepcion@basculaspesa.com.mx)'
+             'Enviado el DD/MM/YYYY HH:mm a: correo@cliente.com (CC: recepcion@basculaspesa.com.mx)'
         """
         cell_widget = QWidget()
         cell_widget.setStyleSheet("background: transparent; border: none;")
@@ -3817,7 +3817,7 @@ class DashboardWidget(QWidget):
         top_lay.setSpacing(5)
 
         _SOBER_BADGE_STYLE = (
-            "background-color: #F8FAFC; color: #0F172A; border: 1px solid #CBD5E1; "
+            "background-color: #F5F5F7; color: #0F172A; border: 1px solid #D2D2D7; "
             "border-radius: 4px; padding: 2px 7px; font-size: 11px; font-weight: 600;"
         )
 
@@ -3833,7 +3833,7 @@ class DashboardWidget(QWidget):
         if is_cancelled:
             lbl_canc = QLabel("Cancelada")
             lbl_canc.setStyleSheet(
-                "background-color: #F8FAFC; color: #6E6E73; border: 1px solid #CBD5E1; "
+                "background-color: #F5F5F7; color: #6E6E73; border: 1px solid #D2D2D7; "
                 "border-radius: 4px; padding: 2px 7px; font-size: 10.5px; font-weight: 600;"
             )
             lbl_canc.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -3883,7 +3883,7 @@ class DashboardWidget(QWidget):
             lbl_correo.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             lbl_correo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             lbl_correo.setStyleSheet(
-                "background-color: #F8FAFC; color: #334155; border: 1px solid #E2E8F0; "
+                "background-color: #F5F5F7; color: #334155; border: 1px solid #E2E8F0; "
                 "border-left: 3px solid #0F172A; border-radius: 3px; padding: 3px 8px; "
                 "font-size: 10.5px; font-weight: 600;"
             )
@@ -4643,14 +4643,14 @@ class DashboardWidget(QWidget):
             QPushButton {
                 background-color: #FFFFFF;
                 color: #111827;
-                border: 1px solid #CBD5E1;
+                border: 1px solid #D2D2D7;
                 border-radius: 6px;
                 font-size: 11.5px;
                 font-weight: 600;
                 padding: 0 10px;
                 min-height: 28px;
             }
-            QPushButton:hover { background-color: #F8FAFC; border-color: #9CA3AF; }
+            QPushButton:hover { background-color: #F5F5F7; border-color: #9CA3AF; }
             QPushButton::menu-indicator { image: none; width: 0; }
         """
         _menu_style = _THEME_MENU_QSS or """
@@ -4662,7 +4662,7 @@ class DashboardWidget(QWidget):
                 font-size: 12.5px;
             }
             QMenu::item { padding: 7px 14px; border-radius: 6px; color: #111827; }
-            QMenu::item:selected { background: #F8FAFC; }
+            QMenu::item:selected { background: #F5F5F7; }
             QMenu::separator { height: 1px; background: #F3F4F6; margin: 4px 8px; }
         """
 
@@ -5017,14 +5017,14 @@ class DashboardWidget(QWidget):
             QPushButton {
                 background-color: #FFFFFF;
                 color: #111827;
-                border: 1px solid #CBD5E1;
+                border: 1px solid #D2D2D7;
                 border-radius: 6px;
                 font-size: 11.5px;
                 font-weight: 600;
                 padding: 0 8px;
                 min-height: 28px;
             }
-            QPushButton:hover { background-color: #F8FAFC; border-color: #9CA3AF; }
+            QPushButton:hover { background-color: #F5F5F7; border-color: #9CA3AF; }
         """
         _BTN_PRI_STYLE = _BTN_TBL_PRI_QSS or """
             QPushButton {
@@ -5041,7 +5041,7 @@ class DashboardWidget(QWidget):
         """
         _BTN_DISABLED_STYLE = """
             QPushButton {
-                background-color: #F8FAFC;
+                background-color: #F5F5F7;
                 color: #9CA3AF;
                 border: 1px solid #E5E7EB;
                 border-radius: 6px;
@@ -5060,7 +5060,7 @@ class DashboardWidget(QWidget):
                 font-size: 12.5px;
             }
             QMenu::item { padding: 7px 14px; border-radius: 6px; color: #111827; }
-            QMenu::item:selected { background: #F8FAFC; }
+            QMenu::item:selected { background: #F5F5F7; }
             QMenu::separator { height: 1px; background: #F3F4F6; margin: 4px 8px; }
         """
 
@@ -5333,13 +5333,13 @@ class DashboardWidget(QWidget):
                     QPushButton {
                         background-color: #FFFFFF;
                         color: #0F172A;
-                        border: 1px solid #CBD5E1;
+                        border: 1px solid #D2D2D7;
                         border-radius: 5px;
                         font-size: 11px;
                         font-weight: 600;
                         padding: 2px 4px;
                     }
-                    QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
+                    QPushButton:hover { background-color: #F2F2F7; border-color: #94A3B8; }
                 """)
                 btn_widget.setToolTip(f"{info_vivo}\n(Clic para reenviar)")
 
@@ -5400,7 +5400,7 @@ class DashboardWidget(QWidget):
                         font-weight: 600;
                         padding: 2px 4px;
                     }
-                    QPushButton:hover { background-color: #F8FAFC; color: #A50D26; border-color: #A50D26; }
+                    QPushButton:hover { background-color: #F5F5F7; color: #A50D26; border-color: #A50D26; }
                 """)
                 btn_widget.setToolTip(f"Error al enviar orden: {err_msg}\nClic para reintentar envío")
             QMessageBox.critical(
@@ -5428,14 +5428,14 @@ class DashboardWidget(QWidget):
                     QPushButton {
                         background-color: #FFFFFF;
                         color: #0F172A;
-                        border: 1px solid #CBD5E1;
+                        border: 1px solid #D2D2D7;
                         border-radius: 5px;
                         font-size: 8.5pt;
                         font-weight: 600;
                         padding: 0 6px;
                         min-height: 26px;
                     }
-                    QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
+                    QPushButton:hover { background-color: #F2F2F7; border-color: #94A3B8; }
                 """)
                 btn_widget.setToolTip(f"{info_vivo}\n(Clic para reenviar lote)")
 
@@ -5456,13 +5456,13 @@ class DashboardWidget(QWidget):
                                     QPushButton {
                                         background-color: #FFFFFF;
                                         color: #0F172A;
-                                        border: 1px solid #CBD5E1;
+                                        border: 1px solid #D2D2D7;
                                         border-radius: 5px;
                                         font-size: 11px;
                                         font-weight: 600;
                                         padding: 2px 4px;
                                     }
-                                    QPushButton:hover { background-color: #F1F5F9; border-color: #94A3B8; }
+                                    QPushButton:hover { background-color: #F2F2F7; border-color: #94A3B8; }
                                 """)
                                 btn.setToolTip(f"{info_vivo}\n(Clic para reenviar)")
                 self._recalcular_alturas_filas()
@@ -5489,7 +5489,7 @@ class DashboardWidget(QWidget):
                         padding: 0 6px;
                         min-height: 26px;
                     }
-                    QPushButton:hover { background-color: #F8FAFC; color: #A50D26; border-color: #A50D26; }
+                    QPushButton:hover { background-color: #F5F5F7; color: #A50D26; border-color: #A50D26; }
                 """)
                 btn_widget.setToolTip(f"Error al enviar lote: {err_msg}\nClic para reintentar envío")
             QMessageBox.critical(

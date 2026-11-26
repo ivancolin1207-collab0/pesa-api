@@ -256,7 +256,7 @@ class RMAFormWidget(QWidget):
         layout.addWidget(btn_limpiar)
         layout.addStretch()
 
-        self._btn_guardar = QPushButton("💾  Guardar RMA")
+        self._btn_guardar = QPushButton("Guardar RMA")
         self._btn_guardar.setProperty("class", "primary")
         self._btn_guardar.setFixedWidth(150)
         self._btn_guardar.clicked.connect(self._save)
@@ -468,7 +468,7 @@ class RMAFormWidget(QWidget):
             QMessageBox.critical(self, "Error", f"No se pudo guardar la remisión:\n{exc}")
         finally:
             self._btn_guardar.setEnabled(True)
-            self._btn_guardar.setText("💾  Guardar RMA")
+            self._btn_guardar.setText("Guardar RMA")
 
     def _clear_form(self) -> None:
         self._lbl_folio.setText("— NUEVO —")

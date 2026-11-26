@@ -47,6 +47,7 @@ class SyncService extends ChangeNotifier {
   int       _pending   = 0;
   DateTime? _lastSync;
   int       _clientesCount = 0;
+  int       _sucursalesCount = 0;
   List<String> _syncWarnings = [];
   StreamSubscription? _connSub;
   Timer?    _syncWatchdog;  // [FIX-CUELGUE] Watchdog: libera el lock si sync excede 90s
@@ -54,12 +55,13 @@ class SyncService extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   int get syncedOrdersCount => _orders.length;
   int get syncedClientesCount => _clientesCount;
+  int get syncedSucursalesCount => _sucursalesCount;
   List<String> get syncWarnings => List.unmodifiable(_syncWarnings);
 
   String get syncSummaryLabel {
     final hhmm = _lastSync != null ? DateFormat('HH:mm').format(_lastSync!.toLocal()) : null;
     final prefix = hhmm != null ? 'Última sincronización: $hhmm' : 'Caché local';
-    return '$prefix (${_orders.length} órdenes, $_clientesCount clientes)';
+    return '$prefix (${_orders.length} órdenes · $_clientesCount clientes · $_sucursalesCount direcciones)';
   }
 
   // ── Aviso de correos despachados desde la cola offline ──
@@ -138,7 +140,8 @@ class SyncService extends ChangeNotifier {
 
       setOrdersFromPull(localDbOrders);
       _clientesCount = await db.getConteoCatalogoClientes();
-      debugPrint('[Sync] Dashboard recargado incondicionalmente desde SQLite: ${localDbOrders.length} OS, $_clientesCount clientes');
+      _sucursalesCount = await db.getConteoCatalogoSucursales();
+      debugPrint('[Sync] Dashboard recargado incondicionalmente desde SQLite: ${localDbOrders.length} OS, $_clientesCount clientes, $_sucursalesCount direcciones');
       notifyListeners();
     } catch (e) {
       debugPrint('[Sync cargarOrdenes] Error: $e');
@@ -604,6 +607,7 @@ class SyncService extends ChangeNotifier {
           }
         }
         _clientesCount = await LocalDbService.instance.getConteoCatalogoClientes();
+        _sucursalesCount = await LocalDbService.instance.getConteoCatalogoSucursales();
       } catch (e) {
         moduleWarnings.add('Sync clientes: $e');
       }
@@ -632,6 +636,7 @@ class SyncService extends ChangeNotifier {
 
       await cargarOrdenes();
       _clientesCount = await LocalDbService.instance.getConteoCatalogoClientes();
+      _sucursalesCount = await LocalDbService.instance.getConteoCatalogoSucursales();
       _syncWarnings = moduleWarnings;
       _lastSync = DateTime.now();
       await _refreshPending();
@@ -640,7 +645,7 @@ class SyncService extends ChangeNotifier {
         _state = SyncState.success;
         _errorMessage = null;
         _message = pullCount > 0
-            ? 'Sincronizado ($pullCount OS actualizadas, $_clientesCount clientes)'
+            ? 'Sincronizado ($pullCount OS actualizadas · $_clientesCount clientes · $_sucursalesCount direcciones)'
             : syncSummaryLabel;
       } else if (_orders.isNotEmpty || _clientesCount > 0) {
         _state = SyncState.success;
@@ -2003,7 +2008,7 @@ class SyncService extends ChangeNotifier {
 
     debugPrint('[Sync PUSH Firmas] ${firmasPend.length} firmas → subida concurrente (timeout 10s/firma)');
 
-    // Subida paralela de todas las firmas pendientes con timeout individual
+    // Subida paralela de todas las firmas pendientes con aislamiento total por ítem
     await Future.wait(
       firmasPend.map((f) async {
         try {
@@ -2016,14 +2021,16 @@ class SyncService extends ChangeNotifier {
           ).timeout(
             const Duration(seconds: 10),
             onTimeout: () {
-              debugPrint('[Sync] ⏱ TIMEOUT 10s al subir firma para ${f['folio_os']}');
+              debugPrint('[Sync] TIMEOUT 10s al subir firma para ${f['folio_os']}');
+              throw TimeoutException('Timeout 10s al subir firma para ${f['folio_os']}');
             },
           );
           await db.markFirmaSincronizada(f['local_id'] as int);
         } catch (e) {
-          debugPrint('[Sync PUSH Firmas] Error en ${f['folio_os']}: $e');
+          debugPrint('[Sync PUSH Firmas] Error aislado en ${f['folio_os']}: $e');
         }
       }),
+      eagerError: false,
     );
   }
 

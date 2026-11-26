@@ -492,7 +492,7 @@ class LVFormWidget(QWidget):
         )
         self._btn_cancel.clicked.connect(self._on_cancel)
 
-        self._btn_pdf = QPushButton("📄 Generar PDF")
+        self._btn_pdf = QPushButton("Generar PDF")
         self._btn_pdf.setStyleSheet(
             "background: #E5E5EA; color: #1D1D1F; font-weight: 700; "
             "padding: 8px 18px; border-radius: 7px; border: none;"
@@ -500,7 +500,7 @@ class LVFormWidget(QWidget):
         self._btn_pdf.clicked.connect(self._generate_pdf)
         self._btn_pdf.setEnabled(self._is_edit)
 
-        self._btn_save = QPushButton("💾 Guardar LV")
+        self._btn_save = QPushButton("Guardar LV")
         self._btn_save.setStyleSheet(
             f"background: {_RED}; color: white; font-weight: 700; "
             "padding: 8px 20px; border-radius: 7px; border: none;"
@@ -740,7 +740,7 @@ class LVFormWidget(QWidget):
 
             QMessageBox.information(
                 self, "LV Guardado",
-                f"✅ Levantamiento guardado correctamente.\nFolio: {folio}\n"
+                f"Levantamiento guardado correctamente.\nFolio: {folio}\n"
                 f"Básculas registradas: {len(basculas)}"
             )
         except Exception as exc:
@@ -800,4 +800,4 @@ class LVFormWidget(QWidget):
             QMessageBox.critical(self, "Error PDF", f"No se pudo generar el PDF:\n{exc}")
         finally:
             self._btn_pdf.setEnabled(True)
-            self._btn_pdf.setText("📄 Generar PDF")
+            self._btn_pdf.setText("Generar PDF")

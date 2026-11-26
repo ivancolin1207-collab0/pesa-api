@@ -871,10 +871,10 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? _kRed.withOpacity(0.08) : Colors.grey.shade50,
-          borderRadius: BorderRadius.circular(8),
+          color: selected ? const Color(0xFFF2F2F7) : const Color(0xFFFFFFFF),
+          borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: selected ? _kRed : Colors.grey.shade300,
+            color: selected ? _kRed : const Color(0xFFD2D2D7),
             width: selected ? 1.5 : 1.0,
           ),
         ),

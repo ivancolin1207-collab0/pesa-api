@@ -5,6 +5,7 @@ y construcción de la plantilla institucional de correo con tabla HTML.
 """
 from services.metrology import (
     extraer_cca_dve,
+    formatear_division_minima,
     armar_correo_institucional,
     construir_asunto_y_cuerpo_correo,
     formatear_linea_correo_orden,
@@ -14,6 +15,7 @@ from services.metrology import (
 
 __all__ = [
     "extraer_cca_dve",
+    "formatear_division_minima",
     "armar_correo_institucional",
     "construir_asunto_y_cuerpo_correo",
     "formatear_linea_correo_orden",

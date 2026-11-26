@@ -290,7 +290,7 @@ class OSFormWidget(QWidget):
             sb.setSpecialValueText(" ")
             sb.setValue(0)
             sb.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
-            sb.setStyleSheet("QDoubleSpinBox { background:#F8FAFC; border:1px solid #D1D5DB; border-radius:6px; padding:6px; }")
+            sb.setStyleSheet("QDoubleSpinBox { background:#F5F5F7; border:1px solid #D1D5DB; border-radius:6px; padding:6px; }")
             return sb
 
         # Instanciar inputs
@@ -313,7 +313,7 @@ class OSFormWidget(QWidget):
         # Señal: al activar un ítem del desplegable → autocompletar otros campos
         self._txt_id_equipo.activated.connect(self._on_id_equipo_changed)
         self._txt_id_equipo.setStyleSheet(
-            "QComboBox { background:#F8FAFC; border:1px solid #D1D5DB;"
+            "QComboBox { background:#F5F5F7; border:1px solid #D1D5DB;"
             " border-radius:6px; padding:6px; }"
         )
         self._txt_marca           = _make_line_edit("Ej. Rice Lake", 100)
@@ -324,7 +324,7 @@ class OSFormWidget(QWidget):
         self._spin_div_minima     = make_spin(4)
         
         self._combo_tipo_instrumento = QComboBox()
-        self._combo_tipo_instrumento.setStyleSheet("QComboBox { background:#F8FAFC; border:1px solid #D1D5DB; border-radius:6px; padding:6px; }")
+        self._combo_tipo_instrumento.setStyleSheet("QComboBox { background:#F5F5F7; border:1px solid #D1D5DB; border-radius:6px; padding:6px; }")
         self._txt_ubicacion       = _make_line_edit("Ej. Almacén 2", 200)
         self._spin_div_verificacion = make_spin(4)
 
@@ -491,20 +491,20 @@ class OSFormWidget(QWidget):
 
         layout.addStretch()
 
-        btn_cancelar = QPushButton("✖  Cancelar")
+        btn_cancelar = QPushButton("Cancelar")
         btn_cancelar.setFixedWidth(110)
         btn_cancelar.setProperty("class", "danger")
         btn_cancelar.clicked.connect(self._clear_form)
         layout.addWidget(btn_cancelar)
 
-        self._btn_pdf = QPushButton("📄  Generar PDF")
+        self._btn_pdf = QPushButton("Generar PDF")
         self._btn_pdf.setFixedWidth(140)
         self._btn_pdf.setEnabled(self._is_edit)
         self._btn_pdf.clicked.connect(self._generate_pdf)
         layout.addWidget(self._btn_pdf)
 
         self._btn_guardar = QPushButton(
-            "💾  Actualizar OS" if self._is_edit else "💾  Guardar OS"
+            "Actualizar OS" if self._is_edit else "Guardar OS"
         )
         self._btn_guardar.setFixedWidth(160)
         self._btn_guardar.setProperty("class", "primary")
@@ -1184,7 +1184,7 @@ class OSFormWidget(QWidget):
         finally:
             self._btn_guardar.setEnabled(True)
             self._btn_guardar.setText(
-                "💾  Actualizar OS" if self._is_edit else "💾  Guardar OS"
+                "Actualizar OS" if self._is_edit else "Guardar OS"
             )
 
     def _clear_form(self) -> None:
@@ -1224,7 +1224,7 @@ class OSFormWidget(QWidget):
         self._spin_div_verificacion.setValue(0)
         self._txt_observaciones.clear()
         self._pruebas_widget.clear_all()
-        self._btn_guardar.setText("💾  Guardar OS")
+        self._btn_guardar.setText("Guardar OS")
 
     # ── Utilidades ────────────────────────────────────────────────────────────
 
@@ -1342,4 +1342,4 @@ class OSFormWidget(QWidget):
             QMessageBox.critical(self, "Error PDF", f"No se pudo generar el PDF:\n{exc}")
         finally:
             self._btn_pdf.setEnabled(True)
-            self._btn_pdf.setText("📄  Generar PDF")
+            self._btn_pdf.setText("Generar PDF")

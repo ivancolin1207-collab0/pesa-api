@@ -206,12 +206,12 @@ class _LoginScreenState extends State<LoginScreen> {
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color: _loginedOffline
-                                ? const Color(0xFFF8FAFC)
+                                ? const Color(0xFFF5F5F7)
                                 : const Color(0xFFFFF5F6),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
                                 color: _loginedOffline
-                                    ? const Color(0xFFCBD5E1)
+                                    ? const Color(0xFFD2D2D7)
                                     : const Color(0xFFC8102E)),
                           ),
                           child: Text(_error!,
@@ -320,7 +320,7 @@ class _LoginScreenState extends State<LoginScreen> {
       final warmupTimer = Future<void>.delayed(const Duration(seconds: 3)).then((_) {
         if (mounted && _loading) {
           setState(() => _error =
-            '🔄 Conectando con el servidor... Por favor espera.');
+            'Conectando con el servidor... Por favor espera.');
         }
       });
 
@@ -339,7 +339,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
         if (intento < 3) {
           setState(() => _error =
-            '🔄 Intento $intento/3 — Reintentando en 5s...\n$errorMsg');
+            'Intento $intento/3 — Reintentando en 5s...\n$errorMsg');
           await Future<void>.delayed(const Duration(seconds: 5));
           if (!mounted) return;
         }
@@ -425,7 +425,7 @@ class _LoginScreenState extends State<LoginScreen> {
       // Offline login exitoso
       setState(() {
         _loginedOffline = true;
-        _error = '⚠️ MODO OFFLINE — Trabajando con datos locales. '
+        _error = 'MODO OFFLINE — Trabajando con datos locales. '
                  'Sincronización automática al restaurar conexión.';
       });
       await Future.delayed(const Duration(seconds: 2));

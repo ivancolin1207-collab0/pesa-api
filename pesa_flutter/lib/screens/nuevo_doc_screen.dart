@@ -1057,9 +1057,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: const Color(0xFFF5F5F7),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: const Color(0xFFCBD5E1)),
+                  border: Border.all(color: const Color(0xFFD2D2D7)),
                 ),
                 child: Text(
                   '${_clientes.length} en catálogo',
@@ -1126,9 +1126,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: const Color(0xFFF5F5F7),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: const Color(0xFFD2D2D7)),
                   ),
                   child: Text(
                     '${_sucursalesCliente.length} dirección(es) registrada(s)',
@@ -1412,7 +1412,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
+                      color: const Color(0xFFF5F5F7),
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: const Color(0xFFE2E8F0)),
                     ),
@@ -1434,7 +1434,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                           style: const TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
-                            color: Color(0xFF0F172A),
+                            color: Color(0xFF1D1D1F),
                           ),
                         ),
                         if (_tipoDoc == 'OS' &&
@@ -1444,7 +1444,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                             prefix: 'CCA',
                             value: limpiarNumeroRegulatorio(_ccaCtrl.text),
                             color: const Color(0xFF111827),
-                            bg: const Color(0xFFF8FAFC),
+                            bg: const Color(0xFFF5F5F7),
                           ),
                         if (_tipoDoc == 'OS' &&
                             _activeRules.tieneInspeccion &&
@@ -1453,7 +1453,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                             prefix: 'DVE',
                             value: limpiarNumeroRegulatorio(_dveCtrl.text),
                             color: const Color(0xFF111827),
-                            bg: const Color(0xFFF8FAFC),
+                            bg: const Color(0xFFF5F5F7),
                           ),
                       ],
                     ),

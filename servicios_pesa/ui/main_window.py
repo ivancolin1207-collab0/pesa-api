@@ -272,10 +272,10 @@ class UserChip(QFrame):
     """Muestra el usuario activo y su rol con diseño pill-chip."""
 
     _ROLE_COLORS = {
-        "admin":     ("#C8102E", "#F8FAFC"),
-        "logistica": ("#0F172A", "#F8FAFC"),
-        "servicio":  ("#334155", "#F8FAFC"),
-        "recepcion": ("#334155", "#F8FAFC"),
+        "admin":     ("#C8102E", "#F5F5F7"),
+        "logistica": ("#0F172A", "#F5F5F7"),
+        "servicio":  ("#334155", "#F5F5F7"),
+        "recepcion": ("#334155", "#F5F5F7"),
     }
 
     def __init__(self, parent=None):
@@ -328,7 +328,7 @@ class UserChip(QFrame):
     def _update_frame_style(self):
         self.setStyleSheet("""
             QFrame#user_chip {
-                background-color: #F8FAFC;
+                background-color: #F5F5F7;
                 border-radius: 10px;
                 border: 1px solid #E5E7EB;
             }
@@ -337,7 +337,7 @@ class UserChip(QFrame):
     def update_user(self, nombre: str, role: str) -> None:
         """Actualiza el chip con los datos del usuario autenticado."""
         initials = "".join(p[0].upper() for p in nombre.split() if p)[:2] or "US"
-        color, _bg = self._ROLE_COLORS.get(role, ("#111827", "#F8FAFC"))
+        color, _bg = self._ROLE_COLORS.get(role, ("#111827", "#F5F5F7"))
 
         self._avatar.setText(initials)
         self._avatar.setStyleSheet(f"""
@@ -603,12 +603,12 @@ class MainWindow(QMainWindow):
                 padding: 0 8px;
             }
             QPushButton#btn_logout:hover {
-                background: #F8FAFC;
+                background: #F5F5F7;
                 color: #C8102E;
                 border-color: #C8102E;
             }
             QPushButton#btn_logout:pressed {
-                background: #F1F5F9;
+                background: #F2F2F7;
             }
         """)
         self._btn_logout.clicked.connect(self._on_cerrar_sesion)
@@ -720,11 +720,11 @@ class MainWindow(QMainWindow):
         lay.addWidget(self._lbl_breadcrumb)
         lay.addStretch()
 
-        # Píldora discreta de conexión PostgreSQL (punto semántico 6px)
+        # Píldora discreta de conexión PostgreSQL (punto semántico 6px, centrada verticalmente)
         try:
             from ui.theme import StatusBadge, PrimaryButton
             self._header_conn_badge = StatusBadge("Verificando BD…", dot_color="#FF9500", parent=header)
-            lay.addWidget(self._header_conn_badge)
+            lay.addWidget(self._header_conn_badge, 0, Qt.AlignmentFlag.AlignVCenter)
         except Exception:
             self._header_conn_badge = None
 
@@ -1152,7 +1152,7 @@ class MainWindow(QMainWindow):
             w.set_folio(folio)
 
     def _on_os_saved(self, folio: str) -> None:
-        self.statusBar().showMessage(f"✓  OS guardada: {folio}", 6000)
+        self.statusBar().showMessage(f"OS guardada: {folio}", 6000)
         if "dashboard" in self._pages:
             dash = self._pages["dashboard"]
             if hasattr(dash, "refresh"):

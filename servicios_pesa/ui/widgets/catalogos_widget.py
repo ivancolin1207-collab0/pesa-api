@@ -134,7 +134,7 @@ class _TecnicoEditDialog(QDialog):
         # ──────────────── Perfiles / Roles (multi-selección) ────────────────────────────────────
         roles_group = QGroupBox("Perfiles / Roles")
         roles_group.setStyleSheet(
-            "QGroupBox { font-weight:600; font-size:12px; border:1px solid #CBD5E1;"
+            "QGroupBox { font-weight:600; font-size:12px; border:1px solid #D2D2D7;"
             " border-radius:6px; margin-top:6px; padding:10px 8px; }"
             "QGroupBox::title { subcontrol-origin: margin; left: 10px; padding: 0 4px; color:#374151; }"
         )
@@ -150,7 +150,7 @@ class _TecnicoEditDialog(QDialog):
             self._checks[rol_name] = chk
             roles_vlay.addWidget(chk)
 
-        note_roles = QLabel("ℹ️ Un usuario puede tener múltiples perfiles activos.")
+        note_roles = QLabel("Un usuario puede tener múltiples perfiles activos.")
         note_roles.setStyleSheet("color:#6B7280; font-size:10px; padding-left:4px;")
         roles_vlay.addWidget(note_roles)
         form.addRow("", roles_group)
@@ -192,7 +192,7 @@ class _TecnicoEditDialog(QDialog):
         root.addLayout(form)
 
         if not is_new:
-            note = QLabel("ℹ️  Si dejas la contraseña en blanco, se conserva la actual.")
+            note = QLabel("Si dejas la contraseña en blanco, se conserva la actual.")
             note.setStyleSheet(
                 "background:#F0F9FF; color:#1A5276; border:1px solid #AED6F1;"
                 " border-radius:6px; padding:6px 10px; font-size:11px;"
@@ -387,18 +387,18 @@ class _CatalogTab(QWidget):
         root.setSpacing(10)
 
         toolbar = QHBoxLayout()
-        btn_new = QPushButton("➕  Nuevo")
+        btn_new = QPushButton("+ Nuevo")
         btn_new.setProperty("class", "primary")
         btn_new.setFixedWidth(110)
         btn_new.clicked.connect(self._new_record)
         toolbar.addWidget(btn_new)
 
-        btn_edit = QPushButton("✏️  Editar")
+        btn_edit = QPushButton("Editar")
         btn_edit.setFixedWidth(110)
         btn_edit.clicked.connect(self._edit_record)
         toolbar.addWidget(btn_edit)
 
-        btn_del = QPushButton("✖️  Desactivar")
+        btn_del = QPushButton("Desactivar")
         btn_del.setProperty("class", "danger")
         btn_del.setFixedWidth(130)
         btn_del.clicked.connect(self._delete_record)
@@ -531,7 +531,7 @@ class _FusionClientesDialog(QDialog):
 
     def __init__(self, clientes: list[dict], parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
-        self.setWindowTitle("🔗  Fusionar Clientes Duplicados")
+        self.setWindowTitle("Fusionar Clientes Duplicados")
         self.setMinimumSize(640, 500)
         self.setModal(True)
         self._clientes = clientes
@@ -552,7 +552,7 @@ class _FusionClientesDialog(QDialog):
         )
         lbl_inst.setWordWrap(True)
         lbl_inst.setStyleSheet(
-            "background:#F8FAFC; color:#111827; border:1px solid #CBD5E1;"
+            "background:#F5F5F7; color:#111827; border:1px solid #D2D2D7;"
             " border-radius:8px; padding:10px; font-size:12px;"
         )
         root.addWidget(lbl_inst)
@@ -598,7 +598,7 @@ class _FusionClientesDialog(QDialog):
 
         # Botones
         btns = QDialogButtonBox()
-        self._btn_merge = btns.addButton("🔗  Fusionar", QDialogButtonBox.ButtonRole.AcceptRole)
+        self._btn_merge = btns.addButton("Fusionar", QDialogButtonBox.ButtonRole.AcceptRole)
         self._btn_merge.setProperty("class", "primary")
         btns.addButton("Cancelar", QDialogButtonBox.ButtonRole.RejectRole)
         btns.accepted.connect(self._on_merge)
@@ -623,7 +623,7 @@ class _FusionClientesDialog(QDialog):
         if len(checked) > 3:
             names += f" y {len(checked) - 3} más"
         self._lbl_preview.setText(
-            f"✅ Se fusionarán <b>{len(checked)}</b> registros → Principal: "
+            f"Se fusionarán <b>{len(checked)}</b> registros → Principal: "
             f"<b>{self._cmb_canonico.currentText()}</b><br>"
             f"Duplicados: {names}"
         )
@@ -653,7 +653,7 @@ class _FusionSucursalesDialog(QDialog):
 
     def __init__(self, sucursales: list[dict], cliente_nombre: str, parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
-        self.setWindowTitle("🔗  Fusionar Sucursales Duplicadas")
+        self.setWindowTitle("Fusionar Sucursales Duplicadas")
         self.setMinimumSize(580, 440)
         self.setModal(True)
         self._sucursales = sucursales
@@ -707,7 +707,7 @@ class _FusionSucursalesDialog(QDialog):
         root.addLayout(frm)
 
         btns = QDialogButtonBox()
-        btn_merge = btns.addButton("🔗  Fusionar Sucursales", QDialogButtonBox.ButtonRole.AcceptRole)
+        btn_merge = btns.addButton("Fusionar Sucursales", QDialogButtonBox.ButtonRole.AcceptRole)
         btn_merge.setProperty("class", "primary")
         btns.addButton("Cancelar", QDialogButtonBox.ButtonRole.RejectRole)
         btns.accepted.connect(self._on_merge)
@@ -1192,8 +1192,8 @@ class ClientesSucursalesTab(QWidget):
             btn.setEnabled(False)
         for btn in [self._btn_eq_new, self._btn_eq_edit, self._btn_eq_del]:
             btn.setEnabled(False)
-        self._grp_sucursales.setTitle("🏭  Sucursales / Plantas  —  (selecciona un cliente)")
-        self._grp_equipos.setTitle("⚖️  Equipos / Básculas  —  (selecciona una planta)")
+        self._grp_sucursales.setTitle("Sucursales / Plantas  —  (selecciona un cliente)")
+        self._grp_equipos.setTitle("Equipos / Básculas  —  (selecciona una planta)")
         # Aplicar filtro de búsqueda si hay texto
         self._filter_clientes(self._inp_search.text())
 
@@ -1231,14 +1231,14 @@ class ClientesSucursalesTab(QWidget):
                     item.setForeground(QColor("#86868B"))
                 self._tbl_sucursales.setItem(i, col, item)
         n = len(self._sucursales)
-        self._grp_sucursales.setTitle(f"🏭  Sucursales / Plantas de '{cliente_nombre}'  ({n})")
+        self._grp_sucursales.setTitle(f"Sucursales / Plantas de '{cliente_nombre}'  ({n})")
         self._btn_suc_new.setEnabled(True)
         # Limpiar equipos
         self._tbl_equipos.setRowCount(0)
         self._equipos.clear()
         for btn in [self._btn_eq_new, self._btn_eq_edit, self._btn_eq_del]:
             btn.setEnabled(False)
-        self._grp_equipos.setTitle("⚖️  Equipos / Básculas  —  (selecciona una planta)")
+        self._grp_equipos.setTitle("Equipos / Básculas  —  (selecciona una planta)")
 
     def _load_equipos(self, sucursal_id: int, sucursal_nombre: str) -> None:
         try:
@@ -1263,7 +1263,7 @@ class ClientesSucursalesTab(QWidget):
                     item.setForeground(QColor("#86868B"))
                 self._tbl_equipos.setItem(i, col, item)
         n = len(self._equipos)
-        self._grp_equipos.setTitle(f"⚖️  Equipos de '{sucursal_nombre}'  ({n} registradas)")
+        self._grp_equipos.setTitle(f"Equipos de '{sucursal_nombre}'  ({n} registradas)")
         self._btn_eq_new.setEnabled(True)
 
     # ── Slots de selección ────────────────────────────────────────────────────
@@ -1305,7 +1305,7 @@ class ClientesSucursalesTab(QWidget):
                 _broadcast_catalogs_update()
                 nuevo_id = nuevo.get('id', '?')
                 QMessageBox.information(self, "Cliente Registrado",
-                    f"✅ Cliente '{razon}' creado correctamente.\nID asignado: {nuevo_id}")
+                    f"Cliente '{razon}' creado correctamente.\nID asignado: {nuevo_id}")
             except Exception as exc:
                 QMessageBox.critical(self, "Error al Crear Cliente",
                     f"No se pudo guardar el cliente en la base de datos:\n\n{exc}")
@@ -1384,7 +1384,7 @@ class ClientesSucursalesTab(QWidget):
                 nuevo_id = nueva.get("id", "?")
                 QMessageBox.information(
                     self, "Éxito",
-                    f"✅ Sucursal/Planta '{nombre}' guardada exitosamente (ID: {nuevo_id})."
+                    f"Sucursal/Planta '{nombre}' guardada exitosamente (ID: {nuevo_id})."
                 )
             except Exception as exc:
                 QMessageBox.critical(self, "Error al Guardar Sucursal", f"Fallo al registrar en PostgreSQL:\n\n{exc}")
@@ -1456,7 +1456,7 @@ class ClientesSucursalesTab(QWidget):
                 nuevo_id = nuevo.get("id", "?")
                 QMessageBox.information(
                     self, "Éxito",
-                    f"✅ Equipo/Báscula N/S '{serie}' registrado correctamente (ID: {nuevo_id})."
+                    f"Equipo/Báscula N/S '{serie}' registrado correctamente (ID: {nuevo_id})."
                 )
             except Exception as exc:
                 QMessageBox.critical(self, "Error al Guardar Equipo", f"Fallo al registrar en PostgreSQL:\n\n{exc}")
@@ -1503,7 +1503,7 @@ class ClientesSucursalesTab(QWidget):
             return
         nombre = data.get("razon_social", "")
         r1 = QMessageBox.question(
-            self, "⚠️ Eliminar Definitivamente",
+            self, "Eliminar Definitivamente",
             f"¿Eliminar PERMANENTEMENTE al cliente:\n\n  «{nombre}»?\n\n"
             "Esta acción eliminará también todas sus sucursales y equipos "
             "del catálogo. NO se puede deshacer.",
@@ -1534,7 +1534,7 @@ class ClientesSucursalesTab(QWidget):
             return
         nombre = suc.get("nombre_sucursal", "")
         r = QMessageBox.question(
-            self, "⚠️ Eliminar Definitivamente",
+            self, "Eliminar Definitivamente",
             f"¿Eliminar PERMANENTEMENTE la planta:\n\n  «{nombre}»?\n\n"
             "Se eliminarán también todos sus equipos del catálogo. NO se puede deshacer.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -1558,7 +1558,7 @@ class ClientesSucursalesTab(QWidget):
             return
         ns = eq.get("numero_serie", "")
         r = QMessageBox.question(
-            self, "⚠️ Eliminar Definitivamente",
+            self, "Eliminar Definitivamente",
             f"¿Eliminar PERMANENTEMENTE la báscula N/S «{ns}»?\n\nEsta acción NO se puede deshacer.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
@@ -1588,7 +1588,7 @@ class ClientesSucursalesTab(QWidget):
                 _broadcast_catalogs_update()
                 omitidas = stats.get('sucursales_omitidas', 0)
                 msg = (
-                    f"✅ Fusión realizada con éxito.\n\n"
+                    f"Fusión realizada con éxito.\n\n"
                     f"• Sucursales movidas: {stats.get('sucursales_movidas', 0)}\n"
                     f"• OS actualizadas: {stats.get('os_actualizadas', 0)}\n"
                     f"• Duplicados desactivados: {len(dup_ids)}"
@@ -1618,7 +1618,7 @@ class ClientesSucursalesTab(QWidget):
                 _broadcast_catalogs_update()
                 QMessageBox.information(
                     self, "Fusión completada",
-                    f"✅ Fusión de sucursales realizada con éxito.\n\n"
+                    f"Fusión de sucursales realizada con éxito.\n\n"
                     f"• Equipos movidos: {stats.get('equipos_movidos', 0)}\n"
                     f"• Equipos omitidos (N/S duplicados): {stats.get('equipos_omitidos', 0)}\n"
                     f"• Duplicados desactivados: {len(dup_ids)}"

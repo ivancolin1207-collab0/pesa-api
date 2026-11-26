@@ -1018,8 +1018,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
             if (correo.isNotEmpty)
               Text(
                 subio
-                    ? '✓ Enviado a $correo (CC: recepcion@basculaspesa.com.mx).'
-                    : '⏳ Correo en cola ($correo) — se enviará automáticamente al detectar conexión.',
+                    ? 'Enviado a $correo (CC: recepcion@basculaspesa.com.mx).'
+                    : 'Correo en cola ($correo) — se enviará automáticamente al detectar conexión.',
                 style: TextStyle(
                   fontSize: 12,
                   color: subio ? Colors.green.shade800 : Colors.orange.shade800,

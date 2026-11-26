@@ -115,26 +115,106 @@ class OsobDigitalDialog(QDialog):
             | Qt.WindowType.WindowCloseButtonHint
             | Qt.WindowType.WindowMinMaxButtonsHint
         )
-        self.setStyleSheet("QDialog { background: #F5F6FA; }")
+        self.setStyleSheet("QDialog { background: #F5F5F7; }")
+        self._guardado_final = False
         self._load_db_data()
+        self._load_draft_local()
         self._setup_ui()
         self._populate_initial_values()
+
+    def _draft_db_path(self):
+        from pathlib import Path
+        d = Path.home() / ".servicios_pesa"
+        d.mkdir(parents=True, exist_ok=True)
+        return d / "borradores_captura.sqlite"
+
+    def _load_draft_local(self) -> None:
+        if not self._folio:
+            return
+        try:
+            import sqlite3
+            with sqlite3.connect(self._draft_db_path()) as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS borradores_captura "
+                    "(folio_os TEXT PRIMARY KEY, draft_json TEXT NOT NULL, updated_at TEXT NOT NULL)"
+                )
+                row = conn.execute(
+                    "SELECT draft_json FROM borradores_captura WHERE folio_os = ?",
+                    (self._folio,),
+                ).fetchone()
+                if row and row[0]:
+                    parsed = json.loads(row[0])
+                    if isinstance(parsed, dict):
+                        self._os_data.update({k: v for k, v in parsed.items() if v not in (None, "")})
+        except Exception as exc:
+            logger.debug("OsobDigitalDialog._load_draft_local: %s", exc)
+
+    def _save_draft_local(self) -> None:
+        if self._guardado_final or not self._folio or not hasattr(self, "le_cliente"):
+            return
+        try:
+            import sqlite3
+            draft = {
+                "folio_os": self._folio,
+                "orden_servicio_vinculada": self.le_os_vinculada.text().strip(),
+                "cliente": self.le_cliente.text().strip(),
+                "planta": self.le_planta.text().strip(),
+                "id_equipo": self.le_tag.text().strip(),
+                "marca": self.le_marca.text().strip(),
+                "modelo": self.le_modelo.text().strip(),
+                "ns": self.le_serie.text().strip(),
+                "capacidad_maxima": self.le_capacidad.text().strip(),
+                "division_minima": self.le_division.text().strip(),
+                "observaciones": self.txt_observaciones.toPlainText().strip(),
+                "refacciones_requeridas": self.txt_refacciones.toPlainText().strip(),
+                "nombre_ing": self.le_cli_nombre.text().strip(),
+                "puesto_ing": self.le_cli_puesto.text().strip(),
+            }
+            with sqlite3.connect(self._draft_db_path()) as conn:
+                conn.execute(
+                    "CREATE TABLE IF NOT EXISTS borradores_captura "
+                    "(folio_os TEXT PRIMARY KEY, draft_json TEXT NOT NULL, updated_at TEXT NOT NULL)"
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO borradores_captura (folio_os, draft_json, updated_at) VALUES (?, ?, ?)",
+                    (self._folio, json.dumps(draft, ensure_ascii=False), datetime.now().isoformat()),
+                )
+                conn.commit()
+        except Exception as exc:
+            logger.debug("OsobDigitalDialog._save_draft_local: %s", exc)
+
+    def _delete_draft_local(self) -> None:
+        if not self._folio:
+            return
+        try:
+            import sqlite3
+            with sqlite3.connect(self._draft_db_path()) as conn:
+                conn.execute("DELETE FROM borradores_captura WHERE folio_os = ?", (self._folio,))
+                conn.commit()
+        except Exception:
+            pass
+
+    def closeEvent(self, event) -> None:
+        self._save_draft_local()
+        super().closeEvent(event)
+
+    def reject(self) -> None:
+        self._save_draft_local()
+        super().reject()
 
     def _load_db_data(self) -> None:
         if not _db_pool or not self._folio:
             return
         try:
-            conn = _db_pool.get_connection()
-            try:
+            with _db_pool.transaction() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
                         """
                         SELECT os.id, os.folio_os, os.fecha,
-                               COALESCE(c.nombre, '') AS cliente,
-                               COALESCE(s.nombre, '') AS sucursal,
+                               COALESCE(c.razon_social, os.cliente, '') AS cliente,
+                               COALESCE(s.nombre_sucursal, '') AS sucursal,
                                COALESCE(s.direccion, c.direccion, '') AS direccion,
-                               COALESCE(t.nombre, '') AS tecnico,
-                               COALESCE(os.tipo_instrumento, '') AS tipo_instrumento,
+                               COALESCE(t.nombre_completo, '') AS tecnico,
                                COALESCE(os.marca, '') AS marca,
                                COALESCE(os.modelo, '') AS modelo,
                                COALESCE(os.ns, '') AS ns,
@@ -143,15 +223,12 @@ class OsobDigitalDialog(QDialog):
                                os.alcance_max, os.div_minima,
                                COALESCE(os.instrumento_capacidad, '') AS instrumento_capacidad,
                                COALESCE(os.instrumento_division, '') AS instrumento_division,
-                               COALESCE(os.unidad_medida, 'kg') AS unidad_medida,
                                COALESCE(os.observaciones, '') AS observaciones,
-                               COALESCE(os.dictamen, '') AS dictamen,
-                               COALESCE(os.nombre_ing, '') AS nombre_ing,
-                               COALESCE(os.puesto_ing, '') AS puesto_ing,
+                               COALESCE(os.firma_cliente_nombre, '') AS nombre_ing,
                                os.datos_tecnicos_json
                         FROM ordenes_servicio os
                         LEFT JOIN cat_clientes c ON os.id_cliente = c.id
-                        LEFT JOIN cat_sucursales_cliente s ON os.id_sucursal = s.id
+                        LEFT JOIN cliente_sucursales s ON os.sucursal_id = s.id
                         LEFT JOIN cat_tecnicos t ON os.id_tecnico = t.id
                         WHERE os.folio_os = %s
                         LIMIT 1
@@ -167,9 +244,6 @@ class OsobDigitalDialog(QDialog):
                                 self._os_data[k] = v
                         if not self._os_id and db_map.get("id"):
                             self._os_id = int(db_map["id"])
-                conn.commit()
-            finally:
-                _db_pool.release_connection(conn)
         except Exception as exc:
             logger.warning("OsobDigitalDialog._load_db_data error: %s", exc)
 
@@ -481,6 +555,9 @@ class OsobDigitalDialog(QDialog):
         obs_txt = self.txt_observaciones.toPlainText().strip()
         ref_txt = self.txt_refacciones.toPlainText().strip()
 
+        from services.metrology import formatear_division_minima
+        div_limpia = formatear_division_minima(self.le_division.text().strip())
+
         payload = {
             "folio_os": self._folio,
             "folio": self._folio,
@@ -496,7 +573,7 @@ class OsobDigitalDialog(QDialog):
             "modelo": self.le_modelo.text().strip(),
             "ns": self.le_serie.text().strip(),
             "capacidad_maxima": self.le_capacidad.text().strip(),
-            "division_minima": self.le_division.text().strip(),
+            "division_minima": div_limpia,
             "tipo_instrumento": tipo_otro_val or tipo_inst_sel,
             "tipo_instrumento_otro": tipo_otro_val,
             "checklist": checklist_map,
@@ -524,27 +601,24 @@ class OsobDigitalDialog(QDialog):
 
         if _db_pool:
             try:
-                conn = _db_pool.get_connection()
-                try:
+                with _db_pool.transaction() as conn:
                     with conn.cursor() as cur:
                         cur.execute(
                             """
                             UPDATE ordenes_servicio
                             SET estado = 'COMPLETADA',
-                                estatus = 'CERRADO',
+                                estatus = 'Cerrado',
                                 marca = %s,
                                 modelo = %s,
                                 ns = %s,
                                 id_equipo = %s,
                                 ubicacion = %s,
-                                tipo_instrumento = %s,
+                                instrumento_division = %s,
                                 observaciones = %s,
-                                dictamen = %s,
-                                nombre_ing = %s,
-                                puesto_ing = %s,
-                                datos_tecnicos_json = %s::jsonb,
-                                pdf_url = %s,
-                                has_pdf = TRUE,
+                                firma_cliente_nombre = %s,
+                                datos_tecnicos_json = %s,
+                                pdf_path = %s,
+                                pdf_generado = TRUE,
                                 updated_at = NOW()
                             WHERE folio_os = %s
                             """,
@@ -554,22 +628,19 @@ class OsobDigitalDialog(QDialog):
                                 payload["ns"],
                                 payload["id_equipo"],
                                 payload["ubicacion"],
-                                payload["tipo_instrumento"],
+                                div_limpia,
                                 obs_txt,
-                                dictamen_sel,
                                 payload["nombre_ing"],
-                                payload["puesto_ing"],
                                 json.dumps(payload, ensure_ascii=False),
                                 pdf_path,
                                 self._folio,
                             ),
                         )
-                    conn.commit()
-                finally:
-                    _db_pool.release_connection(conn)
             except Exception as exc:
                 logger.warning("No se pudo actualizar ordenes_servicio para %s: %s", self._folio, exc)
 
+        self._guardado_final = True
+        self._delete_draft_local()
         self.captura_guardada.emit()
         QMessageBox.information(
             self,

@@ -3,7 +3,7 @@ pesa_api/core/security.py — JWT, hashing de contraseñas y RBAC.
 """
 import os
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -172,16 +172,54 @@ _ROL_MAP = {
 }
 
 
-def es_rol_admin(user: Optional[dict]) -> bool:
-    """True para cualquier variante de rol administrativo (admin, administrador, superadmin, jefe, gerente)."""
-    if not user:
+_ADMIN_ROLES = frozenset({
+    "admin", "administrador", "superadmin", "jefe", "gerente", "gerencia", "direccion",
+})
+
+
+def es_admin(rol_o_user: Any) -> bool:
+    """
+    Helper único RBAC: acepta string de rol o dict de usuario (incluyendo lista multi-rol `roles`).
+    Retorna True insensiblemente a mayúsculas/acentos para:
+    {'admin', 'administrador', 'superadmin', 'jefe', 'gerente', 'gerencia', 'direccion'}.
+    """
+    if not rol_o_user:
         return False
-    username = str(user.get("username") or "").strip().lower()
-    if username in _USUARIOS_VISIBILIDAD_GLOBAL:
-        return True
-    rol = _normalizar_rol(str(user.get("role") or ""))
-    rol_canon = _ROL_MAP.get(rol, rol)
-    return rol_canon in {"admin", "superadmin", "jefe", "gerente", "gerencia", "direccion"} or "admin" in rol
+
+    def _is_admin_str(val: Any) -> bool:
+        rol = _normalizar_rol(str(val or ""))
+        if not rol:
+            return False
+        rol_canon = _ROL_MAP.get(rol, rol)
+        return rol in _ADMIN_ROLES or rol_canon in _ADMIN_ROLES or "admin" in rol
+
+    if isinstance(rol_o_user, dict):
+        username = str(rol_o_user.get("username") or rol_o_user.get("usuario") or "").strip().lower()
+        if username in _USUARIOS_VISIBILIDAD_GLOBAL:
+            return True
+        if _is_admin_str(rol_o_user.get("role") or rol_o_user.get("rol") or ""):
+            return True
+        roles_raw = rol_o_user.get("roles")
+        if isinstance(roles_raw, str) and roles_raw.strip():
+            try:
+                import json as _json
+                parsed = _json.loads(roles_raw)
+                if isinstance(parsed, list):
+                    roles_raw = parsed
+                else:
+                    roles_raw = [roles_raw]
+            except Exception:
+                roles_raw = [r.strip() for r in roles_raw.split(",") if r.strip()]
+        if isinstance(roles_raw, (list, tuple, set)):
+            return any(_is_admin_str(r) for r in roles_raw)
+        return False
+
+    return _is_admin_str(rol_o_user)
+
+
+def es_rol_admin(user: Optional[dict]) -> bool:
+    """Alias retrocompatible sobre es_admin(user)."""
+    return es_admin(user)
 
 
 def require_roles(*roles: str):
@@ -199,7 +237,7 @@ def require_roles(*roles: str):
             return current_user
 
         # 2. Admin siempre puede
-        if user_role_canon == "admin" or "admin" in user_role:
+        if es_admin(current_user):
             return current_user
 
         # 3. Cualquier variante de técnico es válida cuando se acepta tecnico/servicio

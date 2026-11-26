@@ -10,11 +10,11 @@ Implementa las tres tablas del formato "Toma de Datos" con reglas condicionales:
 
     • ExcentricidadCondicionalWidget
         Selector visual de tipo de instrumento (tarjetas con ícono):
-            🏗 Plataforma   → tabla estándar (4 ó 6 posiciones)
-            🌾 Tolva        → NO aplica excentricidad
-            🏗 Grúa         → NO aplica excentricidad
-            🛢 Tanque       → NO aplica excentricidad
-            🚛 Camionera/FC → tabla según número de celdas (8→4 pts / 10→5 pts)
+            Plataforma   → tabla estándar (4 ó 6 posiciones)
+            Tolva        → NO aplica excentricidad
+            Grúa         → NO aplica excentricidad
+            Tanque       → NO aplica excentricidad
+            Camionera/FC → tabla según número de celdas (8→4 pts / 10→5 pts)
 
     • ExactitudWidget
         Columnas: N | VALOR NOMINAL | LECTURA INICIAL | LECTURA FINAL
@@ -62,7 +62,7 @@ logger = logging.getLogger(__name__)
 # ──────────────────────────────────────────────────────────────────────────────
 _RED    = "#E63946"
 _BLUE   = "#007AFF"
-_PURPLE = "#8B5CF6"
+_PURPLE = "#1D1D1F"
 _GREEN  = "#34C759"
 _GRAY   = "#86868B"
 _DARK   = "#1D1D1F"

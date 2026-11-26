@@ -20,7 +20,7 @@ Estructura del formulario:
 
 Acceso:
     - Desde BatchGeneratorWidget → botón "Llenar Formulario Digital"
-    - Desde DashboardWidget → doble clic en tabla → botón "📝 Llenar Digital"
+    - Desde DashboardWidget → doble clic en tabla → botón "Llenar Digital"
     - Llamada directa: DigitalServiceDialog(folio_os, os_data, parent)
 """
 
@@ -188,7 +188,7 @@ class DrawingCanvas(QWidget):
             painter.drawText(
                 self.rect(),
                 Qt.AlignmentFlag.AlignCenter,
-                f"✍  {self._placeholder}"
+                f"{self._placeholder}"
             )
             return
 
@@ -628,13 +628,13 @@ class DigitalServiceDialog(QDialog):
 
         # Bloques del formulario
         self._content_lay.addWidget(self._build_block_header())
-        self._content_lay.addWidget(SectionTitle("1", "Datos del Instrumento", "⚙", _RED))
+        self._content_lay.addWidget(SectionTitle("1", "Datos del Instrumento", "", _RED))
         self._content_lay.addWidget(self._build_block_equipo())
-        self._content_lay.addWidget(SectionTitle("2", "Pruebas Metrológicas", "📊", _BLUE))
+        self._content_lay.addWidget(SectionTitle("2", "Pruebas Metrológicas", "", _DARK))
         self._content_lay.addWidget(self._build_block_pruebas())
-        self._content_lay.addWidget(SectionTitle("3", "Observaciones del Servicio", "📋", "#8B5CF6"))
+        self._content_lay.addWidget(SectionTitle("3", "Observaciones del Servicio", "", _DARK))
         self._content_lay.addWidget(self._build_block_observaciones())
-        self._content_lay.addWidget(SectionTitle("4", "Firmas Digitales", "✍", _GREEN))
+        self._content_lay.addWidget(SectionTitle("4", "Firmas Digitales", "", _DARK))
         self._content_lay.addWidget(self._build_block_firmas())
         self._content_lay.addSpacing(16)
 
@@ -656,11 +656,6 @@ class DigitalServiceDialog(QDialog):
         lay.setContentsMargins(28, 0, 24, 0)
         lay.setSpacing(16)
 
-        # Ícono + identidad
-        lbl_icon = QLabel("📝")
-        lbl_icon.setStyleSheet("font-size: 24px; background: transparent;")
-        lay.addWidget(lbl_icon)
-
         col = QVBoxLayout()
         col.setSpacing(1)
         lbl_folio = QLabel(f"Formulario Digital — {self._folio_os}")
@@ -672,12 +667,12 @@ class DigitalServiceDialog(QDialog):
         lay.addLayout(col, stretch=1)
 
         # Badge de estado
-        self._lbl_estado = QLabel("  EN LLENADO  ")
+        self._lbl_estado = QLabel("EN LLENADO")
         self._lbl_estado.setObjectName("badge_estado")
         lay.addWidget(self._lbl_estado)
 
         # Botón cerrar
-        btn_close = QPushButton("✕")
+        btn_close = QPushButton("×")
         btn_close.setObjectName("btn_topbar_close")
         btn_close.setFixedSize(32, 32)
         btn_close.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -756,9 +751,9 @@ class DigitalServiceDialog(QDialog):
         self._inp_equipo_id.textChanged.connect(self._on_equipo_search)
         search_row.addWidget(self._inp_equipo_id, stretch=1)
 
-        btn_buscar = QPushButton("🔍  Buscar")
+        btn_buscar = QPushButton("Buscar")
         btn_buscar.setObjectName("btn_secondary")
-        btn_buscar.setFixedHeight(44)
+        btn_buscar.setFixedHeight(38)
         btn_buscar.clicked.connect(self._buscar_equipo)
         search_row.addWidget(btn_buscar)
         lay.addLayout(search_row, 1, 0, 1, 3)
@@ -852,7 +847,7 @@ class DigitalServiceDialog(QDialog):
                 l_rep = QVBoxLayout(wrap_rep)
                 l_rep.setContentsMargins(16, 16, 16, 16)
                 l_rep.addWidget(self._w_repetibilidad)
-                tabs.addTab(wrap_rep, "📏  Repetibilidad")
+                tabs.addTab(wrap_rep, "Repetibilidad")
 
                 # ② Pestaña Excentricidad
                 self._w_excentricidad = ExcentricidadCondicionalWidget()
@@ -862,7 +857,7 @@ class DigitalServiceDialog(QDialog):
                 l_exc = QVBoxLayout(wrap_exc)
                 l_exc.setContentsMargins(16, 16, 16, 16)
                 l_exc.addWidget(self._w_excentricidad)
-                tabs.addTab(wrap_exc, "⬡  Excentricidad")
+                tabs.addTab(wrap_exc, "Excentricidad")
 
                 # ③ Pestaña Exactitud
                 self._w_exactitud = ExactitudWidget()
@@ -872,7 +867,7 @@ class DigitalServiceDialog(QDialog):
                 l_exac = QVBoxLayout(wrap_exac)
                 l_exac.setContentsMargins(16, 16, 16, 16)
                 l_exac.addWidget(self._w_exactitud)
-                tabs.addTab(wrap_exac, "✔  Exactitud")
+                tabs.addTab(wrap_exac, "Exactitud")
 
                 # Referencia global al widget de tabs para get_all_data()
                 self._pruebas_widget = None   # se usa _w_repetibilidad/_w_excentricidad/_w_exactitud
@@ -891,7 +886,7 @@ class DigitalServiceDialog(QDialog):
                 l_all = QVBoxLayout(wrap_all)
                 l_all.setContentsMargins(16, 16, 16, 16)
                 l_all.addWidget(self._pruebas_widget)
-                tabs.addTab(wrap_all, "📊  Pruebas")
+                tabs.addTab(wrap_all, "Pruebas")
 
             tabs.setMinimumHeight(420)
             lay.addWidget(tabs)
@@ -907,10 +902,10 @@ class DigitalServiceDialog(QDialog):
                  3, _RED),
                 ("Excentricidad",
                  ["POSICIÓN", "LECTURA INICIAL", "LECTURA FINAL"],
-                 6, _BLUE),
+                 6, _DARK),
                 ("Exactitud",
                  ["N", "VALOR NOMINAL", "LECTURA INICIAL", "LECTURA FINAL"],
-                 10, "#8B5CF6"),
+                 10, _DARK),
             ]:
                 tbl = MetrologicalTable(title=title, columns=cols, rows=nrows, color=color)
                 lay.addWidget(tbl)
@@ -963,7 +958,7 @@ class DigitalServiceDialog(QDialog):
             subtitle      = "Técnico de Servicios PESA",
             attr_name     = "_canvas_tecnico",
             name_attr     = "_inp_nombre_tecnico",
-            icon          = "🔧",
+            icon          = "",
             color         = _RED,
             name_label    = "Nombre del Técnico Responsable",
             name_required = False,
@@ -974,8 +969,8 @@ class DigitalServiceDialog(QDialog):
             subtitle      = "Representante del cliente que recibió el servicio",
             attr_name     = "_canvas_cliente",
             name_attr     = "_inp_nombre_cliente",
-            icon          = "🏭",
-            color         = _BLUE,
+            icon          = "",
+            color         = _DARK,
             name_label    = "Nombre del Usuario / Representante del Cliente",
             name_required = True,
         ), stretch=1)
@@ -1066,7 +1061,7 @@ class DigitalServiceDialog(QDialog):
         canvas.signature_changed.connect(_update_status)
         bottom.addWidget(lbl_status, stretch=1)
 
-        btn_clear = QPushButton("🗑  Limpiar Firma")
+        btn_clear = QPushButton("Limpiar Firma")
         btn_clear.setObjectName("btn_clear_sig")
         btn_clear.setFixedHeight(30)
         btn_clear.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1102,16 +1097,16 @@ class DigitalServiceDialog(QDialog):
         # Botón cancelar
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.setObjectName("btn_cancel")
-        btn_cancel.setFixedHeight(44)
+        btn_cancel.setFixedHeight(40)
         btn_cancel.setFixedWidth(110)
         btn_cancel.clicked.connect(self._on_close_requested)
         lay.addWidget(btn_cancel)
 
         # Botón guardar
-        self._btn_save = QPushButton("💾   Guardar y Finalizar Servicio")
+        self._btn_save = QPushButton("Guardar y Finalizar Servicio")
         self._btn_save.setObjectName("btn_save")
-        self._btn_save.setFixedHeight(44)
-        self._btn_save.setMinimumWidth(280)
+        self._btn_save.setFixedHeight(40)
+        self._btn_save.setMinimumWidth(260)
         self._btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_save.clicked.connect(self._on_guardar)
         lay.addWidget(self._btn_save)
@@ -1127,9 +1122,13 @@ class DigitalServiceDialog(QDialog):
             QDialog {{
                 background: {_BG};
             }}
+            QLabel {{
+                border: none;
+                background: transparent;
+            }}
             QFrame#topbar {{
                 background: {_WHITE};
-                border-bottom: 1.5px solid rgba(0,0,0,0.08);
+                border-bottom: 1px solid #E5E5EA;
             }}
             QLabel#topbar_folio {{
                 font-size: 16px;
@@ -1144,29 +1143,30 @@ class DigitalServiceDialog(QDialog):
                 background: transparent;
             }}
             QLabel#badge_estado {{
-                background: rgba(230,57,70,0.09);
-                color: {_RED};
+                background: #F2F2F7;
+                color: {_DARK};
+                border: 1px solid #E5E5EA;
                 font-size: 11px;
-                font-weight: 700;
-                border-radius: 6px;
+                font-weight: 600;
+                border-radius: 8px;
                 padding: 4px 10px;
-                letter-spacing: 0.5px;
+                letter-spacing: 0.4px;
             }}
             QPushButton#btn_topbar_close {{
-                background: rgba(0,0,0,0.05);
+                background: #F2F2F7;
                 color: {_GRAY};
                 border: none;
                 border-radius: 16px;
-                font-size: 14px;
+                font-size: 15px;
                 font-weight: 600;
             }}
             QPushButton#btn_topbar_close:hover {{
-                background: rgba(230,57,70,0.12);
-                color: {_RED};
+                background: #E5E5EA;
+                color: {_DARK};
             }}
             QFrame#bottombar {{
                 background: {_WHITE};
-                border-top: 1.5px solid rgba(0,0,0,0.08);
+                border-top: 1px solid #E5E5EA;
             }}
             QLabel#folio_display {{
                 font-size: 22px;
@@ -1176,48 +1176,49 @@ class DigitalServiceDialog(QDialog):
                 background: transparent;
             }}
             QLabel#readonly_field {{
-                font-size: 14px;
+                font-size: 13.5px;
                 font-weight: 500;
                 color: {_DARK};
-                background: #F3F4F6;
-                border: 1px solid #E5E7EB;
-                border-radius: 8px;
+                background: #F5F5F7;
+                border: 1px solid #E5E5EA;
+                border-radius: 10px;
                 padding: 8px 12px;
                 min-height: 20px;
             }}
             QLabel#readonly_field_filled {{
-                font-size: 14px;
+                font-size: 13.5px;
                 font-weight: 600;
-                color: #1D4ED8;
-                background: #EBF5FF;
-                border: 1px solid #BFDBFE;
-                border-radius: 8px;
+                color: {_DARK};
+                background: #F2F2F7;
+                border: 1px solid #D2D2D7;
+                border-radius: 10px;
                 padding: 8px 12px;
                 min-height: 20px;
             }}
             QLineEdit#input_field {{
                 background: {_WHITE};
-                border: 1.5px solid {_LGRAY};
-                border-radius: 8px;
+                border: 1px solid #D2D2D7;
+                border-radius: 10px;
                 padding: 0 12px;
-                font-size: 14px;
+                font-size: 13.5px;
                 color: {_DARK};
-                selection-background-color: rgba(0,122,255,0.15);
+                selection-background-color: #E5E5EA;
+                selection-color: #1D1D1F;
             }}
             QLineEdit#input_field:focus {{
-                border-color: {_RED};
-                background: #FFFBFB;
+                border: 1.5px solid {_RED};
+                background: #FFFFFF;
             }}
             QDateEdit#date_field {{
                 background: {_WHITE};
-                border: 1.5px solid {_LGRAY};
-                border-radius: 8px;
+                border: 1px solid #D2D2D7;
+                border-radius: 10px;
                 padding: 0 12px;
-                font-size: 14px;
+                font-size: 13.5px;
                 color: {_DARK};
             }}
             QDateEdit#date_field:focus {{
-                border-color: {_RED};
+                border: 1.5px solid {_RED};
             }}
             QDateEdit::drop-down {{
                 border: none;
@@ -1225,67 +1226,67 @@ class DigitalServiceDialog(QDialog):
             }}
             QTextEdit#txt_observaciones {{
                 background: {_WHITE};
-                border: 1.5px solid {_LGRAY};
+                border: 1px solid #D2D2D7;
                 border-radius: 10px;
                 padding: 12px;
-                font-size: 14px;
+                font-size: 13.5px;
                 color: {_DARK};
             }}
             QTextEdit#txt_observaciones:focus {{
-                border-color: #8B5CF6;
+                border: 1.5px solid {_RED};
             }}
             QPushButton#btn_secondary {{
-                background: {_SURFACE};
-                border: 1.5px solid {_LGRAY};
-                border-radius: 8px;
+                background: #FFFFFF;
+                border: 1px solid #D2D2D7;
+                border-radius: 10px;
                 color: {_DARK};
                 font-size: 13px;
                 font-weight: 600;
                 padding: 0 16px;
             }}
             QPushButton#btn_secondary:hover {{
-                background: #E5E7EB;
-                border-color: #9CA3AF;
+                background: #F2F2F7;
+                border-color: #8E8E93;
             }}
             QPushButton#btn_clear_sig {{
-                background: transparent;
-                border: 1px solid #E5E7EB;
-                border-radius: 6px;
+                background: #FFFFFF;
+                border: 1px solid #D2D2D7;
+                border-radius: 8px;
                 color: {_GRAY};
                 font-size: 11px;
                 padding: 0 10px;
             }}
             QPushButton#btn_clear_sig:hover {{
-                background: #FEF2F2;
+                background: #F2F2F7;
                 border-color: {_RED};
                 color: {_RED};
             }}
             QPushButton#btn_cancel {{
                 background: {_WHITE};
-                border: 1.5px solid {_LGRAY};
+                border: 1px solid #D2D2D7;
                 border-radius: 10px;
-                color: {_GRAY};
+                color: {_DARK};
                 font-size: 13px;
             }}
             QPushButton#btn_cancel:hover {{
-                background: #F9FAFB;
-                border-color: #9CA3AF;
+                background: #F2F2F7;
+                border-color: #8E8E93;
                 color: {_DARK};
             }}
             QPushButton#btn_save {{
                 background: #C8102E;
-                color: white;
+                color: #FFFFFF;
                 border: none;
-                border-radius: 8px;
-                font-size: 14px;
-                font-weight: 700;
+                border-radius: 10px;
+                font-size: 13.5px;
+                font-weight: 600;
                 letter-spacing: -0.2px;
             }}
             QPushButton#btn_save:hover {{
                 background: #A60D26;
             }}
             QPushButton#btn_save:pressed {{
-                background: #AA1515;
+                background: #880B20;
             }}
             QPushButton#btn_save:disabled {{
                 background: #D1D5DB;
@@ -1450,7 +1451,7 @@ class DigitalServiceDialog(QDialog):
                         if tab_widget is not None and tab_widget.layout():
                             from PyQt6.QtWidgets import QLabel as _QL
                             lbl_no = _QL(
-                                f"⚠️  INSTRUMENTO NO APTO PARA PRUEBA DE EXCENTRICIDAD\n"
+                                f"INSTRUMENTO NO APTO PARA PRUEBA DE EXCENTRICIDAD\n"
                                 f"Tipo: {tipo_no}\n"
                                 "(NOM-010-SCFI-2020: geometría variable inhabilita la prueba)"
                             )
@@ -1479,7 +1480,7 @@ class DigitalServiceDialog(QDialog):
                         for idx in range(self._pruebas_tabs.count()):
                             tab_text = self._pruebas_tabs.tabText(idx)
                             if "excentricidad" in tab_text.lower():
-                                self._pruebas_tabs.setTabText(idx, tab_text + "  ⚠")
+                                self._pruebas_tabs.setTabText(idx, tab_text + "  ")
                                 self._pruebas_tabs.setTabToolTip(
                                     idx,
                                     "Geometría LIBRE: selecciona el tipo de receptor "
@@ -1703,7 +1704,7 @@ class DigitalServiceDialog(QDialog):
         except Exception as exc:
             logger.exception("Error crítico al guardar formulario digital: %s", exc)
             self._btn_save.setEnabled(True)
-            self._btn_save.setText("💾   Guardar y Finalizar Servicio")
+            self._btn_save.setText(" Guardar y Finalizar Servicio")
             QMessageBox.critical(
                 self, "Error al Guardar",
                 f"Ocurrió un error inesperado al guardar:\n\n{exc}\n\n"

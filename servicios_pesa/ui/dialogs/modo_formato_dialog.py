@@ -72,7 +72,8 @@ class ModoFormatoDialog(QDialog):
 
         self.setWindowTitle(f"Nueva {self._TIPO_LABELS.get(tipo_formato, tipo_formato)} — Modo de Trabajo")
         self.setModal(True)
-        self.setFixedSize(520, 560)
+        self.setMinimumSize(540, 540)
+        self.resize(560, 580)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint)
 
         self._build_ui()
@@ -86,30 +87,29 @@ class ModoFormatoDialog(QDialog):
         main.setContentsMargins(0, 0, 0, 0)
         main.setSpacing(0)
 
-        # ── Cabecera roja ──────────────────────────────────────────────────────
+        # ── Cabecera corporativa Apple ─────────────────────────────────────────
         header = QFrame()
         header.setObjectName("dlg_header")
-        header.setFixedHeight(80)
+        header.setMinimumHeight(76)
         h_lay = QVBoxLayout(header)
-        h_lay.setContentsMargins(30, 0, 30, 0)
+        h_lay.setContentsMargins(28, 16, 28, 16)
+        h_lay.setSpacing(4)
 
         tipo_label = self._TIPO_LABELS.get(self._tipo, self._tipo)
         lbl_h1 = QLabel(f"Nueva {tipo_label}")
         lbl_h1.setObjectName("h1")
         lbl_h2 = QLabel("Selecciona la modalidad de trabajo para este formato")
         lbl_h2.setObjectName("h2")
-        h_lay.addStretch()
         h_lay.addWidget(lbl_h1)
         h_lay.addWidget(lbl_h2)
-        h_lay.addStretch()
         main.addWidget(header)
 
         # ── Cuerpo ────────────────────────────────────────────────────────────
         body = QFrame()
         body.setObjectName("dlg_body")
         body_lay = QVBoxLayout(body)
-        body_lay.setContentsMargins(30, 24, 30, 24)
-        body_lay.setSpacing(20)
+        body_lay.setContentsMargins(28, 22, 28, 22)
+        body_lay.setSpacing(16)
 
         # ── Selector de modalidad ─────────────────────────────────────────────
         lbl_modo = QLabel("Modalidad de trabajo:")
@@ -119,15 +119,15 @@ class ModoFormatoDialog(QDialog):
         modes_row = QHBoxLayout()
         modes_row.setSpacing(14)
 
-        self.card_fisico  = self._make_mode_card(
+        self.card_fisico = self._make_mode_card(
             "FÍSICO",
-            "🖨️",
+            "IMPRESIÓN",
             "Impresión en papel calca.\nEl técnico llena el formato\na mano en campo.",
             "FISICO",
         )
         self.card_digital = self._make_mode_card(
             "DIGITAL",
-            "📱",
+            "TABLET / MÓVIL",
             "El formato se sincroniza\na la tablet del técnico.\nFirmas digitales en campo.",
             "DIGITAL",
         )
@@ -148,11 +148,11 @@ class ModoFormatoDialog(QDialog):
 
         self.cmb_tecnico = QComboBox()
         self.cmb_tecnico.setObjectName("cmb_tecnico")
-        self.cmb_tecnico.setFixedHeight(42)
+        self.cmb_tecnico.setFixedHeight(38)
         self.cmb_tecnico.setPlaceholderText("— Seleccionar técnico —")
         body_lay.addWidget(self.cmb_tecnico)
 
-        self.lbl_tec_info = QLabel("ℹ️  Requerido para modo DIGITAL. Opcional para FÍSICO.")
+        self.lbl_tec_info = QLabel("Requerido para modo DIGITAL. Opcional para FÍSICO.")
         self.lbl_tec_info.setObjectName("lbl_tec_info")
         body_lay.addWidget(self.lbl_tec_info)
 
@@ -160,7 +160,7 @@ class ModoFormatoDialog(QDialog):
         self.lbl_nota = QLabel("")
         self.lbl_nota.setObjectName("lbl_nota")
         self.lbl_nota.setWordWrap(True)
-        self.lbl_nota.setMinimumHeight(40)
+        self.lbl_nota.setMinimumHeight(44)
         body_lay.addWidget(self.lbl_nota)
 
         body_lay.addStretch()
@@ -171,12 +171,12 @@ class ModoFormatoDialog(QDialog):
 
         self.btn_cancel = QPushButton("Cancelar")
         self.btn_cancel.setObjectName("btn_cancel")
-        self.btn_cancel.setFixedHeight(42)
+        self.btn_cancel.setFixedHeight(38)
         self.btn_cancel.clicked.connect(self.reject)
 
-        self.btn_confirm = QPushButton("✓  Crear Formato")
+        self.btn_confirm = QPushButton("Crear Formato")
         self.btn_confirm.setObjectName("btn_confirm")
-        self.btn_confirm.setFixedHeight(42)
+        self.btn_confirm.setFixedHeight(38)
         self.btn_confirm.clicked.connect(self._on_confirm)
 
         btn_row.addWidget(self.btn_cancel)
@@ -188,23 +188,23 @@ class ModoFormatoDialog(QDialog):
         # Seleccionar FÍSICO por defecto
         self._select_mode("FISICO")
 
-    def _make_mode_card(self, title: str, icon: str, desc: str, mode: str) -> QFrame:
-        """Crea una tarjeta seleccionable para la modalidad."""
+    def _make_mode_card(self, title: str, tag: str, desc: str, mode: str) -> QFrame:
+        """Crea una tarjeta seleccionable flexible sin altura rígida para evitar recortes."""
         card = QFrame()
         card.setObjectName(f"mode_card_{mode.lower()}")
         card.setProperty("mode", mode)
         card.setCursor(Qt.CursorShape.PointingHandCursor)
-        card.setFixedHeight(160)
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        card.setMinimumHeight(140)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.MinimumExpanding)
 
         lay = QVBoxLayout(card)
         lay.setContentsMargins(16, 16, 16, 16)
-        lay.setSpacing(8)
+        lay.setSpacing(6)
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        lbl_icon = QLabel(icon)
-        lbl_icon.setObjectName("card_icon")
-        lbl_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl_tag = QLabel(tag)
+        lbl_tag.setObjectName("card_tag")
+        lbl_tag.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         lbl_title = QLabel(title)
         lbl_title.setObjectName("card_title")
@@ -215,7 +215,7 @@ class ModoFormatoDialog(QDialog):
         lbl_desc.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lbl_desc.setWordWrap(True)
 
-        lay.addWidget(lbl_icon)
+        lay.addWidget(lbl_tag)
         lay.addWidget(lbl_title)
         lay.addWidget(lbl_desc)
 
@@ -225,146 +225,126 @@ class ModoFormatoDialog(QDialog):
 
     def _apply_styles(self) -> None:
         self.setStyleSheet(f"""
-            /* Ventana */
             QDialog {{
                 background: {_WHITE};
-                border-radius: 12px;
-                border: 1px solid #E5E7EB;
+                border-radius: 14px;
+                border: 1px solid #E5E5EA;
             }}
-
-            /* Cabecera */
+            QLabel {{
+                border: none;
+                background: transparent;
+            }}
             QFrame#dlg_header {{
-                background: {_RED};
-                border-radius: 12px 12px 0 0;
+                background: #1D1D1F;
+                border-top-left-radius: 14px;
+                border-top-right-radius: 14px;
+                border-bottom: 1px solid #2C2C2E;
             }}
             QLabel#h1 {{
-                color: white;
-                font-size: 18px;
+                color: #FFFFFF;
+                font-size: 17px;
                 font-weight: 700;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
             }}
             QLabel#h2 {{
-                color: rgba(255,255,255,0.8);
-                font-size: 11px;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                color: #AEAEB2;
+                font-size: 12px;
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
             }}
-
-            /* Cuerpo */
             QFrame#dlg_body {{
                 background: {_WHITE};
             }}
-
-            /* Labels de sección */
             QLabel#section_label {{
-                font-size: 13px;
-                font-weight: 700;
+                font-size: 12.5px;
+                font-weight: 600;
                 color: {_DARK};
-                font-family: 'Segoe UI', Arial, sans-serif;
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
             }}
-
-            /* Tarjetas de modo - inactivas */
-            QFrame[mode="FISICO"], QFrame[mode="DIGITAL"] {{
-                border: 2px solid #E5E7EB;
-                border-radius: 10px;
-                background: {_BG};
-            }}
-            QFrame[mode="FISICO"]:hover, QFrame[mode="DIGITAL"]:hover {{
-                border-color: {_RED};
-                background: #FFF5F5;
-            }}
-
-            /* Tarjeta activa - se pone via Python */
-            QFrame#mode_card_fisico_active, QFrame#mode_card_digital_active {{
-                border: 2.5px solid {_RED};
-                border-radius: 10px;
-                background: #FEF2F2;
-            }}
-
-            /* Ícono de tarjeta */
-            QLabel#card_icon {{
-                font-size: 32px;
+            QLabel#card_tag {{
+                font-size: 10px;
+                font-weight: 700;
+                letter-spacing: 0.6px;
+                color: {_RED};
+                background: #F2F2F7;
+                border-radius: 6px;
+                padding: 3px 8px;
             }}
             QLabel#card_title {{
                 font-size: 14px;
                 font-weight: 700;
                 color: {_DARK};
-                font-family: 'Segoe UI', Arial, sans-serif;
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
             }}
             QLabel#card_desc {{
-                font-size: 10px;
+                font-size: 11px;
                 color: {_GRAY};
-                font-family: 'Segoe UI', Arial, sans-serif;
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
             }}
-
-            /* Separador */
             QFrame#separator {{
-                color: #E5E7EB;
+                color: #E5E5EA;
+                background: #E5E5EA;
+                max-height: 1px;
             }}
-
-            /* ComboBox */
             QComboBox#cmb_tecnico {{
-                border: 1.5px solid #D1D5DB;
-                border-radius: 8px;
-                padding: 8px 12px;
+                border: 1px solid #D2D2D7;
+                border-radius: 10px;
+                padding: 6px 12px;
                 font-size: 13px;
                 color: {_DARK};
-                background: {_BG};
-                font-family: 'Segoe UI', Arial, sans-serif;
+                background: {_WHITE};
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
             }}
             QComboBox#cmb_tecnico:focus {{
-                border-color: {_RED};
+                border: 1.5px solid {_RED};
             }}
             QComboBox#cmb_tecnico::drop-down {{
                 border: none;
-                width: 30px;
+                width: 28px;
             }}
-
-            /* Info técnico */
             QLabel#lbl_tec_info {{
-                font-size: 10px;
-                color: {_GRAY};
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }}
-
-            /* Nota */
-            QLabel#lbl_nota {{
                 font-size: 11px;
-                color: #374151;
-                background: #F3F4F6;
-                border-radius: 6px;
-                padding: 8px 12px;
-                font-family: 'Segoe UI', Arial, sans-serif;
-            }}
-
-            /* Botón cancelar */
-            QPushButton#btn_cancel {{
-                border: 1.5px solid #D1D5DB;
-                border-radius: 8px;
-                background: {_WHITE};
                 color: {_GRAY};
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+            }}
+            QLabel#lbl_nota {{
+                font-size: 11.5px;
+                color: {_DARK};
+                background: #F5F5F7;
+                border: 1px solid #E5E5EA;
+                border-radius: 10px;
+                padding: 10px 12px;
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+            }}
+            QPushButton#btn_cancel {{
+                border: 1px solid #D2D2D7;
+                border-radius: 10px;
+                background: {_WHITE};
+                color: {_DARK};
                 font-size: 13px;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                font-weight: 500;
+                padding: 0 16px;
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
             }}
             QPushButton#btn_cancel:hover {{
-                background: #F9FAFB;
-                border-color: #9CA3AF;
+                background: #F2F2F7;
+                border-color: #8E8E93;
             }}
-
-            /* Botón confirmar */
             QPushButton#btn_confirm {{
                 background: {_RED};
-                color: white;
+                color: #FFFFFF;
                 border: none;
-                border-radius: 8px;
+                border-radius: 10px;
                 font-size: 13px;
-                font-weight: 700;
-                font-family: 'Segoe UI', Arial, sans-serif;
+                font-weight: 600;
+                padding: 0 18px;
+                font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
             }}
             QPushButton#btn_confirm:hover {{
-                background: #B91C1C;
+                background: #A60D26;
             }}
             QPushButton#btn_confirm:disabled {{
-                background: #9CA3AF;
+                background: #E5E5EA;
+                color: #8E8E93;
             }}
         """)
 
@@ -374,7 +354,7 @@ class ModoFormatoDialog(QDialog):
         """Cambia la tarjeta activa y actualiza la nota informativa."""
         self._selected_mode = mode
 
-        # Resetear estilos de ambas tarjetas
+        # Resetear estilos de ambas tarjetas (Apple Minimalist — sin rosados pastel)
         for card, m in [(self.card_fisico, "FISICO"), (self.card_digital, "DIGITAL")]:
             cid = f"modo_card_{m.lower()}"
             card.setObjectName(cid)
@@ -382,36 +362,39 @@ class ModoFormatoDialog(QDialog):
                 card.setStyleSheet(f"""
                     QFrame#{cid} {{
                         border: 2px solid {_RED};
-                        border-radius: 10px;
-                        background: #FFF5F6;
+                        border-radius: 12px;
+                        background: #FFFFFF;
                     }}
                     QFrame#{cid} QLabel {{ border: none; background: transparent; }}
+                    QFrame#{cid} QLabel#card_tag {{ background: #F2F2F7; color: {_RED}; border-radius: 6px; padding: 3px 8px; }}
                 """)
             else:
                 card.setStyleSheet(f"""
                     QFrame#{cid} {{
-                        border: 1.5px solid #E5E7EB;
-                        border-radius: 10px;
-                        background: #FFFFFF;
+                        border: 1px solid #E5E5EA;
+                        border-radius: 12px;
+                        background: #F5F5F7;
                     }}
                     QFrame#{cid}:hover {{
-                        border-color: {_RED};
-                        background: #F8FAFC;
+                        border-color: #8E8E93;
+                        background: #FFFFFF;
                     }}
                     QFrame#{cid} QLabel {{ border: none; background: transparent; }}
+                    QFrame#{cid} QLabel#card_tag {{ background: #E5E5EA; color: #6E6E73; border-radius: 6px; padding: 3px 8px; }}
                 """)
 
+        self.lbl_nota.setStyleSheet("")
         if mode == "FISICO":
             self.lbl_nota.setText(
-                "📄  Se generará e imprimirá el PDF en papel calca. "
-                "El técnico completa el formato a mano y debe entregar el original "
+                "Se generará e imprimirá el PDF en papel calca. "
+                "El técnico completa el formato a mano y entrega el original "
                 "firmado para escanearlo y cerrarlo en el sistema."
             )
         else:
             self.lbl_nota.setText(
-                "📱  El formato se enviará a la tablet del técnico seleccionado. "
-                "El técnico puede trabajar sin conexión. Las firmas digitales se "
-                "capturan en campo y se sincronizan al conectarse al WiFi de la oficina."
+                "El formato se enviará a la tablet del técnico seleccionado. "
+                "El técnico puede trabajar sin conexión y las firmas digitales se "
+                "capturan en campo y sincronizan al conectarse."
             )
 
     def _load_tecnicos(self) -> None:
@@ -437,8 +420,7 @@ class ModoFormatoDialog(QDialog):
 
         try:
             from psycopg2.extras import RealDictCursor as _RDC
-            conn = _db_pool.get_connection()
-            try:
+            with _db_pool.transaction() as conn:
                 with conn.cursor(cursor_factory=_RDC) as cur:
                     cur.execute(
                         """
@@ -449,18 +431,15 @@ class ModoFormatoDialog(QDialog):
                         """
                     )
                     rows = cur.fetchall()
-                conn.commit()
-            finally:
-                _db_pool.release_connection(conn)
             for row in rows:
-                _id  = int(row["id"])               # garantizar entero numérico
+                _id  = int(row["id"])
                 _nom = str(row["nombre_completo"] or "")
                 self.cmb_tecnico.addItem(_nom, _id)
                 self._tecnicos.append({"id": _id, "nombre_completo": _nom})
             logger.info("[MODO_FORMATO] %d técnicos cargados desde BD", len(rows))
         except Exception as exc:
             logger.error("Error cargando técnicos en ModoFormatoDialog: %s", exc)
-            self.cmb_tecnico.addItem("⚠ Error al cargar técnicos", None)
+            self.cmb_tecnico.addItem("Error al cargar técnicos", None)
 
     def _on_confirm(self) -> None:
         """Valida y acepta el diálogo."""
@@ -473,11 +452,11 @@ class ModoFormatoDialog(QDialog):
         # Validación: para DIGITAL el técnico es obligatorio
         if mode == "DIGITAL" and id_tecnico is None:
             self.lbl_nota.setText(
-                "⚠️  Para el modo DIGITAL debes seleccionar un técnico."
+                "Para el modo DIGITAL debes seleccionar un técnico asignado."
             )
             self.lbl_nota.setStyleSheet(
-                "color: #CC1F1F; background: #FEF2F2; border-radius: 6px; "
-                "padding: 8px 12px; font-size: 11px;"
+                "color: #C8102E; background: #F5F5F7; border: 1px solid #C8102E; "
+                "border-radius: 10px; padding: 10px 12px; font-size: 11.5px; font-weight: 600;"
             )
             return
 

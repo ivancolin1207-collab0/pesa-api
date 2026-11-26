@@ -449,25 +449,10 @@ async def sync_pull(
     from pesa_api.core.email_service import _ensure_email_columns, formatear_fecha_hora_mexico
     await _ensure_email_columns(db)
 
-    def _norm_role(r: str) -> str:
-        if not r:
-            return ""
-        nfkd = unicodedata.normalize('NFKD', str(r))
-        return "".join(c for c in nfkd if not unicodedata.combining(c)).lower().strip()
+    from pesa_api.core.security import es_admin, tiene_visibilidad_global
 
-    role       = str(current_user.get("role", "")).strip()
-    role_raw_l = role.lower().strip()
-    role_norm  = _norm_role(role)
     id_tecnico = current_user.get("id_tecnico") or current_user.get("id")
-
-    username_clean = str(current_user.get("username", "")).strip().lower()
-    _ADMIN_EXACT = {"admin", "administrador", "superadmin", "jefe", "gerente", "direccion", "gerencia", "logistica", "recepcion"}
-    is_admin = (
-        role_raw_l in _ADMIN_EXACT
-        or role_norm in _ADMIN_EXACT
-        or any(ar in role_norm for ar in ("admin", "superadmin", "gerencia", "jefe", "gerente", "logist", "recep"))
-        or username_clean == "ivancolin1207"
-    )
+    is_admin = es_admin(current_user) or tiene_visibilidad_global(current_user)
 
     q_clean = str(q).strip() if q and str(q).strip() else None
 

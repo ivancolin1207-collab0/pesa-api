@@ -190,7 +190,7 @@ class PrimaryButton(QPushButton):
 
 
 class SecondaryButton(QPushButton):
-    """Botón secundario neutro (#FFFFFF, borde #CBD5E1, texto #111827)."""
+    """Botón secundario neutro (#FFFFFF, borde #D2D2D7, texto #1D1D1F)."""
 
     def __init__(self, text: str = "", height: int = 36, parent: Optional[QWidget] = None):
         super().__init__(text, parent if isinstance(parent, QWidget) else None)
@@ -210,20 +210,20 @@ class OverflowMenuButton(QPushButton):
         self.setStyleSheet("""
             QPushButton {
                 background-color: #FFFFFF;
-                color: #4B5563;
-                border: 1px solid #CBD5E1;
-                border-radius: 6px;
+                color: #6E6E73;
+                border: 1px solid #D2D2D7;
+                border-radius: 8px;
                 font-size: 14px;
                 font-weight: 700;
                 padding: 0px;
             }
             QPushButton:hover {
-                background-color: #F8FAFC;
-                color: #111827;
-                border-color: #9CA3AF;
+                background-color: #F2F2F7;
+                color: #1D1D1F;
+                border-color: #8E8E93;
             }
             QPushButton:pressed {
-                background-color: #F3F4F6;
+                background-color: #E5E5EA;
             }
             QPushButton::menu-indicator { image: none; width: 0px; }
         """)
@@ -231,8 +231,8 @@ class OverflowMenuButton(QPushButton):
 
 class StatusBadge(QWidget):
     """
-    Etiqueta de estado neutra (#F8FAFC, borde 1px #CBD5E1, texto #111827)
-    con un punto semántico circular de 6px (#16A34A, #D97706, #C8102E o neutro).
+    Etiqueta de estado neutra (#F2F2F7, borde 1px #E5E5EA, texto #1D1D1F)
+    con un punto semántico circular de 6px (#34C759, #FF9500, #C8102E o neutro).
     Renderizado directo con QPainter usando exclusivamente QRectF.
     """
 
@@ -355,7 +355,7 @@ class LinearProgressBar(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         w = float(self.width())
         h = float(self.height())
-        p.fillRect(QRectF(0.0, 0.0, w, h), QColor("#E5E7EB"))
+        p.fillRect(QRectF(0.0, 0.0, w, h), QColor("#E5E5EA"))
         bar_w = max(40.0, w * 0.28)
         x = (self._pos - 0.30) * w
         p.fillRect(QRectF(x, 0.0, bar_w, h), QColor(PALETTE["brand"]))
@@ -387,8 +387,8 @@ class ToastNotification(QFrame):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         self.setStyleSheet("""
             QFrame#pesa_toast {
-                background-color: #111827;
-                border: 1px solid #374151;
+                background-color: #1D1D1F;
+                border: 1px solid #3A3A3C;
                 border-radius: 10px;
             }
         """)
