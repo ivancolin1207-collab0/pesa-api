@@ -11,6 +11,8 @@ import 'package:provider/provider.dart';
 
 import 'package:pesa_tablet/screens/login_screen.dart';
 import 'package:pesa_tablet/screens/mi_firma_screen.dart';
+import 'package:pesa_tablet/screens/nuevo_doc_screen.dart';
+import 'package:pesa_tablet/services/api_service.dart';
 import 'package:pesa_tablet/services/auth_service.dart';
 import 'package:pesa_tablet/services/metrology_helper.dart';
 import 'package:pesa_tablet/services/sync_service.dart';
@@ -149,6 +151,30 @@ void main() {
       testWidgets('MiFirmaScreen sin overflow en ${entry.key}', (tester) async {
         await verifyNoOverflowAtSize(tester, entry.value, const MiFirmaScreen());
         expect(find.byType(MiFirmaScreen), findsOneWidget);
+      });
+
+      testWidgets('NuevoDocScreen 4 pasos y Enlaces Sustitución sin overflow en ${entry.key}', (tester) async {
+        ApiService.instance.injectToken('eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJyb2xlIjoiYWRtaW4ifQ.sig');
+        await verifyNoOverflowAtSize(tester, entry.value, const NuevoDocScreen());
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('Modalidad de Trabajo'), findsOneWidget);
+        expect(find.text('Tipo de Documento'), findsOneWidget);
+        expect(find.text('Parámetros del Formato y Equipos'), findsOneWidget);
+        expect(find.text('Confirmar Folios y Ejecutar'), findsOneWidget);
+        expect(find.textContaining('OS-26-XXX'), findsNothing);
+
+        // Desactivar Excentricidad -> debe aparecer Motivo No Aplica y bloque Enlaces de Sustitución
+        final excFinder = find.byKey(const ValueKey('aplica_exc_0'));
+        await tester.ensureVisible(excFinder);
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.tap(excFinder);
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.tap(find.text('NO').last);
+        await tester.pump(const Duration(milliseconds: 350));
+
+        expect(find.byKey(const ValueKey('enlaces_sustitucion_card_0')), findsOneWidget);
+        expect(find.textContaining('NOM-010-SCFI / OIML R 76'), findsOneWidget);
+        expect(find.text('3 enlaces'), findsOneWidget);
       });
     }
   });

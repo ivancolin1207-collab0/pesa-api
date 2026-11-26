@@ -88,7 +88,17 @@ class LocalDbService {
       hologramas             TEXT,
       funcionamiento         TEXT,
       puntos_apoyo           INTEGER DEFAULT 4,
+      filas_excentricidad    INTEGER DEFAULT 5,
+      puntos_excentricidad   INTEGER DEFAULT 5,
+      puntos_exactitud       INTEGER DEFAULT 5,
+      geometria_puntos       TEXT,
       usa_sustitucion        INTEGER DEFAULT 0,
+      aplica_sustitucion     INTEGER DEFAULT 0,
+      aplica_enlaces_sustitucion INTEGER DEFAULT 0,
+      cantidad_enlaces       INTEGER,
+      num_enlaces_sustitucion INTEGER,
+      inicial_calibrador     TEXT,
+      dve                    TEXT,
       masa_patron_disponible REAL,
       factor_sustitucion     REAL,
       instrumento_capacidad  TEXT,
@@ -386,7 +396,17 @@ class LocalDbService {
             'hologramas': 'TEXT',
             'funcionamiento': 'TEXT',
             'puntos_apoyo': 'INTEGER DEFAULT 4',
+            'filas_excentricidad': 'INTEGER DEFAULT 5',
+            'puntos_excentricidad': 'INTEGER DEFAULT 5',
+            'puntos_exactitud': 'INTEGER DEFAULT 5',
+            'geometria_puntos': 'TEXT',
             'usa_sustitucion': 'INTEGER DEFAULT 0',
+            'aplica_sustitucion': 'INTEGER DEFAULT 0',
+            'aplica_enlaces_sustitucion': 'INTEGER DEFAULT 0',
+            'cantidad_enlaces': 'INTEGER',
+            'num_enlaces_sustitucion': 'INTEGER',
+            'inicial_calibrador': 'TEXT',
+            'dve': 'TEXT',
             'masa_patron_disponible': 'REAL',
             'factor_sustitucion': 'REAL',
             'instrumento_capacidad': 'TEXT',
@@ -1013,7 +1033,37 @@ class LocalDbService {
           if (_toIntOrNull(raw['sucursal_id'] ?? raw['id_sucursal']) != null)
             'sucursal_id': _toIntOrNull(raw['sucursal_id'] ?? raw['id_sucursal']),
           'holograma_anterior': raw['holograma_anterior']?.toString(),
-          'usa_sustitucion': _toBoolInt(raw['usa_sustitucion']) > 0 || (raw['datos_tecnicos_json'] != null && raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion":true')) || (raw['datos_tecnicos_json'] != null && raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion": true')) ? 1 : 0,
+          'filas_excentricidad': _toInt(raw['filas_excentricidad'] ?? raw['puntos_excentricidad'] ?? raw['puntos_apoyo'], 5),
+          'puntos_excentricidad': _toInt(raw['puntos_excentricidad'] ?? raw['filas_excentricidad'] ?? raw['puntos_apoyo'], 5),
+          'puntos_exactitud': _toInt(raw['puntos_exactitud'] ?? raw['pts_exactitud'] ?? raw['filas_exactitud'], 5),
+          'geometria_puntos': (raw['geometria_puntos'] ?? raw['geometria_plataforma'] ?? raw['geometria_excentricidad'])?.toString(),
+          'geometria_plataforma': (raw['geometria_plataforma'] ?? raw['geometria_puntos'] ?? raw['geometria_excentricidad'])?.toString(),
+          'usa_sustitucion': (_toBoolInt(raw['usa_sustitucion']) > 0 ||
+                  _toBoolInt(raw['aplica_sustitucion']) > 0 ||
+                  _toBoolInt(raw['aplica_enlaces_sustitucion']) > 0 ||
+                  (raw['datos_tecnicos_json'] != null &&
+                      (raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion":true') ||
+                          raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion": true') ||
+                          raw['datos_tecnicos_json'].toString().contains('"aplica_enlaces_sustitucion":true') ||
+                          raw['datos_tecnicos_json'].toString().contains('"aplica_enlaces_sustitucion": true'))))
+              ? 1
+              : 0,
+          'aplica_sustitucion': (_toBoolInt(raw['aplica_sustitucion']) > 0 ||
+                  _toBoolInt(raw['usa_sustitucion']) > 0 ||
+                  _toBoolInt(raw['aplica_enlaces_sustitucion']) > 0)
+              ? 1
+              : 0,
+          'aplica_enlaces_sustitucion': (_toBoolInt(raw['aplica_enlaces_sustitucion']) > 0 ||
+                  _toBoolInt(raw['aplica_sustitucion']) > 0 ||
+                  _toBoolInt(raw['usa_sustitucion']) > 0)
+              ? 1
+              : 0,
+          if (_toIntOrNull(raw['cantidad_enlaces'] ?? raw['num_enlaces_sustitucion'] ?? raw['num_enlaces']) != null) ...{
+            'cantidad_enlaces': _toIntOrNull(raw['cantidad_enlaces'] ?? raw['num_enlaces_sustitucion'] ?? raw['num_enlaces']),
+            'num_enlaces_sustitucion': _toIntOrNull(raw['cantidad_enlaces'] ?? raw['num_enlaces_sustitucion'] ?? raw['num_enlaces']),
+          },
+          if (raw['inicial_calibrador'] != null) 'inicial_calibrador': raw['inicial_calibrador'].toString(),
+          if (raw['dve'] != null) 'dve': raw['dve'].toString(),
           'factor_sustitucion': _toDouble(raw['factor_sustitucion']),
           'holograma_actualizado': (raw['holograma_actualizado'] ?? raw['holograma_nuevo'])?.toString(),
           'pdf_url':           raw['pdf_url']?.toString(),
@@ -1107,6 +1157,31 @@ class LocalDbService {
               if ((mapped['id_equipo'] == null || mapped['id_equipo'].toString().trim().isEmpty) &&
                   dt['id_indicador'] != null && dt['id_indicador'].toString().trim().isNotEmpty) {
                 mapped['id_equipo'] = dt['id_indicador'].toString().trim();
+              }
+              final dtPuntosExc = _toIntOrNull(dt['puntos_excentricidad'] ?? dt['filas_excentricidad']);
+              if (dtPuntosExc != null && dtPuntosExc > 0) {
+                mapped['puntos_excentricidad'] = dtPuntosExc;
+                mapped['filas_excentricidad'] = dtPuntosExc;
+              }
+              final dtPuntosExac = _toIntOrNull(dt['puntos_exactitud'] ?? dt['pts_exactitud'] ?? dt['filas_exactitud']);
+              if (dtPuntosExac != null && dtPuntosExac > 0) {
+                mapped['puntos_exactitud'] = dtPuntosExac;
+              }
+              final dtGeo = (dt['geometria_puntos'] ?? dt['geometria_plataforma'] ?? dt['geometria_excentricidad'])?.toString().trim();
+              if (dtGeo != null && dtGeo.isNotEmpty) {
+                mapped['geometria_puntos'] = dtGeo;
+                mapped['geometria_plataforma'] = dtGeo;
+              }
+              if (dt['aplica_enlaces_sustitucion'] != null || dt['aplica_sustitucion'] != null || dt['usa_sustitucion'] != null) {
+                final bSust = _toBoolInt(dt['aplica_enlaces_sustitucion'] ?? dt['aplica_sustitucion'] ?? dt['usa_sustitucion']);
+                mapped['usa_sustitucion'] = bSust;
+                mapped['aplica_sustitucion'] = bSust;
+                mapped['aplica_enlaces_sustitucion'] = bSust;
+              }
+              final dtEnl = _toIntOrNull(dt['cantidad_enlaces'] ?? dt['num_enlaces_sustitucion'] ?? dt['num_enlaces']);
+              if (dtEnl != null && dtEnl > 0) {
+                mapped['cantidad_enlaces'] = dtEnl;
+                mapped['num_enlaces_sustitucion'] = dtEnl;
               }
             }
           } catch (_) {}
@@ -1447,6 +1522,24 @@ class LocalDbService {
       'instrumento_division':  data['instrumento_division']?.toString(),
       'secciones_camionera':   _toInt(data['secciones_camionera'] ?? data['num_celdas_camionera'], 0),
       'num_secciones':         _toInt(data['num_secciones'], 0),
+      'filas_excentricidad':   _toInt(data['filas_excentricidad'] ?? data['puntos_excentricidad'] ?? data['puntos_apoyo'], 5),
+      'puntos_excentricidad':  _toInt(data['puntos_excentricidad'] ?? data['filas_excentricidad'] ?? data['puntos_apoyo'], 5),
+      'puntos_exactitud':      _toInt(data['puntos_exactitud'] ?? data['pts_exactitud'] ?? data['filas_exactitud'], 5),
+      if ((data['geometria_puntos'] ?? data['geometria_plataforma'] ?? data['geometria_excentricidad']) != null) ...{
+        'geometria_puntos': (data['geometria_puntos'] ?? data['geometria_plataforma'] ?? data['geometria_excentricidad']).toString(),
+        'geometria_plataforma': (data['geometria_plataforma'] ?? data['geometria_puntos'] ?? data['geometria_excentricidad']).toString(),
+      },
+      if (data['usa_sustitucion'] != null || data['aplica_sustitucion'] != null || data['aplica_enlaces_sustitucion'] != null) ...{
+        'usa_sustitucion': _toBoolInt(data['usa_sustitucion'] ?? data['aplica_sustitucion'] ?? data['aplica_enlaces_sustitucion']),
+        'aplica_sustitucion': _toBoolInt(data['aplica_sustitucion'] ?? data['usa_sustitucion'] ?? data['aplica_enlaces_sustitucion']),
+        'aplica_enlaces_sustitucion': _toBoolInt(data['aplica_enlaces_sustitucion'] ?? data['aplica_sustitucion'] ?? data['usa_sustitucion']),
+      },
+      if (_toIntOrNull(data['cantidad_enlaces'] ?? data['num_enlaces_sustitucion'] ?? data['num_enlaces']) != null) ...{
+        'cantidad_enlaces': _toIntOrNull(data['cantidad_enlaces'] ?? data['num_enlaces_sustitucion'] ?? data['num_enlaces']),
+        'num_enlaces_sustitucion': _toIntOrNull(data['cantidad_enlaces'] ?? data['num_enlaces_sustitucion'] ?? data['num_enlaces']),
+      },
+      if (data['inicial_calibrador'] != null) 'inicial_calibrador': data['inicial_calibrador'].toString(),
+      if (data['dve'] != null) 'dve': data['dve'].toString(),
       // Offline-First v2 + Lotes
       'unidad_medida':     data['unidad_medida']?.toString() ?? 'kg',
       'id_lote':           (data['id_lote'] ?? data['lote'])?.toString() ?? '',
@@ -4979,6 +5072,46 @@ class LocalDbService {
     final db = await _ensureInit();
     await _asegurarTablasCatalogosAdmin(db);
     await db.delete('cola_cancelaciones', where: 'folio_os = ?', whereArgs: [folio.trim()]);
+  }
+
+  /// Fallback offline: calcula el siguiente folio consecutivo revisando SQLite local.
+  Future<Map<String, dynamic>> calcularSiguienteFolioLocal(String tipo) async {
+    final t = tipo.trim().toUpperCase().isEmpty ? 'OS' : tipo.trim().toUpperCase();
+    final anio = DateTime.now().year;
+    final yy = (anio % 100).toString().padLeft(2, '0');
+    final prefix = '$t-$yy-';
+    int maxNum = 0;
+    try {
+      final db = await _ensureInit();
+      final rows = await db.rawQuery(
+        'SELECT folio_os FROM ordenes_servicio WHERE UPPER(folio_os) LIKE ?',
+        ['$prefix%'],
+      );
+      for (final r in rows) {
+        final f = (r['folio_os'] ?? '').toString().trim().toUpperCase();
+        if (!f.startsWith(prefix)) continue;
+        final tail = f.substring(prefix.length);
+        final match = RegExp(r'^(\d+)').firstMatch(tail);
+        if (match != null) {
+          final n = int.tryParse(match.group(1)!) ?? 0;
+          if (n > maxNum) maxNum = n;
+        }
+      }
+    } catch (e) {
+      debugPrint('[LocalDB] calcularSiguienteFolioLocal error: $e');
+    }
+    final nextNum = maxNum + 1;
+    final numStr = (t == 'OSOB' || t == 'OSOCC')
+        ? nextNum.toString().padLeft(3, '0')
+        : nextNum.toString();
+    return {
+      'tipo': t,
+      'anio': anio,
+      'folio_inicial': '$prefix$numStr',
+      'consecutivo': nextNum,
+      'ultimo_consecutivo': maxNum,
+      'origen': 'offline_sqlite',
+    };
   }
 
   // ── UUID v4 simple ────────────────────────────────────────────────────────

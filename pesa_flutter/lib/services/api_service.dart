@@ -1588,6 +1588,35 @@ class ApiService {
     return false;
   }
 
+  // ── Siguiente Folio Consecutivo Real ──────────────────────────────────────
+
+  /// Consulta en vivo el siguiente folio consecutivo real en PostgreSQL
+  /// para el [tipo] solicitado (OS, RMA, RE, LP, LV, OSOB, OSOCC).
+  Future<Map<String, dynamic>?> getSiguienteFolio(String tipo) async {
+    final t = Uri.encodeQueryComponent(tipo.trim().toUpperCase());
+    final paths = <String>[
+      '/api/folios/siguiente?tipo=$t',
+      '/api/v1/folios/siguiente?tipo=$t',
+    ];
+    for (final path in paths) {
+      try {
+        final resp = await _getWithRetry(
+          Uri.parse('$_baseUrl$path'),
+          timeout: const Duration(seconds: 20),
+        );
+        if (resp.statusCode == 200) {
+          final decoded = jsonDecode(utf8.decode(resp.bodyBytes));
+          if (decoded is Map) {
+            return Map<String, dynamic>.from(decoded);
+          }
+        }
+      } catch (e) {
+        debugPrint('[API] getSiguienteFolio($path) falló: $e');
+      }
+    }
+    return null;
+  }
+
   // ── Crear Orden de Servicio ───────────────────────────────────────────────
 
   /// Crea una nueva Orden de Servicio (individual o lote, cualquiera de los 7 formatos) en el servidor.

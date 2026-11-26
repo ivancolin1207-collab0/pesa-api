@@ -2814,24 +2814,6 @@ class _OsListScreenState extends State<OsListScreen> {
     final auth        = context.watch<AuthService>();
     final hideTecnico = auth.isTecnico;
 
-    final dashboard = LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth < kFoldableCoverBreakpoint) {
-          return _MobilePhoneDashboard(
-            state: this,
-            sync: sync,
-            hideTecnico: hideTecnico,
-          );
-        } else {
-          return _FoldableMasterDetailDashboard(
-            state: this,
-            sync: sync,
-            hideTecnico: hideTecnico,
-          );
-        }
-      },
-    );
-
     final u = AuthService.usuarioActual;
     final String rol = (auth.role ?? u?.rol ?? '').toString().toLowerCase();
     final String nombre = (auth.displayName.isNotEmpty ? auth.displayName : (u?.nombre ?? '')).toString().toLowerCase();
@@ -2853,76 +2835,54 @@ class _OsListScreenState extends State<OsListScreen> {
     }
     final repoActivo = puedeVerRepositorio && _vistaRepositorio;
 
+    final dashboard = LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < kFoldableCoverBreakpoint) {
+          return _MobilePhoneDashboard(
+            state: this,
+            sync: sync,
+            hideTecnico: hideTecnico,
+            puedeVerRepositorio: puedeVerRepositorio,
+            vistaRepositorio: repoActivo,
+            onToggleRepositorio: (v) => setState(() => _vistaRepositorio = v),
+          );
+        } else {
+          return _FoldableMasterDetailDashboard(
+            state: this,
+            sync: sync,
+            hideTecnico: hideTecnico,
+            puedeVerRepositorio: puedeVerRepositorio,
+            vistaRepositorio: repoActivo,
+            onToggleRepositorio: (v) => setState(() => _vistaRepositorio = v),
+          );
+        }
+      },
+    );
+
     final content = Scaffold(
       backgroundColor: _kBgColor,
       body: SafeArea(
         bottom: false,
-        child: !puedeVerRepositorio
-            ? dashboard
-            : Column(
+        child: repoActivo
+            ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _selectorVista(repoActivo),
-                  Expanded(
-                    child: repoActivo
-                        ? const CalibracionesRepositorioView()
-                        : dashboard,
+                  _Header(
+                    sync: sync,
+                    onSync: () => _sincronizarOrdenesServidor(forceFull: true),
+                    onLongPressSync: () => _mostrarMenuSincronizacion(context),
+                    onRefresh: _loadLocal,
+                    puedeVerRepositorio: puedeVerRepositorio,
+                    vistaRepositorio: true,
+                    onToggleRepositorio: (v) => setState(() => _vistaRepositorio = v),
                   ),
+                  const Expanded(child: CalibracionesRepositorioView()),
                 ],
-              ),
+              )
+            : dashboard,
       ),
     );
     return AppShell(currentRoute: '/os', child: content);
-  }
-
-  Widget _selectorVista(bool repoActivo) {
-    final isAdmin = context.watch<AuthService>().isAdmin;
-    return LayoutBuilder(builder: (context, c) {
-      final compacto = c.maxWidth < kFoldableCoverBreakpoint;
-      final labelOrdenes = isAdmin
-          ? (compacto ? 'Órdenes' : 'Todas las Órdenes')
-          : (compacto ? 'Mis Órdenes' : 'Mis Órdenes Asignadas');
-      return Container(
-        color: _kBgColor,
-        padding: EdgeInsets.fromLTRB(compacto ? 12 : 24, 10, compacto ? 12 : 24, 4),
-        child: Align(
-          alignment: compacto ? Alignment.center : Alignment.centerLeft,
-          child: SegmentedButton<bool>(
-            key: const Key('os_vista_selector'),
-            showSelectedIcon: false,
-            segments: [
-              ButtonSegment<bool>(
-                value: false,
-                icon: const Icon(Icons.assignment_outlined, size: 17),
-                label: Text(labelOrdenes),
-              ),
-              ButtonSegment<bool>(
-                value: true,
-                icon: const Icon(Icons.folder_copy_outlined, size: 17),
-                label: Text(compacto ? 'Calibraciones' : 'Repositorio Calibraciones (Todos)'),
-              ),
-            ],
-            selected: {repoActivo},
-            onSelectionChanged: (s) => setState(() => _vistaRepositorio = s.first),
-            style: ButtonStyle(
-              visualDensity: VisualDensity.standard,
-              textStyle: const WidgetStatePropertyAll(
-                TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-              ),
-              backgroundColor: WidgetStateProperty.resolveWith((states) {
-                if (!states.contains(WidgetState.selected)) return Colors.white;
-                return _kCarmineRed;
-              }),
-              foregroundColor: WidgetStateProperty.resolveWith((states) =>
-                  states.contains(WidgetState.selected) ? Colors.white : _kTextPrim),
-              side: const WidgetStatePropertyAll(
-                BorderSide(color: _kBorder),
-              ),
-            ),
-          ),
-        ),
-      );
-    });
   }
 }
 
@@ -3198,11 +3158,17 @@ class _MobilePhoneDashboard extends StatelessWidget {
   final _OsListScreenState state;
   final SyncService sync;
   final bool hideTecnico;
+  final bool puedeVerRepositorio;
+  final bool vistaRepositorio;
+  final ValueChanged<bool>? onToggleRepositorio;
 
   const _MobilePhoneDashboard({
     required this.state,
     required this.sync,
     required this.hideTecnico,
+    this.puedeVerRepositorio = false,
+    this.vistaRepositorio = false,
+    this.onToggleRepositorio,
   });
 
   @override
@@ -3291,6 +3257,18 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       await context.push('/nuevo-doc');
                       await state._loadLocal();
                     },
+                  ),
+                if (puedeVerRepositorio && onToggleRepositorio != null)
+                  IconButton(
+                    key: const Key('os_vista_selector'),
+                    constraints: const BoxConstraints(minWidth: 44, minHeight: 48),
+                    icon: Icon(
+                      vistaRepositorio ? Icons.assignment_outlined : Icons.folder_copy_outlined,
+                      color: vistaRepositorio ? _kCarmineRed : _kTextPrim,
+                      size: 21,
+                    ),
+                    tooltip: vistaRepositorio ? 'Ver Órdenes' : 'Repositorio Calibraciones',
+                    onPressed: () => onToggleRepositorio!(!vistaRepositorio),
                   ),
               ],
             ),
@@ -4454,11 +4432,17 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
   final _OsListScreenState state;
   final SyncService sync;
   final bool hideTecnico;
+  final bool puedeVerRepositorio;
+  final bool vistaRepositorio;
+  final ValueChanged<bool>? onToggleRepositorio;
 
   const _FoldableMasterDetailDashboard({
     required this.state,
     required this.sync,
     required this.hideTecnico,
+    this.puedeVerRepositorio = false,
+    this.vistaRepositorio = false,
+    this.onToggleRepositorio,
   });
 
   @override
@@ -4481,6 +4465,9 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
           onSync: () => state._sincronizarOrdenesServidor(forceFull: true),
           onLongPressSync: () => state._mostrarMenuSincronizacion(context),
           onRefresh: state._loadLocal,
+          puedeVerRepositorio: puedeVerRepositorio,
+          vistaRepositorio: vistaRepositorio,
+          onToggleRepositorio: onToggleRepositorio,
         ),
         if (state._searchingRemote)
           const LinearProgressIndicator(
@@ -5785,18 +5772,24 @@ class _Header extends StatelessWidget {
   final VoidCallback onSync;
   final VoidCallback? onLongPressSync;
   final VoidCallback onRefresh;
+  final bool puedeVerRepositorio;
+  final bool vistaRepositorio;
+  final ValueChanged<bool>? onToggleRepositorio;
   const _Header({
     required this.sync,
     required this.onSync,
     this.onLongPressSync,
     required this.onRefresh,
+    this.puedeVerRepositorio = false,
+    this.vistaRepositorio = false,
+    this.onToggleRepositorio,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(16, 10, 12, 10),
+      padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
       decoration: const BoxDecoration(
         color: _kCardBg,
         border: Border(bottom: BorderSide(color: _kBorder)),
@@ -5804,35 +5797,51 @@ class _Header extends StatelessWidget {
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.menu_rounded, color: _kTextPrim, size: 24),
+            icon: const Icon(Icons.menu_rounded, color: _kTextPrim, size: 22),
             tooltip: 'Alternar menú lateral',
             onPressed: () => AppShell.toggleMenu(context),
           ),
           const SizedBox(width: 4),
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: _kCarmineRed, borderRadius: BorderRadius.circular(8)),
-            child: const Icon(Icons.scale, color: Colors.white, size: 20),
-          ),
-          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  'Resumen Operativo de Servicios',
-                  style: TextStyle(color: _kTextPrim, fontWeight: FontWeight.w800, fontSize: 15),
+                Text(
+                  vistaRepositorio ? 'Repositorio de Calibraciones' : 'Resumen Operativo de Servicios',
+                  style: const TextStyle(color: _kTextPrim, fontWeight: FontWeight.w700, fontSize: 15.5),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   sync.syncSummaryLabel,
-                  style: const TextStyle(color: _kTextSec, fontSize: 11),
+                  style: const TextStyle(color: _kTextSec, fontSize: 11.5),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
+          if (puedeVerRepositorio && onToggleRepositorio != null) ...[
+            OutlinedButton.icon(
+              key: const Key('os_vista_selector'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: vistaRepositorio ? Colors.white : _kTextPrim,
+                backgroundColor: vistaRepositorio ? _kCarmineRed : Colors.white,
+                side: BorderSide(color: vistaRepositorio ? _kCarmineRed : _kBorder),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              ),
+              onPressed: () => onToggleRepositorio!(!vistaRepositorio),
+              icon: Icon(
+                vistaRepositorio ? Icons.assignment_outlined : Icons.folder_copy_outlined,
+                size: 14,
+              ),
+              label: Text(
+                vistaRepositorio ? 'Ver Órdenes' : 'Calibraciones',
+                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 6),
+          ],
           _SyncChip(sync: sync),
           const SizedBox(width: 6),
           OutlinedButton.icon(
@@ -5840,10 +5849,9 @@ class _Header extends StatelessWidget {
               foregroundColor: _kTextPrim,
               side: const BorderSide(color: _kBorder),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             ),
             onPressed: () {
-              // [FIX-CUELGUE] Si está trabado, forzar reset antes de reintentar
               if (sync.state == SyncState.syncing) {
                 sync.forceResetSync();
               } else {
@@ -5856,23 +5864,11 @@ class _Header extends StatelessWidget {
                     width: 13, height: 13,
                     child: CircularProgressIndicator(strokeWidth: 2, color: _kCarmineRed),
                   )
-                : const Icon(Icons.sync, size: 15),
+                : const Icon(Icons.sync_rounded, size: 15),
             label: Text(
-              sync.state == SyncState.syncing ? 'Cancelar' : 'Sincronizar ahora',
-              style: const TextStyle(fontSize: 11),
+              sync.state == SyncState.syncing ? 'Cancelar' : 'Sincronizar',
+              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600),
             ),
-          ),
-          const SizedBox(width: 4),
-          OutlinedButton(
-            style: OutlinedButton.styleFrom(
-              foregroundColor: _kTextPrim,
-              side: const BorderSide(color: _kBorder),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-              minimumSize: Size.zero,
-            ),
-            onPressed: onRefresh,
-            child: const Icon(Icons.refresh, size: 16),
           ),
           Builder(builder: (ctx) {
             final isTecnico = ctx.watch<AuthService>().isTecnico;
@@ -5880,22 +5876,23 @@ class _Header extends StatelessWidget {
             return Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(width: 4),
+                const SizedBox(width: 6),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _kCarmineRed,
                     foregroundColor: Colors.white,
+                    elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                   ),
                   onPressed: () async {
                     await context.push('/nuevo-doc');
                     onRefresh();
                   },
-                  icon: const Icon(Icons.add, size: 14),
+                  icon: const Icon(Icons.add_rounded, size: 15),
                   label: const Text(
-                    '+ Nuevo Documento',
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+                    'Nuevo Documento',
+                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700),
                   ),
                 ),
               ],

@@ -559,9 +559,11 @@ class PdfService {
     // (fallback usa_sustitucion si no existe). es_sustitucion / es_enlace_sustitucion
     // pueden quedar 'pegadas' tras cambiar el tipo en captura y ya no se consideran.
     final bool esTanque = (osData['tipo_instrumento']?.toString().toLowerCase().contains('tanque') ?? false);
-    final rawSust = osData.containsKey('aplica_sustitucion') && osData['aplica_sustitucion'] != null
-        ? osData['aplica_sustitucion']
-        : osData['usa_sustitucion'];
+    final rawSust = osData.containsKey('aplica_enlaces_sustitucion') && osData['aplica_enlaces_sustitucion'] != null
+        ? osData['aplica_enlaces_sustitucion']
+        : (osData.containsKey('aplica_sustitucion') && osData['aplica_sustitucion'] != null
+            ? osData['aplica_sustitucion']
+            : osData['usa_sustitucion']);
     final String sSust = rawSust?.toString().trim().toUpperCase() ?? '';
     final bool aplicaSustitucion = rawSust == true || rawSust == 1 ||
         sSust == '1' || sSust == 'TRUE' || sSust == 'SI' || sSust == 'SÍ';
@@ -1341,7 +1343,7 @@ class PdfService {
   }
 
   int _numEnlacesConfigurados(Map<String, dynamic> os, int fallbackLen) {
-    for (final k in ['num_enlaces_sustitucion', 'num_enlaces', 'pts_exactitud']) {
+    for (final k in ['cantidad_enlaces', 'num_enlaces_sustitucion', 'num_enlaces', 'pts_exactitud']) {
       final v = int.tryParse(os[k]?.toString() ?? '');
       if (v != null && v > 0) return v;
     }

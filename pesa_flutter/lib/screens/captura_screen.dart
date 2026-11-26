@@ -138,7 +138,11 @@ class _CapturaScreenState extends State<CapturaScreen>
     return false;
   }
   bool get _aplicaSustitucion =>
-      _usaSustitucion && (_hasValidSustitutos || _pesoSustituto != null || _factorSustituto != null);
+      _usaSustitucion &&
+      (_hasValidSustitutos ||
+          _pesoSustituto != null ||
+          _factorSustituto != null ||
+          _exacRows.any((r) => (r['enlace'] ?? r['carga_patron'] ?? r['carga']) != null));
 
   // ── Controladores Paso 0 — Instrumento ───────────────────────────────────
   final _marcaCtrl      = TextEditingController();
@@ -172,6 +176,7 @@ class _CapturaScreenState extends State<CapturaScreen>
   int     _numSeccionesExc = 4;              // para Camionera (3, 4, 5, 6...)
   bool    _jChecked = false, _iChecked = false, _aChecked = false;
   bool    _usaSustitucion = false;
+  int     _numEnlacesSustitucion = 5;
   bool?   _aplExcOverride;  // null = auto-determinar por instrumento
   String  _motivoNoExcentricidad = 'Tolva'; // Grúa | Patín | Tanque | Tolva | Silo
 
@@ -573,11 +578,37 @@ class _CapturaScreenState extends State<CapturaScreen>
     final bool isPatin  = tLowInit.contains('patin') || tLowInit.contains('patín') || tLowInit.contains('transpaleta');
     final bool isTolva  = tLowInit.contains('tolva');
 
+    Map<String, dynamic> dtInit = const {};
+    try {
+      final rawDt = _os['datos_tecnicos_json'];
+      if (rawDt is String && rawDt.trim().isNotEmpty) {
+        final dec = jsonDecode(rawDt);
+        if (dec is Map) dtInit = Map<String, dynamic>.from(dec);
+      } else if (rawDt is Map) {
+        dtInit = Map<String, dynamic>.from(rawDt);
+      }
+    } catch (_) {}
+
     _usaSustitucion = _asBool(_os['usa_sustitucion']) ||
                       _asBool(_os['es_sustitucion']) ||
                       _asBool(_os['es_enlace_sustitucion']) ||
                       _asBool(_os['aplica_sustitucion']) ||
+                      _asBool(_os['aplica_enlaces_sustitucion']) ||
+                      _asBool(dtInit['aplica_enlaces_sustitucion']) ||
+                      _asBool(dtInit['aplica_sustitucion']) ||
+                      _asBool(dtInit['usa_sustitucion']) ||
                       isTanque;
+
+    final rawEnlInit = _os['cantidad_enlaces'] ??
+        _os['num_enlaces_sustitucion'] ??
+        _os['num_enlaces'] ??
+        dtInit['cantidad_enlaces'] ??
+        dtInit['num_enlaces_sustitucion'] ??
+        dtInit['num_enlaces'];
+    final parsedEnlInit = int.tryParse(rawEnlInit?.toString() ?? '');
+    if (parsedEnlInit != null && parsedEnlInit >= 1 && parsedEnlInit <= 20) {
+      _numEnlacesSustitucion = parsedEnlInit;
+    }
 
     final rawMotivoInit = (_os['motivo_no_excentricidad'] ??
         _os['tipo_no_apto'] ??
@@ -797,8 +828,13 @@ class _CapturaScreenState extends State<CapturaScreen>
             _os['motivo_no_aplica'] = _motivoNoExcentricidad;
             _os['tipo_no_aplica_exc'] = _motivoNoExcentricidad.toLowerCase();
           }
-          if (draft['usa_sustitucion'] != null) {
-            _usaSustitucion = draft['usa_sustitucion'] == true;
+          if (draft['usa_sustitucion'] != null || draft['aplica_enlaces_sustitucion'] != null) {
+            _usaSustitucion = draft['usa_sustitucion'] == true || draft['aplica_enlaces_sustitucion'] == true;
+          }
+          final rawEnlDraft = draft['cantidad_enlaces'] ?? draft['num_enlaces_sustitucion'] ?? draft['num_enlaces'];
+          final parsedEnlDraft = int.tryParse(rawEnlDraft?.toString() ?? '');
+          if (parsedEnlDraft != null && parsedEnlDraft >= 1 && parsedEnlDraft <= 20) {
+            _numEnlacesSustitucion = parsedEnlDraft;
           }
           if (draft['sustitutos'] is List) {
             _sustitutosRows = List<Map<String, dynamic>>.from(
@@ -2037,8 +2073,8 @@ class _CapturaScreenState extends State<CapturaScreen>
   Widget _buildExactitudTab(int nPuntos, String folio) {
     if (_usaSustitucion) {
       return EnlacesSustitucionTable(
-        key: ValueKey('exac_${_dataVersion}_$_dValue'),
-        numEnlaces: 5,
+        key: ValueKey('exac_${_dataVersion}_${_dValue}_$_numEnlacesSustitucion'),
+        numEnlaces: _numEnlacesSustitucion,
         rows: _exacRows,
         divMin: _dValue,
         sustitutos: _sustitutosRows,
@@ -2478,6 +2514,11 @@ class _CapturaScreenState extends State<CapturaScreen>
         'motivo_no_aplica':        _aplExc ? '' : _motivoNoExcentricidad,
         'tipo_no_aplica_exc':      _aplExc ? null : _motivoNoExcentricidad.toLowerCase(),
         'usa_sustitucion':       _usaSustitucion,
+        'aplica_sustitucion':    _usaSustitucion,
+        'aplica_enlaces_sustitucion': _usaSustitucion,
+        'cantidad_enlaces':      _numEnlacesSustitucion,
+        'num_enlaces_sustitucion': _numEnlacesSustitucion,
+        'num_enlaces':           _numEnlacesSustitucion,
         'aplica_sustituto':      _hasValidSustitutos,
         'sustitutos':            _sustitutosRows,
         'masa_patron':           _masaPatronCtrl.text.trim(),
@@ -2709,6 +2750,10 @@ class _CapturaScreenState extends State<CapturaScreen>
         'holograma_nuevo':       _holoActEf,
         'usa_sustitucion':       _aplicaSustitucion,
         'aplica_sustitucion':    _aplicaSustitucion,
+        'aplica_enlaces_sustitucion': _aplicaSustitucion,
+        'cantidad_enlaces':      _numEnlacesSustitucion,
+        'num_enlaces_sustitucion': _numEnlacesSustitucion,
+        'num_enlaces':           _numEnlacesSustitucion,
         'aplica_sustituto':      _hasValidSustitutos,
         'sustitutos':            _sustitutosRows,
         'peso_sustituto':        _aplicaSustitucion ? _pesoSustituto : null,
