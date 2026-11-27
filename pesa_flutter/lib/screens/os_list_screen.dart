@@ -889,11 +889,24 @@ class _OsListScreenState extends State<OsListScreen> {
       return;
     }
 
-    // Si la OS ya está en el servidor, SIEMPRE mostrar la versión vigente
-    // (evita abrir una copia local estancada con firma antigua).
-    String? pathToOpen = await _refrescarPdfDesdeServidor(os);
-
+    // Si el dispositivo acaba de regenerar un PDF localmente (aún pendiente de subir),
+    // priorizar esa versión local recién emitida en lugar de descargar una copia anterior del servidor.
     final memPath = (os['pdf_path_local'] as String? ?? '').trim();
+    final tieneCambiosLocalesPendientes =
+        os['is_dirty'] == 1 || os['is_dirty'] == true ||
+        os['pdf_subido'] == 0 || os['pdf_subido'] == false;
+    String? pathToOpen;
+    if (tieneCambiosLocalesPendientes &&
+        memPath.isNotEmpty &&
+        File(memPath).existsSync() &&
+        File(memPath).lengthSync() > 500) {
+      pathToOpen = memPath;
+    } else {
+      // Si la OS ya está sincronizada en el servidor, mostrar siempre la versión vigente
+      // descargada sin caché (evita abrir una copia local estancada).
+      pathToOpen = await _refrescarPdfDesdeServidor(os);
+    }
+
     if (pathToOpen == null && memPath.isNotEmpty && File(memPath).existsSync() && File(memPath).lengthSync() > 500) {
       pathToOpen = memPath;
     }
@@ -1113,11 +1126,18 @@ class _OsListScreenState extends State<OsListScreen> {
       return;
     }
 
-    // Borrar la copia vieja y bajar la vigente del servidor antes de exportar
-    final fresco = await _refrescarPdfDesdeServidor(os);
+    // Priorizar el PDF local si acaba de regenerarse y aún no termina de subirse;
+    // de lo contrario descargar siempre la versión fresca del servidor.
+    final memLocalPath = (os['pdf_path_local'] as String? ?? '').trim();
+    final localMasNuevo =
+        (os['is_dirty'] == 1 || os['is_dirty'] == true || os['pdf_subido'] == 0 || os['pdf_subido'] == false) &&
+        memLocalPath.isNotEmpty &&
+        File(memLocalPath).existsSync() &&
+        File(memLocalPath).lengthSync() > 500;
+    final fresco = localMasNuevo ? memLocalPath : await _refrescarPdfDesdeServidor(os);
     if (!context.mounted) return;
 
-    String? sourcePath = fresco ?? os['pdf_path_local'] as String?;
+    String? sourcePath = fresco ?? (memLocalPath.isNotEmpty ? memLocalPath : null);
     if (sourcePath == null || sourcePath.isEmpty || !File(sourcePath).existsSync() || File(sourcePath).lengthSync() < 100) {
       try {
         final downloaded = await ApiService.instance.downloadPdf(
@@ -1209,8 +1229,10 @@ class _OsListScreenState extends State<OsListScreen> {
           ],
         ),
         content: Text(
-          '¿Deseas reabrir y modificar la toma de $folio?\n\n'
-          'Se abrirá el formulario cargando todas las lecturas de Repetibilidad, Excentricidad, Exactitud, datos de Instrumento y firmas guardados para que puedas ajustarlos.',
+          '¿Deseas rehacer y corregir la orden $folio?\n\n'
+          '• Se desbloqueará la captura conservando las pruebas técnicas y datos del equipo.\n'
+          '• Se limpiará la firma previa del cliente y se invalidará el PDF anterior (local y servidor).\n'
+          '• Antes de volver a firmar podrás revisar la Vista Previa del nuevo PDF y al finalizar se sobrescribirá el PDF definitivo.',
           style: const TextStyle(fontSize: 13, height: 1.4),
         ),
         actions: [
@@ -1220,25 +1242,53 @@ class _OsListScreenState extends State<OsListScreen> {
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFF57C00),
+              backgroundColor: const Color(0xFFC8102E),
               foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
             icon: const Icon(Icons.edit_outlined, size: 16),
-            label: const Text('Reabrir y Editar'),
+            label: const Text('Rehacer y Editar'),
             onPressed: () async {
               Navigator.of(dialogCtx).pop();
-              // Eliminar la copia vieja estancada del PDF (el Base64 en SQLite
-              // queda como respaldo hasta que se genere el nuevo).
-              await LocalDbService.instance.invalidarPdfLocal(
-                folio, pathExtra: os['pdf_path_local']?.toString());
+              final syncSvc = context.read<SyncService>();
+              await syncSvc.rehacerOrdenYSincronizar(folio, os);
+
               final editOs = Map<String, dynamic>.from(os);
-              editOs['estado'] = 'Proceso';
-              editOs.remove('pdf_path_local');
-              try { os['estado'] = 'Proceso'; os.remove('pdf_path_local'); } catch (_) {}
+              editOs['estado'] = 'EN_PROCESO';
+              editOs['estatus'] = 'EN_PROCESO';
+              editOs['firma_cliente'] = null;
+              editOs['firma_cliente_b64'] = null;
+              editOs['pdf_path_local'] = null;
+              editOs['pdf_path'] = null;
+              editOs['pdf_b64_local'] = null;
+              editOs['pdf_url'] = null;
+              editOs['has_pdf'] = 0;
+              editOs['pdf_subido'] = 0;
+              editOs['correo_enviado'] = 0;
+              editOs['email_enviado'] = 0;
+              editOs['reabierta_rehacer'] = true;
+
+              try {
+                os['estado'] = 'EN_PROCESO';
+                os['estatus'] = 'EN_PROCESO';
+                os['firma_cliente'] = null;
+                os['firma_cliente_b64'] = null;
+                os['pdf_path_local'] = null;
+                os['pdf_path'] = null;
+                os['pdf_b64_local'] = null;
+                os['pdf_url'] = null;
+                os['has_pdf'] = 0;
+                os['pdf_subido'] = 0;
+                os['correo_enviado'] = 0;
+                os['email_enviado'] = 0;
+              } catch (_) {}
+
               if (!context.mounted) return;
-              navegarCapturaSegunTipo(context, editOs);
+              await navegarCapturaSegunTipo(context, editOs);
+              if (mounted) {
+                await _loadLocal();
+              }
             },
           ),
         ],

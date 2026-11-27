@@ -5,6 +5,7 @@
 //      - Pantalla externa plegada (Cover): Size(380, 840)
 //      - Pantalla interna desplegada (Unfolded): Size(840, 920)
 //      Verificando 0 RenderFlex overflow y 0 excepciones en pantallas y widgets clave.
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
@@ -12,6 +13,7 @@ import 'package:provider/provider.dart';
 import 'package:pesa_tablet/screens/login_screen.dart';
 import 'package:pesa_tablet/screens/mi_firma_screen.dart';
 import 'package:pesa_tablet/screens/nuevo_doc_screen.dart';
+import 'package:pesa_tablet/screens/pdf_preview_aprobacion_screen.dart';
 import 'package:pesa_tablet/services/api_service.dart';
 import 'package:pesa_tablet/services/auth_service.dart';
 import 'package:pesa_tablet/services/metrology_helper.dart';
@@ -175,6 +177,23 @@ void main() {
         expect(find.byKey(const ValueKey('enlaces_sustitucion_card_0')), findsOneWidget);
         expect(find.textContaining('NOM-010-SCFI / OIML R 76'), findsOneWidget);
         expect(find.text('3 enlaces'), findsOneWidget);
+      });
+
+      testWidgets('PdfPreviewAprobacionScreen sin overflow y botones operativos en ${entry.key}', (tester) async {
+        await verifyNoOverflowAtSize(
+          tester,
+          entry.value,
+          PdfPreviewAprobacionScreen(
+            folio: 'OS-26-864',
+            pdfBytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46, 0x2D]),
+            tipoDocumento: 'Orden de Servicio (OS)',
+            customPreviewBody: const Center(child: Text('Documento PDF de prueba')),
+          ),
+        );
+        expect(find.text('Vista Previa para Revisión del Cliente — OS-26-864'), findsOneWidget);
+        expect(find.text('Sin firma del cliente'), findsOneWidget);
+        expect(find.text('Volver a Corregir'), findsOneWidget);
+        expect(find.text('Estoy de Acuerdo — Pasar a Firmar'), findsOneWidget);
       });
     }
   });

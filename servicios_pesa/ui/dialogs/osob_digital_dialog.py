@@ -459,6 +459,13 @@ class OsobDigitalDialog(QDialog):
         ftr.setObjectName("osob_ftr")
         ftr.setStyleSheet("QFrame#osob_ftr { background: #FFFFFF; border-top: 1px solid #E5E7EB; padding: 10px 18px; } QFrame#osob_ftr QLabel { border: none; background: transparent; }")
         fl = QHBoxLayout(ftr)
+        btn_preview = QPushButton("Vista Previa sin Firma")
+        btn_preview.setStyleSheet(
+            "QPushButton { background: #FFFFFF; color: #1D1D1F; font-weight: 600; "
+            "border: 1px solid #D2D2D7; padding: 10px 18px; border-radius: 7px; font-size: 10pt; }"
+            "QPushButton:hover { background: #F5F5F7; }"
+        )
+        btn_preview.clicked.connect(self._on_vista_previa_sin_firma)
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.clicked.connect(self.reject)
         btn_save = QPushButton("Finalizar y Generar PDF Oficial (OSOB)")
@@ -469,6 +476,7 @@ class OsobDigitalDialog(QDialog):
         )
         btn_save.clicked.connect(self._on_guardar)
         fl.addStretch(1)
+        fl.addWidget(btn_preview)
         fl.addWidget(btn_cancel)
         fl.addWidget(btn_save)
         root.addWidget(ftr)
@@ -513,7 +521,7 @@ class OsobDigitalDialog(QDialog):
         if dict_val in self._dictamen_radios:
             self._dictamen_radios[dict_val].setChecked(True)
 
-    def _on_guardar(self) -> None:
+    def _build_payload(self, modo_preview_sin_firma: bool = False) -> dict:
         checklist_map = {}
         checklist_list = []
         for num, (cmb, le_obs) in self._chk_widgets.items():
@@ -547,7 +555,7 @@ class OsobDigitalDialog(QDialog):
                 break
 
         firma_tec_b64 = self.canvas_tec.to_base64_png() if not self.canvas_tec.is_empty() else ""
-        firma_cli_b64 = self.canvas_cli.to_base64_png() if not self.canvas_cli.is_empty() else ""
+        firma_cli_b64 = "" if modo_preview_sin_firma else (self.canvas_cli.to_base64_png() if not self.canvas_cli.is_empty() else "")
 
         tipo_inst_sel = self.cmb_tipo_inst.currentText()
         tipo_otro_val = self.le_tipo_otro.text().strip() if tipo_inst_sel == "Otro" else ""
@@ -558,7 +566,7 @@ class OsobDigitalDialog(QDialog):
         from services.metrology import formatear_division_minima
         div_limpia = formatear_division_minima(self.le_division.text().strip())
 
-        payload = {
+        return {
             "folio_os": self._folio,
             "folio": self._folio,
             "tipo_documento": "OSOB",
@@ -586,11 +594,37 @@ class OsobDigitalDialog(QDialog):
             "dictamen": dictamen_sel,
             "tecnico_nombre": self.le_tec_nombre.text().strip(),
             "puesto_tecnico": self.le_tec_puesto.text().strip(),
-            "nombre_ing": self.le_cli_nombre.text().strip(),
-            "puesto_ing": self.le_cli_puesto.text().strip(),
+            "nombre_ing": "" if modo_preview_sin_firma else self.le_cli_nombre.text().strip(),
+            "puesto_ing": "" if modo_preview_sin_firma else self.le_cli_puesto.text().strip(),
             "firma_tecnico": firma_tec_b64,
             "firma_cliente": firma_cli_b64,
+            "modo_preview_sin_firma": modo_preview_sin_firma,
         }
+
+    def _on_vista_previa_sin_firma(self) -> None:
+        """Genera y abre una vista previa temporal del PDF OSOB SIN firma del cliente y sin cerrar la orden."""
+        import tempfile, os as _os, sys, subprocess
+        try:
+            payload = self._build_payload(modo_preview_sin_firma=True)
+            tmp_dir = Path(tempfile.gettempdir()) / "Pesa_PDFs"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            preview_path = str(tmp_dir / f"{self._folio}_PREVIEW_SIN_FIRMA.pdf")
+            from services.os_pdf_generator import osob_pdf_generator
+            out_path = osob_pdf_generator.generate(payload, output_path=preview_path, force=True, digital=True)
+            if out_path and Path(out_path).exists():
+                if sys.platform == "win32":
+                    _os.startfile(out_path)
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", out_path], check=False)
+                else:
+                    subprocess.run(["xdg-open", out_path], check=False)
+        except Exception as exc_p:
+            QMessageBox.warning(self, "Vista Previa", f"No se pudo generar la vista previa OSOB:\n{exc_p}")
+
+    def _on_guardar(self) -> None:
+        payload = self._build_payload(modo_preview_sin_firma=False)
+        div_limpia = payload["division_minima"]
+        obs_txt = payload["observaciones"]
 
         try:
             from services.os_pdf_generator import osob_pdf_generator
@@ -599,43 +633,104 @@ class OsobDigitalDialog(QDialog):
             QMessageBox.critical(self, "Error PDF", f"No se pudo generar el PDF OSOB:\n{exc}")
             return
 
+        pdf_b64 = ""
+        try:
+            import base64 as _b64
+            if pdf_path and Path(pdf_path).exists():
+                pdf_b64 = _b64.b64encode(Path(pdf_path).read_bytes()).decode("ascii")
+        except Exception:
+            pass
+
         if _db_pool:
             try:
                 with _db_pool.transaction() as conn:
                     with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            UPDATE ordenes_servicio
-                            SET estado = 'COMPLETADA',
-                                estatus = 'Cerrado',
-                                marca = %s,
-                                modelo = %s,
-                                ns = %s,
-                                id_equipo = %s,
-                                ubicacion = %s,
-                                instrumento_division = %s,
-                                observaciones = %s,
-                                firma_cliente_nombre = %s,
-                                datos_tecnicos_json = %s,
-                                pdf_path = %s,
-                                pdf_generado = TRUE,
-                                updated_at = NOW()
-                            WHERE folio_os = %s
-                            """,
-                            (
-                                payload["marca"],
-                                payload["modelo"],
-                                payload["ns"],
-                                payload["id_equipo"],
-                                payload["ubicacion"],
-                                div_limpia,
-                                obs_txt,
-                                payload["nombre_ing"],
-                                json.dumps(payload, ensure_ascii=False),
-                                pdf_path,
-                                self._folio,
-                            ),
-                        )
+                        try:
+                            cur.execute(
+                                """
+                                UPDATE ordenes_servicio
+                                SET estado = 'COMPLETADA',
+                                    estatus = 'Cerrado',
+                                    marca = %s,
+                                    modelo = %s,
+                                    ns = %s,
+                                    id_equipo = %s,
+                                    ubicacion = %s,
+                                    instrumento_division = %s,
+                                    observaciones = %s,
+                                    firma_cliente_nombre = %s,
+                                    firma_tecnico = COALESCE(NULLIF(%s, ''), firma_tecnico),
+                                    firma_tecnico_b64 = COALESCE(NULLIF(%s, ''), firma_tecnico_b64),
+                                    firma_cliente = COALESCE(NULLIF(%s, ''), firma_cliente),
+                                    firma_cliente_b64 = COALESCE(NULLIF(%s, ''), firma_cliente_b64),
+                                    datos_tecnicos_json = %s,
+                                    pdf_path = %s,
+                                    pdf_b64 = COALESCE(NULLIF(%s, ''), pdf_b64),
+                                    pdf_base64 = COALESCE(NULLIF(%s, ''), pdf_base64),
+                                    pdf_generado = TRUE,
+                                    has_pdf = TRUE,
+                                    fecha_cierre = NOW(),
+                                    pdf_version = COALESCE(pdf_version, 1) + 1,
+                                    updated_at = NOW()
+                                WHERE folio_os = %s
+                                """,
+                                (
+                                    payload["marca"],
+                                    payload["modelo"],
+                                    payload["ns"],
+                                    payload["id_equipo"],
+                                    payload["ubicacion"],
+                                    div_limpia,
+                                    obs_txt,
+                                    payload["nombre_ing"],
+                                    payload["firma_tecnico"],
+                                    payload["firma_tecnico"],
+                                    payload["firma_cliente"],
+                                    payload["firma_cliente"],
+                                    json.dumps(payload, ensure_ascii=False),
+                                    pdf_path,
+                                    pdf_b64,
+                                    pdf_b64,
+                                    self._folio,
+                                ),
+                            )
+                        except Exception:
+                            conn.rollback()
+                            cur.execute(
+                                """
+                                UPDATE ordenes_servicio
+                                SET estado = 'COMPLETADA',
+                                    estatus = 'Cerrado',
+                                    marca = %s,
+                                    modelo = %s,
+                                    ns = %s,
+                                    id_equipo = %s,
+                                    ubicacion = %s,
+                                    instrumento_division = %s,
+                                    observaciones = %s,
+                                    firma_cliente_nombre = %s,
+                                    datos_tecnicos_json = %s,
+                                    pdf_path = %s,
+                                    pdf_b64 = COALESCE(NULLIF(%s, ''), pdf_b64),
+                                    pdf_generado = TRUE,
+                                    updated_at = NOW()
+                                WHERE folio_os = %s
+                                """,
+                                (
+                                    payload["marca"],
+                                    payload["modelo"],
+                                    payload["ns"],
+                                    payload["id_equipo"],
+                                    payload["ubicacion"],
+                                    div_limpia,
+                                    obs_txt,
+                                    payload["nombre_ing"],
+                                    json.dumps(payload, ensure_ascii=False),
+                                    pdf_path,
+                                    pdf_b64,
+                                    self._folio,
+                                ),
+                            )
             except Exception as exc:
                 logger.warning("No se pudo actualizar ordenes_servicio para %s: %s", self._folio, exc)
 

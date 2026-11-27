@@ -80,6 +80,7 @@ class PdfService {
     required List<Map<String, dynamic>> exacRows,
     String? firmaTecBase64,
     String? firmaCliBase64,
+    bool modoPreviewSinFirma = false,
   }) async {
     final String folioCheck = (osData['folio_os'] ?? osData['folio'] ?? '').toString().trim().toUpperCase();
     final String tipoDocCheck = (osData['tipo_documento'] ?? '').toString().trim().toUpperCase();
@@ -87,14 +88,16 @@ class PdfService {
       return generarPdfObservacionesCelda(
         osData: osData,
         firmaTecBase64: firmaTecBase64,
-        firmaCliBase64: firmaCliBase64,
+        firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+        modoPreviewSinFirma: modoPreviewSinFirma,
       );
     }
     if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
       return generarPdfObservacionesBascula(
         osData: osData,
         firmaTecBase64: firmaTecBase64,
-        firmaCliBase64: firmaCliBase64,
+        firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+        modoPreviewSinFirma: modoPreviewSinFirma,
       );
     }
 
@@ -102,16 +105,20 @@ class PdfService {
     osData['fecha_creacion_logistica'] ??= osData['fecha'];
     osData['fecha'] = fechaEjecucionHoy;
     osData['fecha_servicio'] = fechaEjecucionHoy;
-    osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    if (!modoPreviewSinFirma) {
+      osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    }
 
     final bytes = await buildPdfBytes(
       osData: osData, repRows: repRows, excRows: excRows, exacRows: exacRows,
-      firmaTecBase64: firmaTecBase64, firmaCliBase64: firmaCliBase64,
+      firmaTecBase64: firmaTecBase64,
+      firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+      modoPreviewSinFirma: modoPreviewSinFirma,
     );
     return _saveToDisk(osData, bytes);
   }
 
-  /// Construye el PDF en memoria (sin guardarlo). Útil para pruebas locales.
+  /// Construye el PDF en memoria (sin guardarlo). Útil para vista previa sin firma y pruebas locales.
   Future<Uint8List> buildPdfBytes({
     required Map<String, dynamic> osData,
     required List<Map<String, dynamic>> repRows,
@@ -119,6 +126,7 @@ class PdfService {
     required List<Map<String, dynamic>> exacRows,
     String? firmaTecBase64,
     String? firmaCliBase64,
+    bool modoPreviewSinFirma = false,
   }) async {
     final String folioCheck = (osData['folio_os'] ?? osData['folio'] ?? '').toString().trim().toUpperCase();
     final String tipoDocCheck = (osData['tipo_documento'] ?? '').toString().trim().toUpperCase();
@@ -126,14 +134,16 @@ class PdfService {
       return buildPdfObservacionesCeldaBytes(
         osData: osData,
         firmaTecBase64: firmaTecBase64,
-        firmaCliBase64: firmaCliBase64,
+        firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+        modoPreviewSinFirma: modoPreviewSinFirma,
       );
     }
     if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
       return buildPdfObservacionesBasculaBytes(
         osData: osData,
         firmaTecBase64: firmaTecBase64,
-        firmaCliBase64: firmaCliBase64,
+        firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+        modoPreviewSinFirma: modoPreviewSinFirma,
       );
     }
 
@@ -165,7 +175,7 @@ class PdfService {
         firmaTecImg = pw.MemoryImage(base64Decode(raw));
       } catch (_) {}
     }
-    if (firmaCliBase64 != null && firmaCliBase64.isNotEmpty) {
+    if (!modoPreviewSinFirma && firmaCliBase64 != null && firmaCliBase64.isNotEmpty) {
       try {
         final raw = firmaCliBase64.contains(',') ? firmaCliBase64.split(',').last : firmaCliBase64;
         firmaCliImg = pw.MemoryImage(base64Decode(raw));
@@ -179,6 +189,7 @@ class PdfService {
         osData: osData, repRows: repRows, excRows: excRows, exacRows: exacRows,
         logoPesa: logoPesa, logoRl: logoRl,
         firmaTec: firmaTecImg, firmaCli: firmaCliImg,
+        modoPreviewSinFirma: modoPreviewSinFirma,
       ),
     ));
 
@@ -198,6 +209,7 @@ class PdfService {
     pw.ImageProvider? logoRl,
     pw.ImageProvider? firmaTec,
     pw.ImageProvider? firmaCli,
+    bool modoPreviewSinFirma = false,
   }) {
     final aplExc   = _parseBool(osData['aplica_excentricidad']);
     final motivoNoRaw = _s(osData, 'motivo_no_excentricidad',
@@ -249,7 +261,7 @@ class PdfService {
         _buildObservaciones(osData),
         pw.SizedBox(height: 5),
         // 9. Firmas
-        _buildFirmas(osData, firmaTec, firmaCli),
+        _buildFirmas(osData, firmaTec, firmaCli, modoPreviewSinFirma: modoPreviewSinFirma),
       ],
     );
   }
@@ -1580,10 +1592,13 @@ class PdfService {
   // 9. FIRMAS
   // ══════════════════════════════════════════════════════════════════════════
   pw.Widget _buildFirmas(Map<String, dynamic> os,
-      pw.ImageProvider? firmaTec, pw.ImageProvider? firmaCli) {
+      pw.ImageProvider? firmaTec, pw.ImageProvider? firmaCli,
+      {bool modoPreviewSinFirma = false}) {
     final tecnico = _s(os, 'tecnico_nombre', _s(os, 'tecnico', 'Alan Guevara'));
-    final cliente = _s(os, 'nombre_ing', _s(os, 'firma_cliente_nombre', _s(os, 'nombre_responsable', '')));
-    final puesto  = _s(os, 'puesto_ing', '');
+    final cliente = modoPreviewSinFirma
+        ? ''
+        : _s(os, 'nombre_ing', _s(os, 'firma_cliente_nombre', _s(os, 'nombre_responsable', '')));
+    final puesto  = modoPreviewSinFirma ? '' : _s(os, 'puesto_ing', '');
     final subCli  = puesto.isNotEmpty ? '$puesto\nNOMBRE Y FIRMA' : 'NOMBRE Y FIRMA';
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -1593,14 +1608,20 @@ class PdfService {
         ),
         pw.SizedBox(width: 24),
         pw.Expanded(
-          child: _firmaBox('CLIENTE', cliente, firmaCli, subtitle: subCli),
+          child: _firmaBox(
+            'CLIENTE',
+            cliente,
+            modoPreviewSinFirma ? null : firmaCli,
+            subtitle: subCli,
+            pendienteCliente: modoPreviewSinFirma,
+          ),
         ),
       ],
     );
   }
 
   pw.Widget _firmaBox(String titulo, String nombre, pw.ImageProvider? img,
-      {String? subtitle}) =>
+      {String? subtitle, bool pendienteCliente = false}) =>
       pw.Container(
         padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
         child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.center, children: [
@@ -1611,7 +1632,19 @@ class PdfService {
                 ? pw.Center(
                     child: pw.Image(img, fit: pw.BoxFit.contain),
                   )
-                : pw.SizedBox.expand(),
+                : (pendienteCliente
+                    ? pw.Center(
+                        child: pw.Text(
+                          'Pendiente de firma y conformidad del cliente',
+                          textAlign: pw.TextAlign.center,
+                          style: pw.TextStyle(
+                            fontSize: 6.5,
+                            fontStyle: pw.FontStyle.italic,
+                            color: _gray,
+                          ),
+                        ),
+                      )
+                    : pw.SizedBox.expand()),
           ),
           pw.Container(height: 0.7, color: _black),
           pw.SizedBox(height: 3),
@@ -1824,12 +1857,15 @@ class PdfService {
     required String estadoConectores,
     String? firmaTecBase64,
     String? firmaCliBase64,
+    bool modoPreviewSinFirma = false,
   }) async {
     final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
     rvData['fecha_creacion_logistica'] ??= rvData['fecha'];
     rvData['fecha'] = fechaEjecucionHoy;
     rvData['fecha_servicio'] = fechaEjecucionHoy;
-    rvData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    if (!modoPreviewSinFirma) {
+      rvData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    }
 
     final bytes = await buildPdfRevisionCeldasBytes(
       rvData: rvData,
@@ -1840,7 +1876,8 @@ class PdfService {
       estadoCables: estadoCables,
       estadoConectores: estadoConectores,
       firmaTecBase64: firmaTecBase64,
-      firmaCliBase64: firmaCliBase64,
+      firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+      modoPreviewSinFirma: modoPreviewSinFirma,
     );
 
     final dir = await getApplicationDocumentsDirectory();
@@ -1872,6 +1909,7 @@ class PdfService {
     required String estadoConectores,
     String? firmaTecBase64,
     String? firmaCliBase64,
+    bool modoPreviewSinFirma = false,
   }) async {
     final folio = _s(rvData, 'folio_os', _s(rvData, 'folio_re', '—'));
     final doc = pw.Document(
@@ -1906,7 +1944,7 @@ class PdfService {
         firmaTecImg = pw.MemoryImage(base64Decode(raw));
       } catch (_) {}
     }
-    if (firmaCliBase64 != null && firmaCliBase64.isNotEmpty) {
+    if (!modoPreviewSinFirma && firmaCliBase64 != null && firmaCliBase64.isNotEmpty) {
       try {
         final raw = firmaCliBase64.contains(',') ? firmaCliBase64.split(',').last : firmaCliBase64;
         firmaCliImg = pw.MemoryImage(base64Decode(raw));
@@ -2686,7 +2724,12 @@ class PdfService {
                   ),
                   pw.SizedBox(width: 36),
                   pw.Expanded(
-                    child: _firmaBox('FIRMA CLIENTE', recTxt, firmaCliImg),
+                    child: _firmaBox(
+                      'FIRMA CLIENTE',
+                      modoPreviewSinFirma ? '' : recTxt,
+                      modoPreviewSinFirma ? null : firmaCliImg,
+                      pendienteCliente: modoPreviewSinFirma,
+                    ),
                   ),
                 ],
               ),
@@ -2707,17 +2750,21 @@ class PdfService {
     required Map<String, dynamic> osData,
     String? firmaTecBase64,
     String? firmaCliBase64,
+    bool modoPreviewSinFirma = false,
   }) async {
     final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
     osData['fecha_creacion_logistica'] ??= osData['fecha'];
     osData['fecha'] = fechaEjecucionHoy;
     osData['fecha_servicio'] = fechaEjecucionHoy;
-    osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    if (!modoPreviewSinFirma) {
+      osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    }
 
     final bytes = await buildPdfObservacionesBasculaBytes(
       osData: osData,
       firmaTecBase64: firmaTecBase64,
-      firmaCliBase64: firmaCliBase64,
+      firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+      modoPreviewSinFirma: modoPreviewSinFirma,
     );
 
     final dir = await getApplicationDocumentsDirectory();
@@ -2744,6 +2791,7 @@ class PdfService {
     required Map<String, dynamic> osData,
     String? firmaTecBase64,
     String? firmaCliBase64,
+    bool modoPreviewSinFirma = false,
   }) async {
     final folio = _s(osData, 'folio_os', _s(osData, 'folio', 'OSOB-26-001'));
     final doc = pw.Document(
@@ -2773,7 +2821,9 @@ class PdfService {
     pw.ImageProvider? firmaTecImg;
     pw.ImageProvider? firmaCliImg;
     final rawTec = firmaTecBase64 ?? _s(osData, 'firma_tecnico', _s(osData, 'firma_tecnico_b64', ''));
-    final rawCli = firmaCliBase64 ?? _s(osData, 'firma_cliente', _s(osData, 'firma_receptor_b64', ''));
+    final rawCli = modoPreviewSinFirma
+        ? ''
+        : (firmaCliBase64 ?? _s(osData, 'firma_cliente', _s(osData, 'firma_receptor_b64', '')));
     if (rawTec.isNotEmpty) {
       try {
         final clean = rawTec.contains(',') ? rawTec.split(',').last : rawTec;
@@ -3239,9 +3289,21 @@ class PdfService {
                       pw.SizedBox(
                         height: 32,
                         width: double.infinity,
-                        child: firmaCliImg != null
+                        child: (!modoPreviewSinFirma && firmaCliImg != null)
                             ? pw.Center(child: pw.Image(firmaCliImg, fit: pw.BoxFit.contain))
-                            : pw.SizedBox(),
+                            : (modoPreviewSinFirma
+                                ? pw.Center(
+                                    child: pw.Text(
+                                      'Pendiente de firma y conformidad del cliente',
+                                      textAlign: pw.TextAlign.center,
+                                      style: pw.TextStyle(
+                                        fontSize: 5.8,
+                                        fontStyle: pw.FontStyle.italic,
+                                        color: _gray,
+                                      ),
+                                    ),
+                                  )
+                                : pw.SizedBox()),
                       ),
                       pw.Divider(height: 1, thickness: 0.5, color: PdfColors.grey600),
                       pw.Center(child: pw.Text('Firma', style: const pw.TextStyle(fontSize: 5.8, color: _grayD))),
@@ -3279,17 +3341,21 @@ class PdfService {
     required Map<String, dynamic> osData,
     String? firmaTecBase64,
     String? firmaCliBase64,
+    bool modoPreviewSinFirma = false,
   }) async {
     final String fechaEjecucionHoy = DateTime.now().toIso8601String().substring(0, 10);
     osData['fecha_creacion_logistica'] ??= osData['fecha'];
     osData['fecha'] = fechaEjecucionHoy;
     osData['fecha_servicio'] = fechaEjecucionHoy;
-    osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    if (!modoPreviewSinFirma) {
+      osData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    }
 
     final bytes = await buildPdfObservacionesCeldaBytes(
       osData: osData,
       firmaTecBase64: firmaTecBase64,
-      firmaCliBase64: firmaCliBase64,
+      firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+      modoPreviewSinFirma: modoPreviewSinFirma,
     );
 
     final dir = await getApplicationDocumentsDirectory();
@@ -3316,6 +3382,7 @@ class PdfService {
     required Map<String, dynamic> osData,
     String? firmaTecBase64,
     String? firmaCliBase64,
+    bool modoPreviewSinFirma = false,
   }) async {
     final folio = _s(osData, 'folio_os', _s(osData, 'folio', 'OSOCC-26-001'));
     final doc = pw.Document(
@@ -3345,7 +3412,9 @@ class PdfService {
     pw.ImageProvider? firmaTecImg;
     pw.ImageProvider? firmaCliImg;
     final rawTec = firmaTecBase64 ?? _s(osData, 'firma_tecnico', _s(osData, 'firma_tecnico_b64', ''));
-    final rawCli = firmaCliBase64 ?? _s(osData, 'firma_cliente', _s(osData, 'firma_receptor_b64', ''));
+    final rawCli = modoPreviewSinFirma
+        ? ''
+        : (firmaCliBase64 ?? _s(osData, 'firma_cliente', _s(osData, 'firma_receptor_b64', '')));
     if (rawTec.isNotEmpty) {
       try {
         final clean = rawTec.contains(',') ? rawTec.split(',').last : rawTec;
@@ -3733,9 +3802,21 @@ class PdfService {
                       pw.SizedBox(
                         height: 34,
                         width: double.infinity,
-                        child: firmaCliImg != null
+                        child: (!modoPreviewSinFirma && firmaCliImg != null)
                             ? pw.Center(child: pw.Image(firmaCliImg, fit: pw.BoxFit.contain))
-                            : pw.SizedBox(),
+                            : (modoPreviewSinFirma
+                                ? pw.Center(
+                                    child: pw.Text(
+                                      'Pendiente de firma y conformidad del cliente',
+                                      textAlign: pw.TextAlign.center,
+                                      style: pw.TextStyle(
+                                        fontSize: 5.8,
+                                        fontStyle: pw.FontStyle.italic,
+                                        color: _gray,
+                                      ),
+                                    ),
+                                  )
+                                : pw.SizedBox()),
                       ),
                       pw.Divider(height: 1, thickness: 0.5, color: PdfColors.grey600),
                       pw.Center(child: pw.Text('Firma', style: const pw.TextStyle(fontSize: 5.8, color: _grayD))),

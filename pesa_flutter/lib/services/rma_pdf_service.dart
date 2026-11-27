@@ -21,6 +21,7 @@ class RmaPdfService {
     String? firmaTecBase64,
     String? firmaCliBase64,
     String? observaciones,
+    bool modoPreviewSinFirma = false,
   }) async {
     final String folioCheck = (rmaData['folio_os'] ?? rmaData['folio_rma'] ?? rmaData['folio'] ?? '').toString().trim().toUpperCase();
     final String tipoDocCheck = (rmaData['tipo_documento'] ?? '').toString().trim().toUpperCase();
@@ -28,14 +29,16 @@ class RmaPdfService {
       return PdfService.instance.buildPdfObservacionesCeldaBytes(
         osData: rmaData,
         firmaTecBase64: firmaTecBase64,
-        firmaCliBase64: firmaCliBase64,
+        firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+        modoPreviewSinFirma: modoPreviewSinFirma,
       );
     }
     if (folioCheck.startsWith('OSOB-') || tipoDocCheck == 'OSOB') {
       return PdfService.instance.buildPdfObservacionesBasculaBytes(
         osData: rmaData,
         firmaTecBase64: firmaTecBase64,
-        firmaCliBase64: firmaCliBase64,
+        firmaCliBase64: modoPreviewSinFirma ? null : firmaCliBase64,
+        modoPreviewSinFirma: modoPreviewSinFirma,
       );
     }
 
@@ -67,7 +70,7 @@ class RmaPdfService {
     }
 
     pw.MemoryImage? imgFirmaCli;
-    if (firmaCliBase64 != null && firmaCliBase64.isNotEmpty) {
+    if (!modoPreviewSinFirma && firmaCliBase64 != null && firmaCliBase64.isNotEmpty) {
       try {
         final clean = firmaCliBase64.contains(',') ? firmaCliBase64.split(',').last : firmaCliBase64;
         imgFirmaCli = pw.MemoryImage(base64Decode(clean));
@@ -79,7 +82,9 @@ class RmaPdfService {
     rmaData['fecha_creacion_logistica'] ??= rmaData['fecha'];
     rmaData['fecha'] = fechaEjecucionHoy;
     rmaData['fecha_servicio'] = fechaEjecucionHoy;
-    rmaData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    if (!modoPreviewSinFirma) {
+      rmaData['fecha_cierre'] ??= DateTime.now().toIso8601String();
+    }
     final fecha = fechaEjecucionHoy;
     final cliente = (rmaData['cliente'] ?? rmaData['cliente_nombre'] ?? rmaData['razon_social'] ?? '').toString();
     final direccion = (rmaData['direccion'] ?? rmaData['sucursal_direccion'] ?? rmaData['sucursal'] ?? '').toString();
@@ -258,10 +263,20 @@ class RmaPdfService {
                       children: [
                         pw.Container(
                           height: 48,
-                          alignment: pw.Alignment.bottomCenter,
-                          child: imgFirmaCli != null
+                          alignment: modoPreviewSinFirma ? pw.Alignment.center : pw.Alignment.bottomCenter,
+                          child: (!modoPreviewSinFirma && imgFirmaCli != null)
                               ? pw.Image(imgFirmaCli, height: 44, fit: pw.BoxFit.contain)
-                              : pw.SizedBox(),
+                              : (modoPreviewSinFirma
+                                  ? pw.Text(
+                                      'Pendiente de firma y conformidad del cliente',
+                                      textAlign: pw.TextAlign.center,
+                                      style: pw.TextStyle(
+                                        fontSize: 6.5,
+                                        fontStyle: pw.FontStyle.italic,
+                                        color: _grayDark,
+                                      ),
+                                    )
+                                  : pw.SizedBox()),
                         ),
                         pw.Container(height: 0.8, color: _grayDark),
                         pw.SizedBox(height: 3),

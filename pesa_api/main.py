@@ -78,6 +78,8 @@ async def lifespan(app: FastAPI):
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS fecha_cancelacion TIMESTAMP",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS sin_correo_cliente BOOLEAN DEFAULT FALSE",
                 "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS motivo_sin_correo TEXT",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_version INTEGER DEFAULT 1",
+                "ALTER TABLE ordenes_servicio ADD COLUMN IF NOT EXISTS pdf_base64 TEXT",
                 "ALTER TABLE ordenes_servicio DROP CONSTRAINT IF EXISTS chk_os_estado",
                 """UPDATE ordenes_servicio
                    SET correo_destino = CASE

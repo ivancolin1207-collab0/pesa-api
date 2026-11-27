@@ -62,6 +62,9 @@ class TestHeadlessImports(unittest.TestCase):
                 "/api/ordenes/{folio}/instrumento",
                 "/api/ordenes/{folio}/cancelar",
                 "/api/ordenes/{folio}/reactivar",
+                "/api/ordenes/{folio}/rehacer",
+                "/api/v1/ordenes/{folio}/rehacer",
+                "/api/v1/os/{folio_os}/rehacer",
                 "/api/usuarios/{id_tecnico}/firma",
             ):
                 self.assertIn(expected, paths, f"Ruta crítica ausente en FastAPI: {expected}")
@@ -274,6 +277,235 @@ class TestGeneracionPDFsRealesEnTemp(unittest.TestCase):
                 self.assertTrue(p_oc.exists())
                 self.assertTrue(p_oc.read_bytes().startswith(b"%PDF-"))
                 self.assertGreater(p_oc.stat().st_size, 3000)
+
+
+class TestRehacerYVistaPreviaSinFirma(unittest.TestCase):
+    """
+    Valida de extremo a extremo (v4.0.2):
+      1. Flujo Rehacer en backend (`rehacer_orden`): desbloquea a EN_PROCESO,
+         limpia firma previa del cliente, invalida pdf_b64/pdf_base64/has_pdf,
+         reinicia correo_enviado, incrementa pdf_version y borra caché en disco.
+      2. Re-finalización sobrescribe obligatoriamente el PDF definitivo con los
+         nuevos datos (distintos bytes, texto nuevo presente, texto previo ausente).
+      3. Generación de Vista Previa sin firma (`modo_preview_sin_firma=True`) en
+         OS, OSOB y OSOCC con leyenda de conformidad pendiente y sin firma cliente.
+    """
+
+    @staticmethod
+    def _extract_pdf_text_bytes(pdf_bytes: bytes) -> str:
+        import base64 as _b64
+        import re as _re
+        import zlib as _zlib
+        chunks = [pdf_bytes.decode("latin-1", errors="ignore")]
+        for m in _re.finditer(rb"stream\r?\n(.*?)\r?\n?endstream", pdf_bytes, flags=_re.S):
+            raw_stream = m.group(1)
+            for candidate in (raw_stream,):
+                try:
+                    chunks.append(_zlib.decompress(candidate).decode("latin-1", errors="ignore"))
+                    continue
+                except Exception:
+                    pass
+                try:
+                    a85 = _b64.a85decode(candidate.strip(), adobe=True)
+                    chunks.append(_zlib.decompress(a85).decode("latin-1", errors="ignore"))
+                    continue
+                except Exception:
+                    pass
+                try:
+                    a85_plain = _b64.a85decode(candidate.strip().rstrip(b"~>"))
+                    chunks.append(_zlib.decompress(a85_plain).decode("latin-1", errors="ignore"))
+                except Exception:
+                    pass
+        return "\n".join(chunks)
+
+    def test_ciclo_cerrar_rehacer_modificar_sobrescribir_pdf(self):
+        import asyncio
+        import os as _os
+        from pesa_api.routers.catalogos import rehacer_orden
+        from services.os_pdf_generator import OsPdfGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prev_upload = _os.environ.get("UPLOAD_DIR")
+            _os.environ["UPLOAD_DIR"] = tmpdir
+            try:
+                folio = "OS-26-864"
+                pdf_file = Path(tmpdir) / f"{folio}.pdf"
+                gen = OsPdfGenerator()
+
+                # 1. Cerrar orden (PDF V1 con observación original y firma previa)
+                data_v1 = {
+                    "folio_os": folio,
+                    "fecha": "2026-11-27",
+                    "cliente": "PEMEX TRANSFORMACION INDUSTRIAL",
+                    "tipo_servicio": "Ajuste",
+                    "tipo_instrumento": "Báscula de plataforma",
+                    "marca": "Sartorius",
+                    "modelo": "PR1612/02",
+                    "ns": "2011004405",
+                    "id_equipo": "Bascula 3",
+                    "alcance_max": "100 kg",
+                    "div_minima": "0.02 kg",
+                    "aplica_excentricidad": True,
+                    "observaciones": "OBSERVACION_ORIGINAL_V1_864",
+                    "nombre_ing": "Cliente Inicial",
+                }
+                out_v1 = gen.generate_os_pdf(data_v1, output_path=str(pdf_file), digital=True, force=True)
+                self.assertTrue(Path(out_v1).exists())
+                bytes_v1 = Path(out_v1).read_bytes()
+                txt_v1 = self._extract_pdf_text_bytes(bytes_v1)
+                self.assertIn("OBSERVACION_ORIGINAL_V1_864", txt_v1)
+
+                # Simular fila cerrada y enviada en PostgreSQL
+                fake_row = {
+                    "id": 864,
+                    "folio_os": folio,
+                    "estado": "COMPLETADA",
+                    "estatus": "Cerrado",
+                    "id_tecnico": 7,
+                    "firma_cliente": "BASE64_FIRMA_ANTERIOR",
+                    "firma_cliente_b64": "BASE64_FIRMA_ANTERIOR",
+                    "pdf_path": str(pdf_file),
+                    "pdf_b64": "OLD_B64",
+                    "pdf_base64": "OLD_B64",
+                    "pdf_generado": True,
+                    "has_pdf": True,
+                    "correo_enviado": True,
+                    "email_enviado": True,
+                    "pdf_version": 1,
+                }
+
+                class _FakeDB:
+                    def __init__(self, state):
+                        self.state = state
+                        self.last_sql = ""
+
+                    async def fetchrow(self, sql, *args):
+                        return dict(self.state)
+
+                    async def fetchval(self, sql, *args):
+                        self.last_sql = sql
+                        self.state["estado"] = "EN_PROCESO"
+                        self.state["estatus"] = "EN_PROCESO"
+                        self.state["firma_cliente"] = None
+                        self.state["firma_cliente_b64"] = None
+                        self.state["pdf_b64"] = None
+                        self.state["pdf_base64"] = None
+                        self.state["pdf_path"] = None
+                        self.state["pdf_generado"] = False
+                        self.state["has_pdf"] = False
+                        self.state["correo_enviado"] = False
+                        self.state["email_enviado"] = False
+                        self.state["pdf_version"] = int(self.state["pdf_version"]) + 1
+                        return self.state["pdf_version"]
+
+                fake_db = _FakeDB(fake_row)
+                res = asyncio.run(
+                    rehacer_orden(
+                        folio=folio,
+                        db=fake_db,
+                        current_user={"rol": "admin", "id_tecnico": 1, "username": "ivancolin1207"},
+                    )
+                )
+
+                # 2. Verificar que Rehacer desbloqueó, limpió firma previa e invalidó caché en disco
+                self.assertTrue(res["ok"])
+                self.assertEqual(res["estado"], "EN_PROCESO")
+                self.assertEqual(res["estatus"], "EN_PROCESO")
+                self.assertIsNone(res["firma_cliente"])
+                self.assertFalse(res["has_pdf"])
+                self.assertFalse(res["pdf_generado"])
+                self.assertFalse(res["correo_enviado"])
+                self.assertEqual(res["pdf_version"], 2)
+                self.assertIn("firma_cliente        = NULL", fake_db.last_sql)
+                self.assertIn("pdf_b64              = NULL", fake_db.last_sql)
+                self.assertIn("pdf_base64           = NULL", fake_db.last_sql)
+                self.assertFalse(pdf_file.exists(), "El PDF previo en disco debió eliminarse al Rehacer")
+
+                # 3. Modificar datos y re-finalizar sobrescribiendo el PDF en la misma ruta
+                data_v2 = {
+                    **data_v1,
+                    "observaciones": "OBSERVACION_CORREGIDA_V2_REHECHA",
+                    "nombre_ing": "Nuevo Receptor Conforme",
+                }
+                out_v2 = gen.generate_os_pdf(data_v2, output_path=str(pdf_file), digital=True, force=True)
+                self.assertTrue(Path(out_v2).exists())
+                bytes_v2 = Path(out_v2).read_bytes()
+                self.assertNotEqual(bytes_v1, bytes_v2, "El PDF re-finalizado debe diferir del PDF anterior")
+                txt_v2 = self._extract_pdf_text_bytes(bytes_v2)
+                self.assertIn("OBSERVACION_CORREGIDA_V2_REHECHA", txt_v2)
+                self.assertNotIn("OBSERVACION_ORIGINAL_V1_864", txt_v2)
+            finally:
+                if prev_upload is None:
+                    _os.environ.pop("UPLOAD_DIR", None)
+                else:
+                    _os.environ["UPLOAD_DIR"] = prev_upload
+
+    def test_vista_previa_sin_firma_os_osob_osocc(self):
+        from services.os_pdf_generator import OsPdfGenerator, OsobPdfGenerator, OsoccPdfGenerator
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # OS preview sin firma
+            os_dest = str(Path(tmpdir) / "OS-26-PREV.pdf")
+            os_out = OsPdfGenerator().generate_os_pdf(
+                {
+                    "folio_os": "OS-26-PREV",
+                    "fecha": "2026-11-27",
+                    "cliente": "CLIENTE PREVIEW S.A.",
+                    "tipo_servicio": "Ajuste",
+                    "marca": "METTLER",
+                    "modelo": "IND560",
+                    "ns": "SN-PREV-1",
+                    "alcance_max": "500 kg",
+                    "div_minima": "0.1 kg",
+                    "firma_cliente_b64": "NO_DEBE_USARSE_EN_PREVIEW",
+                },
+                output_path=os_dest,
+                digital=True,
+                force=True,
+                modo_preview_sin_firma=True,
+            )
+            os_bytes = Path(os_out).read_bytes()
+            self.assertTrue(os_bytes.startswith(b"%PDF-"))
+            self.assertIn("Pendiente de firma y conformidad del cliente", self._extract_pdf_text_bytes(os_bytes))
+
+            # OSOB preview sin firma
+            osob_dest = str(Path(tmpdir) / "OSOB-26-PREV.pdf")
+            osob_out = OsobPdfGenerator().generate(
+                {
+                    "folio_os": "OSOB-26-PREV",
+                    "fecha": "2026-11-27",
+                    "cliente": "CLIENTE PREVIEW",
+                    "marca": "OHAUS",
+                    "modelo": "T31P",
+                    "modo_preview_sin_firma": True,
+                },
+                output_path=osob_dest,
+                force=True,
+                digital=True,
+            )
+            osob_bytes = Path(osob_out).read_bytes()
+            self.assertTrue(osob_bytes.startswith(b"%PDF-"))
+            self.assertIn("Pendiente de firma y conformidad del cliente", self._extract_pdf_text_bytes(osob_bytes))
+
+            # OSOCC preview sin firma
+            osocc_dest = str(Path(tmpdir) / "OSOCC-26-PREV.pdf")
+            osocc_out = OsoccPdfGenerator().generate(
+                {
+                    "folio_os": "OSOCC-26-PREV",
+                    "fecha": "2026-11-27",
+                    "destino_celda": "CLIENTE",
+                    "cliente": "CLIENTE PREVIEW",
+                    "marca": "ZEMIC",
+                    "modelo": "H8C",
+                    "modo_preview_sin_firma": True,
+                },
+                output_path=osocc_dest,
+                force=True,
+                calca=False,
+            )
+            osocc_bytes = Path(osocc_out).read_bytes()
+            self.assertTrue(osocc_bytes.startswith(b"%PDF-"))
+            self.assertIn("Pendiente de firma y conformidad del cliente", self._extract_pdf_text_bytes(osocc_bytes))
 
 
 if __name__ == "__main__":

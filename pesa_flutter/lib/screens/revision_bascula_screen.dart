@@ -29,6 +29,7 @@ import '../theme/pesa_theme.dart';
 import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/nombre_recibe.dart';
 import '../widgets/signature_shield.dart';
+import 'pdf_preview_aprobacion_screen.dart';
 
 class RevisionBasculaScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
@@ -111,6 +112,8 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   Uint8List? _firmaTecPre;
   bool _usarFirmaPre = false;
   bool _guardando = false;
+  bool _vistaPreviaAprobada = false;
+  final GlobalKey _firmaSectionKey = GlobalKey();
   bool _guardandoParcial = false;
 
   Map<String, dynamic> _datosCombinados = {};
@@ -481,7 +484,80 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
     } catch (_) {}
   }
 
+  Future<void> _abrirVistaPreviaRe() async {
+    final tieneFirmaTec = (_usarFirmaPre && _firmaTecPre != null) || _sigTecnicoCtrl.isNotEmpty;
+    if (!tieneFirmaTec) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Falta la firma del técnico responsable antes de mostrar la vista previa.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _guardando = true);
+    try {
+      final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'RE-LOCAL').toString().trim();
+      final Uint8List? sigTecBytes =
+          (_usarFirmaPre && _firmaTecPre != null) ? _firmaTecPre : await _sigTecnicoCtrl.toPngBytes();
+      final String? firmaTecB64 = sigTecBytes != null ? base64Encode(sigTecBytes) : null;
+      final String fechaEjecucionHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final payloadPreview = _construirPayloadRevision(
+        fechaEjecucionHoy: fechaEjecucionHoy,
+        firmaTecB64: firmaTecB64,
+        firmaCliB64: null,
+      );
+      final funcMap = <String, bool>{};
+      for (final item in _currentIndicadorItems) {
+        funcMap[item] = _funcIndicador[item] ?? false;
+      }
+
+      final previewBytes = await PdfService.instance.buildPdfRevisionCeldasBytes(
+        rvData: payloadPreview,
+        numCeldas: _numCeldas,
+        lecturasOhms: _obtenerMatrizOhms(),
+        funcIndicador: funcMap,
+        estadoCeldas: List.generate(_numCeldas, (i) => _estadoCeldas[i]),
+        estadoCables: _estadoCables,
+        estadoConectores: _estadoConectores,
+        firmaTecBase64: firmaTecB64,
+        firmaCliBase64: null,
+        modoPreviewSinFirma: true,
+      );
+      if (!mounted) return;
+      setState(() => _guardando = false);
+
+      final aprobado = await PdfPreviewAprobacionScreen.mostrar(
+        context,
+        folio: folio,
+        pdfBytes: previewBytes,
+        tipoDocumento: 'Revisión de Celdas y Báscula (RE)',
+      );
+      if (aprobado && mounted) {
+        setState(() => _vistaPreviaAprobada = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = _firmaSectionKey.currentContext;
+          if (ctx != null) {
+            Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _guardando = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generando vista previa RE: $e'), backgroundColor: _pesaRed),
+        );
+      }
+    }
+  }
+
   Future<void> _finalizar() async {
+    if (!_vistaPreviaAprobada) {
+      await _abrirVistaPreviaRe();
+      return;
+    }
     final cliente = _pickFromMap(_datosCombinados, ['cliente', 'razon_social']);
     final nombreReceptor = _nombreReceptorCtrl.text.trim();
     if (!exigirNombreRecibe(context, nombreReceptor, clienteEmpresa: cliente)) {
@@ -565,6 +641,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         funcMap[item] = _funcIndicador[item] ?? false;
       }
 
+      // Invalidar cualquier PDF anterior en caché local antes de emitir el definitivo
+      await LocalDbService.instance.invalidarPdfLocal(folio);
+
       // Generar PDF Oficial homologado con el formato físico RE
       final pdfPath = await PdfService.instance.generarPdfRevisionCeldas(
         rvData: payload,
@@ -576,6 +655,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         estadoConectores: _estadoConectores,
         firmaTecBase64: firmaTecB64,
         firmaCliBase64: firmaCliB64,
+        modoPreviewSinFirma: false,
       );
 
       final pdfBytes = await File(pdfPath).readAsBytes();
@@ -863,43 +943,91 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
             const SizedBox(height: 14),
 
             // ── SECCIÓN 5: OBSERVACIONES Y FIRMAS ──────────────────────────────
-            _buildSeccion5ObservacionesFirmasCard(cliente),
+            KeyedSubtree(key: _firmaSectionKey, child: _buildSeccion5ObservacionesFirmasCard(cliente)),
             const SizedBox(height: 20),
 
-            // ── BOTÓN FINALIZAR Y GENERAR PDF OFICIAL ──────────────────────────
+            // ── BOTÓN VISTA PREVIA → FINALIZAR Y GENERAR PDF OFICIAL ───────────
             AnimatedBuilder(
               animation: _correoCtrl,
               builder: (_, __) => Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  ClienteCorreoLockBanner(controller: _correoCtrl),
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: PesaColors.brand,
-                        foregroundColor: Colors.white,
-                        disabledBackgroundColor: PesaColors.surfaceMuted,
-                        disabledForegroundColor: PesaColors.textTertiary,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      onPressed: (_guardando || !_correoCtrl.isValido) ? null : _finalizar,
-                      icon: _guardando
-                          ? const SizedBox(
-                              width: 22,
-                              height: 22,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
-                            )
-                          : Icon(!_correoCtrl.isValido ? Icons.lock_outline_rounded : Icons.picture_as_pdf_rounded, size: 22),
-                      label: Text(
-                        _guardando
-                            ? 'GENERANDO FICHA TÉCNICA PDF...'
-                            : 'FINALIZAR REVISIÓN Y GENERAR PDF OFICIAL',
-                        style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, letterSpacing: 0.3),
+                  if (_vistaPreviaAprobada) ...[
+                    ClienteCorreoLockBanner(controller: _correoCtrl),
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: _guardando ? null : _abrirVistaPreviaRe,
+                          icon: const Icon(Icons.preview_outlined, size: 18),
+                          label: const Text('Vista Previa'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: PesaColors.textPrimary,
+                            side: const BorderSide(color: PesaColors.borderStrong),
+                            minimumSize: const Size(0, 52),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: SizedBox(
+                            height: 52,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: PesaColors.brand,
+                                foregroundColor: Colors.white,
+                                disabledBackgroundColor: PesaColors.surfaceMuted,
+                                disabledForegroundColor: PesaColors.textTertiary,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              onPressed: (_guardando || !_correoCtrl.isValido) ? null : _finalizar,
+                              icon: _guardando
+                                  ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                                    )
+                                  : Icon(!_correoCtrl.isValido ? Icons.lock_outline_rounded : Icons.picture_as_pdf_rounded, size: 20),
+                              label: Text(
+                                _guardando
+                                    ? 'GENERANDO PDF FINAL...'
+                                    : 'CONFIRMAR FIRMA Y FINALIZAR',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, letterSpacing: 0.2),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    SizedBox(
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: PesaColors.brand,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: _guardando ? null : _abrirVistaPreviaRe,
+                        icon: _guardando
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                              )
+                            : const Icon(Icons.preview_outlined, size: 22),
+                        label: Text(
+                          _guardando
+                              ? 'PREPARANDO VISTA PREVIA...'
+                              : 'REVISAR VISTA PREVIA (SIN FIRMA)',
+                          style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, letterSpacing: 0.3),
+                        ),
                       ),
                     ),
-                  ),
+                  ],
                 ],
               ),
             ),

@@ -33,6 +33,7 @@ import '../theme/pesa_theme.dart';
 import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/nombre_recibe.dart';
 import '../widgets/pesa_components.dart';
+import 'pdf_preview_aprobacion_screen.dart';
 import '../widgets/signature_shield.dart';
 
 class ObservacionesCeldaScreen extends StatefulWidget {
@@ -133,6 +134,8 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   Uint8List? _firmaTecPre;
   bool _usarFirmaPre = false;
   bool _guardando = false;
+  bool _vistaPreviaAprobada = false;
+  final GlobalKey _firmaSectionKey = GlobalKey();
   bool _cargandoInicial = true;
   bool _finalizadaExitosamente = false;
   Timer? _autoSaveDebounce;
@@ -645,7 +648,70 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
     } catch (_) {}
   }
 
+  Future<void> _abrirVistaPreviaSinFirma() async {
+    final tieneFirmaTec = (_usarFirmaPre && _firmaTecPre != null) || _sigTecnicoCtrl.isNotEmpty;
+    if (!tieneFirmaTec) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Falta la firma del técnico responsable antes de mostrar la vista previa.'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() => _guardando = true);
+    try {
+      final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'OSOCC-26-001').toString().trim();
+      final Uint8List? sigTecBytes =
+          (_usarFirmaPre && _firmaTecPre != null) ? _firmaTecPre : await _sigTecnicoCtrl.toPngBytes();
+      final String? firmaTecB64 = sigTecBytes != null ? base64Encode(sigTecBytes) : null;
+      final String fechaEjecucionHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final payloadPreview = _construirPayload(
+        fechaEjecucionHoy: fechaEjecucionHoy,
+        firmaTecB64: firmaTecB64,
+        firmaCliB64: null,
+        correoCliente: _correoCtrl.emailTextCtrl.text.trim(),
+      );
+      final previewBytes = await PdfService.instance.buildPdfObservacionesCeldaBytes(
+        osData: payloadPreview,
+        firmaTecBase64: firmaTecB64,
+        firmaCliBase64: null,
+        modoPreviewSinFirma: true,
+      );
+      if (!mounted) return;
+      setState(() => _guardando = false);
+
+      final aprobado = await PdfPreviewAprobacionScreen.mostrar(
+        context,
+        folio: folio,
+        pdfBytes: previewBytes,
+        tipoDocumento: 'Diagnóstico y Revisión de Celda (OSOCC)',
+      );
+      if (aprobado && mounted) {
+        setState(() => _vistaPreviaAprobada = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = _firmaSectionKey.currentContext;
+          if (ctx != null) {
+            Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _guardando = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error generando vista previa OSOCC: $e'), backgroundColor: _pesaRed),
+        );
+      }
+    }
+  }
+
   Future<void> _finalizar() async {
+    if (!_vistaPreviaAprobada) {
+      await _abrirVistaPreviaSinFirma();
+      return;
+    }
     final esStock = _destinoTipo == 'Stock';
     final cliente = _clienteDestinoCtrl.text.trim();
     final nombreReceptor = _cliNombreCtrl.text.trim();
@@ -727,10 +793,13 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
         fechaCreacionLogistica: payload['fecha_creacion_logistica']?.toString(),
       );
 
+      await LocalDbService.instance.invalidarPdfLocal(folio);
+
       final pdfPath = await PdfService.instance.generarPdfObservacionesCelda(
         osData: payload,
         firmaTecBase64: firmaTecB64,
         firmaCliBase64: firmaCliB64,
+        modoPreviewSinFirma: false,
       );
 
       final pdfBytes = await File(pdfPath).readAsBytes();
@@ -1089,41 +1158,89 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     const SizedBox(height: 12),
                     _buildSeccion4Card(),
                     const SizedBox(height: 12),
-                    _buildSeccion5Card(),
+                    KeyedSubtree(key: _firmaSectionKey, child: _buildSeccion5Card()),
                     const SizedBox(height: 22),
                     AnimatedBuilder(
                       animation: _correoCtrl,
                       builder: (_, __) => Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          ClienteCorreoLockBanner(controller: _correoCtrl),
-                          SizedBox(
-                            height: 52,
-                            child: ElevatedButton.icon(
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _pesaRed,
-                                foregroundColor: Colors.white,
-                                disabledBackgroundColor: PesaColors.surfaceMuted,
-                                disabledForegroundColor: PesaColors.textTertiary,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                elevation: 0,
-                              ),
-                              onPressed: (_guardando || !_correoCtrl.isValido) ? null : _finalizar,
-                              icon: _guardando
-                                  ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                                    )
-                                  : Icon(!_correoCtrl.isValido ? Icons.lock_outline_rounded : Icons.assignment_turned_in_rounded),
-                              label: Text(
-                                _guardando
-                                    ? 'Generando PDF Oficial...'
-                                    : 'Finalizar y Generar PDF Oficial (OSOCC)',
-                                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
+                          if (_vistaPreviaAprobada) ...[
+                            ClienteCorreoLockBanner(controller: _correoCtrl),
+                            Row(
+                              children: [
+                                OutlinedButton.icon(
+                                  onPressed: _guardando ? null : _abrirVistaPreviaSinFirma,
+                                  icon: const Icon(Icons.preview_outlined, size: 18),
+                                  label: const Text('Vista Previa'),
+                                  style: OutlinedButton.styleFrom(
+                                    foregroundColor: PesaColors.textPrimary,
+                                    side: const BorderSide(color: PesaColors.borderStrong),
+                                    minimumSize: const Size(0, 52),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 52,
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: _pesaRed,
+                                        foregroundColor: Colors.white,
+                                        disabledBackgroundColor: PesaColors.surfaceMuted,
+                                        disabledForegroundColor: PesaColors.textTertiary,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                        elevation: 0,
+                                      ),
+                                      onPressed: (_guardando || !_correoCtrl.isValido) ? null : _finalizar,
+                                      icon: _guardando
+                                          ? const SizedBox(
+                                              width: 20,
+                                              height: 20,
+                                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                            )
+                                          : Icon(!_correoCtrl.isValido ? Icons.lock_outline_rounded : Icons.assignment_turned_in_rounded),
+                                      label: Text(
+                                        _guardando
+                                            ? 'Generando PDF Final...'
+                                            : 'Confirmar Firma y Finalizar (OSOCC)',
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ] else ...[
+                            SizedBox(
+                              height: 52,
+                              child: ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: _pesaRed,
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  elevation: 0,
+                                ),
+                                onPressed: _guardando ? null : _abrirVistaPreviaSinFirma,
+                                icon: _guardando
+                                    ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                      )
+                                    : const Icon(Icons.preview_outlined),
+                                label: Text(
+                                  _guardando
+                                      ? 'Preparando Vista Previa...'
+                                      : 'Revisar Vista Previa (Sin Firma)',
+                                  style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold),
+                                ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),

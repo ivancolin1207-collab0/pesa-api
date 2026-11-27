@@ -435,7 +435,15 @@ class SyncService extends ChangeNotifier {
         debugPrint('[Sync PUSH pendientes] Error ignorado: $e');
       }
 
-      // Reintentar resets y cancelaciones que fallaron por red offline en el ciclo anterior
+      // Reintentar resets, rehacer y cancelaciones que fallaron por red offline en el ciclo anterior
+      try {
+        final rehacerOk = await _pushRehacerPendientes()
+            .timeout(const Duration(seconds: 12), onTimeout: () => 0);
+        if (rehacerOk > 0) debugPrint('[Sync PUSH REHACER] $rehacerOk reaperturas propagadas al servidor');
+      } catch (e) {
+        debugPrint('[Sync PUSH REHACER] Error ignorado: $e');
+      }
+
       try {
         final resets = await _pushResetsPendientes()
             .timeout(const Duration(seconds: 10), onTimeout: () => 0);
@@ -1059,6 +1067,88 @@ class SyncService extends ChangeNotifier {
     }
   }
 
+  /// Desbloquea una orden cerrada/enviada para "Rehacer" conservando lecturas técnicas:
+  ///   1. Actualiza SQLite (`estado=EN_PROCESO`, limpia `firma_cliente` y PDF local/caché).
+  ///   2. Actualiza estado reactivo en memoria.
+  ///   3. Propaga `POST /ordenes/{folio}/rehacer` al servidor inmediatamente (o queda
+  ///      encolado como `PENDIENTE_REHACER` si no hay red).
+  Future<bool> rehacerOrdenYSincronizar(String folio, Map<String, dynamic> os) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return false;
+    try {
+      final db = LocalDbService.instance;
+      final ok = await db.rehacerOrdenLocal(
+        folioKey,
+        localId: os['local_id'] as int?,
+        pathExtra: (os['pdf_path_local'] ?? os['pdf_path'])?.toString(),
+      );
+
+      updateLocalOrder(folioKey, {
+        'estado': 'EN_PROCESO',
+        'estatus': 'EN_PROCESO',
+        'firma_cliente': null,
+        'firma_cliente_b64': null,
+        'pdf_path': null,
+        'pdf_path_local': null,
+        'pdf_b64_local': null,
+        'pdf_url': null,
+        'has_pdf': 0,
+        'pdf_subido': 0,
+        'correo_enviado': 0,
+        'email_enviado': 0,
+        'fecha_cierre': null,
+        'sync_check_status': 'BORRADOR_LOCAL',
+        'sync_status': 'PENDIENTE_REHACER',
+        'is_dirty': 1,
+      });
+
+      // Intentar propagación inmediata al servidor (si falla queda PENDIENTE_REHACER)
+      try {
+        final serverOk = await ApiService.instance
+            .rehacerOrdenEnServidor(folioKey)
+            .timeout(const Duration(seconds: 10));
+        if (serverOk) {
+          await LocalDbService.instance.updateSyncStatus(folioKey, 'BORRADOR');
+          updateLocalOrder(folioKey, {'sync_status': 'BORRADOR'});
+          debugPrint('[SYNC] ✅ rehacerOrdenEnServidor confirmado para $folioKey');
+        } else {
+          debugPrint('[SYNC] Servidor no confirmó rehacer para $folioKey — reintentará en PUSH');
+        }
+      } catch (e) {
+        debugPrint('[SYNC] rehacerOrdenEnServidor offline/error ($folioKey): $e');
+      }
+
+      notifyListeners();
+      return ok;
+    } catch (e) {
+      debugPrint('[SYNC] Error en rehacerOrdenYSincronizar($folioKey): $e');
+      return false;
+    }
+  }
+
+  Future<int> _pushRehacerPendientes() async {
+    final pendientes = await LocalDbService.instance.getOrdenesPendientesRehacer();
+    if (pendientes.isEmpty) return 0;
+    int enviados = 0;
+    for (final os in pendientes) {
+      final folio = ((os['folio_os'] ?? os['folio']) as String? ?? '').trim();
+      if (folio.isEmpty) continue;
+      try {
+        final ok = await ApiService.instance
+            .rehacerOrdenEnServidor(folio)
+            .timeout(const Duration(seconds: 10));
+        if (ok) {
+          await LocalDbService.instance.updateSyncStatus(folio, 'BORRADOR');
+          updateLocalOrder(folio, {'sync_status': 'BORRADOR'});
+          enviados++;
+        }
+      } catch (e) {
+        debugPrint('[Sync PUSH REHACER] Error para $folio: $e');
+      }
+    }
+    return enviados;
+  }
+
   /// Reset completo de la orden desde cero (SQLite local + Render PostgreSQL)
   Future<bool> resetearOrdenDesdeCero(String folio, Map<String, dynamic> os) async {
     final folioKey = folio.trim();
@@ -1232,9 +1322,12 @@ class SyncService extends ChangeNotifier {
             continue; // el servidor ya tiene la versión final del PDF
           }
         }
+        final bool localPendienteSubida =
+            os['is_dirty'] == 1 || os['is_dirty'] == true ||
+            os['pdf_subido'] == 0 || os['pdf_subido'] == false;
         final tsServidor = DateTime.tryParse((os['fecha_subida_servidor'] ?? '').toString());
         final mtimeLocal = local.lastModifiedSync();
-        if (serverBytes != null && tsServidor != null && !mtimeLocal.isAfter(tsServidor)) {
+        if (!localPendienteSubida && serverBytes != null && tsServidor != null && !mtimeLocal.isAfter(tsServidor)) {
           if (metaEquipo.length > 2) {
             await ApiService.instance
                 .patchInstrumentoOrden(folio, metaEquipo, timeout: const Duration(seconds: 10))

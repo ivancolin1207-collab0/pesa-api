@@ -5160,7 +5160,7 @@ class DashboardWidget(QWidget):
             if has_real_pdf:
                 act_rehacer = QAction("Rehacer captura / reemitir PDF", menu_more)
                 act_rehacer.triggered.connect(
-                    lambda _, fid=os_id, fl=folio, rd=row_data: self._abrir_captura_digital(fid, fl, rd)
+                    lambda _, fid=os_id, fl=folio, rd=row_data: self._rehacer_captura_os(fid, fl, rd)
                 )
                 menu_more.addAction(act_rehacer)
             else:
@@ -5197,6 +5197,139 @@ class DashboardWidget(QWidget):
         lay.addWidget(btn_more)
         lay.addStretch()
         return container
+
+    def _limpiar_cache_temp_folio(self, folio: str) -> None:
+        """Elimina ÚNICAMENTE caché temporal de PDF en %TEMP% para el folio indicado."""
+        import pathlib
+        import tempfile
+        clean = str(folio or "").strip()
+        if not clean:
+            return
+        tmp_root = pathlib.Path(tempfile.gettempdir())
+        candidatos = [
+            tmp_root / f"{clean}.pdf",
+            tmp_root / "Pesa_PDFs" / f"{clean}.pdf",
+            tmp_root / "Pesa_PDFs" / f"{clean}_PREVIEW_SIN_FIRMA.pdf",
+        ]
+        for p in candidatos:
+            try:
+                if p.is_file():
+                    p.unlink()
+            except Exception as exc_rm:
+                logger.debug("No se pudo limpiar caché temporal %s: %s", p, exc_rm)
+
+    def _rehacer_captura_os(self, os_id, folio: str, row_data=None) -> None:
+        """
+        Desbloquea una orden ya firmada/enviada para rehacer su captura:
+          - Cambia estado/estatus a EN_PROCESO conservando pruebas técnicas
+          - Limpia firma_cliente y firma_cliente_b64
+          - Invalida pdf_b64, pdf_base64, pdf_url, pdf_path, pdf_generado, has_pdf
+          - Reinicia correo_enviado/email_enviado a FALSE e incrementa pdf_version
+          - Limpia caché temporal de este folio y solicita invalidación en Render
+          - Abre inmediatamente el diálogo de captura digital
+        """
+        clean_folio = str(folio or "").strip()
+        if not clean_folio:
+            return
+        resp = QMessageBox.question(
+            self,
+            f"Rehacer Orden {clean_folio}",
+            f"¿Deseas rehacer la captura de {clean_folio}?\n\n"
+            "• Se desbloqueará la orden para edición conservando sus pruebas técnicas.\n"
+            "• Se limpiará la firma previa del cliente y se invalidará el PDF anterior.\n"
+            "• Al volver a finalizar se generará y sobrescribirá el PDF definitivo.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if resp != QMessageBox.StandardButton.Yes:
+            return
+
+        if _DEPS_OK and _db_pool:
+            try:
+                conn = _db_pool.get_connection()
+                try:
+                    with conn.cursor() as cur:
+                        try:
+                            cur.execute(
+                                """
+                                UPDATE ordenes_servicio
+                                SET estado = 'EN_PROCESO',
+                                    estatus = 'EN_PROCESO',
+                                    firma_cliente = NULL,
+                                    firma_cliente_b64 = NULL,
+                                    pdf_b64 = NULL,
+                                    pdf_base64 = NULL,
+                                    pdf_url = NULL,
+                                    pdf_path = NULL,
+                                    pdf_generado = FALSE,
+                                    has_pdf = FALSE,
+                                    pdf_descargado = FALSE,
+                                    correo_enviado = FALSE,
+                                    email_enviado = FALSE,
+                                    fecha_cierre = NULL,
+                                    sync_check_status = 'BORRADOR_LOCAL',
+                                    pdf_version = COALESCE(pdf_version, 1) + 1,
+                                    updated_at = NOW()
+                                WHERE id = %s OR folio_os = %s
+                                """,
+                                (os_id, clean_folio),
+                            )
+                        except Exception:
+                            conn.rollback()
+                            cur.execute(
+                                """
+                                UPDATE ordenes_servicio
+                                SET estado = 'EN_PROCESO',
+                                    estatus = 'EN_PROCESO',
+                                    firma_cliente = NULL,
+                                    firma_cliente_b64 = NULL,
+                                    pdf_b64 = NULL,
+                                    pdf_url = NULL,
+                                    pdf_path = NULL,
+                                    pdf_generado = FALSE,
+                                    correo_enviado = FALSE,
+                                    fecha_cierre = NULL,
+                                    sync_check_status = 'BORRADOR_LOCAL',
+                                    updated_at = NOW()
+                                WHERE id = %s OR folio_os = %s
+                                """,
+                                (os_id, clean_folio),
+                            )
+                    conn.commit()
+                finally:
+                    _db_pool.release_connection(conn)
+            except Exception as exc_db:
+                logger.warning("[REHACER] Error actualizando PostgreSQL para %s: %s", clean_folio, exc_db)
+
+        self._limpiar_cache_temp_folio(clean_folio)
+
+        # Notificar al servidor Render en segundo plano para purgar uploads/{folio}.pdf
+        try:
+            import threading
+            from services.http_client import http_request
+            def _notify_render_rehacer():
+                try:
+                    headers = {"User-Agent": "PesaWindowsApp/1.0"}
+                    try:
+                        from core.session import session as _sess
+                        tok = getattr(_sess, "token", None) or getattr(_sess, "access_token", None)
+                        if tok:
+                            headers["Authorization"] = f"Bearer {tok}"
+                    except Exception:
+                        pass
+                    http_request(
+                        "POST",
+                        f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/rehacer",
+                        headers=headers,
+                        timeout=8.0,
+                    )
+                except Exception:
+                    pass
+            threading.Thread(target=_notify_render_rehacer, daemon=True).start()
+        except Exception:
+            pass
+
+        self._abrir_captura_digital(os_id, clean_folio, row_data)
 
     def _cancelar_orden_os(self, os_id, folio: str) -> None:
         """Marca una orden sobrante no utilizada como CANCELADA sin eliminar el consecutivo de BD."""
@@ -6456,14 +6589,91 @@ class DashboardWidget(QWidget):
         import base64
 
         clean_folio = str(folio or "").strip()
+        self._limpiar_cache_temp_folio(clean_folio)
 
-        # 1. Buscar el PDF en la carpeta de PDFs de la aplicación
+        # 1. FUENTE DE VERDAD: PostgreSQL (pdf_b64 / pdf_base64 siempre sobrescrito al rehacer/finalizar)
         pdf_src = None
-        try:
-            from services.pdf_router import get_pdf_path
-            pdf_src = get_pdf_path(os_id, clean_folio)
-        except Exception:
-            pass
+        if _DEPS_OK and _db_pool:
+            try:
+                conn = _db_pool.get_connection()
+                pdf_b64 = None
+                try:
+                    with conn.cursor() as cur:
+                        try:
+                            cur.execute(
+                                "SELECT COALESCE(NULLIF(pdf_b64, ''), NULLIF(pdf_base64, '')) "
+                                "FROM ordenes_servicio WHERE id = %s OR folio_os = %s LIMIT 1",
+                                (os_id, clean_folio),
+                            )
+                        except Exception:
+                            conn.rollback()
+                            cur.execute(
+                                "SELECT pdf_b64 FROM ordenes_servicio WHERE id = %s OR folio_os = %s LIMIT 1",
+                                (os_id, clean_folio),
+                            )
+                        row = cur.fetchone()
+                        if row and row[0]:
+                            pdf_b64 = row[0]
+                finally:
+                    _db_pool.release_connection(conn)
+
+                if pdf_b64:
+                    import tempfile
+                    temp_dir = _os.path.join(tempfile.gettempdir(), "Pesa_PDFs")
+                    _os.makedirs(temp_dir, exist_ok=True)
+                    temp_pdf = _os.path.join(temp_dir, f"{clean_folio}.pdf")
+                    temp_tmp = temp_pdf + ".tmp"
+                    with open(temp_tmp, "wb") as f_out:
+                        f_out.write(base64.b64decode(pdf_b64))
+                    _os.replace(temp_tmp, temp_pdf)
+                    pdf_src = temp_pdf
+            except Exception as exc:
+                logger.warning("No se pudo obtener pdf_b64 de la BD para %s: %s", clean_folio, exc)
+
+        # 2. Respaldo en vivo: descarga directa desde Render sin caché
+        if not pdf_src or not _os.path.exists(pdf_src):
+            import tempfile
+            import time as _time
+            from services.http_client import http_request
+            ts_bust = int(_time.time() * 1000)
+            render_endpoints = [
+                f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/download-pdf?t={ts_bust}",
+                f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/pdf?t={ts_bust}",
+                f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/pdf?t={ts_bust}",
+            ]
+            for render_url in render_endpoints:
+                try:
+                    status, _hdrs, content = http_request(
+                        "GET",
+                        render_url,
+                        headers={
+                            "User-Agent": "PesaDesktop/1.0",
+                            "Accept": "application/pdf",
+                            "Cache-Control": "no-cache, no-store, must-revalidate",
+                            "Pragma": "no-cache",
+                        },
+                        timeout=12.0,
+                    )
+                    if status == 200 and len(content) > 500 and (content.startswith(b"%PDF") or b"%PDF" in content[:1024]):
+                        temp_dir = _os.path.join(tempfile.gettempdir(), "Pesa_PDFs")
+                        _os.makedirs(temp_dir, exist_ok=True)
+                        temp_pdf = _os.path.join(temp_dir, f"{clean_folio}.pdf")
+                        temp_tmp = temp_pdf + ".tmp"
+                        with open(temp_tmp, "wb") as f_out:
+                            f_out.write(content)
+                        _os.replace(temp_tmp, temp_pdf)
+                        pdf_src = temp_pdf
+                        break
+                except Exception as exc_render:
+                    logger.debug("No se pudo descargar PDF desde Render (%s) en _descargar_pdf_os para %s: %s", render_url, clean_folio, exc_render)
+
+        # 3. Último recurso: buscar PDF en disco local si la BD/Render no tienen blob
+        if not pdf_src or not _os.path.exists(pdf_src):
+            try:
+                from services.pdf_router import get_pdf_path
+                pdf_src = get_pdf_path(os_id, clean_folio)
+            except Exception:
+                pass
         if not pdf_src or not _os.path.exists(pdf_src):
             from pathlib import Path
             for search_dir in [
@@ -6476,58 +6686,6 @@ class DashboardWidget(QWidget):
                 if candidate.exists():
                     pdf_src = str(candidate)
                     break
-
-        # Si no existe localmente, intentar descargar desde PostgreSQL (pdf_b64 subido por tablet)
-        if (not pdf_src or not _os.path.exists(pdf_src)) and _DEPS_OK and _db_pool:
-            try:
-                conn = _db_pool.get_connection()
-                pdf_b64 = None
-                with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT pdf_b64 FROM ordenes_servicio WHERE id = %s OR folio_os = %s LIMIT 1",
-                        (os_id, clean_folio)
-                    )
-                    row = cur.fetchone()
-                    if row and row[0]:
-                        pdf_b64 = row[0]
-                _db_pool.release_connection(conn)
-
-                if pdf_b64:
-                    import tempfile
-                    temp_dir = tempfile.gettempdir()
-                    temp_pdf = _os.path.join(temp_dir, f"{clean_folio}.pdf")
-                    with open(temp_pdf, "wb") as f_out:
-                        f_out.write(base64.b64decode(pdf_b64))
-                    pdf_src = temp_pdf
-            except Exception as exc:
-                logger.warning("No se pudo obtener pdf_b64 de la BD para %s: %s", clean_folio, exc)
-
-        # Si aún no existe, intentar descarga directa desde Render vía HTTP (pool persistente)
-        if not pdf_src or not _os.path.exists(pdf_src):
-            import tempfile
-            from services.http_client import http_request
-            render_endpoints = [
-                f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/pdf",
-                f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/download-pdf",
-                f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/pdf",
-                f"https://pesa-api-za9i.onrender.com/uploads/{clean_folio}.pdf",
-            ]
-            for render_url in render_endpoints:
-                try:
-                    status, _hdrs, content = http_request(
-                        "GET",
-                        render_url,
-                        headers={"User-Agent": "PesaDesktop/1.0", "Accept": "application/pdf"},
-                        timeout=12.0,
-                    )
-                    if status == 200 and len(content) > 500:
-                        temp_pdf = _os.path.join(tempfile.gettempdir(), f"{clean_folio}.pdf")
-                        with open(temp_pdf, "wb") as f_out:
-                            f_out.write(content)
-                        pdf_src = temp_pdf
-                        break
-                except Exception as exc_render:
-                    logger.debug("No se pudo descargar PDF desde Render (%s) en _descargar_pdf_os para %s: %s", render_url, clean_folio, exc_render)
 
         if (not pdf_src or not _os.path.exists(pdf_src)) and clean_folio.upper().startswith(("OSOB-", "OSOCC-")):
             try:
@@ -7770,21 +7928,31 @@ class DashboardWidget(QWidget):
         if not clean_folio:
             return False
 
+        self._limpiar_cache_temp_folio(clean_folio)
+
         # Directorio temporal especificado: %TEMP%/Pesa_PDFs
         temp_dir = pathlib.Path(tempfile.gettempdir()) / "Pesa_PDFs"
         temp_dir.mkdir(parents=True, exist_ok=True)
         target_path = temp_dir / f"{clean_folio}.pdf"
 
-        # 1. Estrategia: Base de datos PostgreSQL central (pdf_b64)
+        # 1. Estrategia: Base de datos PostgreSQL central (pdf_b64 / pdf_base64)
         try:
             conn = _db_pool.get_connection()
             _asegurar_columnas_correo_bd_sync(conn)
             try:
                 with conn.cursor() as cur:
-                    cur.execute(
-                        "SELECT pdf_b64 FROM ordenes_servicio WHERE folio_os = %s",
-                        (clean_folio,)
-                    )
+                    try:
+                        cur.execute(
+                            "SELECT COALESCE(NULLIF(pdf_b64, ''), NULLIF(pdf_base64, '')) "
+                            "FROM ordenes_servicio WHERE folio_os = %s",
+                            (clean_folio,),
+                        )
+                    except Exception:
+                        conn.rollback()
+                        cur.execute(
+                            "SELECT pdf_b64 FROM ordenes_servicio WHERE folio_os = %s",
+                            (clean_folio,),
+                        )
                     row_b64 = cur.fetchone()
                 conn.commit()
             finally:
@@ -7793,21 +7961,24 @@ class DashboardWidget(QWidget):
             if row_b64 and row_b64[0]:
                 pdf_bytes = base64.b64decode(row_b64[0])
                 if len(pdf_bytes) > 500:
-                    target_path.write_bytes(pdf_bytes)
-                    logger.info("PDF obtenido desde PostgreSQL (pdf_b64) → %s", target_path)
+                    tmp_write = target_path.with_suffix(".pdf.tmp")
+                    tmp_write.write_bytes(pdf_bytes)
+                    os.replace(str(tmp_write), str(target_path))
+                    logger.info("PDF obtenido desde PostgreSQL (pdf_b64/pdf_base64) → %s", target_path)
                     _open_file(str(target_path))
                     return True
         except Exception as exc_db:
             logger.warning("Error leyendo pdf_b64 de BD para %s: %s", clean_folio, exc_db)
 
-        # 2. Estrategia: Descarga HTTP GET directa desde la API de Render (pool persistente)
+        # 2. Estrategia: Descarga HTTP GET directa desde la API de Render sin caché
+        import time as _time
         from services.http_client import http_request
+        ts_bust = int(_time.time() * 1000)
         render_endpoints = [
-            f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/download-pdf",
-            f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/pdf",
-            f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/pdf",
-            f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/download-pdf",
-            f"https://pesa-api-za9i.onrender.com/uploads/{clean_folio}.pdf",
+            f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/download-pdf?t={ts_bust}",
+            f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/pdf?t={ts_bust}",
+            f"https://pesa-api-za9i.onrender.com/api/v1/ordenes/{clean_folio}/pdf?t={ts_bust}",
+            f"https://pesa-api-za9i.onrender.com/api/v1/os/{clean_folio}/download-pdf?t={ts_bust}",
         ]
         for url in render_endpoints:
             try:
@@ -7815,12 +7986,19 @@ class DashboardWidget(QWidget):
                 status, hdrs, content = http_request(
                     "GET",
                     url,
-                    headers={"User-Agent": "PesaWindowsApp/1.0", "Accept": "application/pdf"},
+                    headers={
+                        "User-Agent": "PesaWindowsApp/1.0",
+                        "Accept": "application/pdf",
+                        "Cache-Control": "no-cache, no-store, must-revalidate",
+                        "Pragma": "no-cache",
+                    },
                     timeout=12.0,
                 )
                 c_type = hdrs.get("content-type", "").lower()
                 if status == 200 and len(content) > 500 and (content.startswith(b"%PDF") or b"%PDF" in content[:1024] or "pdf" in c_type):
-                    target_path.write_bytes(content)
+                    tmp_write = target_path.with_suffix(".pdf.tmp")
+                    tmp_write.write_bytes(content)
+                    os.replace(str(tmp_write), str(target_path))
                     logger.info("PDF descargado exitosamente de Render → %s", target_path)
                     _open_file(str(target_path))
                     return True

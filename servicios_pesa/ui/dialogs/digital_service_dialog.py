@@ -1094,6 +1094,15 @@ class DigitalServiceDialog(QDialog):
         col_info.addWidget(lbl_hint)
         lay.addLayout(col_info, stretch=1)
 
+        # Botón vista previa sin firma
+        btn_preview = QPushButton("Vista Previa sin Firma")
+        btn_preview.setObjectName("btn_cancel")
+        btn_preview.setFixedHeight(40)
+        btn_preview.setMinimumWidth(170)
+        btn_preview.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn_preview.clicked.connect(self._on_vista_previa_sin_firma)
+        lay.addWidget(btn_preview)
+
         # Botón cancelar
         btn_cancel = QPushButton("Cancelar")
         btn_cancel.setObjectName("btn_cancel")
@@ -1856,6 +1865,66 @@ class DigitalServiceDialog(QDialog):
             json.dump(data, f, ensure_ascii=False, indent=2)
         logger.info("Formulario guardado localmente: %s", out_file)
 
+    def _on_vista_previa_sin_firma(self) -> None:
+        """Genera y abre una vista previa temporal del PDF sin firma del cliente y sin cerrar la orden."""
+        import tempfile, os as _os, sys, subprocess
+        if not _HAS_PDF:
+            QMessageBox.warning(self, "Vista Previa", "Generador de PDF no disponible.")
+            return
+        try:
+            data = self._collect_data()
+            tmp_dir = Path(tempfile.gettempdir()) / "Pesa_PDFs"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            firma_tec_path = str(tmp_dir / f"{self._folio_os}_preview_firma_tec.png")
+            if not self._canvas_tecnico.is_empty():
+                self._canvas_tecnico.to_pixmap(400, 140).save(firma_tec_path, "PNG")
+            else:
+                firma_tec_path = ""
+            preview_pdf = str(tmp_dir / f"{self._folio_os}_PREVIEW_SIN_FIRMA.pdf")
+            os_data_pdf = {
+                "folio_os":               data["folio_os"],
+                "cliente":                data["cliente"],
+                "razon_social":           data["cliente"],
+                "direccion_cliente":      data["direccion"],
+                "fecha":                  data["fecha"],
+                "observaciones":          data["observaciones"],
+                "equipo_marca":           data["equipo_marca"],
+                "equipo_modelo":          data["equipo_modelo"],
+                "equipo_ns":              data["equipo_ns"],
+                "equipo_alcance":         data["equipo_alcance"],
+                "equipo_division":        data["equipo_division"],
+                "equipo_ubicacion":       data["equipo_ubicacion"],
+                "tipo_instrumento":       data["tipo_instrumento"],
+                "repetibilidad":          data["repetibilidad"],
+                "excentricidad":          data["excentricidad"],
+                "exactitud":              data["exactitud"],
+                "clase_exactitud":        data["clase_exactitud"],
+                "indicadores_jia":        data["indicadores_jia"],
+                "nombre_tecnico_firma":   data["nombre_tecnico_firma"],
+                "nombre_cliente_firma":   "",
+                "firma_tecnico_path":     firma_tec_path,
+                "firma_cliente_path":     "",
+                "modo_preview_sin_firma": True,
+            }
+            gen = OsPdfGenerator()
+            gen.generate_os_pdf(
+                os_data=os_data_pdf,
+                output_path=preview_pdf,
+                tecnico_nombre=data["tecnico"],
+                digital=True,
+                force=True,
+                modo_preview_sin_firma=True,
+            )
+            if Path(preview_pdf).exists():
+                if sys.platform == "win32":
+                    _os.startfile(preview_pdf)
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", preview_pdf], check=False)
+                else:
+                    subprocess.run(["xdg-open", preview_pdf], check=False)
+        except Exception as exc_p:
+            QMessageBox.warning(self, "Vista Previa", f"No se pudo generar la vista previa:\n{exc_p}")
+
     def _generate_pdf(self, data: dict) -> Optional[str]:
         """
         Genera el PDF final de la OS con todos los datos del formulario
@@ -1916,8 +1985,46 @@ class DigitalServiceDialog(QDialog):
                 output_path    = pdf_path,
                 tecnico_nombre = data["tecnico"],
                 digital        = True,
+                force          = True,
             )
             logger.info("PDF digital generado: %s", pdf_path)
+
+            # Sobrescribir PDF en PostgreSQL para invalidar versiones previas
+            try:
+                if _db_pool and Path(pdf_path).exists():
+                    import base64 as _b64
+                    b64_pdf = _b64.b64encode(Path(pdf_path).read_bytes()).decode("ascii")
+                    conn_p = _db_pool.get_connection()
+                    try:
+                        with conn_p.cursor() as cur_p:
+                            try:
+                                cur_p.execute(
+                                    """
+                                    UPDATE ordenes_servicio
+                                    SET pdf_b64 = %s, pdf_base64 = %s, pdf_path = %s,
+                                        pdf_generado = TRUE, has_pdf = TRUE, estatus = 'Cerrado',
+                                        fecha_cierre = NOW(), pdf_version = COALESCE(pdf_version, 1) + 1,
+                                        updated_at = NOW()
+                                    WHERE id = %s OR folio_os = %s
+                                    """,
+                                    (b64_pdf, b64_pdf, pdf_path, self._os_id, self._folio_os),
+                                )
+                            except Exception:
+                                conn_p.rollback()
+                                cur_p.execute(
+                                    """
+                                    UPDATE ordenes_servicio
+                                    SET pdf_b64 = %s, pdf_path = %s, pdf_generado = TRUE,
+                                        estatus = 'Cerrado', updated_at = NOW()
+                                    WHERE id = %s OR folio_os = %s
+                                    """,
+                                    (b64_pdf, pdf_path, self._os_id, self._folio_os),
+                                )
+                        conn_p.commit()
+                    finally:
+                        _db_pool.release_connection(conn_p)
+            except Exception as exc_dbpdf:
+                logger.warning("No se pudo sobrescribir pdf_b64 en BD: %s", exc_dbpdf)
 
             # Abrir automáticamente
             try:

@@ -22,6 +22,7 @@ import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/signature_shield.dart';
 import 'observaciones_bascula_screen.dart';
 import 'observaciones_celda_screen.dart';
+import 'pdf_preview_aprobacion_screen.dart';
 
 class RemisionCapturaScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
@@ -88,6 +89,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
   late final TabController _tabFirmasCtrl;
   late final ClienteCorreoController _correoCtrl = ClienteCorreoController();
   bool _saving = false;
+  bool _vistaPreviaAprobada = false;
   Uint8List? _firmaTecnicoExistente;
 
   bool get _esOsocc {
@@ -322,7 +324,85 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     }
   }
 
+  Future<void> _abrirVistaPreviaRma() async {
+    final itemsValidos = _partidas
+        .map((p) => p.toMap())
+        .where((m) => (m['descripcion'] as String).isNotEmpty || (m['no_parte'] as String).isNotEmpty)
+        .toList();
+
+    if (itemsValidos.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: _red,
+          content: Text('Agrega al menos una partida con descripción antes de la vista previa.'),
+        ),
+      );
+      return;
+    }
+
+    String? firmaTecB64;
+    if (_ctrlFirmaTecnico.isNotEmpty) {
+      final bytes = await _ctrlFirmaTecnico.toPngBytes();
+      if (bytes != null) firmaTecB64 = base64Encode(bytes);
+    } else if (_firmaTecnicoExistente != null) {
+      firmaTecB64 = base64Encode(_firmaTecnicoExistente!);
+    }
+
+    if (firmaTecB64 == null || firmaTecB64.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          backgroundColor: _red,
+          content: Text('La Firma del Técnico Asignado es obligatoria antes de la vista previa.'),
+        ),
+      );
+      _tabFirmasCtrl.animateTo(0);
+      return;
+    }
+
+    setState(() => _saving = true);
+    try {
+      final folio = (widget.orden['folio_os'] ?? widget.orden['folio_rma'] ?? 'RMA').toString();
+      final ordenPreview = Map<String, dynamic>.from(widget.orden);
+      ordenPreview['firma_cliente_nombre'] = _nombreReceptorCtrl.text.trim();
+      ordenPreview['puesto_ing'] = _puestoReceptorCtrl.text.trim();
+      ordenPreview['observaciones'] = _observacionesCtrl.text.trim();
+
+      final previewBytes = await RmaPdfService.generate(
+        rmaData: ordenPreview,
+        items: itemsValidos,
+        firmaTecBase64: firmaTecB64,
+        firmaCliBase64: null,
+        observaciones: _observacionesCtrl.text.trim(),
+        modoPreviewSinFirma: true,
+      );
+      if (!mounted) return;
+      setState(() => _saving = false);
+
+      final aprobado = await PdfPreviewAprobacionScreen.mostrar(
+        context,
+        folio: folio,
+        pdfBytes: previewBytes,
+        tipoDocumento: 'Remisión de Material (RMA)',
+      );
+      if (aprobado && mounted) {
+        setState(() => _vistaPreviaAprobada = true);
+        _tabFirmasCtrl.animateTo(1);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(backgroundColor: _red, content: Text('Error generando vista previa RMA: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _finalizarRemision() async {
+    if (!_vistaPreviaAprobada) {
+      await _abrirVistaPreviaRma();
+      return;
+    }
     // 1. Validar partidas
     final itemsValidos = _partidas
         .map((p) => p.toMap())
@@ -427,6 +507,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
         fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
       );
 
+      // Invalidar cualquier PDF anterior en caché local antes de emitir el definitivo
+      await LocalDbService.instance.invalidarPdfLocal(folio);
+
       // Generar PDF
       final pdfBytes = await RmaPdfService.generate(
         rmaData: rmaData,
@@ -434,6 +517,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
         firmaTecBase64: firmaTecB64,
         firmaCliBase64: firmaCliB64,
         observaciones: _observacionesCtrl.text.trim(),
+        modoPreviewSinFirma: false,
       );
 
       // Guardar PDF en disco local
@@ -748,24 +832,64 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ClienteCorreoLockBanner(controller: _correoCtrl),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _red,
-                    foregroundColor: Colors.white,
-                    minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                if (_vistaPreviaAprobada) ...[
+                  ClienteCorreoLockBanner(controller: _correoCtrl),
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _saving ? null : _abrirVistaPreviaRma,
+                        icon: const Icon(Icons.preview_outlined, size: 18),
+                        label: const Text('Vista Previa'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _dark,
+                          side: const BorderSide(color: PesaColors.borderStrong),
+                          minimumSize: const Size(0, 48),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _red,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size.fromHeight(48),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: (_saving || !_correoCtrl.isValido) ? null : _finalizarRemision,
+                          icon: _saving
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                              : const Icon(Icons.assignment_turned_in_rounded),
+                          label: Text(
+                            _saving ? 'Generando PDF Final...' : 'Confirmar Firma y Finalizar',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  onPressed: (_saving || !_correoCtrl.isValido) ? null : _finalizarRemision,
-                  icon: _saving
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.assignment_turned_in_rounded),
-                  label: Text(
-                    _saving ? 'Generando PDF y Firmando...' : 'Finalizar y Generar PDF Oficial',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ] else ...[
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _red,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: _saving ? null : _abrirVistaPreviaRma,
+                    icon: _saving
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.preview_outlined),
+                    label: Text(
+                      _saving ? 'Preparando Vista Previa...' : 'Revisar Vista Previa (Sin Firma)',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                    ),
                   ),
-                ),
+                ],
               ],
             ),
           ),

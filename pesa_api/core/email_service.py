@@ -690,36 +690,39 @@ def _candidatos_pdf_disco(r, folio: str) -> List[str]:
 def _cargar_pdf_bytes(r, folio: str) -> Optional[bytes]:
     """
     Obtiene los bytes del PDF VIGENTE de la orden. Solo lectura.
-      1. Archivo en disco con LastWriteTime más reciente (desempate: '_firmado').
-      2. pdf_b64 persistido en PostgreSQL (disco efímero vacío tras redeploy).
-    Evita adjuntar una versión previa en caché de una remisión editada/firmada.
+      1. FUENTE DE VERDAD: pdf_b64 / pdf_base64 persistido en PostgreSQL (siempre
+         sobrescrito al finalizar o rehacer una orden).
+      2. Respaldo: archivo en disco con LastWriteTime más reciente si la BD no tiene blob.
+    Evita adjuntar una versión previa en caché de disco tras Rehacer/re-firmar.
     """
     content_pdf = None
-    candidatos = _candidatos_pdf_disco(r, folio)
-    if candidatos:
-        candidatos.sort(
-            key=lambda p: (os.path.getmtime(p), "_firmado" in os.path.basename(p).lower()),
-            reverse=True,
-        )
-        elegido = candidatos[0]
+    b64 = None
+    for bkey in ("pdf_b64", "pdf_base64"):
         try:
-            with open(elegido, "rb") as fp:
-                content_pdf = fp.read()
-            logger.info("[EMAIL] PDF vigente de %s: %s (de %d candidato(s))", folio, os.path.basename(elegido), len(candidatos))
+            if r[bkey]:
+                b64 = r[bkey]
+                break
+        except Exception:
+            pass
+    if b64:
+        try:
+            decoded = base64.b64decode(str(b64).strip())
+            if decoded and len(decoded) > 500:
+                content_pdf = decoded
         except Exception:
             content_pdf = None
     if not content_pdf:
-        b64 = None
-        for bkey in ("pdf_b64", "pdf_base64"):
+        candidatos = _candidatos_pdf_disco(r, folio)
+        if candidatos:
+            candidatos.sort(
+                key=lambda p: (os.path.getmtime(p), "_firmado" in os.path.basename(p).lower()),
+                reverse=True,
+            )
+            elegido = candidatos[0]
             try:
-                if r[bkey]:
-                    b64 = r[bkey]
-                    break
-            except Exception:
-                pass
-        if b64:
-            try:
-                content_pdf = base64.b64decode(b64.strip())
+                with open(elegido, "rb") as fp:
+                    content_pdf = fp.read()
+                logger.info("[EMAIL] PDF disco (respaldo) de %s: %s (de %d candidato(s))", folio, os.path.basename(elegido), len(candidatos))
             except Exception:
                 content_pdf = None
     return content_pdf or None
@@ -1056,8 +1059,9 @@ async def enviar_email_orden(
         row = await conn.fetchrow(
             """
             SELECT os.id, os.folio_os, os.id_lote, os.correo_cliente, os.correo_destino,
-                   os.email_enviado, os.fecha_envio_email,
-                   os.pdf_path, os.pdf_b64, os.tipo_servicio,
+                   COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
+                   os.fecha_envio_email,
+                   os.pdf_path, COALESCE(NULLIF(os.pdf_b64, ''), NULLIF(os.pdf_base64, '')) AS pdf_b64, os.tipo_servicio,
                    os.marca, os.modelo, os.id_equipo, os.indicador_id,
                    os.numero_cca, os.numero_dve,
                    os.fecha, os.dictamen, os.datos_tecnicos_json,
@@ -1105,9 +1109,10 @@ async def enviar_email_orden(
         if folios_lista and len(folios_lista) >= 1:
             lote_rows = await conn.fetch(
                 """
-                SELECT os.id, os.folio_os, os.correo_cliente, os.email_enviado,
+                SELECT os.id, os.folio_os, os.correo_cliente,
+                       COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
                        os.fecha_envio_email,
-                       os.pdf_path, os.pdf_b64, os.tipo_servicio,
+                       os.pdf_path, COALESCE(NULLIF(os.pdf_b64, ''), NULLIF(os.pdf_base64, '')) AS pdf_b64, os.tipo_servicio,
                        os.marca, os.modelo, os.id_equipo, os.indicador_id,
                        os.numero_cca, os.numero_dve,
                        os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,
@@ -1136,9 +1141,10 @@ async def enviar_email_orden(
         elif id_lote and str(id_lote).strip():
             lote_rows = await conn.fetch(
                 """
-                SELECT os.id, os.folio_os, os.correo_cliente, os.correo_destino, os.email_enviado,
+                SELECT os.id, os.folio_os, os.correo_cliente, os.correo_destino,
+                       COALESCE(os.correo_enviado, os.email_enviado, FALSE) AS email_enviado,
                        os.fecha_envio_email,
-                       os.pdf_path, os.pdf_b64, os.tipo_servicio,
+                       os.pdf_path, COALESCE(NULLIF(os.pdf_b64, ''), NULLIF(os.pdf_base64, '')) AS pdf_b64, os.tipo_servicio,
                        os.marca, os.modelo, os.id_equipo, os.indicador_id,
                        os.numero_cca, os.numero_dve,
                        os.fecha, os.dictamen, os.datos_tecnicos_json, os.has_pdf,

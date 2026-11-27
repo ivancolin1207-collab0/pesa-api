@@ -39,6 +39,8 @@ class CapturaSaveWorker(QThread):
                 self.os_data_pdf, self.rep_rows, self.exc_rows, self.exac_rows, self.tecnico_exec,
                 firma_tecnico_b64=self.firma_tecnico_b64,
             )
+            if pdf_path and os.path.exists(pdf_path):
+                self.dialog._persistir_pdf_en_bd(pdf_path)
             self.finished_ok.emit(pdf_path or "")
         except Exception as e:
             self.finished_err.emit(str(e))
@@ -620,6 +622,14 @@ class CapturaDigitalDialog(QDialog):
         )
         btn_reset.clicked.connect(self._on_reiniciar_captura)
 
+        self._btn_preview = QPushButton("Vista Previa sin Firma")
+        self._btn_preview.setStyleSheet(_BTN_SECONDARY)
+        self._btn_preview.setToolTip(
+            "Genera una vista previa temporal del PDF con pruebas y firma del técnico "
+            "para revisión del cliente antes de emitir el PDF final."
+        )
+        self._btn_preview.clicked.connect(self._on_vista_previa_sin_firma)
+
         self._btn_borrador = QPushButton("Guardar Borrador")
         self._btn_borrador.setStyleSheet(
             "QPushButton {"
@@ -640,6 +650,7 @@ class CapturaDigitalDialog(QDialog):
         lay.addWidget(btn_cancel)
         lay.addWidget(btn_reset)
         lay.addStretch()
+        lay.addWidget(self._btn_preview)
         lay.addWidget(self._btn_borrador)
         lay.addWidget(self._btn_guardar)
         return bar
@@ -1136,6 +1147,133 @@ class CapturaDigitalDialog(QDialog):
         finally:
             self._btn_borrador.setEnabled(True)
             self._btn_borrador.setText("\U0001f4be  Guardar Borrador")
+
+    def _on_vista_previa_sin_firma(self) -> None:
+        """Genera un PDF temporal de revisión SIN firma del cliente y sin cerrar la orden."""
+        import tempfile
+        from datetime import date as _today_mod
+        from services.metrology import formatear_division_minima
+        try:
+            tecnico_exec = (
+                self._le_tecnico_exec.text().strip()
+                or self._os_data.get("tecnico_nombre")
+                or self._os_data.get("tecnico", "")
+                or "Tecnico"
+            )
+            rep_rows = exc_rows = exac_rows = []
+            if self._pruebas_widget:
+                try:
+                    data = self._pruebas_widget.get_all_data()
+                    rep_rows = list(data.get("repetibilidad", []))
+                    exc_rows = list(data.get("excentricidad", []))
+                    exac_rows = list(data.get("exactitud", []))
+                except Exception:
+                    pass
+            obs_text = self._txt_obs.toPlainText().strip() if hasattr(self, "_txt_obs") else ""
+            os_data_preview = {
+                **self._os_data,
+                "folio_os": self._os_data.get("folio_os", self._folio),
+                "observaciones": obs_text,
+                "dictamen": "APTO",
+                "repetibilidad": rep_rows,
+                "excentricidad": exc_rows,
+                "exactitud": exac_rows,
+                "tipo_instrumento": self._cmb_tipo_inst.currentText(),
+                "marca": self._le_marca.text().strip() or self._os_data.get("marca", ""),
+                "modelo": self._le_modelo.text().strip() or self._os_data.get("modelo", ""),
+                "ns": self._le_serie.text().strip() or self._os_data.get("ns", ""),
+                "id_equipo": self._le_id_equipo.text().strip() or self._os_data.get("id_equipo", ""),
+                "numero_cca": self._le_num_cca.text().strip() or self._os_data.get("numero_cca", ""),
+                "inicial_calibrador": self._cmb_inicial.currentText() or self._os_data.get("inicial_calibrador", ""),
+                "holograma_anterior": self._le_holo_ant.text().strip() or self._os_data.get("holograma_anterior", ""),
+                "holograma_nuevo": self._le_holo_nuevo.text().strip() or self._os_data.get("holograma_nuevo", ""),
+                "div_verificacion": self._le_dve.text().strip() or self._os_data.get("div_verificacion", ""),
+                "alcance_max": self._le_capacidad.text().strip() or self._os_data.get("alcance_max", ""),
+                "div_minima": formatear_division_minima(self._le_div_min.text().strip() or self._os_data.get("div_minima", "")),
+                "unidad_medida": self._cmb_unidad.currentText(),
+                "ubicacion": self._le_ubicacion.text().strip() or self._os_data.get("ubicacion", ""),
+                "aplica_excentricidad": (self._cmb_excentricidad.currentText() == "Sí"),
+                "motivo_no_aplica": self._motivo_no_aplica if self._cmb_excentricidad.currentText() != "Sí" else "",
+                "tipo_receptor": self._cmb_receptor.currentText(),
+                "funcionamiento": self._cmb_funcionamiento.currentText(),
+                "puntos_apoyo": self._spn_puntos_apoyo.value(),
+                "fecha_servicio": _today_mod.today().strftime("%Y-%m-%d"),
+                "firma_cliente": "",
+                "firma_cliente_b64": "",
+                "modo_preview_sin_firma": True,
+            }
+            firma_tecnico_b64 = self._get_firma_tecnico()
+            tmp_dir = os.path.join(tempfile.gettempdir(), "Pesa_PDFs")
+            os.makedirs(tmp_dir, exist_ok=True)
+            preview_path = os.path.join(tmp_dir, f"{self._folio}_PREVIEW_SIN_FIRMA.pdf")
+            from services.os_pdf_generator import OsPdfGenerator
+            gen = OsPdfGenerator()
+            out_path = gen.generate_os_pdf(
+                os_data=os_data_preview,
+                output_path=preview_path,
+                repetibilidad=rep_rows,
+                excentricidad=exc_rows,
+                exactitud=exac_rows,
+                tecnico_nombre=tecnico_exec,
+                firma_tecnico_b64=firma_tecnico_b64,
+                digital=True,
+                force=True,
+                modo_preview_sin_firma=True,
+            )
+            if out_path and os.path.exists(out_path):
+                self._open_file(out_path)
+            else:
+                QMessageBox.warning(self, "Vista Previa", "No se pudo generar la vista previa temporal.")
+        except Exception as exc_prev:
+            logger.warning("Error generando vista previa sin firma: %s", exc_prev)
+            QMessageBox.warning(self, "Vista Previa", f"No se pudo generar la vista previa:\n{exc_prev}")
+
+    def _persistir_pdf_en_bd(self, pdf_path: str) -> None:
+        """Sobrescribe pdf_b64, pdf_base64, pdf_path y pdf_version en PostgreSQL tras generar el PDF final."""
+        if not _DEPS_OK or _db_pool is None or not self._os_id or not pdf_path or not os.path.exists(pdf_path):
+            return
+        try:
+            with open(pdf_path, "rb") as fp:
+                b64_str = base64.b64encode(fp.read()).decode("ascii")
+            conn = _db_pool.get_connection()
+            try:
+                with conn.cursor() as cur:
+                    try:
+                        cur.execute(
+                            """
+                            UPDATE ordenes_servicio
+                            SET pdf_b64 = %s,
+                                pdf_base64 = %s,
+                                pdf_path = %s,
+                                pdf_generado = TRUE,
+                                has_pdf = TRUE,
+                                estatus = 'Cerrado',
+                                fecha_cierre = NOW(),
+                                pdf_version = COALESCE(pdf_version, 1) + 1,
+                                updated_at = NOW()
+                            WHERE id = %s
+                            """,
+                            (b64_str, b64_str, pdf_path, self._os_id),
+                        )
+                    except Exception:
+                        conn.rollback()
+                        cur.execute(
+                            """
+                            UPDATE ordenes_servicio
+                            SET pdf_b64 = %s,
+                                pdf_path = %s,
+                                pdf_generado = TRUE,
+                                estatus = 'Cerrado',
+                                updated_at = NOW()
+                            WHERE id = %s
+                            """,
+                            (b64_str, pdf_path, self._os_id),
+                        )
+                conn.commit()
+            finally:
+                _db_pool.release_connection(conn)
+        except Exception as exc_pdfdb:
+            logger.warning("No se pudo sobrescribir pdf_b64 en PostgreSQL para id=%s: %s", self._os_id, exc_pdfdb)
 
     def _on_guardar(self) -> None:
         tecnico_exec = self._le_tecnico_exec.text().strip()

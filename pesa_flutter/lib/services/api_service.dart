@@ -1617,6 +1617,50 @@ class ApiService {
     return null;
   }
 
+  // ── Rehacer Orden (desbloqueo, limpieza de firma previa e invalidación PDF) ─
+
+  /// Solicita al servidor desbloquear una orden cerrada/enviada para corrección:
+  /// conserva pruebas técnicas, limpia `firma_cliente` e invalida el PDF previo
+  /// en PostgreSQL y disco del servidor (`pdf_version++`).
+  Future<bool> rehacerOrdenEnServidor(String folio) async {
+    final clean = folio.trim();
+    if (clean.isEmpty) return false;
+    final f = Uri.encodeComponent(clean);
+    final paths = <String>[
+      '/api/v1/ordenes/$f/rehacer',
+      '/api/ordenes/$f/rehacer',
+      '/api/v1/os/$f/rehacer',
+    ];
+    for (final pth in paths) {
+      try {
+        final resp = await _postWithRetry(
+          Uri.parse('$_baseUrl$pth'),
+          '{}',
+          timeout: const Duration(seconds: 15),
+        );
+        if (resp.statusCode == 200 || resp.statusCode == 201) {
+          debugPrint('[API] ✅ rehacerOrdenEnServidor OK para $clean vía POST $pth');
+          return true;
+        }
+        if (resp.statusCode == 405) {
+          final respPatch = await _patchWithRetry(
+            Uri.parse('$_baseUrl$pth'),
+            '{}',
+            timeout: const Duration(seconds: 15),
+          );
+          if (respPatch.statusCode == 200 || respPatch.statusCode == 201) {
+            debugPrint('[API] ✅ rehacerOrdenEnServidor OK para $clean vía PATCH $pth');
+            return true;
+          }
+        }
+      } catch (e) {
+        debugPrint('[API] Error rehacerOrdenEnServidor($pth): $e');
+        return false;
+      }
+    }
+    return false;
+  }
+
   // ── Crear Orden de Servicio ───────────────────────────────────────────────
 
   /// Crea una nueva Orden de Servicio (individual o lote, cualquiera de los 7 formatos) en el servidor.

@@ -6,8 +6,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
+import '../services/auth_service.dart';
+import '../services/firma_tecnico_service.dart';
 import '../services/local_db_service.dart';
+import '../services/pdf_service.dart';
 import '../services/sync_service.dart';
+import 'pdf_preview_aprobacion_screen.dart';
 import '../services/tipo_servicio_rules.dart';
 import '../services/metrology_helper.dart';
 import '../theme/foldable_layout.dart';
@@ -2293,17 +2297,19 @@ class _CapturaScreenState extends State<CapturaScreen>
               height: 52,
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1A7F64),
+                  backgroundColor: const Color(0xFFC8102E),
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 3,
+                  elevation: 0,
                 ),
                 icon: _saving
                     ? const SizedBox(width: 18, height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.draw_outlined),
-                label: const Text('Continuar a Firmas →',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                    : const Icon(Icons.preview_outlined),
+                label: Text(
+                  _saving ? 'Preparando Vista Previa...' : 'Revisar Vista Previa (Sin Firma)',
+                  style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
+                ),
                 onPressed: _saving ? null : () => _irAFirma(folio),
               ),
             ),
@@ -2694,85 +2700,137 @@ class _CapturaScreenState extends State<CapturaScreen>
       }
     }
 
-    if (mounted) {
-      context.push('/firma/${widget.osId}', extra: {
-        ..._os,
-        'folio_os':              folio,
-        'tecnico':               _os['tecnico'] ?? '',
-        'tecnico_nombre':        _os['tecnico_nombre'] ?? _os['tecnico'] ?? '',
-        'cliente':               clienteFinal,
-        'cliente_nombre':        clienteFinal,
-        'direccion':             direccionFinal,
-        'direccion_cliente':     direccionFinal,
-        'sucursal':              _os['sucursal'] ?? direccionFinal,
-        'fecha':                 fechaActual,
-        'fecha_servicio':        fechaActual,
-        'rep_rows':              _repRows,
-        'exc_rows':              _excRows,
-        'exac_rows':             _exacRows,
-        'observaciones':         _obsCtrl.text.trim(),
-        'firma_cliente_nombre':  nombreCliente,
-        'nombre_ing':            nombreCliente,
-        'dictamen':              _dictamen,
-        'jia_j':                 _jEf,
-        'jia_i':                 _iEf,
-        'jia_a':                 _aEf,
-        'marca':                 _marcaCtrl.text.trim(),
-        'equipo_marca':          _marcaCtrl.text.trim(),
-        'modelo':                _modeloCtrl.text.trim(),
-        'equipo_modelo':         _modeloCtrl.text.trim(),
-        'ns':                    _nsCtrl.text.trim(),
-        'serie':                 _nsCtrl.text.trim(),
-        'equipo_ns':             _nsCtrl.text.trim(),
-        'id_equipo':             _idEquipoCtrl.text.trim(),
-        'id_indicador':          _idEquipoCtrl.text.trim(),
-        'ubicacion':             _ubicCtrl.text.trim(),
-        'equipo_ubicacion':      _ubicCtrl.text.trim(),
-        'capacidad_max':         _capMaxCtrl.text.trim(),
-        'alcance_max':           _capMaxCtrl.text.trim(),
-        'equipo_alcance':        _capMaxCtrl.text.trim(),
-        'division_minima':       formatearDivisionMinima(_divMinCtrl.text.trim()),
-        'div_minima':            formatearDivisionMinima(_divMinCtrl.text.trim()),
-        'equipo_division':       formatearDivisionMinima(_divMinCtrl.text.trim()),
-        'div_verificacion':      _dveEf,
-        'div_ver':               _dveEf,
-        'folio_dve':             _numeroDveEf,
-        'numero_dve':            _numeroDveEf,
-        'numero_cca':            _ccaEf,
-        'cca':                   _ccaEf,
-        'cca_aplica':            _aplicaCCA || _ccaEf.isNotEmpty,
-        'aplica_cca':            _aplicaCCA || _ccaEf.isNotEmpty,
-        'aplica_dve':            _aplicaDVE || _numeroDveEf.isNotEmpty,
-        'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
-        'unidad_medida':         _unidadMedida,
-        'holograma_anterior':    _holoAntEf,
-        'holograma_actualizado': _holoActEf,
-        'holograma_nuevo':       _holoActEf,
-        'usa_sustitucion':       _aplicaSustitucion,
-        'aplica_sustitucion':    _aplicaSustitucion,
-        'aplica_enlaces_sustitucion': _aplicaSustitucion,
-        'cantidad_enlaces':      _numEnlacesSustitucion,
-        'num_enlaces_sustitucion': _numEnlacesSustitucion,
-        'num_enlaces':           _numEnlacesSustitucion,
-        'aplica_sustituto':      _hasValidSustitutos,
-        'sustitutos':            _sustitutosRows,
-        'peso_sustituto':        _aplicaSustitucion ? _pesoSustituto : null,
-        'factor_sustitucion':    _aplicaSustitucion ? _factorSustituto : null,
-        'tipo_instrumento':      _tipoInstrumento ?? '',
-        'tipo_servicio':         _os['tipo_servicio'] ?? '',
-        'funcionamiento':        _funcionamiento,
-        'puntos_apoyo':          _puntosApoyo,
-        'geometria_excentricidad': _geometriaExcentricidad,
-        'geometria_plataforma':    _geometriaExcentricidad,
-        'num_secciones':           _numSeccionesExc,
-        'secciones_camionera':     _numSeccionesExc,
-        'aplica_excentricidad':  _aplExc,
-        'motivo_no_excentricidad': _aplExc ? '' : _motivoNoExcentricidad,
-        'tipo_no_apto':            _aplExc ? '' : _motivoNoExcentricidad,
-        'motivo_no_aplica':        _aplExc ? '' : _motivoNoExcentricidad,
-        'tipo_no_aplica_exc':      _aplExc ? null : _motivoNoExcentricidad.toLowerCase(),
-      });
+    if (!mounted) return;
+    final extraPayload = <String, dynamic>{
+      ..._os,
+      'folio_os':              folio,
+      'tecnico':               _os['tecnico'] ?? '',
+      'tecnico_nombre':        _os['tecnico_nombre'] ?? _os['tecnico'] ?? '',
+      'cliente':               clienteFinal,
+      'cliente_nombre':        clienteFinal,
+      'direccion':             direccionFinal,
+      'direccion_cliente':     direccionFinal,
+      'sucursal':              _os['sucursal'] ?? direccionFinal,
+      'fecha':                 fechaActual,
+      'fecha_servicio':        fechaActual,
+      'rep_rows':              _repRows,
+      'exc_rows':              _excRows,
+      'exac_rows':             _exacRows,
+      'observaciones':         _obsCtrl.text.trim(),
+      'firma_cliente_nombre':  nombreCliente,
+      'nombre_ing':            nombreCliente,
+      'dictamen':              _dictamen,
+      'jia_j':                 _jEf,
+      'jia_i':                 _iEf,
+      'jia_a':                 _aEf,
+      'marca':                 _marcaCtrl.text.trim(),
+      'equipo_marca':          _marcaCtrl.text.trim(),
+      'modelo':                _modeloCtrl.text.trim(),
+      'equipo_modelo':         _modeloCtrl.text.trim(),
+      'ns':                    _nsCtrl.text.trim(),
+      'serie':                 _nsCtrl.text.trim(),
+      'equipo_ns':             _nsCtrl.text.trim(),
+      'id_equipo':             _idEquipoCtrl.text.trim(),
+      'id_indicador':          _idEquipoCtrl.text.trim(),
+      'ubicacion':             _ubicCtrl.text.trim(),
+      'equipo_ubicacion':      _ubicCtrl.text.trim(),
+      'capacidad_max':         _capMaxCtrl.text.trim(),
+      'alcance_max':           _capMaxCtrl.text.trim(),
+      'equipo_alcance':        _capMaxCtrl.text.trim(),
+      'division_minima':       formatearDivisionMinima(_divMinCtrl.text.trim()),
+      'div_minima':            formatearDivisionMinima(_divMinCtrl.text.trim()),
+      'equipo_division':       formatearDivisionMinima(_divMinCtrl.text.trim()),
+      'div_verificacion':      _dveEf,
+      'div_ver':               _dveEf,
+      'folio_dve':             _numeroDveEf,
+      'numero_dve':            _numeroDveEf,
+      'numero_cca':            _ccaEf,
+      'cca':                   _ccaEf,
+      'cca_aplica':            _aplicaCCA || _ccaEf.isNotEmpty,
+      'aplica_cca':            _aplicaCCA || _ccaEf.isNotEmpty,
+      'aplica_dve':            _aplicaDVE || _numeroDveEf.isNotEmpty,
+      'calibrado_por':         _os['calibrado_por'] ?? 'PESA BÁSCULAS',
+      'unidad_medida':         _unidadMedida,
+      'holograma_anterior':    _holoAntEf,
+      'holograma_actualizado': _holoActEf,
+      'holograma_nuevo':       _holoActEf,
+      'usa_sustitucion':       _aplicaSustitucion,
+      'aplica_sustitucion':    _aplicaSustitucion,
+      'aplica_enlaces_sustitucion': _aplicaSustitucion,
+      'cantidad_enlaces':      _numEnlacesSustitucion,
+      'num_enlaces_sustitucion': _numEnlacesSustitucion,
+      'num_enlaces':           _numEnlacesSustitucion,
+      'aplica_sustituto':      _hasValidSustitutos,
+      'sustitutos':            _sustitutosRows,
+      'peso_sustituto':        _aplicaSustitucion ? _pesoSustituto : null,
+      'factor_sustitucion':    _aplicaSustitucion ? _factorSustituto : null,
+      'tipo_instrumento':      _tipoInstrumento ?? '',
+      'tipo_servicio':         _os['tipo_servicio'] ?? '',
+      'funcionamiento':        _funcionamiento,
+      'puntos_apoyo':          _puntosApoyo,
+      'geometria_excentricidad': _geometriaExcentricidad,
+      'geometria_plataforma':    _geometriaExcentricidad,
+      'num_secciones':           _numSeccionesExc,
+      'secciones_camionera':     _numSeccionesExc,
+      'aplica_excentricidad':  _aplExc,
+      'motivo_no_excentricidad': _aplExc ? '' : _motivoNoExcentricidad,
+      'tipo_no_apto':            _aplExc ? '' : _motivoNoExcentricidad,
+      'motivo_no_aplica':        _aplExc ? '' : _motivoNoExcentricidad,
+      'tipo_no_aplica_exc':      _aplExc ? null : _motivoNoExcentricidad.toLowerCase(),
+    };
+    if (widget.osData['reabierta_rehacer'] == true || _os['reabierta_rehacer'] == true) {
+      extraPayload['reabierta_rehacer'] = true;
+      extraPayload['firma_cliente'] = null;
+      extraPayload['firma_cliente_b64'] = null;
     }
+
+    // ── Paso Obligatorio: Vista Previa del PDF (Sin Firma del Cliente) ────────
+    setState(() => _saving = true);
+    Uint8List? previewBytes;
+    try {
+      String? firmaTecPreview;
+      try {
+        final auth = context.read<AuthService>();
+        final username = auth.username ?? '';
+        final idLogeado = auth.idTecnico ?? 0;
+        final idOrden = int.tryParse('${_os['id_tecnico'] ?? ''}') ?? 0;
+        if (idOrden <= 0 || idLogeado <= 0 || idOrden == idLogeado) {
+          final perfil = await FirmaTecnicoService.instance.getFirma(username, idTecnico: idLogeado);
+          if (perfil != null && perfil.trim().length > 50) firmaTecPreview = perfil.trim();
+        }
+      } catch (_) {}
+      firmaTecPreview ??= (_os['firma_tecnico'] ?? _os['firma_tecnico_b64'] ?? '').toString().trim();
+      if (firmaTecPreview.length <= 50) firmaTecPreview = null;
+
+      previewBytes = await PdfService.instance.buildPdfBytes(
+        osData: Map<String, dynamic>.from(extraPayload),
+        repRows: _repRows,
+        excRows: _excRows,
+        exacRows: _exacRows,
+        firmaTecBase64: firmaTecPreview,
+        firmaCliBase64: null,
+        modoPreviewSinFirma: true,
+      );
+    } catch (e) {
+      if (mounted) {
+        _showError('No se pudo generar la vista previa del PDF: $e');
+      }
+      if (mounted) setState(() => _saving = false);
+      return;
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+
+    if (!mounted) return;
+    final aprobado = await PdfPreviewAprobacionScreen.mostrar(
+      context,
+      folio: folio,
+      pdfBytes: previewBytes,
+      tipoDocumento: 'Orden de Servicio (OS)',
+    );
+    if (!aprobado || !mounted) return;
+
+    context.push('/firma/${widget.osId}', extra: extraPayload);
   }
 
   Future<void> _mostrarDialogoCandadoInstrumento(List<String> faltantes) async {

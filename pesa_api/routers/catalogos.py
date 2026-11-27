@@ -2366,37 +2366,69 @@ async def upload_pdf_tablet(
     filename = f"{actual_folio}.pdf"
     filepath = os.path.join(upload_dir, filename)
 
-    with open(filepath, "wb") as f:
+    # Escritura atómica sobrescribiendo siempre la versión anterior del folio
+    tmp_filepath = f"{filepath}.tmp"
+    with open(tmp_filepath, "wb") as f:
         f.write(content)
+    os.replace(tmp_filepath, filepath)
 
     pdf_b64 = base64.b64encode(content).decode("ascii")
 
-    # Actualizar estado, pdf_b64, pdf_base64, has_pdf, pdf_url y sync_status en PostgreSQL
-    upd_status = await db.execute(
-        """
-        UPDATE ordenes_servicio
-        SET estado            = 'Cerrado',
-            estatus           = 'Cerrado',
-            pdf_b64           = $1,
-            pdf_base64        = $1,
-            pdf_url           = $2,
-            pdf_path          = $3,
-            pdf_descargado    = FALSE,
-            pdf_generado      = TRUE,
-            has_pdf           = TRUE,
-            sync_check_status = 'SUBIDA_SERVIDOR',
-            fecha_subida_servidor = NOW(),
-            sync_status       = 'SINCRONIZADO',
-            sync_version      = COALESCE(sync_version, 0) + 1,
-            sync_at           = NOW(),
-            updated_at        = NOW()
-        WHERE id = $4
-        """,
-        pdf_b64,
-        f"/uploads/{filename}",
-        filepath,
-        actual_id,
-    )
+    # Actualizar estado, pdf_b64, pdf_base64, has_pdf, pdf_url, pdf_version y sync_status en PostgreSQL
+    try:
+        upd_status = await db.execute(
+            """
+            UPDATE ordenes_servicio
+            SET estado            = 'Cerrado',
+                estatus           = 'Cerrado',
+                pdf_b64           = $1,
+                pdf_base64        = $1,
+                pdf_url           = $2,
+                pdf_path          = $3,
+                pdf_descargado    = FALSE,
+                pdf_generado      = TRUE,
+                has_pdf           = TRUE,
+                pdf_version       = COALESCE(pdf_version, 1) + 1,
+                fecha_cierre      = NOW(),
+                sync_check_status = 'SUBIDA_SERVIDOR',
+                fecha_subida_servidor = NOW(),
+                sync_status       = 'SINCRONIZADO',
+                sync_version      = COALESCE(sync_version, 0) + 1,
+                sync_at           = NOW(),
+                updated_at        = NOW()
+            WHERE id = $4
+            """,
+            pdf_b64,
+            f"/uploads/{filename}",
+            filepath,
+            actual_id,
+        )
+    except Exception:
+        upd_status = await db.execute(
+            """
+            UPDATE ordenes_servicio
+            SET estado            = 'Cerrado',
+                estatus           = 'Cerrado',
+                pdf_b64           = $1,
+                pdf_base64        = $1,
+                pdf_url           = $2,
+                pdf_path          = $3,
+                pdf_descargado    = FALSE,
+                pdf_generado      = TRUE,
+                has_pdf           = TRUE,
+                sync_check_status = 'SUBIDA_SERVIDOR',
+                fecha_subida_servidor = NOW(),
+                sync_status       = 'SINCRONIZADO',
+                sync_version      = COALESCE(sync_version, 0) + 1,
+                sync_at           = NOW(),
+                updated_at        = NOW()
+            WHERE id = $4
+            """,
+            pdf_b64,
+            f"/uploads/{filename}",
+            filepath,
+            actual_id,
+        )
 
     if str(upd_status or "").strip().endswith(" 0"):
         raise HTTPException(
@@ -2983,6 +3015,141 @@ async def reactivar_orden_endpoint(
     return await ejecutar_reactivar_orden(folio, db, current_user)
 
 
+def _eliminar_pdfs_folio_disco(folio: str, extra_path: Optional[str] = None) -> int:
+    """Elimina archivos PDF cacheados en disco SOLO del folio indicado."""
+    borrados = 0
+    clean = str(folio or "").strip()
+    if not clean:
+        return 0
+    upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+    candidatos = {
+        os.path.join(upload_dir, f"{clean}.pdf"),
+        os.path.join(upload_dir, f"OS-{clean}.pdf"),
+        os.path.join(upload_dir, f"{clean}_firmado.pdf"),
+    }
+    if extra_path and str(extra_path).strip():
+        p_ext = str(extra_path).strip()
+        if clean.lower() in os.path.basename(p_ext).lower():
+            candidatos.add(p_ext)
+    for fp in candidatos:
+        try:
+            if os.path.isfile(fp):
+                os.remove(fp)
+                borrados += 1
+        except Exception as exc_rm:
+            logger.warning("[REHACER/RESET] No se pudo eliminar caché PDF %s: %s", fp, exc_rm)
+    return borrados
+
+
+@router.post(
+    "/ordenes/{folio}/rehacer",
+    summary="Reabrir una orden cerrada/enviada para corregir pruebas, limpiar firma previa del cliente e invalidar PDF anterior",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+@router.patch(
+    "/ordenes/{folio}/rehacer",
+    summary="Alias PATCH para rehacer una orden cerrada/enviada",
+    tags=["Catálogos", "Órdenes de Servicio"],
+)
+async def rehacer_orden(
+    folio: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Desbloquea una orden (aunque esté CERRADO, FIRMADA o ENVIADA) conservando sus
+    lecturas técnicas y datos del equipo para que el técnico corrija solo lo necesario:
+      - estatus = 'EN_PROCESO', estado = 'EN_PROCESO'
+      - Limpia firma_cliente / firma_cliente_b64 (exige nueva conformidad y firma)
+      - Invalida PDF previo en BD y disco (pdf_b64 = NULL, pdf_base64 = NULL, pdf_generado = FALSE, has_pdf = FALSE)
+      - Incrementa pdf_version y updated_at para romper cualquier caché HTTP
+      - Marca correo_enviado = FALSE / email_enviado = FALSE sin borrar historial previo
+    """
+    clean_folio = folio.strip()
+    row = await db.fetchrow(
+        "SELECT id, folio_os, estado, id_tecnico, pdf_path FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        clean_folio,
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"OS '{clean_folio}' no encontrada")
+    verificar_acceso_os(current_user, row["id_tecnico"])
+
+    actual_folio = row["folio_os"]
+    actual_id = row["id"]
+
+    try:
+        new_ver = await db.fetchval(
+            """
+            UPDATE ordenes_servicio
+            SET estado               = 'EN_PROCESO',
+                estatus              = 'EN_PROCESO',
+                firma_cliente        = NULL,
+                firma_cliente_b64    = NULL,
+                pdf_b64              = NULL,
+                pdf_base64           = NULL,
+                pdf_url              = NULL,
+                pdf_path             = NULL,
+                pdf_generado         = FALSE,
+                has_pdf              = FALSE,
+                pdf_descargado       = FALSE,
+                correo_enviado       = FALSE,
+                email_enviado        = FALSE,
+                fecha_cierre         = NULL,
+                sync_check_status    = 'BORRADOR_LOCAL',
+                sync_status          = 'PENDIENTE',
+                pdf_version          = COALESCE(pdf_version, 1) + 1,
+                sync_version         = COALESCE(sync_version, 0) + 1,
+                updated_at           = NOW()
+            WHERE id = $1
+            RETURNING COALESCE(pdf_version, 1)
+            """,
+            actual_id,
+        )
+    except Exception:
+        await db.execute(
+            """
+            UPDATE ordenes_servicio
+            SET estado               = 'EN_PROCESO',
+                estatus              = 'EN_PROCESO',
+                firma_cliente        = NULL,
+                firma_cliente_b64    = NULL,
+                pdf_b64              = NULL,
+                pdf_url              = NULL,
+                pdf_path             = NULL,
+                pdf_generado         = FALSE,
+                pdf_descargado       = FALSE,
+                correo_enviado       = FALSE,
+                fecha_cierre         = NULL,
+                sync_check_status    = 'BORRADOR_LOCAL',
+                sync_status          = 'PENDIENTE',
+                sync_version         = COALESCE(sync_version, 0) + 1,
+                updated_at           = NOW()
+            WHERE id = $1
+            """,
+            actual_id,
+        )
+        new_ver = 2
+
+    borrados = _eliminar_pdfs_folio_disco(actual_folio, extra_path=row.get("pdf_path"))
+    logger.info(
+        "[REHACER] Orden %s (ID %s) reabierta a EN_PROCESO | pdf_version=%s | archivos_cache_eliminados=%d",
+        actual_folio, actual_id, new_ver, borrados,
+    )
+    return {
+        "ok": True,
+        "folio_os": actual_folio,
+        "id": actual_id,
+        "estado": "EN_PROCESO",
+        "estatus": "EN_PROCESO",
+        "firma_cliente": None,
+        "pdf_generado": False,
+        "has_pdf": False,
+        "correo_enviado": False,
+        "pdf_version": int(new_ver or 2),
+        "detail": "Orden desbloqueada para corrección. Firma previa del cliente y PDF anterior invalidados.",
+    }
+
+
 # ── Reset / Eliminar toma metrológica desde cero ──────────────────────────────
 
 @router.delete(
@@ -3002,7 +3169,7 @@ async def reset_toma_orden(
 ):
     clean_folio = folio.strip()
     row = await db.fetchrow(
-        "SELECT id, folio_os, estado, id_tecnico FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+        "SELECT id, folio_os, estado, id_tecnico, pdf_path FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
         clean_folio,
     )
     if row is None:
@@ -3017,53 +3184,86 @@ async def reset_toma_orden(
     await db.execute("DELETE FROM det_excentricidad WHERE id_os = $1", actual_id)
     await db.execute("DELETE FROM det_exactitud WHERE id_os = $1", actual_id)
 
-    # 2. Resetear ordenes_servicio a estado inicial 'PROCESO'
-    await db.execute(
-        """
-        UPDATE ordenes_servicio
-        SET estado               = 'PROCESO',
-            estatus              = 'Proceso',
-            dictamen             = NULL,
-            observaciones        = NULL,
-            valor_repetibilidad  = NULL,
-            valor_excentricidad  = NULL,
-            firma_tecnico        = NULL,
-            firma_tecnico_b64    = NULL,
-            firma_cliente        = NULL,
-            firma_cliente_b64    = NULL,
-            nombre_ing           = NULL,
-            puesto_ing           = NULL,
-            firma_cliente_nombre = NULL,
-            pdf_b64              = NULL,
-            pdf_url              = NULL,
-            pdf_path             = NULL,
-            pdf_generado         = FALSE,
-            pdf_descargado       = FALSE,
-            sync_check_status    = 'BORRADOR_LOCAL',
-            fecha_cierre         = NULL,
-            sync_status          = 'PENDIENTE',
-            sync_version         = COALESCE(sync_version, 0) + 1,
-            updated_at           = NOW()
-        WHERE id = $1
-        """,
-        actual_id,
-    )
-
-    # 3. Eliminar archivo PDF de disco en uploads si existía
+    # 2. Resetear ordenes_servicio a estado inicial 'EN_PROCESO' invalidando pdf_b64 y pdf_base64
     try:
-        upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
-        filepath = os.path.join(upload_dir, f"{actual_folio}.pdf")
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    except Exception as e_rm:
-        logger.warning("[RESET TOMA] Error al eliminar PDF de disco: %s", e_rm)
+        await db.execute(
+            """
+            UPDATE ordenes_servicio
+            SET estado               = 'EN_PROCESO',
+                estatus              = 'EN_PROCESO',
+                dictamen             = NULL,
+                observaciones        = NULL,
+                valor_repetibilidad  = NULL,
+                valor_excentricidad  = NULL,
+                firma_tecnico        = NULL,
+                firma_tecnico_b64    = NULL,
+                firma_cliente        = NULL,
+                firma_cliente_b64    = NULL,
+                nombre_ing           = NULL,
+                puesto_ing           = NULL,
+                firma_cliente_nombre = NULL,
+                pdf_b64              = NULL,
+                pdf_base64           = NULL,
+                pdf_url              = NULL,
+                pdf_path             = NULL,
+                pdf_generado         = FALSE,
+                has_pdf              = FALSE,
+                pdf_descargado       = FALSE,
+                correo_enviado       = FALSE,
+                email_enviado        = FALSE,
+                sync_check_status    = 'BORRADOR_LOCAL',
+                fecha_cierre         = NULL,
+                sync_status          = 'PENDIENTE',
+                pdf_version          = COALESCE(pdf_version, 1) + 1,
+                sync_version         = COALESCE(sync_version, 0) + 1,
+                updated_at           = NOW()
+            WHERE id = $1
+            """,
+            actual_id,
+        )
+    except Exception:
+        await db.execute(
+            """
+            UPDATE ordenes_servicio
+            SET estado               = 'PROCESO',
+                estatus              = 'Proceso',
+                dictamen             = NULL,
+                observaciones        = NULL,
+                valor_repetibilidad  = NULL,
+                valor_excentricidad  = NULL,
+                firma_tecnico        = NULL,
+                firma_tecnico_b64    = NULL,
+                firma_cliente        = NULL,
+                firma_cliente_b64    = NULL,
+                nombre_ing           = NULL,
+                puesto_ing           = NULL,
+                firma_cliente_nombre = NULL,
+                pdf_b64              = NULL,
+                pdf_url              = NULL,
+                pdf_path             = NULL,
+                pdf_generado         = FALSE,
+                pdf_descargado       = FALSE,
+                correo_enviado       = FALSE,
+                sync_check_status    = 'BORRADOR_LOCAL',
+                fecha_cierre         = NULL,
+                sync_status          = 'PENDIENTE',
+                sync_version         = COALESCE(sync_version, 0) + 1,
+                updated_at           = NOW()
+            WHERE id = $1
+            """,
+            actual_id,
+        )
+
+    # 3. Eliminar archivos PDF cacheados en disco solo para este folio
+    _eliminar_pdfs_folio_disco(actual_folio, extra_path=row.get("pdf_path"))
 
     logger.info("[RESET TOMA] Orden %s (ID %s) reiniciada desde cero exitosamente", actual_folio, actual_id)
     return {
         "ok": True,
         "folio_os": actual_folio,
         "id": actual_id,
-        "estado": "PROCESO",
+        "estado": "EN_PROCESO",
+        "estatus": "EN_PROCESO",
         "detail": "Lecturas, dictamen y firmas eliminadas. Orden reseteada a estado inicial.",
     }
 

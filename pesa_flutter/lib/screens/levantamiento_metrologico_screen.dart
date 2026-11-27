@@ -2,6 +2,7 @@
 // Formulario específico para Levantamiento Metrológico y Logística de Pesas (LV).
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -20,6 +21,7 @@ import '../theme/foldable_layout.dart';
 import '../theme/pesa_theme.dart';
 import '../widgets/cliente_correo_poka_yoke.dart';
 import '../widgets/signature_shield.dart';
+import 'pdf_preview_aprobacion_screen.dart';
 
 class LevantamientoMetrologicoScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
@@ -47,6 +49,8 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
   late final ClienteCorreoController _correoCtrl = ClienteCorreoController();
 
   bool _saving = false;
+  bool _vistaPreviaAprobada = false;
+  final GlobalKey _firmaSectionKey = GlobalKey();
 
   @override
   void initState() {
@@ -74,7 +78,184 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
     super.dispose();
   }
 
+  Future<Uint8List> _construirPdfLVBytes({
+    required String folio,
+    required String fechaEjecucionHoy,
+    required Map<String, dynamic> ordenMutable,
+    required String nombre,
+    String? firmaTecB64,
+    String? firmaCliB64,
+    bool modoPreviewSinFirma = false,
+  }) async {
+    pw.ImageProvider? imgTec;
+    if (firmaTecB64 != null && firmaTecB64.isNotEmpty) {
+      try {
+        final raw = firmaTecB64.contains(',') ? firmaTecB64.split(',').last : firmaTecB64;
+        imgTec = pw.MemoryImage(base64Decode(raw));
+      } catch (_) {}
+    }
+    pw.ImageProvider? imgCli;
+    if (!modoPreviewSinFirma && firmaCliB64 != null && firmaCliB64.isNotEmpty) {
+      try {
+        final raw = firmaCliB64.contains(',') ? firmaCliB64.split(',').last : firmaCliB64;
+        imgCli = pw.MemoryImage(base64Decode(raw));
+      } catch (_) {}
+    }
+
+    final pdf = pw.Document(title: 'Levantamiento Metrológico - $folio');
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.letter,
+        margin: const pw.EdgeInsets.all(36),
+        build: (ctx) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('BÁSCULAS PESA — LEVANTAMIENTO METROLÓGICO (LV)', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFFC8102E))),
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text('FOLIO: $folio', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('FECHA: $fechaEjecucionHoy', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                  ],
+                ),
+              ],
+            ),
+            pw.Divider(color: PdfColors.grey),
+            pw.Text('Cliente: ${ordenMutable['cliente'] ?? ''}', style: const pw.TextStyle(fontSize: 10)),
+            pw.Text('Fecha de Ejecución: $fechaEjecucionHoy', style: const pw.TextStyle(fontSize: 10)),
+            pw.SizedBox(height: 10),
+            pw.Text('LOGÍSTICA DE PESAS PATRÓN:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+            pw.Text('Masa Total Requerida: ${_pesoTotalCtrl.text} | Clase: ${_clasePesasCtrl.text}', style: const pw.TextStyle(fontSize: 9)),
+            pw.Text('Transporte / Maniobra: ${_maniobraCtrl.text}', style: const pw.TextStyle(fontSize: 9)),
+            pw.SizedBox(height: 10),
+            pw.Text('ACCESIBILIDAD Y SEGURIDAD:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+            pw.Text(_accesibilidadCtrl.text.isNotEmpty ? _accesibilidadCtrl.text : 'Acceso libre para camión y personal.', style: const pw.TextStyle(fontSize: 9)),
+            pw.SizedBox(height: 10),
+            pw.Text('INVENTARIO DE BÁSCULAS A CALIBRAR:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+            pw.Text(_inventarioBasculasCtrl.text.isNotEmpty ? _inventarioBasculasCtrl.text : 'Pendiente inspección en sitio.', style: const pw.TextStyle(fontSize: 9)),
+            pw.SizedBox(height: 10),
+            pw.Text('OBSERVACIONES:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+            pw.SizedBox(height: 3),
+            () {
+              final String obsTexto = _observacionesCtrl.text.trim();
+              final double obsFontSize = obsTexto.length > 350
+                  ? 6.8
+                  : (obsTexto.length > 200 ? 7.5 : 8.5);
+              return pw.Container(
+                width: double.infinity,
+                constraints: const pw.BoxConstraints(minHeight: 38),
+                padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
+                ),
+                child: pw.Text(
+                  obsTexto.isEmpty ? 'Sin observaciones adicionales.' : obsTexto,
+                  style: pw.TextStyle(
+                    fontSize: obsFontSize,
+                    lineSpacing: 1.5,
+                  ),
+                  softWrap: true,
+                  textAlign: pw.TextAlign.left,
+                ),
+              );
+            }(),
+            pw.Spacer(),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+              children: [
+                pw.Column(children: [
+                  pw.Container(
+                    width: 160,
+                    height: 44,
+                    alignment: pw.Alignment.bottomCenter,
+                    child: imgTec != null ? pw.Image(imgTec, height: 40, fit: pw.BoxFit.contain) : pw.SizedBox(),
+                  ),
+                  pw.Container(width: 160, height: 1, color: PdfColors.black),
+                  pw.SizedBox(height: 3),
+                  pw.Text('Metrólogo Responsable', style: const pw.TextStyle(fontSize: 8)),
+                ]),
+                pw.Column(children: [
+                  pw.Container(
+                    width: 160,
+                    height: 44,
+                    alignment: modoPreviewSinFirma ? pw.Alignment.center : pw.Alignment.bottomCenter,
+                    child: (!modoPreviewSinFirma && imgCli != null)
+                        ? pw.Image(imgCli, height: 40, fit: pw.BoxFit.contain)
+                        : (modoPreviewSinFirma
+                            ? pw.Text(
+                                'Pendiente de firma y conformidad del cliente',
+                                textAlign: pw.TextAlign.center,
+                                style: pw.TextStyle(fontSize: 6.5, fontStyle: pw.FontStyle.italic, color: PdfColors.grey600),
+                              )
+                            : pw.SizedBox()),
+                  ),
+                  pw.Container(width: 160, height: 1, color: PdfColors.black),
+                  pw.SizedBox(height: 3),
+                  pw.Text(
+                    modoPreviewSinFirma ? 'Conforme (Cliente)' : 'Conforme: $nombre',
+                    style: const pw.TextStyle(fontSize: 8),
+                  ),
+                ]),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    return pdf.save();
+  }
+
+  Future<void> _abrirVistaPreviaLV() async {
+    setState(() => _saving = true);
+    try {
+      final folio = (widget.orden['folio_os'] ?? 'LV-00-000').toString();
+      final fechaHoy = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final username = (widget.orden['tecnico_username'] ?? widget.orden['tecnico'] ?? '').toString();
+      final fTecB64 = await FirmaTecnicoService.instance.getFirma(username);
+
+      final previewBytes = await _construirPdfLVBytes(
+        folio: folio,
+        fechaEjecucionHoy: fechaHoy,
+        ordenMutable: Map<String, dynamic>.from(widget.orden),
+        nombre: _nombreClienteCtrl.text.trim(),
+        firmaTecB64: fTecB64,
+        firmaCliB64: null,
+        modoPreviewSinFirma: true,
+      );
+      if (!mounted) return;
+      setState(() => _saving = false);
+
+      final aprobado = await PdfPreviewAprobacionScreen.mostrar(
+        context,
+        folio: folio,
+        pdfBytes: previewBytes,
+        tipoDocumento: 'Levantamiento Metrológico (LV)',
+      );
+      if (aprobado && mounted) {
+        setState(() => _vistaPreviaAprobada = true);
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          final ctx = _firmaSectionKey.currentContext;
+          if (ctx != null) {
+            Scrollable.ensureVisible(ctx, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(backgroundColor: _red, content: Text('Error vista previa: $e')));
+      }
+    }
+  }
+
   Future<void> _finalizarLV() async {
+    if (!_vistaPreviaAprobada) {
+      await _abrirVistaPreviaLV();
+      return;
+    }
     final nombre = _nombreClienteCtrl.text.trim();
     if (!exigirNombreRecibe(context, nombre)) {
       setState(() => _errNombreRecibe = true);
@@ -114,98 +295,33 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
         fechaCreacionLogistica: ordenMutable['fecha_creacion_logistica']?.toString(),
       );
 
-      final pdf = pw.Document(title: 'Levantamiento Metrológico - $folio');
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.letter,
-          margin: const pw.EdgeInsets.all(36),
-          build: (ctx) => pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text('BÁSCULAS PESA — LEVANTAMIENTO METROLÓGICO (LV)', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColor.fromInt(0xFFC8102E))),
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.end,
-                    children: [
-                      pw.Text('FOLIO: $folio', style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold)),
-                      pw.Text('FECHA: $fechaEjecucionHoy', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
-                    ],
-                  ),
-                ],
-              ),
-              pw.Divider(color: PdfColors.grey),
-              pw.Text('Cliente: ${ordenMutable['cliente'] ?? ''}', style: const pw.TextStyle(fontSize: 10)),
-              pw.Text('Fecha de Ejecución: $fechaEjecucionHoy', style: const pw.TextStyle(fontSize: 10)),
-              pw.SizedBox(height: 10),
-              pw.Text('LOGÍSTICA DE PESAS PATRÓN:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.Text('Masa Total Requerida: ${_pesoTotalCtrl.text} | Clase: ${_clasePesasCtrl.text}', style: const pw.TextStyle(fontSize: 9)),
-              pw.Text('Transporte / Maniobra: ${_maniobraCtrl.text}', style: const pw.TextStyle(fontSize: 9)),
-              pw.SizedBox(height: 10),
-              pw.Text('ACCESIBILIDAD Y SEGURIDAD:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.Text(_accesibilidadCtrl.text.isNotEmpty ? _accesibilidadCtrl.text : 'Acceso libre para camión y personal.', style: const pw.TextStyle(fontSize: 9)),
-              pw.SizedBox(height: 10),
-              pw.Text('INVENTARIO DE BÁSCULAS A CALIBRAR:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.Text(_inventarioBasculasCtrl.text.isNotEmpty ? _inventarioBasculasCtrl.text : 'Pendiente inspección en sitio.', style: const pw.TextStyle(fontSize: 9)),
-              pw.SizedBox(height: 10),
-              pw.Text('OBSERVACIONES:', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.SizedBox(height: 3),
-              () {
-                final String obsTexto = _observacionesCtrl.text.trim();
-                final double obsFontSize = obsTexto.length > 350
-                    ? 6.8
-                    : (obsTexto.length > 200 ? 7.5 : 8.5);
-                return pw.Container(
-                  width: double.infinity,
-                  constraints: const pw.BoxConstraints(minHeight: 38),
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-                  decoration: pw.BoxDecoration(
-                    border: pw.Border.all(color: PdfColors.grey400, width: 0.6),
-                  ),
-                  child: pw.Text(
-                    obsTexto.isEmpty ? 'Sin observaciones adicionales.' : obsTexto,
-                    style: pw.TextStyle(
-                      fontSize: obsFontSize,
-                      lineSpacing: 1.5,
-                    ),
-                    softWrap: true,
-                    textAlign: pw.TextAlign.left,
-                  ),
-                );
-              }(),
-              pw.Spacer(),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-                children: [
-                  pw.Column(children: [
-                    pw.Container(width: 160, height: 1, color: PdfColors.black),
-                    pw.Text('Metrólogo Responsable', style: const pw.TextStyle(fontSize: 8)),
-                  ]),
-                  pw.Column(children: [
-                    pw.Container(width: 160, height: 1, color: PdfColors.black),
-                    pw.Text('Conforme: $nombre', style: const pw.TextStyle(fontSize: 8)),
-                  ]),
-                ],
-              ),
-            ],
-          ),
-        ),
-      );
-
-      final pdfBytes = await pdf.save();
-      final dir = await getApplicationDocumentsDirectory();
-      final pdfDir = Directory('${dir.path}/pdfs');
-      if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
-      final pdfPath = '${pdfDir.path}/$folio.pdf';
-      final file = File(pdfPath);
-      await file.writeAsBytes(pdfBytes, flush: true);
+      final username = (widget.orden['tecnico_username'] ?? widget.orden['tecnico'] ?? '').toString();
+      final fTecB64 = await FirmaTecnicoService.instance.getFirma(username);
 
       String? fCliB64;
       if (_ctrlFirmaCli.isNotEmpty) {
         final b = await _ctrlFirmaCli.toPngBytes();
         if (b != null) fCliB64 = base64Encode(b);
       }
+
+      await LocalDbService.instance.invalidarPdfLocal(folio);
+
+      final pdfBytes = await _construirPdfLVBytes(
+        folio: folio,
+        fechaEjecucionHoy: fechaEjecucionHoy,
+        ordenMutable: ordenMutable,
+        nombre: nombre,
+        firmaTecB64: fTecB64,
+        firmaCliB64: fCliB64,
+        modoPreviewSinFirma: false,
+      );
+
+      final dir = await getApplicationDocumentsDirectory();
+      final pdfDir = Directory('${dir.path}/pdfs');
+      if (!await pdfDir.exists()) await pdfDir.create(recursive: true);
+      final pdfPath = '${pdfDir.path}/$folio.pdf';
+      final file = File(pdfPath);
+      await file.writeAsBytes(pdfBytes, flush: true);
 
       final String loteIdLv = (widget.orden['id_lote'] ?? widget.orden['lote'] ?? '').toString().trim();
       final String correoCapturado = await _correoCtrl.persistirEnOrdenYLote(
@@ -316,14 +432,60 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                ClienteCorreoLockBanner(controller: _correoCtrl),
-                ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white, minimumSize: const Size.fromHeight(48)),
-                  onPressed: (_saving || !_correoCtrl.isValido) ? null : _finalizarLV,
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Finalizar Levantamiento Metrológico', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
+                if (_vistaPreviaAprobada) ...[
+                  ClienteCorreoLockBanner(controller: _correoCtrl),
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _saving ? null : _abrirVistaPreviaLV,
+                        icon: const Icon(Icons.preview_outlined, size: 18),
+                        label: const Text('Vista Previa'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: _dark,
+                          side: const BorderSide(color: PesaColors.borderStrong),
+                          minimumSize: const Size(0, 48),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _red,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size.fromHeight(48),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          onPressed: (_saving || !_correoCtrl.isValido) ? null : _finalizarLV,
+                          icon: const Icon(Icons.check_circle_outline),
+                          label: Text(
+                            _saving ? 'Generando PDF Final...' : 'Confirmar Firma y Finalizar',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _red,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    onPressed: _saving ? null : _abrirVistaPreviaLV,
+                    icon: _saving
+                        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                        : const Icon(Icons.preview_outlined),
+                    label: Text(
+                      _saving ? 'Preparando Vista Previa...' : 'Revisar Vista Previa (Sin Firma)',
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -350,7 +512,7 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
             const SizedBox(height: 12),
             TextFormField(controller: _observacionesCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Observaciones Metrológicas del Sitio', border: OutlineInputBorder())),
             const SizedBox(height: 16),
-            const Text('FIRMA DE CONFORMIDAD', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: PesaColors.textPrimary)),
+            Text('FIRMA DE CONFORMIDAD', key: _firmaSectionKey, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: PesaColors.textPrimary)),
             const SizedBox(height: 8),
             TextFormField(controller: _nombreClienteCtrl, onChanged: (_) { if (_errNombreRecibe) setState(() => _errNombreRecibe = false); }, decoration: InputDecoration(labelText: 'Nombre del Responsable en Planta *', errorText: _errNombreRecibe ? kMsgNombreRecibeObligatorio : null, border: const OutlineInputBorder())),
             const SizedBox(height: 10),

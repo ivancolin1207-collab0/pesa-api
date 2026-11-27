@@ -419,6 +419,7 @@ class OsPdfGenerator:
         firma_tecnico_b64: Optional[str] = None,
         digital:           bool = False,
         force:             bool = False,
+        modo_preview_sin_firma: bool = False,
     ) -> str:
         """
         Genera el PDF completo de la OS.
@@ -441,9 +442,12 @@ class OsPdfGenerator:
 
         folio_check = str((os_data or {}).get("folio_os") or (os_data or {}).get("folio_re") or (os_data or {}).get("folio") or "").strip().upper()
         tipo_doc_check = str((os_data or {}).get("tipo_documento") or "").strip().upper()
+        preview_sin_firma = bool(modo_preview_sin_firma or (os_data or {}).get("modo_preview_sin_firma"))
         if folio_check.startswith("OSOB-") or tipo_doc_check == "OSOB":
             try:
                 merged_osob = dict(os_data or {})
+                if preview_sin_firma:
+                    merged_osob["modo_preview_sin_firma"] = True
                 if tecnico_nombre and not merged_osob.get("tecnico_nombre"):
                     merged_osob["tecnico_nombre"] = tecnico_nombre
                 if firma_tecnico_b64 and not merged_osob.get("firma_tecnico"):
@@ -451,7 +455,7 @@ class OsPdfGenerator:
                 return osob_pdf_generator.generate(
                     os_data=merged_osob,
                     output_path=output_path,
-                    force=force,
+                    force=True if preview_sin_firma else force,
                     digital=digital,
                 )
             except Exception as exc_osob:
@@ -461,6 +465,10 @@ class OsPdfGenerator:
             try:
                 from services.re_pdf_generator import re_pdf_generator
                 merged_re = dict(os_data or {})
+                if preview_sin_firma:
+                    merged_re["modo_preview_sin_firma"] = True
+                    merged_re["firma_cliente"] = None
+                    merged_re["firma_cliente_b64"] = None
                 if tecnico_nombre and not merged_re.get("tecnico_nombre"):
                     merged_re["tecnico_nombre"] = tecnico_nombre
                 if firma_tecnico_b64 and not merged_re.get("firma_tecnico"):
@@ -468,7 +476,7 @@ class OsPdfGenerator:
                 return re_pdf_generator.generate(
                     rv_data=merged_re,
                     output_path=output_path,
-                    force=force,
+                    force=True if preview_sin_firma else force,
                     digital=digital,
                 )
             except Exception as exc_re:
@@ -514,7 +522,8 @@ class OsPdfGenerator:
         try:
             self._draw_page(c, os_data, repetibilidad, excentricidad, exactitud,
                             tecnico_nombre, digital=digital,
-                            firma_tecnico_b64=firma_tecnico_b64)
+                            firma_tecnico_b64=firma_tecnico_b64,
+                            modo_preview_sin_firma=preview_sin_firma)
             c.save()
             _os.replace(tmp_path, output_path)
         except Exception:
@@ -530,7 +539,8 @@ class OsPdfGenerator:
 
     def _draw_page(self, c, os_data, rep, exc, exac, tecnico_nombre,
                    digital: bool = False,
-                   firma_tecnico_b64: Optional[str] = None) -> None:
+                   firma_tecnico_b64: Optional[str] = None,
+                   modo_preview_sin_firma: bool = False) -> None:
         y = self.H
         y = self._draw_header(c, y, os_data)
         y = self._draw_fecha(c, y, os_data, digital=digital)
@@ -544,6 +554,7 @@ class OsPdfGenerator:
             c, y, os_data, tecnico_nombre,
             digital=digital,
             firma_tecnico_b64=firma_tecnico_b64,
+            modo_preview_sin_firma=modo_preview_sin_firma,
         )
         y = self._draw_nota(c, y_after_firmas)
         self._draw_footer_bar(c)
@@ -2727,7 +2738,8 @@ class OsPdfGenerator:
     def _draw_firmas(self, c, y: float, os_data: dict,
                      tecnico_nombre: Optional[str],
                      digital: bool = False,
-                     firma_tecnico_b64: Optional[str] = None) -> float:
+                     firma_tecnico_b64: Optional[str] = None,
+                     modo_preview_sin_firma: bool = False) -> float:
         """
         Dos columnas centradas. Retorna la y final después de las firmas.
         En modo digital: incrusta las imágenes de firma y los nombres debajo.
@@ -2812,7 +2824,8 @@ class OsPdfGenerator:
                         logger.warning("No se pudo incrustar firma_tecnico_path: %s", e)
 
             # ── Firma del cliente ──────────────────────────────────────────────
-            _firma_cli_b64 = _limpiar_b64_firma(
+            preview_cli_blank = bool(modo_preview_sin_firma or os_data.get("modo_preview_sin_firma"))
+            _firma_cli_b64 = None if preview_cli_blank else _limpiar_b64_firma(
                 os_data.get("firma_cliente_b64") or os_data.get("firma_cliente")
             )
             if _firma_cli_b64:
@@ -2831,7 +2844,7 @@ class OsPdfGenerator:
                 except Exception as e:
                     logger.warning("No se pudo incrustar firma_cliente_b64: %s", e)
 
-            if not has_firma_cli:
+            if not has_firma_cli and not preview_cli_blank:
                 firma_cli_path = os_data.get("firma_cliente_path")
                 if firma_cli_path and Path(firma_cli_path).exists():
                     try:
@@ -2844,6 +2857,15 @@ class OsPdfGenerator:
                         has_firma_cli = True
                     except Exception as e:
                         logger.warning("No se pudo incrustar firma_cliente_path: %s", e)
+
+            if preview_cli_blank:
+                c.setFillColor(colors.HexColor("#86868B"))
+                c.setFont("Helvetica-Oblique", 6.5)
+                c.drawCentredString(
+                    right_x + col_w / 2,
+                    img_y + img_h * 0.5,
+                    "Pendiente de firma y conformidad del cliente",
+                )
 
             firma_y = img_y  # la línea va debajo de la imagen
         else:
@@ -2896,7 +2918,12 @@ class OsPdfGenerator:
         if not has_firma_cli:
             c.setFillColor(colors.HexColor("#555555"))
             c.setFont("Helvetica-Oblique", 6)
-            c.drawCentredString(right_x + col_w / 2, firma_y - 32, "(Recibido sin firma digital)")
+            lbl_sin_firma = (
+                "Pendiente de firma y conformidad del cliente"
+                if (modo_preview_sin_firma or os_data.get("modo_preview_sin_firma"))
+                else "(Recibido sin firma digital)"
+            )
+            c.drawCentredString(right_x + col_w / 2, firma_y - 32, lbl_sin_firma)
             final_y = firma_y - 40
 
         return final_y
@@ -3773,8 +3800,9 @@ class OsobPdfGenerator:
         cli_nombre = str(d.get("nombre_ing") or d.get("firma_cliente_nombre") or "").strip() if digital else ""
         cli_puesto = str(d.get("puesto_ing") or d.get("area_cliente") or "").strip() if digital else ""
 
+        preview_sin_firma = bool(d.get("modo_preview_sin_firma"))
         firma_tec_b64 = d.get("firma_tecnico") or d.get("firma_tecnico_b64") or _firma_perfil_tecnico(d)
-        firma_cli_b64 = d.get("firma_cliente") or d.get("firma_cliente_b64")
+        firma_cli_b64 = None if preview_sin_firma else (d.get("firma_cliente") or d.get("firma_cliente_b64"))
 
         # Columna Izquierda: Realizó Revisión (Técnico)
         lx = self.ML
@@ -3853,7 +3881,11 @@ class OsobPdfGenerator:
         c.setFont("Helvetica-Bold", 5.8)
         c.drawString(rx + 6, y - 54.0, "Firma:")
         c.line(rx + 36, y - 55.0, rx + half_w - 6, y - 55.0)
-        if digital and firma_cli_b64:
+        if preview_sin_firma:
+            c.setFillColor(colors.HexColor("#86868B"))
+            c.setFont("Helvetica-Oblique", 5.8)
+            c.drawString(rx + 42, y - 47.0, "Pendiente de firma y conformidad del cliente")
+        elif digital and firma_cli_b64:
             self._draw_sig_b64(c, firma_cli_b64, rx + 45, y - 54.0, width=110, height=21)
 
         return y - box_h
@@ -4584,8 +4616,9 @@ class OsoccPdfGenerator(OsobPdfGenerator):
         cli_nombre = str(d.get("nombre_ing") or d.get("firma_cliente_nombre") or "").strip() if digital else ""
         cli_puesto = str(d.get("puesto_ing") or d.get("area_cliente") or "").strip() if digital else ""
 
+        preview_sin_firma = bool(d.get("modo_preview_sin_firma"))
         firma_tec_b64 = d.get("firma_tecnico") or d.get("firma_tecnico_b64") or _firma_perfil_tecnico(d)
-        firma_cli_b64 = d.get("firma_cliente") or d.get("firma_cliente_b64")
+        firma_cli_b64 = None if preview_sin_firma else (d.get("firma_cliente") or d.get("firma_cliente_b64"))
 
         # Columna Izquierda: Evaluó / Técnico Responsable
         lx = self.ML
@@ -4658,7 +4691,11 @@ class OsoccPdfGenerator(OsobPdfGenerator):
         c.setFont("Helvetica-Bold", 5.8)
         c.drawString(rx + 6, y - 54.0, "Firma:")
         c.line(rx + 36, y - 55.0, rx + half_w - 6, y - 55.0)
-        if digital and firma_cli_b64:
+        if preview_sin_firma:
+            c.setFillColor(colors.HexColor("#86868B"))
+            c.setFont("Helvetica-Oblique", 5.8)
+            c.drawString(rx + 42, y - 47.0, "Pendiente de firma y conformidad del cliente")
+        elif digital and firma_cli_b64:
             self._draw_sig_b64(c, firma_cli_b64, rx + 45, y - 54.0, width=110, height=21)
 
         return y - box_h

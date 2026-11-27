@@ -314,10 +314,21 @@ async def download_pdf(
     if not isinstance(current_user, dict):
         current_user = None
     clean_folio = folio_os.strip()
-    row = await db.fetchrow(
-        "SELECT id, folio_os, pdf_path, pdf_url, pdf_b64, id_tecnico FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
-        clean_folio,
-    )
+    try:
+        row = await db.fetchrow(
+            """
+            SELECT id, folio_os, pdf_path, pdf_url, pdf_b64, pdf_base64,
+                   id_tecnico, estado, estatus, COALESCE(pdf_version, 1) AS pdf_version, updated_at
+            FROM ordenes_servicio
+            WHERE folio_os = $1 OR id::text = $1
+            """,
+            clean_folio,
+        )
+    except Exception:
+        row = await db.fetchrow(
+            "SELECT id, folio_os, pdf_path, pdf_url, pdf_b64, id_tecnico, estado, estatus, updated_at FROM ordenes_servicio WHERE folio_os = $1 OR id::text = $1",
+            clean_folio,
+        )
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -347,18 +358,22 @@ async def download_pdf(
         except Exception as e_audit:
             logger.warning("[DOWNLOAD PDF] Error actualizando auditoria a AUDITADA_ADMIN: %s", e_audit)
 
+    actual_folio = row["folio_os"]
     upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
-    candidate  = Path(upload_dir) / f"{folio_os}.pdf"
-    _no_cache  = {"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"}
+    candidate  = Path(upload_dir) / f"{actual_folio}.pdf"
+    pdf_ver    = str(row.get("pdf_version") or 1)
+    _no_cache  = {
+        "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+        "X-PDF-Version": pdf_ver,
+    }
 
-    # Estrategia 1 (fuente de verdad): pdf_b64 en PostgreSQL.
-    # Se prioriza sobre cualquier copia en disco para que un PDF regenerado
-    # (p. ej. con la firma oficial del técnico) reemplace de inmediato la copia
-    # vieja que la tablet subió a uploads/. La caché se refresca si difiere.
-    pdf_b64 = row.get("pdf_b64")
+    # Estrategia 1 (fuente de verdad): pdf_b64 / pdf_base64 en PostgreSQL.
+    pdf_b64 = row.get("pdf_b64") or row.get("pdf_base64")
     if pdf_b64:
         try:
-            pdf_bytes = base64.b64decode(pdf_b64)
+            pdf_bytes = base64.b64decode(str(pdf_b64).strip())
             try:
                 if (force_regenerate or force or not candidate.exists()
                         or candidate.stat().st_size != len(pdf_bytes)
@@ -368,42 +383,69 @@ async def download_pdf(
                     tmp.write_bytes(pdf_bytes)
                     os.replace(str(tmp), str(candidate))
             except Exception as e_cache:
-                logger.warning("[DOWNLOAD PDF] No se pudo refrescar caché de %s: %s", folio_os, e_cache)
+                logger.warning("[DOWNLOAD PDF] No se pudo refrescar caché de %s: %s", actual_folio, e_cache)
             return Response(
                 content=pdf_bytes,
                 media_type="application/pdf",
                 headers={
-                    "Content-Disposition": f'inline; filename="{folio_os}.pdf"',
+                    "Content-Disposition": f'inline; filename="{actual_folio}.pdf"',
                     **_no_cache,
                 },
             )
         except Exception as e_b64:
-            logger.warning("[DOWNLOAD PDF] pdf_b64 inválido para %s: %s", folio_os, e_b64)
+            logger.warning("[DOWNLOAD PDF] pdf_b64 inválido para %s: %s", actual_folio, e_b64)
 
-    # Sin pdf_b64 en BD: recurrir a copias en disco.
-    # Estrategia 2: pdf_path absoluto guardado en BD
+    # Si la orden está reabierta (EN_PROCESO/PROCESO) y no tiene blob en BD,
+    # NUNCA servir un PDF viejo residual de disco.
+    estado_up = f"{row.get('estado') or ''} {row.get('estatus') or ''}".upper()
+    if "PROCESO" in estado_up and "CERRAD" not in estado_up and "COMPLET" not in estado_up:
+        raise HTTPException(
+            status_code=404,
+            detail=f"La orden '{actual_folio}' está en proceso / reabierta para corrección y aún no tiene nuevo PDF definitivo.",
+        )
+
+    # Sin pdf_b64 en BD: verificar si existe copia fresca en disco cuyo mtime >= updated_at
+    updated_at_val = row.get("updated_at")
+    updated_ts = None
+    if updated_at_val is not None:
+        try:
+            updated_ts = updated_at_val.timestamp()
+        except Exception:
+            updated_ts = None
+
+    def _disco_fresco(p: Path) -> bool:
+        if not p.exists():
+            return False
+        if force_regenerate or force:
+            return False
+        if updated_ts is not None:
+            try:
+                if p.stat().st_mtime + 2.0 < updated_ts:
+                    return False
+            except Exception:
+                pass
+        return True
+
     bd_path = row.get("pdf_path")
-    if bd_path and Path(bd_path).exists():
+    if bd_path and _disco_fresco(Path(bd_path)):
         return FileResponse(path=bd_path, media_type="application/pdf",
-                            filename=f"{folio_os}.pdf", headers=_no_cache)
+                            filename=f"{actual_folio}.pdf", headers=_no_cache)
 
-    # Estrategia 3: buscar en UPLOAD_DIR por nombre de folio
-    if candidate.exists():
+    if _disco_fresco(candidate):
         return FileResponse(path=str(candidate), media_type="application/pdf",
-                            filename=f"{folio_os}.pdf", headers=_no_cache)
+                            filename=f"{actual_folio}.pdf", headers=_no_cache)
 
-    # Estrategia 4: pdf_url es una ruta relativa local
     pdf_url = row.get("pdf_url") or ""
     if pdf_url.startswith("/uploads/"):
         local_path = Path(upload_dir) / Path(pdf_url).name
-        if local_path.exists():
+        if _disco_fresco(local_path):
             return FileResponse(path=str(local_path), media_type="application/pdf",
-                                filename=f"{folio_os}.pdf", headers=_no_cache)
+                                filename=f"{actual_folio}.pdf", headers=_no_cache)
 
     # PDF no disponible en servidor
     raise HTTPException(
         status_code=404,
-        detail=f"PDF de '{folio_os}' no disponible en el servidor. El técnico aún no ha finalizado o sincronizado el documento.",
+        detail=f"PDF de '{actual_folio}' no disponible en el servidor. El técnico aún no ha finalizado o sincronizado el documento.",
     )
 
 
@@ -512,8 +554,10 @@ async def upload_pdf_tablet_os(
     filename = f"{actual_folio}.pdf"
     filepath = os.path.join(upload_dir, filename)
 
-    with open(filepath, "wb") as f:
+    tmp_filepath = f"{filepath}.tmp"
+    with open(tmp_filepath, "wb") as f:
         f.write(content)
+    os.replace(tmp_filepath, filepath)
 
     pdf_b64 = base64.b64encode(content).decode("ascii")
 
@@ -530,6 +574,8 @@ async def upload_pdf_tablet_os(
                 pdf_descargado    = FALSE,
                 pdf_generado      = TRUE,
                 has_pdf           = TRUE,
+                pdf_version       = COALESCE(pdf_version, 1) + 1,
+                fecha_cierre      = NOW(),
                 sync_check_status = 'SUBIDA_SERVIDOR',
                 fecha_subida_servidor = NOW(),
                 sync_status       = 'SINCRONIZADO',
@@ -874,6 +920,18 @@ async def sync_data_os(
         "sync_check_status": "SUBIDA_SERVIDOR",
         "sync_status": "SINCRONIZADO",
     }
+
+
+@router.post("/{folio_os}/rehacer", summary="Reabrir orden cerrada/enviada para corrección e invalidar PDF anterior")
+@router.patch("/{folio_os}/rehacer", include_in_schema=False)
+@_safe_endpoint("REHACER OS")
+async def rehacer_os_endpoint(
+    folio_os: str,
+    db=Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    from pesa_api.routers.catalogos import rehacer_orden
+    return await rehacer_orden(folio=folio_os, db=db, current_user=current_user)
 
 
 @router.delete("/{folio_os}/toma", summary="Eliminar toma metrológica desde cero")

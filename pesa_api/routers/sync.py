@@ -170,6 +170,7 @@ class OSCompleta(BaseModel):
     fecha_cancelacion:     Optional[str]   = None
     sin_correo_cliente:    Optional[bool]  = False
     motivo_sin_correo:     Optional[str]   = None
+    pdf_version:           Optional[int]   = 1
     sync_version:          Optional[int]   = 1
     updated_at:            Optional[datetime] = None
 
@@ -614,6 +615,7 @@ async def sync_pull(
             os.fecha_cancelacion::text AS fecha_cancelacion,
             COALESCE(os.sin_correo_cliente, FALSE) AS sin_correo_cliente,
             COALESCE(os.motivo_sin_correo, '') AS motivo_sin_correo,
+            COALESCE(os.pdf_version, 1) AS pdf_version,
             CASE
                 WHEN COALESCE(os.pdf_b64,  '') <> ''
                   OR COALESCE(os.pdf_base64, '') <> ''
@@ -789,11 +791,18 @@ async def sync_pull(
                 d.pop("_fecha_sort", None)
                 folio = (d.get("folio_os") or "").strip()
 
-                # Comprobar si realmente existe un archivo binario en base de datos o en disco del servidor
-                has_pdf_binary = bool(
+                # Comprobar si realmente existe un archivo binario vigente en BD o en disco del servidor.
+                # Si la orden fue reabierta con Rehacer (EN_PROCESO/PROCESO) y la BD ya no tiene PDF,
+                # jamás usar un archivo huérfano en disco para marcarla con PDF vigente.
+                _est_check = str(d.get("estatus") or d.get("estado") or "").strip().upper()
+                _es_abierta = _est_check in ("EN_PROCESO", "EN PROCESO", "PROCESO", "PENDIENTE", "ASIGNADA")
+                _tiene_pdf_bd = bool(
                     d.get("has_pdf_db") or
-                    (d.get("pdf_b64") and len(str(d["pdf_b64"]).strip()) > 100) or
-                    (folio and os.path.exists(os.path.join(upload_dir, f"{folio}.pdf")))
+                    (d.get("pdf_b64") and len(str(d["pdf_b64"]).strip()) > 100)
+                )
+                has_pdf_binary = bool(
+                    _tiene_pdf_bd or
+                    (not _es_abierta and folio and os.path.exists(os.path.join(upload_dir, f"{folio}.pdf")))
                 )
 
                 # Comprobar si cuenta con captura finalizada (firmas, dictamen, pruebas metrologicas, o datos tecnicos)
@@ -1086,6 +1095,8 @@ async def sync_push(
                     ubicacion             = COALESCE($9, ubicacion),
                     id_equipo             = COALESCE($10, id_equipo),
                     pdf_b64               = COALESCE($11, pdf_b64),
+                    pdf_base64            = COALESCE($11, pdf_base64),
+                    has_pdf               = CASE WHEN $11 IS NOT NULL AND $11 <> '' THEN TRUE ELSE has_pdf END,
                     unidad_medida         = COALESCE($12, unidad_medida),
                     firma_tecnico         = COALESCE($13, firma_tecnico),
                     firma_tecnico_b64     = COALESCE($13, firma_tecnico_b64),
@@ -1304,7 +1315,8 @@ async def sync_push(
         # Upsert de pruebas metrológicas
         await _upsert_pruebas(db, os_id, payload)
 
-        # Si viene el PDF en Base64, guardarlo en el almacenamiento de Render
+        # Si viene el PDF en Base64, sobrescribir atómicamente en disco y PostgreSQL
+        # (actualizando tanto pdf_b64 como pdf_base64 y subiendo pdf_version para invalidar caché).
         if payload.pdf_b64:
             try:
                 import os
@@ -1313,25 +1325,48 @@ async def sync_push(
                 os.makedirs(upload_dir, exist_ok=True)
                 p_filename = f"{payload.folio_os}.pdf"
                 p_filepath = os.path.join(upload_dir, p_filename)
+                p_tmp = p_filepath + ".tmp"
                 p_bytes = base64.b64decode(payload.pdf_b64)
-                with open(p_filepath, "wb") as pf:
+                with open(p_tmp, "wb") as pf:
                     pf.write(p_bytes)
-                await db.execute(
-                    """
-                    UPDATE ordenes_servicio 
-                    SET pdf_url = $1, pdf_path = $2, pdf_b64 = $4,
-                        pdf_generado = TRUE,
-                        sync_check_status = CASE 
-                            WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN' 
-                            ELSE 'SUBIDA_SERVIDOR' 
-                        END,
-                        fecha_subida_servidor = COALESCE(fecha_subida_servidor, NOW()),
-                        updated_at = NOW()
-                    WHERE id = $3
-                    """,
-                    f"/uploads/{p_filename}", p_filepath, os_id, payload.pdf_b64,
-                )
-                logger.info("[SYNC PUSH] PDF guardado en disco y PostgreSQL para %s (%d bytes)", payload.folio_os, len(p_bytes))
+                os.replace(p_tmp, p_filepath)
+                try:
+                    await db.execute(
+                        """
+                        UPDATE ordenes_servicio 
+                        SET pdf_url = $1, pdf_path = $2, pdf_b64 = $4, pdf_base64 = $4,
+                            pdf_generado = TRUE,
+                            has_pdf = TRUE,
+                            fecha_cierre = NOW(),
+                            pdf_version = COALESCE(pdf_version, 1) + 1,
+                            sync_check_status = CASE 
+                                WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN' 
+                                ELSE 'SUBIDA_SERVIDOR' 
+                            END,
+                            fecha_subida_servidor = NOW(),
+                            updated_at = NOW()
+                        WHERE id = $3
+                        """,
+                        f"/uploads/{p_filename}", p_filepath, os_id, payload.pdf_b64,
+                    )
+                except Exception:
+                    await db.execute(
+                        """
+                        UPDATE ordenes_servicio 
+                        SET pdf_url = $1, pdf_path = $2, pdf_b64 = $4,
+                            pdf_generado = TRUE,
+                            has_pdf = TRUE,
+                            sync_check_status = CASE 
+                                WHEN sync_check_status = 'AUDITADA_ADMIN' THEN 'AUDITADA_ADMIN' 
+                                ELSE 'SUBIDA_SERVIDOR' 
+                            END,
+                            fecha_subida_servidor = NOW(),
+                            updated_at = NOW()
+                        WHERE id = $3
+                        """,
+                        f"/uploads/{p_filename}", p_filepath, os_id, payload.pdf_b64,
+                    )
+                logger.info("[SYNC PUSH] PDF sobrescrito atómicamente en disco y PostgreSQL para %s (%d bytes)", payload.folio_os, len(p_bytes))
                 # Disparar envío automático de correo vía Gmail SMTP
                 try:
                     import asyncio

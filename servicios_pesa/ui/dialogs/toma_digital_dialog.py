@@ -1574,6 +1574,25 @@ class TomDigitalDialog(QDialog):
         lay.addWidget(self._lbl_save_status)
         lay.addStretch()
 
+        # Botón vista previa sin firma
+        btn_preview = QPushButton("Vista Previa sin Firma")
+        btn_preview.setFixedHeight(_TOUCH_BTN_H + 4)
+        btn_preview.setMinimumWidth(190)
+        btn_preview.setStyleSheet("""
+            QPushButton {
+                background: #FFFFFF;
+                color: #1D1D1F;
+                border: 1px solid #D2D2D7;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: 600;
+                padding: 0 18px;
+            }
+            QPushButton:hover { background: #F5F5F7; border-color: #9CA3AF; }
+        """)
+        btn_preview.clicked.connect(self._on_vista_previa_sin_firma)
+        lay.addWidget(btn_preview)
+
         # Botón secundario: guardar borrador
         btn_draft = QPushButton("Guardar Borrador")
         btn_draft.setFixedHeight(_TOUCH_BTN_H + 4)
@@ -1883,6 +1902,51 @@ class TomDigitalDialog(QDialog):
                 self._folio_os,
             ))
         pg_conn.commit()
+
+    def _on_vista_previa_sin_firma(self) -> None:
+        """Genera una vista previa temporal SIN firma del cliente y la abre sin cerrar la orden."""
+        import tempfile, os as _os, sys, subprocess
+        if not _HAS_PDF:
+            QMessageBox.warning(self, "Vista Previa", "Generador de PDF no disponible.")
+            return
+        try:
+            form_data = self._collect_form_data(draft=True)
+            tmp_dir = Path(tempfile.gettempdir()) / "Pesa_PDFs"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            preview_path = str(tmp_dir / f"{self._folio_os}_PREVIEW_SIN_FIRMA.pdf")
+            os_dict = {**self._os_data, **form_data}
+            os_dict["folio_os"] = self._folio_os
+            os_dict["marca"] = form_data.get("equipo_marca", "")
+            os_dict["modelo"] = form_data.get("equipo_modelo", "")
+            os_dict["ns"] = form_data.get("equipo_ns", "")
+            os_dict["alcance_max"] = form_data.get("alcance_max", "")
+            os_dict["div_minima"] = form_data.get("div_minima", "")
+            os_dict["firma_cliente"] = ""
+            os_dict["firma_cliente_b64"] = ""
+            os_dict["firma_cliente_nombre"] = ""
+            os_dict["modo_preview_sin_firma"] = True
+            gen = OsPdfGenerator()
+            out_p = gen.generate_os_pdf(
+                os_data=os_dict,
+                output_path=preview_path,
+                repetibilidad=form_data.get("repetibilidad", []),
+                excentricidad=form_data.get("excentricidad", []),
+                exactitud=form_data.get("exactitud", []),
+                tecnico_nombre=form_data.get("nombre_tecnico_firma", ""),
+                firma_tecnico_b64=form_data.get("firma_tecnico", "") or None,
+                digital=True,
+                force=True,
+                modo_preview_sin_firma=True,
+            )
+            if out_p and Path(out_p).exists():
+                if sys.platform == "win32":
+                    _os.startfile(out_p)
+                elif sys.platform == "darwin":
+                    subprocess.run(["open", out_p], check=False)
+                else:
+                    subprocess.run(["xdg-open", out_p], check=False)
+        except Exception as exc_pv:
+            QMessageBox.warning(self, "Vista Previa", f"No se pudo generar la vista previa:\n{exc_pv}")
 
     def _generate_pdf_local(self, form_data: dict) -> Optional[str]:
         """Genera el PDF localmente y lo guarda en TABLET_PDF_DIR."""

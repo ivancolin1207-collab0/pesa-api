@@ -131,7 +131,11 @@ class _FirmaScreenState extends State<FirmaScreen>
     }
 
     // 2. Firma del Cliente: OS actual > SQLite
-    final cliOs = (widget.capturaData['firma_cliente'] ?? widget.capturaData['firma_cliente_b64'] ?? '').toString().trim();
+    // Si la orden fue reabierta con "Rehacer", jamás precargar la firma previa del cliente.
+    final bool esRehacer = widget.capturaData['reabierta_rehacer'] == true;
+    final cliOs = esRehacer
+        ? ''
+        : (widget.capturaData['firma_cliente'] ?? widget.capturaData['firma_cliente_b64'] ?? '').toString().trim();
     if (cliOs.length > 50) {
       if (mounted) {
         setState(() {
@@ -144,12 +148,14 @@ class _FirmaScreenState extends State<FirmaScreen>
       if (osRow != null) {
         await _correoCtrl.inicializarDesdeOrden({...osRow, ...widget.capturaData});
       }
-      final cliDb = (osRow?['firma_cliente'] ?? osRow?['firma_cliente_b64'] ?? '').toString().trim();
-      if (cliDb.length > 50 && mounted) {
-        setState(() {
-          _firmaCliPrecargada = true;
-          _firmaCliBase64Guardada = cliDb;
-        });
+      if (!esRehacer) {
+        final cliDb = (osRow?['firma_cliente'] ?? osRow?['firma_cliente_b64'] ?? '').toString().trim();
+        if (cliDb.length > 50 && mounted) {
+          setState(() {
+            _firmaCliPrecargada = true;
+            _firmaCliBase64Guardada = cliDb;
+          });
+        }
       }
     } else {
       final fol = (widget.capturaData['folio_os'] ?? widget.capturaData['folio'] ?? '').toString().trim();
@@ -970,6 +976,9 @@ class _FirmaScreenState extends State<FirmaScreen>
         unidadMedida:  (enrichedOs['unidad_medida'] ?? 'kg').toString(),
       );
 
+      // Purgar cualquier copia previa en caché local antes de emitir el PDF definitivo
+      await LocalDbService.instance.invalidarPdfLocal(folio);
+
       pdfPath = await PdfService.instance.generarPdfFinal(
         osData:         enrichedOs,
         repRows:        repRows,
@@ -977,6 +986,7 @@ class _FirmaScreenState extends State<FirmaScreen>
         exacRows:       exacRows,
         firmaTecBase64: tecBase64.isNotEmpty ? tecBase64 : null,
         firmaCliBase64: cliBase64.isNotEmpty ? cliBase64 : null,
+        modoPreviewSinFirma: false,
       );
 
       // 5. Leer binario del PDF y guardar Base64 + path en SQLite

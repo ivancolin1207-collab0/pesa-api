@@ -460,6 +460,7 @@ class LocalDbService {
             'fecha_cancelacion': 'TEXT',
             'sin_correo_cliente': 'INTEGER DEFAULT 0',
             'motivo_sin_correo': 'TEXT',
+            'pdf_version': 'INTEGER DEFAULT 1',
           };
           for (final entry in requiredCols.entries) {
             if (!existingCols.contains(entry.key.toLowerCase())) {
@@ -2638,6 +2639,7 @@ class LocalDbService {
     final updateData = <String, dynamic>{
       'pdf_path_local': path,
       if (pdfB64 != null && pdfB64.isNotEmpty) 'pdf_b64_local': pdfB64,
+      'has_pdf': 1,
       'fecha': hoy,
       'fecha_servicio': hoy,
       'fecha_cierre': fechaCierre ?? DateTime.now().toIso8601String(),
@@ -2650,6 +2652,7 @@ class LocalDbService {
       'is_synced': isSynced,
       'pdf_subido': pdfSubido,
       'is_dirty': isDirty,
+      'needs_push': isDirty,
       'updated_at': DateTime.now().toUtc().toIso8601String(),
     };
 
@@ -2678,6 +2681,14 @@ class LocalDbService {
           where: 'folio_os = ?',
           whereArgs: [folioKey],
         );
+        if (existingCols.contains('pdf_version')) {
+          try {
+            await db.rawUpdate(
+              'UPDATE ordenes_servicio SET pdf_version = COALESCE(pdf_version, 1) + 1 WHERE folio_os = ? OR folio = ?',
+              [folioKey, folioKey],
+            );
+          } catch (_) {}
+        }
       }
       debugPrint('[LocalDB] savePdfPath exitoso para $folioKey (localId: $localId, path: $path, fecha: $hoy, syncCheck: $syncCheck)');
     } catch (e) {
@@ -2724,8 +2735,9 @@ class LocalDbService {
     }
   }
 
-  /// Borra TODAS las copias locales del PDF de un folio (caché estancada).
-  /// Retorna cuántos archivos se eliminaron.
+  /// Borra TODAS las copias locales del PDF de un folio (caché estancada),
+  /// incluyendo `pdfs_servidor_cache/` y copias en `TemporaryDirectory`.
+  /// Solo afecta archivos del folio especificado.
   Future<int> invalidarPdfLocal(String folio, {String? pathExtra}) async {
     final f = folio.trim();
     if (f.isEmpty) return 0;
@@ -2737,11 +2749,25 @@ class LocalDbService {
         '${dir.path}/$safe.pdf',
         '${dir.path}/pdfs/$safe.pdf',
         '${dir.path}/pdfs/OS-$safe.pdf',
+        '${dir.path}/pdfs_servidor_cache/$safe.pdf',
+        '${dir.path}/pdfs_servidor_cache/OS-$safe.pdf',
         '${dir.path}/Pesa_PDFs/$safe.pdf',
         '${dir.path}/Pesa_PDFs/OS-$safe.pdf',
         '${dir.path}/PESA_Tablet/PDF_OS/$safe.pdf',
+        '${dir.path}/PESA_Tablet/PDF_OS/OS-$safe.pdf',
         if (pathExtra != null && pathExtra.trim().isNotEmpty) pathExtra.trim(),
       };
+      try {
+        final tmp = await getTemporaryDirectory();
+        candidatos.addAll({
+          '${tmp.path}/$safe.pdf',
+          '${tmp.path}/OS-$safe.pdf',
+          '${tmp.path}/pdfs/$safe.pdf',
+          '${tmp.path}/pdfs_servidor_cache/$safe.pdf',
+          '${tmp.path}/PESA_Tablet/PDF_OS/$safe.pdf',
+          '${tmp.path}/Pesa_PDFs/$safe.pdf',
+        });
+      } catch (_) {}
       for (final p in candidatos) {
         try {
           final file = File(p);
@@ -2756,6 +2782,124 @@ class LocalDbService {
     }
     debugPrint('[LocalDB] invalidarPdfLocal($f): $borrados archivo(s) eliminados');
     return borrados;
+  }
+
+  /// Desbloquea localmente una orden ya firmada/enviada para "Rehacer":
+  ///   - Conserva las lecturas técnicas y datos del instrumento para corregir solo lo necesario.
+  ///   - Limpia firma previa del cliente (`firma_cliente = NULL`) para exigir nueva firma.
+  ///   - Invalida rutas/base64/caché de disco del PDF anterior (`has_pdf = 0`, `pdf_subido = 0`).
+  ///   - Reinicia `correo_enviado = 0`, `email_enviado = 0` e incrementa `pdf_version`.
+  ///   - Limpia `firma_cliente` y `pdf_path` dentro de `borradores_captura` para ese folio.
+  Future<bool> rehacerOrdenLocal(String folio, {int? localId, String? pathExtra}) async {
+    final folioKey = folio.trim();
+    if (folioKey.isEmpty) return false;
+    try {
+      final db = await _ensureInit();
+      final info = await db.rawQuery('PRAGMA table_info(ordenes_servicio)');
+      final existingCols = info.map((r) => (r['name'] as String).toLowerCase()).toSet();
+
+      final nowIso = DateTime.now().toUtc().toIso8601String();
+      final updates = <String, dynamic>{
+        'estado': 'EN_PROCESO',
+        'estatus': 'EN_PROCESO',
+        'firma_cliente': null,
+        'firma_cliente_b64': null,
+        'correo_enviado': 0,
+        'email_enviado': 0,
+        'has_pdf': 0,
+        'pdf_subido': 0,
+        'pdf_path_local': null,
+        'pdf_path': null,
+        'pdf_b64_local': null,
+        'pdf_url': null,
+        'fecha_cierre': null,
+        'sync_check_status': 'BORRADOR_LOCAL',
+        'sync_status': 'PENDIENTE_REHACER',
+        'is_dirty': 1,
+        'needs_push': 1,
+        'is_synced': 0,
+        'updated_at': nowIso,
+      };
+      final sanitized = <String, dynamic>{};
+      updates.forEach((k, v) {
+        if (existingCols.contains(k.toLowerCase())) {
+          sanitized[k] = v;
+        }
+      });
+
+      await db.update(
+        'ordenes_servicio',
+        sanitized,
+        where: 'folio_os = ? OR folio = ?' + (localId != null && localId > 0 ? ' OR local_id = ?' : ''),
+        whereArgs: [
+          folioKey,
+          folioKey,
+          if (localId != null && localId > 0) localId,
+        ],
+      );
+      if (existingCols.contains('pdf_version')) {
+        try {
+          await db.rawUpdate(
+            'UPDATE ordenes_servicio SET pdf_version = COALESCE(pdf_version, 1) + 1 WHERE folio_os = ? OR folio = ?',
+            [folioKey, folioKey],
+          );
+        } catch (_) {}
+      }
+
+      // Limpiar firma previa del cliente y pdf_path dentro de borradores_captura conservando pruebas
+      try {
+        final draftRows = await db.query(
+          'borradores_captura',
+          where: 'folio_os = ?',
+          whereArgs: [folioKey],
+        );
+        for (final dr in draftRows) {
+          final raw = dr['draft_json']?.toString();
+          if (raw != null && raw.isNotEmpty) {
+            final decoded = jsonDecode(raw);
+            if (decoded is Map) {
+              final map = Map<String, dynamic>.from(decoded);
+              map.remove('firma_cliente');
+              map.remove('firma_cliente_b64');
+              map.remove('pdf_path');
+              map.remove('pdf_path_local');
+              map.remove('pdf_b64');
+              map['reabierta_rehacer'] = true;
+              await db.update(
+                'borradores_captura',
+                {'draft_json': jsonEncode(map)},
+                where: 'folio_os = ?',
+                whereArgs: [folioKey],
+              );
+            }
+          }
+        }
+      } catch (eDraft) {
+        debugPrint('[LocalDB] rehacerOrdenLocal limpieza borrador ($folioKey): $eDraft');
+      }
+
+      await invalidarPdfLocal(folioKey, pathExtra: pathExtra);
+      debugPrint('[LocalDB] ✅ rehacerOrdenLocal completado para $folioKey');
+      return true;
+    } catch (e) {
+      debugPrint('[LocalDB] Error en rehacerOrdenLocal($folioKey): $e');
+      return false;
+    }
+  }
+
+  /// Devuelve todas las órdenes marcadas con `sync_status = 'PENDIENTE_REHACER'`
+  /// para propagar el desbloqueo al servidor en el próximo ciclo de sincronización.
+  Future<List<Map<String, dynamic>>> getOrdenesPendientesRehacer() async {
+    try {
+      final db = await _ensureInit();
+      return await db.query(
+        'ordenes_servicio',
+        where: "sync_status = 'PENDIENTE_REHACER'",
+      );
+    } catch (e) {
+      debugPrint('[LocalDB] Error getOrdenesPendientesRehacer: $e');
+      return [];
+    }
   }
 
   /// Reemplaza la ruta y el Base64 del PDF local por la versión fresca del servidor.
