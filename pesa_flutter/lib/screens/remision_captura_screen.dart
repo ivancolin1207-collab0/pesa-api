@@ -68,8 +68,7 @@ class _PartidaItem {
 
 class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     with SingleTickerProviderStateMixin {
-  static const Color _red = Color(0xFFC8102E);
-  static const Color _dark = Color(0xFF1D1D1F);
+  static const Color _red = PesaColors.brand;
 
   final List<_PartidaItem> _partidas = [];
   final TextEditingController _observacionesCtrl = TextEditingController();
@@ -77,13 +76,16 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
   bool _errNombreRecibe = false;
   final TextEditingController _puestoReceptorCtrl = TextEditingController();
 
+  // BLINDAJE DE FIRMA: tinta negra (#000000) fija sobre fondo blanco (#FFFFFF) incluso en Dark Mode
   final SignatureController _ctrlFirmaTecnico = SignatureController(
     penStrokeWidth: 3,
-    penColor: const Color(0xFF1D1D1F),
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
   );
   final SignatureController _ctrlFirmaCliente = SignatureController(
     penStrokeWidth: 3,
-    penColor: const Color(0xFF1D1D1F),
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
   );
 
   late final TabController _tabFirmasCtrl;
@@ -665,6 +667,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     if (_esOsob) {
       return ObservacionesBasculaScreen(orden: widget.orden);
     }
+    final c = PesaColors.of(context);
     final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? widget.orden['folio_rma'] ?? 'RMA').toString();
     final cliente = (widget.orden['cliente'] ?? widget.orden['cliente_nombre'] ?? '').toString();
     final direccion = (widget.orden['direccion'] ?? widget.orden['sucursal'] ?? '').toString();
@@ -678,7 +681,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
         children: [
           Text(
             'Entregado por: ${tecnico.isNotEmpty ? tecnico : "Técnico PESA"}',
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
           ),
           const SizedBox(height: 6),
           SizedBox(
@@ -686,9 +689,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
             width: double.infinity,
             child: Container(
               decoration: BoxDecoration(
-                border: Border.all(color: PesaColors.borderStrong),
+                border: Border.all(color: c.borderStrong),
                 borderRadius: BorderRadius.circular(8),
-                color: Colors.white,
+                color: PesaColors.signatureCanvas,
               ),
               child: _firmaTecnicoExistente != null && _ctrlFirmaTecnico.isEmpty
                   ? Stack(
@@ -699,6 +702,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                           right: 4,
                           child: OutlinedButton(
                             style: OutlinedButton.styleFrom(
+                              backgroundColor: Colors.white,
+                              foregroundColor: PesaColors.signatureInk,
+                              side: const BorderSide(color: PesaColors.borderStrong),
                               minimumSize: const Size(0, 32),
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             ),
@@ -715,7 +721,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                       child: SignatureGestureShield(
                         child: Signature(
                           controller: _ctrlFirmaTecnico,
-                          backgroundColor: Colors.white,
+                          backgroundColor: PesaColors.signatureCanvas,
                         ),
                       ),
                     ),
@@ -771,16 +777,16 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
             width: double.infinity,
             child: Container(
               decoration: BoxDecoration(
-                border: Border.all(color: PesaColors.borderStrong),
+                border: Border.all(color: c.borderStrong),
                 borderRadius: BorderRadius.circular(8),
-                color: Colors.white,
+                color: PesaColors.signatureCanvas,
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
                 child: SignatureGestureShield(
                   child: Signature(
                     controller: _ctrlFirmaCliente,
-                    backgroundColor: Colors.white,
+                    backgroundColor: PesaColors.signatureCanvas,
                   ),
                 ),
               ),
@@ -799,24 +805,24 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     }
 
     return Scaffold(
-      backgroundColor: PesaColors.canvas,
+      backgroundColor: c.canvas,
       appBar: AppBar(
-        backgroundColor: PesaColors.surface,
-        foregroundColor: PesaColors.textPrimary,
+        backgroundColor: c.surface,
+        foregroundColor: c.textPrimary,
         elevation: 0,
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: PesaColors.border),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: c.border),
         ),
         title: Text(
           'Remisión de Material ($folio)',
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: PesaColors.textPrimary),
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: c.textPrimary),
         ),
         actions: [
           TextButton.icon(
             onPressed: _saving ? null : _guardarBorrador,
-            icon: const Icon(Icons.save_outlined, color: PesaColors.textSecondary, size: 18),
-            label: const Text('Borrador', style: TextStyle(color: PesaColors.textPrimary)),
+            icon: Icon(Icons.save_outlined, color: c.textSecondary, size: 18),
+            label: Text('Borrador', style: TextStyle(color: c.textPrimary)),
           ),
           const SizedBox(width: 8),
         ],
@@ -826,9 +832,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
         builder: (context, _) => SafeArea(
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: PesaColors.border)),
+            decoration: BoxDecoration(
+              color: c.surface,
+              border: Border(top: BorderSide(color: c.border)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -843,8 +849,8 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                         icon: const Icon(Icons.preview_outlined, size: 18),
                         label: const Text('Vista Previa'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: _dark,
-                          side: const BorderSide(color: PesaColors.borderStrong),
+                          foregroundColor: c.textPrimary,
+                          side: BorderSide(color: c.borderStrong),
                           minimumSize: const Size(0, 48),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
@@ -902,10 +908,11 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
           children: [
           // ── Tarjeta de Datos Generales ──────────────────────────────────
           Card(
+            color: c.surface,
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.grey.shade300),
+              side: BorderSide(color: c.border),
             ),
             child: Padding(
               padding: const EdgeInsets.all(16),
@@ -917,28 +924,28 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                     children: [
                       Text(
                         'FOLIO: $folio',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: _red),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: c.brandAccent),
                       ),
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF2F2F7),
+                          color: c.surfaceMuted,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFE5E5EA)),
+                          border: Border.all(color: c.border),
                         ),
-                        child: const Text(
+                        child: Text(
                           'RMA DIGITAL',
-                          style: TextStyle(color: _red, fontWeight: FontWeight.w700, fontSize: 11),
+                          style: TextStyle(color: c.brandAccent, fontWeight: FontWeight.w700, fontSize: 11),
                         ),
                       ),
                     ],
                   ),
-                  const Divider(height: 20),
-                  _buildMetaRow('Cliente', cliente),
+                  Divider(height: 20, color: c.border),
+                  _buildMetaRow(c, 'Cliente', cliente),
                   const SizedBox(height: 6),
-                  _buildMetaRow('Dirección / Sucursal', direccion),
+                  _buildMetaRow(c, 'Dirección / Sucursal', direccion),
                   const SizedBox(height: 6),
-                  _buildMetaRow('Técnico Asignado', tecnico),
+                  _buildMetaRow(c, 'Técnico Asignado', tecnico),
                 ],
               ),
             ),
@@ -949,13 +956,13 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text(
+              Text(
                 'PARTIDAS / REFACCIONES A ENTREGAR',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark, letterSpacing: 0.5),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary, letterSpacing: 0.5),
               ),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _dark,
+                  backgroundColor: c.isDark ? c.elevated : PesaColors.textPrimary,
                   foregroundColor: Colors.white,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -972,11 +979,12 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
             final idx = entry.key;
             final item = entry.value;
             return Card(
+              color: c.surface,
               elevation: 0,
               margin: const EdgeInsets.only(bottom: 12),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(10),
-                side: BorderSide(color: Colors.grey.shade300),
+                side: BorderSide(color: c.border),
               ),
               child: Padding(
                 padding: const EdgeInsets.all(12),
@@ -988,10 +996,10 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                       children: [
                         Text(
                           'Partida #${idx + 1}',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _red),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.brandAccent),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+                          icon: Icon(Icons.delete_outline_rounded, color: c.dotRed),
                           onPressed: () => _eliminarPartida(idx),
                           tooltip: 'Eliminar partida',
                           constraints: const BoxConstraints(),
@@ -1054,19 +1062,20 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
           // ── Observaciones Generales ─────────────────────────────────────
           const SizedBox(height: 8),
           Card(
+            color: c.surface,
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.grey.shade300),
+              side: BorderSide(color: c.border),
             ),
             child: Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'OBSERVACIONES GENERALES',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _dark),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: c.textPrimary),
                   ),
                   const SizedBox(height: 8),
                   TextFormField(
@@ -1085,10 +1094,11 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
 
           // ── Sección de Firmas Obligatorias ──────────────────────────────
           Card(
+            color: c.surface,
             elevation: 0,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
-              side: BorderSide(color: Colors.grey.shade300),
+              side: BorderSide(color: c.border),
             ),
             child: Padding(
               padding: const EdgeInsets.all(14),
@@ -1096,12 +1106,12 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
-                    children: const [
-                      Icon(Icons.draw_rounded, color: _red, size: 20),
-                      SizedBox(width: 8),
+                    children: [
+                      Icon(Icons.draw_rounded, color: c.brandAccent, size: 20),
+                      const SizedBox(width: 8),
                       Text(
                         'FIRMAS OBLIGATORIAS DE ENTREGA',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _dark),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
                       ),
                     ],
                   ),
@@ -1109,9 +1119,9 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
                   if (cover) ...[
                     TabBar(
                       controller: _tabFirmasCtrl,
-                      labelColor: _red,
-                      unselectedLabelColor: PesaColors.textSecondary,
-                      indicatorColor: _red,
+                      labelColor: c.brandAccent,
+                      unselectedLabelColor: c.textSecondary,
+                      indicatorColor: c.brandAccent,
                       tabs: const [
                         Tab(icon: Icon(Icons.engineering_rounded), text: '1. Técnico *'),
                         Tab(icon: Icon(Icons.person_pin_rounded), text: '2. Cliente *'),
@@ -1146,7 +1156,7 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
     );
   }
 
-  Widget _buildMetaRow(String label, String value) {
+  Widget _buildMetaRow(PesaPalette c, String label, String value) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1154,13 +1164,13 @@ class _RemisionCapturaScreenState extends State<RemisionCapturaScreen>
           width: 140,
           child: Text(
             label,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 12, color: c.textSecondary, fontWeight: FontWeight.w600),
           ),
         ),
         Expanded(
           child: Text(
             value.isNotEmpty ? value : '—',
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: c.textPrimary),
           ),
         ),
       ],

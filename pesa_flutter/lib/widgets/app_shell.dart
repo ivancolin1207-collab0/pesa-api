@@ -11,17 +11,12 @@ import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../services/sync_service.dart';
 import '../theme/foldable_layout.dart';
+import '../theme/pesa_theme.dart';
 
-// ── Tokens Apple Minimalist (iOS / iPadOS v3.3.1) — Básculas PESA ───────────
+// ── Dimensiones y acento corporativo Básculas PESA ──────────────────────────
 const _red        = Color(0xFFC8102E);
-const _redLight   = Color(0xFFF2F2F7);
-const _sidebarBg  = Color(0xFFFFFFFF);
 const _sidebarW   = 232.0;
 const _railW      = 72.0;
-const _textActive = Color(0xFFC8102E);
-const _textInact  = Color(0xFF6E6E73);
-const _divider    = Color(0xFFE5E5EA);
-const _bgGeneral  = Color(0xFFF5F5F7);
 
 /// Items del menú lateral — todos los roles
 const _navItemsAll = [
@@ -223,13 +218,14 @@ class _AppShellState extends State<AppShell> {
     int selectedIdx = bottomItems.indexWhere((i) => widget.currentRoute.startsWith(i.route));
     if (selectedIdx < 0) selectedIdx = 0;
 
+    final c = PesaColors.of(context);
     // ÚNICO Scaffold + Row persistente → widget.child mantiene 100% su State al plegar/desplegar el Z Fold.
     return Scaffold(
       key: _shellScaffoldKey,
-      backgroundColor: _bgGeneral,
+      backgroundColor: c.canvas,
       drawer: coverMode
           ? Drawer(
-              backgroundColor: Colors.white,
+              backgroundColor: c.surface,
               child: _SidebarContent(
                 currentRoute: widget.currentRoute,
                 collapsed: false,
@@ -245,9 +241,9 @@ class _AppShellState extends State<AppShell> {
                 duration: const Duration(milliseconds: 180),
                 curve: Curves.easeInOut,
                 width: _isSidebarExpanded ? _sidebarW : _railW,
-                decoration: const BoxDecoration(
-                  color: _sidebarBg,
-                  border: Border(right: BorderSide(color: _divider)),
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  border: Border(right: BorderSide(color: c.border)),
                 ),
                 child: _SidebarContent(
                   currentRoute: widget.currentRoute,
@@ -257,7 +253,7 @@ class _AppShellState extends State<AppShell> {
               ),
             Expanded(
               child: Container(
-                color: _bgGeneral,
+                color: c.canvas,
                 child: widget.child,
               ),
             ),
@@ -266,17 +262,17 @@ class _AppShellState extends State<AppShell> {
       ),
       bottomNavigationBar: coverMode
           ? Container(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: _divider, width: 1)),
+              decoration: BoxDecoration(
+                color: c.surface,
+                border: Border(top: BorderSide(color: c.border, width: 1)),
               ),
               child: SafeArea(
                 top: false,
                 child: NavigationBar(
                   selectedIndex: selectedIdx,
-                  backgroundColor: Colors.white,
+                  backgroundColor: c.surface,
                   surfaceTintColor: Colors.transparent,
-                  indicatorColor: _redLight,
+                  indicatorColor: c.surfaceElevated,
                   height: 62,
                   onDestinationSelected: (idx) {
                     final target = bottomItems[idx].route;
@@ -286,8 +282,8 @@ class _AppShellState extends State<AppShell> {
                   },
                   destinations: bottomItems
                       .map((item) => NavigationDestination(
-                            icon: Icon(item.icon, size: 22),
-                            selectedIcon: Icon(item.icon, size: 22, color: _red),
+                            icon: Icon(item.icon, size: 22, color: c.textSecondary),
+                            selectedIcon: Icon(item.icon, size: 22, color: c.brandAccent),
                             label: item.shortLabel,
                           ))
                       .toList(),
@@ -313,6 +309,7 @@ class _SidebarContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return SafeArea(
       child: Column(children: [
         // ── Brand + Toggle Rail/Sidebar ────────────────────────────────────
@@ -340,10 +337,10 @@ class _SidebarContent extends StatelessWidget {
                         child: InkWell(
                           borderRadius: BorderRadius.circular(8),
                           onTap: onToggle,
-                          child: const Padding(
-                            padding: EdgeInsets.all(6),
+                          child: Padding(
+                            padding: const EdgeInsets.all(6),
                             child: Icon(Icons.chevron_right_rounded,
-                                color: Color(0xFF6B7280), size: 18),
+                                color: c.textSecondary, size: 18),
                           ),
                         ),
                       ),
@@ -361,7 +358,7 @@ class _SidebarContent extends StatelessWidget {
                       child: const Icon(Icons.scale, color: Colors.white, size: 18),
                     ),
                     const SizedBox(width: 9),
-                    const Expanded(
+                    Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -370,7 +367,7 @@ class _SidebarContent extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              color: Color(0xFF111827),
+                              color: c.textPrimary,
                               fontWeight: FontWeight.w800,
                               fontSize: 13.5,
                             ),
@@ -379,15 +376,15 @@ class _SidebarContent extends StatelessWidget {
                             'Sistema Metrológico',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(color: Color(0xFF6B7280), fontSize: 10),
+                            style: TextStyle(color: c.textSecondary, fontSize: 10),
                           ),
                         ],
                       ),
                     ),
                     if (onToggle != null)
                       IconButton(
-                        icon: const Icon(Icons.menu_open_rounded,
-                            color: Color(0xFF6B7280), size: 20),
+                        icon: Icon(Icons.menu_open_rounded,
+                            color: c.textSecondary, size: 20),
                         tooltip: 'Compactar menú',
                         onPressed: onToggle,
                         visualDensity: VisualDensity.compact,
@@ -395,18 +392,18 @@ class _SidebarContent extends StatelessWidget {
                   ],
                 ),
         ),
-        const Divider(color: _divider, height: 1),
+        Divider(color: c.border, height: 1),
 
         // ── Label MENÚ ─────────────────────────────────────────────────────
         if (!collapsed)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 6),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
             child: Align(
               alignment: Alignment.centerLeft,
               child: Text(
                 'MENÚ',
                 style: TextStyle(
-                  color: Color(0xFF9CA3AF),
+                  color: c.textTertiary,
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
                   letterSpacing: 1.1,
@@ -437,11 +434,88 @@ class _SidebarContent extends StatelessWidget {
           ),
         ),
 
-        const Divider(color: _divider, height: 1),
+        Divider(color: c.border, height: 1),
+
+        // ── Botón rápido 1 toque: Modo Claro / Modo Nocturno ───────────────
+        _QuickThemeToggle(collapsed: collapsed),
+
+        Divider(color: c.border, height: 1),
 
         // ── Perfil usuario ─────────────────────────────────────────────────
         _UserProfile(collapsed: collapsed),
       ]),
+    );
+  }
+}
+
+class _QuickThemeToggle extends StatelessWidget {
+  final bool collapsed;
+  const _QuickThemeToggle({this.collapsed = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    final isDark = c.isDark;
+    final label = isDark ? 'Modo Claro' : 'Modo Oscuro';
+    final icon = isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined;
+
+    if (collapsed) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6),
+        child: Tooltip(
+          message: 'Cambiar a $label',
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => ThemeController.instance.toggleLightDark(context),
+            child: Container(
+              width: 44,
+              height: 40,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: c.surfaceElevated,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: c.border),
+              ),
+              child: Icon(icon, size: 19, color: isDark ? c.dotAmber : c.textSecondary),
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: () => ThemeController.instance.toggleLightDark(context),
+        child: Container(
+          height: 40,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: c.surfaceElevated,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: c.border),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, size: 18, color: isDark ? c.dotAmber : c.textSecondary),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: c.textPrimary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -459,6 +533,9 @@ class _NavTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    final activeCol = c.brandAccent;
+    final inactCol = c.textSecondary;
     final tile = InkWell(
       borderRadius: BorderRadius.circular(10),
       onTap: () {
@@ -475,10 +552,10 @@ class _NavTile extends StatelessWidget {
           vertical: collapsed ? 9 : 11,
         ),
         decoration: BoxDecoration(
-          color: isActive ? _redLight : Colors.transparent,
+          color: isActive ? c.surfaceElevated : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: isActive
-              ? Border.all(color: _divider, width: 1)
+              ? Border.all(color: c.border, width: 1)
               : Border.all(color: Colors.transparent, width: 1),
         ),
         child: collapsed
@@ -488,7 +565,7 @@ class _NavTile extends StatelessWidget {
                   Stack(
                     alignment: Alignment.center,
                     children: [
-                      Icon(item.icon, size: 22, color: isActive ? _textActive : _textInact),
+                      Icon(item.icon, size: 22, color: isActive ? activeCol : inactCol),
                     ],
                   ),
                   const SizedBox(height: 3),
@@ -499,7 +576,7 @@ class _NavTile extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 9.5,
                       fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                      color: isActive ? _textActive : _textInact,
+                      color: isActive ? activeCol : inactCol,
                     ),
                   ),
                 ],
@@ -512,11 +589,11 @@ class _NavTile extends StatelessWidget {
                       height: 18,
                       margin: const EdgeInsets.only(right: 8),
                       decoration: BoxDecoration(
-                        color: _red,
+                        color: activeCol,
                         borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                  Icon(item.icon, size: 20, color: isActive ? _textActive : _textInact),
+                  Icon(item.icon, size: 20, color: isActive ? activeCol : inactCol),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
@@ -526,7 +603,7 @@ class _NavTile extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
-                        color: isActive ? _textActive : _textInact,
+                        color: isActive ? activeCol : inactCol,
                       ),
                     ),
                   ),
@@ -577,6 +654,7 @@ class _UserProfile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final auth = context.watch<AuthService>();
     final nombre = auth.displayName;
     final rol = auth.role ?? 'Técnico';
@@ -609,9 +687,9 @@ class _UserProfile extends StatelessWidget {
                   child: InkWell(
                     borderRadius: BorderRadius.circular(8),
                     onTap: () => _confirmLogout(context),
-                    child: const Padding(
-                      padding: EdgeInsets.all(6),
-                      child: Icon(Icons.logout, size: 17, color: Color(0xFF9CA3AF)),
+                    child: Padding(
+                      padding: const EdgeInsets.all(6),
+                      child: Icon(Icons.logout, size: 17, color: c.textSecondary),
                     ),
                   ),
                 ),
@@ -637,8 +715,8 @@ class _UserProfile extends StatelessWidget {
                   children: [
                     Text(
                       nombre,
-                      style: const TextStyle(
-                        color: Color(0xFF111827),
+                      style: TextStyle(
+                        color: c.textPrimary,
                         fontWeight: FontWeight.w600,
                         fontSize: 12,
                       ),
@@ -646,8 +724,8 @@ class _UserProfile extends StatelessWidget {
                     ),
                     Text(
                       _cap(rol),
-                      style: const TextStyle(
-                        color: Color(0xFF6B7280),
+                      style: TextStyle(
+                        color: c.textSecondary,
                         fontSize: 10,
                       ),
                     ),
@@ -655,7 +733,7 @@ class _UserProfile extends StatelessWidget {
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.logout, size: 17, color: Color(0xFF9CA3AF)),
+                icon: Icon(Icons.logout, size: 17, color: c.textSecondary),
                 tooltip: 'Cerrar Sesión',
                 onPressed: () => _confirmLogout(context),
               ),

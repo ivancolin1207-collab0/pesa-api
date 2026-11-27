@@ -105,16 +105,20 @@ class DrawingCanvas(QWidget):
         self._current_stroke: list[QPointF] = []
         self._drawing = False
         self._pen_width = 2.5
-        self._pen_color = QColor(_DARK)
+        self._pen_color = QColor("#000000")
 
+        self.setObjectName("pesa_signature_canvas")
+        self.setProperty("pesa_force_light", True)
         self.setMinimumSize(320, 160)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
-        self.setStyleSheet(f"""
-            background: #FCFCFC;
-            border: 2px solid {_LGRAY};
-            border-radius: 10px;
+        self.setStyleSheet("""
+            QWidget#pesa_signature_canvas {
+                background: #FFFFFF;
+                border: 1.5px solid #38383A;
+                border-radius: 10px;
+            }
         """)
 
     # ── Eventos de dibujo ──────────────────────────────────────────────────────
@@ -158,8 +162,8 @@ class DrawingCanvas(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Fondo suave
-        painter.fillRect(self.rect(), QColor("#FCFCFC"))
+        # Fondo blanco puro blindado incluso en Modo Nocturno
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
 
         # Línea base de firma (guía)
         pen_guide = QPen(QColor("#E5E7EB"), 1, Qt.PenStyle.DashLine)
@@ -275,7 +279,7 @@ class DrawingCanvas(QWidget):
         sx = width  / max(self.width(),  1)
         sy = height / max(self.height(), 1)
 
-        pen = QPen(QColor(_DARK), self._pen_width, Qt.PenStyle.SolidLine,
+        pen = QPen(QColor("#000000"), self._pen_width, Qt.PenStyle.SolidLine,
                    Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
 

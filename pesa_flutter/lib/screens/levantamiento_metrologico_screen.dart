@@ -33,8 +33,7 @@ class LevantamientoMetrologicoScreen extends StatefulWidget {
 }
 
 class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologicoScreen> {
-  static const Color _red = Color(0xFFC8102E);
-  static const Color _dark = Color(0xFF1D1D1F);
+  static const Color _red = PesaColors.brand;
 
   final _pesoTotalCtrl = TextEditingController();
   final _clasePesasCtrl = TextEditingController();
@@ -45,7 +44,12 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
   final _nombreClienteCtrl = TextEditingController();
   bool _errNombreRecibe = false;
 
-  final SignatureController _ctrlFirmaCli = SignatureController(penStrokeWidth: 3, penColor: Colors.black);
+  // BLINDAJE DE FIRMA: tinta negra (#000000) fija sobre fondo blanco (#FFFFFF) incluso en Dark Mode
+  final SignatureController _ctrlFirmaCli = SignatureController(
+    penStrokeWidth: 3,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+  );
   late final ClienteCorreoController _correoCtrl = ClienteCorreoController();
 
   bool _saving = false;
@@ -407,28 +411,29 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final folio = (widget.orden['folio_os'] ?? 'LV-00-000').toString();
 
     return Scaffold(
-      backgroundColor: PesaColors.canvas,
+      backgroundColor: c.canvas,
       appBar: AppBar(
-        backgroundColor: PesaColors.surface,
-        foregroundColor: PesaColors.textPrimary,
+        backgroundColor: c.surface,
+        foregroundColor: c.textPrimary,
         elevation: 0,
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: PesaColors.border),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: c.border),
         ),
-        title: Text('Levantamiento Metrológico ($folio)', style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: PesaColors.textPrimary)),
+        title: Text('Levantamiento Metrológico ($folio)', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: c.textPrimary)),
       ),
       bottomNavigationBar: AnimatedBuilder(
         animation: _correoCtrl,
         builder: (context, _) => SafeArea(
           child: Container(
             padding: const EdgeInsets.all(12),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: PesaColors.border)),
+            decoration: BoxDecoration(
+              color: c.surface,
+              border: Border(top: BorderSide(color: c.border)),
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -443,8 +448,8 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
                         icon: const Icon(Icons.preview_outlined, size: 18),
                         label: const Text('Vista Previa'),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: _dark,
-                          side: const BorderSide(color: PesaColors.borderStrong),
+                          foregroundColor: c.textPrimary,
+                          side: BorderSide(color: c.borderStrong),
                           minimumSize: const Size(0, 48),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
@@ -512,7 +517,7 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
             const SizedBox(height: 12),
             TextFormField(controller: _observacionesCtrl, maxLines: 2, decoration: const InputDecoration(labelText: 'Observaciones Metrológicas del Sitio', border: OutlineInputBorder())),
             const SizedBox(height: 16),
-            Text('FIRMA DE CONFORMIDAD', key: _firmaSectionKey, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: PesaColors.textPrimary)),
+            Text('FIRMA DE CONFORMIDAD', key: _firmaSectionKey, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary)),
             const SizedBox(height: 8),
             TextFormField(controller: _nombreClienteCtrl, onChanged: (_) { if (_errNombreRecibe) setState(() => _errNombreRecibe = false); }, decoration: InputDecoration(labelText: 'Nombre del Responsable en Planta *', errorText: _errNombreRecibe ? kMsgNombreRecibeObligatorio : null, border: const OutlineInputBorder())),
             const SizedBox(height: 10),
@@ -522,10 +527,10 @@ class _LevantamientoMetrologicoScreenState extends State<LevantamientoMetrologic
             ),
             Container(
               height: 165,
-              decoration: BoxDecoration(color: Colors.white, border: Border.all(color: PesaColors.borderStrong), borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(color: PesaColors.signatureCanvas, border: Border.all(color: c.borderStrong), borderRadius: BorderRadius.circular(8)),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
-                child: SignatureGestureShield(child: Signature(controller: _ctrlFirmaCli, backgroundColor: Colors.white)),
+                child: SignatureGestureShield(child: Signature(controller: _ctrlFirmaCli, backgroundColor: PesaColors.signatureCanvas)),
               ),
             ),
           ],

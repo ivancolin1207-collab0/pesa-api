@@ -511,14 +511,18 @@ class DrawingCanvas(QWidget):
         self._strokes: list[list[QPointF]] = []
         self._current_stroke: list[QPointF] = []
         self._drawing = False
+        self.setObjectName("pesa_signature_canvas")
+        self.setProperty("pesa_force_light", True)
         self.setMinimumSize(300, 140)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
-        self.setStyleSheet(f"""
-            background: #FCFCFC;
-            border: 2px solid {_LGRAY};
-            border-radius: 10px;
+        self.setStyleSheet("""
+            QWidget#pesa_signature_canvas {
+                background: #FFFFFF;
+                border: 1.5px solid #38383A;
+                border-radius: 10px;
+            }
         """)
 
     def mousePressEvent(self, event):
@@ -558,7 +562,7 @@ class DrawingCanvas(QWidget):
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#FCFCFC"))
+        painter.fillRect(self.rect(), QColor("#FFFFFF"))
 
         pen_guide = QPen(QColor("#E5E7EB"), 1, Qt.PenStyle.DashLine)
         painter.setPen(pen_guide)
@@ -586,7 +590,7 @@ class DrawingCanvas(QWidget):
                              f"{self._placeholder}")
             return
 
-        pen = QPen(QColor(_DARK), 2.5, Qt.PenStyle.SolidLine,
+        pen = QPen(QColor("#000000"), 2.5, Qt.PenStyle.SolidLine,
                    Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
         for stroke in self._strokes:
@@ -654,7 +658,7 @@ class DrawingCanvas(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         sx = width  / max(self.width(),  1)
         sy = height / max(self.height(), 1)
-        pen = QPen(QColor(_DARK), 2.5, Qt.PenStyle.SolidLine,
+        pen = QPen(QColor("#000000"), 2.5, Qt.PenStyle.SolidLine,
                    Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
         painter.setPen(pen)
         for stroke in self._strokes:

@@ -25,8 +25,8 @@ class MiFirmaScreen extends StatefulWidget {
 class _MiFirmaScreenState extends State<MiFirmaScreen> {
   final SignatureController _ctrl = SignatureController(
     penStrokeWidth: 3.2,
-    penColor: PesaColors.textPrimary,
-    exportPenColor: PesaColors.textPrimary,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
     exportBackgroundColor: Colors.transparent,
   );
 
@@ -87,30 +87,31 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
 
   Future<void> _mostrarDialogoErrorServidor(String detalle) async {
     if (!mounted) return;
+    final c = PesaColors.of(context);
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: PesaColors.surface,
+        backgroundColor: c.surface,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: PesaColors.brand),
+          side: BorderSide(color: c.brandAccent),
         ),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.error_outline_rounded, color: PesaColors.brand, size: 22),
-            SizedBox(width: 8),
+            Icon(Icons.error_outline_rounded, color: c.brandAccent, size: 22),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'Error al sincronizar firma con servidor',
-                style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700),
+                style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w700, color: c.textPrimary),
               ),
             ),
           ],
         ),
         content: SelectableText(
           'La firma se guardó localmente en este dispositivo, pero el servidor devolvió un error:\n\n$detalle',
-          style: const TextStyle(fontSize: 13, color: PesaColors.textPrimary, height: 1.4),
+          style: TextStyle(fontSize: 13, color: c.textPrimary, height: 1.4),
         ),
         actions: [
           ElevatedButton(
@@ -264,6 +265,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final auth = context.watch<AuthService>();
     final media = MediaQuery.of(context);
     final bool isWide = media.size.width >= 600;
@@ -271,15 +273,15 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
     return AppShell(
       currentRoute: '/mi-firma',
       child: Scaffold(
-        backgroundColor: PesaColors.canvas,
+        backgroundColor: c.canvas,
         appBar: isWide
             ? null
             : AppBar(
-                backgroundColor: PesaColors.surface,
+                backgroundColor: c.surface,
                 surfaceTintColor: Colors.transparent,
                 elevation: 0,
                 leading: IconButton(
-                  icon: const Icon(Icons.menu_rounded, color: PesaColors.textPrimary),
+                  icon: Icon(Icons.menu_rounded, color: c.textPrimary),
                   tooltip: 'Menú principal',
                   onPressed: () => AppShell.toggleMenu(context),
                 ),
@@ -287,7 +289,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                 actions: [
                   IconButton(
                     tooltip: 'Recargar firma desde servidor',
-                    icon: const Icon(Icons.sync_rounded, color: PesaColors.textPrimary),
+                    icon: Icon(Icons.sync_rounded, color: c.textPrimary),
                     onPressed: _cargando ? null : _cargarFirmaActual,
                   ),
                 ],
@@ -304,11 +306,11 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildHeader(auth, isWide),
+                    _buildHeader(c, auth, isWide),
                     const SizedBox(height: 16),
-                    _buildFirmaActual(),
+                    _buildFirmaActual(c),
                     const SizedBox(height: 16),
-                    _buildCanvas(),
+                    _buildCanvas(c),
                     const SizedBox(height: 14),
                     Row(
                       children: [
@@ -358,18 +360,16 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
-                          color: PesaColors.surfaceMuted,
+                          color: c.surfaceMuted,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: _statusIsError ? PesaColors.brand : PesaColors.border,
+                            color: _statusIsError ? c.brandAccent : c.border,
                           ),
                         ),
                         child: Row(
                           children: [
                             PesaSemanticDot(
-                              color: _statusIsError
-                                  ? PesaColors.brand
-                                  : PesaColors.dotGreen,
+                              color: _statusIsError ? c.dotRed : c.dotGreen,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -378,9 +378,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  color: _statusIsError
-                                      ? PesaColors.brand
-                                      : PesaColors.textPrimary,
+                                  color: _statusIsError ? c.brandAccent : c.textPrimary,
                                 ),
                               ),
                             ),
@@ -398,7 +396,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
     );
   }
 
-  Widget _buildHeader(AuthService auth, bool isWide) {
+  Widget _buildHeader(PesaPalette c, AuthService auth, bool isWide) {
     return PesaCard(
       padding: const EdgeInsets.all(16),
       child: Row(
@@ -407,7 +405,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
             width: 44,
             height: 44,
             decoration: BoxDecoration(
-              color: PesaColors.brand,
+              color: c.brand,
               borderRadius: BorderRadius.circular(8),
             ),
             child: const Icon(Icons.draw_outlined, color: Colors.white, size: 22),
@@ -417,20 +415,20 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Mi Firma Digital',
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
-                    color: PesaColors.textPrimary,
+                    color: c.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   auth.nombreCompleto ?? auth.username ?? 'Técnico',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13,
-                    color: PesaColors.textSecondary,
+                    color: c.textSecondary,
                   ),
                 ),
               ],
@@ -440,7 +438,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
             IconButton(
               tooltip: 'Sincronizar desde servidor',
               onPressed: _cargando ? null : _cargarFirmaActual,
-              icon: const Icon(Icons.sync_rounded, color: PesaColors.textPrimary),
+              icon: Icon(Icons.sync_rounded, color: c.textPrimary),
             ),
             const SizedBox(width: 6),
             OutlinedButton.icon(
@@ -454,7 +452,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
     );
   }
 
-  Widget _buildFirmaActual() {
+  Widget _buildFirmaActual(PesaPalette c) {
     Uint8List? previewBytes;
     if (_firmaActual != null && _firmaActual!.isNotEmpty) {
       try {
@@ -470,15 +468,15 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.verified_user_outlined, size: 16, color: PesaColors.textSecondary),
+              Icon(Icons.verified_user_outlined, size: 16, color: c.textSecondary),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Firma Registrada en Perfil',
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
-                    color: PesaColors.textPrimary,
+                    color: c.textPrimary,
                   ),
                 ),
               ),
@@ -490,10 +488,10 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
           ),
           const SizedBox(height: 12),
           if (_cargando)
-            const Center(
+            Center(
               child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: CircularProgressIndicator(color: PesaColors.brand),
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: CircularProgressIndicator(color: c.brandAccent),
               ),
             )
           else if (previewBytes != null)
@@ -502,9 +500,9 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
               height: 112,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: PesaColors.surfaceMuted,
+                color: PesaColors.signatureCanvas, // BLINDAJE: fondo blanco para ver tinta negra
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: PesaColors.border),
+                border: Border.all(color: c.borderStrong),
               ),
               child: Image.memory(
                 previewBytes,
@@ -514,7 +512,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                 errorBuilder: (_, __, ___) => const Center(
                   child: Text(
                     'No se pudo decodificar la vista previa. Registra tu firma abajo.',
-                    style: TextStyle(color: PesaColors.textSecondary, fontSize: 12),
+                    style: TextStyle(color: Color(0xFF6E6E73), fontSize: 12),
                   ),
                 ),
               ),
@@ -524,20 +522,20 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
               decoration: BoxDecoration(
-                color: PesaColors.surfaceMuted,
+                color: c.surfaceMuted,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: PesaColors.border),
+                border: Border.all(color: c.border),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  PesaSemanticDot(color: PesaColors.dotAmber),
-                  SizedBox(width: 8),
+                  PesaSemanticDot(color: c.dotAmber),
+                  const SizedBox(width: 8),
                   Flexible(
                     child: Text(
                       'Sin firma registrada — traza tu firma en el recuadro inferior.',
                       style: TextStyle(
-                        color: PesaColors.textSecondary,
+                        color: c.textSecondary,
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
                       ),
@@ -551,7 +549,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
     );
   }
 
-  Widget _buildCanvas() {
+  Widget _buildCanvas(PesaPalette c) {
     return PesaCard(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -559,9 +557,9 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.edit_outlined, size: 16, color: PesaColors.textSecondary),
+              Icon(Icons.edit_outlined, size: 16, color: c.textSecondary),
               const SizedBox(width: 8),
-              const Expanded(
+              Expanded(
                 child: Text(
                   'Nueva Firma',
                   maxLines: 1,
@@ -569,7 +567,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                   style: TextStyle(
                     fontWeight: FontWeight.w700,
                     fontSize: 14,
-                    color: PesaColors.textPrimary,
+                    color: c.textPrimary,
                   ),
                 ),
               ),
@@ -589,9 +587,9 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
             builder: (_, __) => Container(
               height: 196,
               decoration: BoxDecoration(
-                color: PesaColors.surface,
+                color: PesaColors.signatureCanvas, // BLINDAJE OBLIGATORIO: #FFFFFF siempre
                 border: Border.all(
-                  color: _ctrl.isNotEmpty ? PesaColors.brand : PesaColors.borderStrong,
+                  color: _ctrl.isNotEmpty ? c.brandAccent : c.borderStrong,
                   width: _ctrl.isNotEmpty ? 1.5 : 1,
                 ),
                 borderRadius: BorderRadius.circular(8),
@@ -622,7 +620,7 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
                             'Firma aquí con el dedo o lápiz',
                             style: TextStyle(
                               fontSize: 14,
-                              color: PesaColors.textTertiary,
+                              color: Color(0xFF8E8E93),
                             ),
                           ),
                         ),
@@ -633,9 +631,9 @@ class _MiFirmaScreenState extends State<MiFirmaScreen> {
             ),
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'La firma guardada se aplica automáticamente al cerrar órdenes de servicio y generar PDFs.',
-            style: TextStyle(fontSize: 11.5, color: PesaColors.textSecondary),
+            style: TextStyle(fontSize: 11.5, color: c.textSecondary),
           ),
         ],
       ),

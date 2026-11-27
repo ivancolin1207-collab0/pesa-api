@@ -669,5 +669,67 @@ class TestRehacerYVistaPreviaSinFirma(unittest.TestCase):
                 self.assertNotIn("(-0)", txt)
 
 
+class TestDarkModeApplePESA(unittest.TestCase):
+    """
+    v4.0.5: Verifica integridad del Modo Nocturno Apple minimalista en Windows PyQt6,
+    activos SVG oscuros, blindaje de pads de firma (#FFFFFF/#000000) y desacople de PDFs/correos.
+    """
+
+    def test_dark_mode_tokens_svg_assets_and_signature_shielding(self):
+        icons_dir = SERVICIOS_DIR / "ui" / "assets" / "icons"
+        for svg_name in (
+            "chevron_down_dark.svg",
+            "arrow_up_dark.svg",
+            "arrow_down_dark.svg",
+            "more_horiz_dark.svg",
+        ):
+            svg_path = icons_dir / svg_name
+            self.assertTrue(svg_path.exists(), f"Falta activo SVG para modo oscuro: {svg_path}")
+            self.assertIn("<svg", svg_path.read_text(encoding="utf-8"))
+
+        theme_src = (SERVICIOS_DIR / "ui" / "styles" / "theme.py").read_text(encoding="utf-8")
+        ui_theme_src = (SERVICIOS_DIR / "ui" / "theme.py").read_text(encoding="utf-8")
+        for token in (
+            "#121214",
+            "#1C1C1E",
+            "#2C2C2E",
+            "#323236",
+            "#38383A",
+            "#F5F5F7",
+            "#98989D",
+            "#636366",
+            "#F03E55",
+            "#30D158",
+            "#FF9F0A",
+            "#FF453A",
+            "chevron_down_dark.svg",
+            "QWidget#pesa_signature_canvas",
+            "QLabel#pesa_signature_preview",
+        ):
+            self.assertIn(token, theme_src, f"Token o regla de Dark Mode ausente en ui/styles/theme.py: {token}")
+
+        self.assertIn('self._preference: str = "system"', ui_theme_src)
+        self.assertIn("colorSchemeChanged", ui_theme_src)
+        self.assertIn("pesa_force_light", ui_theme_src)
+
+        # Verificar blindaje de pads de firma en las 3 pantallas Windows con firma
+        for rel_path in (
+            "ui/widgets/firma_widget.py",
+            "ui/dialogs/digital_service_dialog.py",
+            "ui/dialogs/toma_digital_dialog.py",
+        ):
+            src = (SERVICIOS_DIR / rel_path).read_text(encoding="utf-8")
+            self.assertIn("pesa_force_light", src, f"Falta blindaje pesa_force_light en {rel_path}")
+            self.assertIn("#FFFFFF", src, f"Falta fondo #FFFFFF blindado en {rel_path}")
+
+        # Verificar selector Claro / Oscuro / Sistema en Configuración y botón rápido en MainWindow
+        cfg_src = (SERVICIOS_DIR / "ui" / "widgets" / "configuracion_widget.py").read_text(encoding="utf-8")
+        self.assertIn('("system", "Sistema")', cfg_src)
+        self.assertIn("Automático sigue en vivo", cfg_src)
+        mw_src = (SERVICIOS_DIR / "ui" / "main_window.py").read_text(encoding="utf-8")
+        self.assertIn("btn_theme_toggle", mw_src)
+        self.assertIn("toggle_light_dark", mw_src)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

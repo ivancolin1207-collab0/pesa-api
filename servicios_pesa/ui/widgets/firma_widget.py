@@ -142,13 +142,14 @@ class DrawingCanvas(QWidget):
         self._preloaded_pixmap: Optional[QPixmap] = None
         self._drawing = False
         self.setObjectName("pesa_signature_canvas")
+        self.setProperty("pesa_force_light", True)
         self.setMinimumSize(420, 190)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_AcceptTouchEvents, True)
         self.setStyleSheet(
             "QWidget#pesa_signature_canvas { "
-            "background: #FFFFFF; border: 1.5px solid #D2D2D7; border-radius: 8px; }"
+            "background: #FFFFFF; border: 1.5px solid #38383A; border-radius: 8px; }"
         )
 
     def set_base64_image(self, b64_data: str) -> bool:
@@ -228,7 +229,7 @@ class DrawingCanvas(QWidget):
             return
 
         pen = QPen(
-            QColor(_DARK),
+            QColor("#000000"),
             3.0,
             Qt.PenStyle.SolidLine,
             Qt.PenCapStyle.RoundCap,
@@ -286,7 +287,7 @@ class DrawingCanvas(QWidget):
         sx = out_w / float(src_w)
         sy = out_h / float(src_h)
         pen = QPen(
-            QColor(_DARK),
+            QColor("#000000"),
             3.2 * min(sx, sy),
             Qt.PenStyle.SolidLine,
             Qt.PenCapStyle.RoundCap,
@@ -529,11 +530,14 @@ class FirmaWidget(QWidget):
         card_lay.addLayout(status_row)
 
         self._img_preview = QLabel("Sin firma registrada")
+        self._img_preview.setObjectName("pesa_signature_preview")
+        self._img_preview.setProperty("pesa_force_light", True)
         self._img_preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._img_preview.setMinimumHeight(210)
         self._img_preview.setStyleSheet(
-            "border: 1px dashed #D2D2D7; border-radius: 10px; background: #F2F2F7; "
-            "color: #6E6E73; font-size: 13px;"
+            "QLabel#pesa_signature_preview { "
+            "border: 1px dashed #38383A; border-radius: 10px; background: #FFFFFF; "
+            "color: #6E6E73; font-size: 13px; }"
         )
         card_lay.addWidget(self._img_preview)
 
@@ -617,8 +621,11 @@ class FirmaWidget(QWidget):
         self._load_worker.start()
 
     def _set_status(self, text: str, dot_color: str) -> None:
+        from ui.theme import PALETTE as _P
         self._lbl_status.setText(text)
-        self._lbl_status.setStyleSheet("font-size: 13px; font-weight: 600; color: #111827;")
+        self._lbl_status.setStyleSheet(
+            f"font-size: 13px; font-weight: 600; color: {_P['text_primary']}; background: transparent;"
+        )
         self._status_dot.setStyleSheet(f"background: {dot_color}; border-radius: 4px; border: none;")
 
     def _on_firma_loaded(self, b64: str) -> None:

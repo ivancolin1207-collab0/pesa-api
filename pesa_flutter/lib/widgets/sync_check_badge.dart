@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/pesa_theme.dart';
 
 /// Modelo de metadatos para cada uno de los 4 estados de trazabilidad tipo WhatsApp.
 class SyncCheckInfo {
@@ -111,7 +112,11 @@ class SyncCheckBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final info = SyncCheckInfo.fromStatus(status);
+    final Color dotColor = info.statusKey == 'ASIGNADA'
+        ? c.dotRed
+        : (info.statusKey == 'RECIBIDA_TABLET' ? c.dotAmber : c.dotGreen);
 
     return Tooltip(
       message: '${info.title}\n${info.description}',
@@ -120,7 +125,7 @@ class SyncCheckBadge extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16),
       textStyle: const TextStyle(color: Colors.white, fontSize: 12, height: 1.3),
       decoration: BoxDecoration(
-        color: const Color(0xFF1D1D1F),
+        color: c.isDark ? c.surfaceElevated : const Color(0xFF1D1D1F),
         borderRadius: BorderRadius.circular(8),
         boxShadow: const [
           BoxShadow(color: Colors.black26, blurRadius: 6, offset: Offset(0, 2)),
@@ -132,10 +137,10 @@ class SyncCheckBadge extends StatelessWidget {
         child: Container(
           padding: padding,
           decoration: BoxDecoration(
-            color: info.backgroundColor,
+            color: c.surfaceMuted,
             borderRadius: BorderRadius.circular(6),
             border: Border.all(
-              color: const Color(0xFFD2D2D7),
+              color: c.borderStrong,
               width: 1,
             ),
           ),
@@ -147,7 +152,7 @@ class SyncCheckBadge extends StatelessWidget {
                 width: 6,
                 height: 6,
                 decoration: BoxDecoration(
-                  color: info.color,
+                  color: dotColor,
                   shape: BoxShape.circle,
                 ),
               ),
@@ -156,7 +161,7 @@ class SyncCheckBadge extends StatelessWidget {
                 Text(
                   info.label,
                   style: TextStyle(
-                    color: const Color(0xFF111827),
+                    color: c.textPrimary,
                     fontSize: fontSize,
                     fontWeight: FontWeight.w600,
                     letterSpacing: 0.1,
@@ -170,43 +175,16 @@ class SyncCheckBadge extends StatelessWidget {
     );
   }
 
-  Widget _buildCheckIcons(SyncCheckInfo info) {
-    if (info.checkCount == 1) {
-      return Icon(
-        Icons.check,
-        size: iconSize,
-        color: info.color,
-      );
-    }
-
-    // Doble palomita superpuesta compacta estilo WhatsApp
-    return SizedBox(
-      width: iconSize + 4,
-      height: iconSize,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          Positioned(
-            left: 0,
-            child: Icon(Icons.check, size: iconSize, color: info.color),
-          ),
-          Positioned(
-            left: 5,
-            child: Icon(Icons.check, size: iconSize, color: info.color),
-          ),
-        ],
-      ),
-    );
-  }
-
   static void _mostrarLeyendaModal(BuildContext context, SyncCheckInfo current) {
+    final c = PesaColors.of(context);
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: c.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) {
+        final mc = PesaColors.of(ctx);
         return SafeArea(
           child: Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
@@ -220,33 +198,35 @@ class SyncCheckBadge extends StatelessWidget {
                     height: 4,
                     margin: const EdgeInsets.only(bottom: 16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFC7C7CC),
+                      color: mc.borderStrong,
                       borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.mark_chat_read_outlined, size: 20, color: Color(0xFF1D1D1F)),
-                    SizedBox(width: 8),
-                    Text(
-                      'Trazabilidad de Órdenes de Servicio',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: Color(0xFF1D1D1F),
+                    Icon(Icons.mark_chat_read_outlined, size: 20, color: mc.textPrimary),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Trazabilidad de Órdenes de Servicio',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: mc.textPrimary,
+                        ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 14),
-                _buildModalRow(SyncCheckInfo.asignada, current.statusKey == 'ASIGNADA'),
-                const Divider(height: 16, color: Color(0xFFF2F2F7)),
-                _buildModalRow(SyncCheckInfo.recibidaTablet, current.statusKey == 'RECIBIDA_TABLET'),
-                const Divider(height: 16, color: Color(0xFFF2F2F7)),
-                _buildModalRow(SyncCheckInfo.subidaServidor, current.statusKey == 'SUBIDA_SERVIDOR'),
-                const Divider(height: 16, color: Color(0xFFF2F2F7)),
-                _buildModalRow(SyncCheckInfo.auditadaAdmin, current.statusKey == 'AUDITADA_ADMIN'),
+                _buildModalRow(mc, SyncCheckInfo.asignada, current.statusKey == 'ASIGNADA'),
+                Divider(height: 16, color: mc.divider),
+                _buildModalRow(mc, SyncCheckInfo.recibidaTablet, current.statusKey == 'RECIBIDA_TABLET'),
+                Divider(height: 16, color: mc.divider),
+                _buildModalRow(mc, SyncCheckInfo.subidaServidor, current.statusKey == 'SUBIDA_SERVIDOR'),
+                Divider(height: 16, color: mc.divider),
+                _buildModalRow(mc, SyncCheckInfo.auditadaAdmin, current.statusKey == 'AUDITADA_ADMIN'),
               ],
             ),
           ),
@@ -255,14 +235,17 @@ class SyncCheckBadge extends StatelessWidget {
     );
   }
 
-  static Widget _buildModalRow(SyncCheckInfo item, bool isSelected) {
+  static Widget _buildModalRow(PesaPalette c, SyncCheckInfo item, bool isSelected) {
+    final Color dotColor = item.statusKey == 'ASIGNADA'
+        ? c.dotRed
+        : (item.statusKey == 'RECIBIDA_TABLET' ? c.dotAmber : c.dotGreen);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: isSelected ? item.backgroundColor.withValues(alpha: 0.6) : Colors.transparent,
+        color: isSelected ? c.surfaceMuted : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         border: isSelected
-            ? Border.all(color: item.color.withValues(alpha: 0.4), width: 1.5)
+            ? Border.all(color: dotColor.withValues(alpha: 0.5), width: 1.5)
             : null,
       ),
       child: Row(
@@ -271,23 +254,23 @@ class SyncCheckBadge extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
             decoration: BoxDecoration(
-              color: item.backgroundColor,
+              color: c.surfaceElevated,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: item.color.withValues(alpha: 0.3)),
+              border: Border.all(color: dotColor.withValues(alpha: 0.45)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (item.checkCount == 1)
-                  Icon(Icons.check, size: 14, color: item.color)
+                  Icon(Icons.check, size: 14, color: dotColor)
                 else
                   SizedBox(
                     width: 18,
                     height: 14,
                     child: Stack(
                       children: [
-                        Positioned(left: 0, child: Icon(Icons.check, size: 14, color: item.color)),
-                        Positioned(left: 4, child: Icon(Icons.check, size: 14, color: item.color)),
+                        Positioned(left: 0, child: Icon(Icons.check, size: 14, color: dotColor)),
+                        Positioned(left: 4, child: Icon(Icons.check, size: 14, color: dotColor)),
                       ],
                     ),
                   ),
@@ -304,15 +287,15 @@ class SyncCheckBadge extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: isSelected ? item.color : const Color(0xFF1D1D1F),
+                    color: isSelected ? dotColor : c.textPrimary,
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   item.description,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11.5,
-                    color: Color(0xFF636366),
+                    color: c.textSecondary,
                     height: 1.25,
                   ),
                 ),

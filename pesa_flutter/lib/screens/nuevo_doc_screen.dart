@@ -162,8 +162,6 @@ class NuevoDocScreen extends StatefulWidget {
 
 class _NuevoDocScreenState extends State<NuevoDocScreen> {
   static const _red = PesaColors.brand;
-  static const _border = PesaColors.border;
-  static const _bg = PesaColors.canvas;
 
   static const _defaultTiposInst = <String>[
     'Báscula de plataforma',
@@ -640,85 +638,88 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     await showDialog<void>(
       context: context,
       builder: (dlgCtx) => StatefulBuilder(
-        builder: (ctx, setDlgState) => AlertDialog(
-          backgroundColor: PesaColors.surface,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: PesaColors.border),
-          ),
-          title: const Text('Nuevo Cliente', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          content: SizedBox(
-            width: 440,
-            child: Form(
-              key: fKey,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-                      controller: razonCtrl,
-                      decoration: const InputDecoration(labelText: 'Razón Social *'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: rfcCtrl,
-                      decoration: const InputDecoration(labelText: 'RFC (opcional)'),
-                      textCapitalization: TextCapitalization.characters,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: telCtrl,
-                      decoration: const InputDecoration(labelText: 'Teléfono'),
-                      keyboardType: TextInputType.phone,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: dirCtrl,
-                      decoration: const InputDecoration(labelText: 'Dirección Principal'),
-                      maxLines: 2,
-                    ),
-                  ],
+        builder: (ctx, setDlgState) {
+          final dc = PesaColors.of(ctx);
+          return AlertDialog(
+            backgroundColor: dc.surface,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: dc.border),
+            ),
+            title: Text('Nuevo Cliente', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: dc.textPrimary)),
+            content: SizedBox(
+              width: 440,
+              child: Form(
+                key: fKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: razonCtrl,
+                        decoration: const InputDecoration(labelText: 'Razón Social *'),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: rfcCtrl,
+                        decoration: const InputDecoration(labelText: 'RFC (opcional)'),
+                        textCapitalization: TextCapitalization.characters,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: telCtrl,
+                        decoration: const InputDecoration(labelText: 'Teléfono'),
+                        keyboardType: TextInputType.phone,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: dirCtrl,
+                        decoration: const InputDecoration(labelText: 'Dirección Principal'),
+                        maxLines: 2,
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: saving
-                  ? null
-                  : () async {
-                      if (!(fKey.currentState?.validate() ?? false)) return;
-                      setDlgState(() => saving = true);
-                      try {
-                        created = await ApiService.instance.crearCliente(
-                          razonSocial: razonCtrl.text,
-                          rfc: rfcCtrl.text,
-                          telefono: telCtrl.text,
-                          direccion: dirCtrl.text,
-                        );
-                        if (dlgCtx.mounted) Navigator.of(dlgCtx).pop();
-                      } catch (e) {
-                        setDlgState(() => saving = false);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              backgroundColor: PesaColors.brand,
-                              content: Text('Error creando cliente: $e'),
-                            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: saving
+                    ? null
+                    : () async {
+                        if (!(fKey.currentState?.validate() ?? false)) return;
+                        setDlgState(() => saving = true);
+                        try {
+                          created = await ApiService.instance.crearCliente(
+                            razonSocial: razonCtrl.text,
+                            rfc: rfcCtrl.text,
+                            telefono: telCtrl.text,
+                            direccion: dirCtrl.text,
                           );
+                          if (dlgCtx.mounted) Navigator.of(dlgCtx).pop();
+                        } catch (e) {
+                          setDlgState(() => saving = false);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                backgroundColor: PesaColors.brand,
+                                content: Text('Error creando cliente: $e'),
+                              ),
+                            );
+                          }
                         }
-                      }
-                    },
-              child: Text(saving ? 'Guardando...' : 'Crear y Seleccionar'),
-            ),
-          ],
-        ),
+                      },
+                child: Text(saving ? 'Guardando...' : 'Crear y Seleccionar'),
+              ),
+            ],
+          );
+        },
       ),
     );
     razonCtrl.dispose();
@@ -753,82 +754,85 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     await showDialog<void>(
       context: context,
       builder: (dlgCtx) => StatefulBuilder(
-        builder: (ctx, setDlgState) => AlertDialog(
-          backgroundColor: PesaColors.surface,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: PesaColors.border),
-          ),
-          title: Text(
-            'Nueva Sucursal — $_clienteNombre',
-            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
-          ),
-          content: SizedBox(
-            width: 440,
-            child: Form(
-              key: fKey,
-              child: SingleChildScrollView(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    TextFormField(
-                      controller: nomCtrl,
-                      decoration: const InputDecoration(labelText: 'Nombre Sucursal / Planta *'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: dirCtrl,
-                      decoration: const InputDecoration(labelText: 'Dirección Completa *'),
-                      maxLines: 2,
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
-                    ),
-                    const SizedBox(height: 10),
-                    TextFormField(
-                      controller: conCtrl,
-                      decoration: const InputDecoration(labelText: 'Contacto en Planta (opcional)'),
-                    ),
-                  ],
+        builder: (ctx, setDlgState) {
+          final dc = PesaColors.of(ctx);
+          return AlertDialog(
+            backgroundColor: dc.surface,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: dc.border),
+            ),
+            title: Text(
+              'Nueva Sucursal — $_clienteNombre',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: dc.textPrimary),
+            ),
+            content: SizedBox(
+              width: 440,
+              child: Form(
+                key: fKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: nomCtrl,
+                        decoration: const InputDecoration(labelText: 'Nombre Sucursal / Planta *'),
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: dirCtrl,
+                        decoration: const InputDecoration(labelText: 'Dirección Completa *'),
+                        maxLines: 2,
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Obligatorio' : null,
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        controller: conCtrl,
+                        decoration: const InputDecoration(labelText: 'Contacto en Planta (opcional)'),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: saving
-                  ? null
-                  : () async {
-                      if (!(fKey.currentState?.validate() ?? false)) return;
-                      setDlgState(() => saving = true);
-                      try {
-                        created = await ApiService.instance.crearSucursal(
-                          cid,
-                          nombreSucursal: nomCtrl.text,
-                          direccion: dirCtrl.text,
-                          contactoNombre: conCtrl.text,
-                        );
-                        if (dlgCtx.mounted) Navigator.of(dlgCtx).pop();
-                      } catch (e) {
-                        setDlgState(() => saving = false);
-                        if (mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              backgroundColor: PesaColors.brand,
-                              content: Text('Error creando sucursal: $e'),
-                            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: saving
+                    ? null
+                    : () async {
+                        if (!(fKey.currentState?.validate() ?? false)) return;
+                        setDlgState(() => saving = true);
+                        try {
+                          created = await ApiService.instance.crearSucursal(
+                            cid,
+                            nombreSucursal: nomCtrl.text,
+                            direccion: dirCtrl.text,
+                            contactoNombre: conCtrl.text,
                           );
+                          if (dlgCtx.mounted) Navigator.of(dlgCtx).pop();
+                        } catch (e) {
+                          setDlgState(() => saving = false);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                backgroundColor: PesaColors.brand,
+                                content: Text('Error creando sucursal: $e'),
+                              ),
+                            );
+                          }
                         }
-                      }
-                    },
-              child: Text(saving ? 'Guardando...' : 'Guardar y Seleccionar'),
-            ),
-          ],
-        ),
+                      },
+                child: Text(saving ? 'Guardando...' : 'Guardar y Seleccionar'),
+              ),
+            ],
+          );
+        },
       ),
     );
     nomCtrl.dispose();
@@ -1028,73 +1032,76 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
         final folio = result['folio_os'] ?? result['folio'] ?? _folioInicialCtrl.text.trim();
         await showDialog<void>(
           context: context,
-          builder: (dlgCtx) => AlertDialog(
-            backgroundColor: PesaColors.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(14),
-              side: const BorderSide(color: PesaColors.border),
-            ),
-            title: const Row(children: [
-              Icon(Icons.check_circle_rounded, color: PesaColors.dotGreen, size: 24),
-              SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Formato(s) Generado(s) y Asignado(s)',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
-                ),
+          builder: (dlgCtx) {
+            final dc = PesaColors.of(dlgCtx);
+            return AlertDialog(
+              backgroundColor: dc.surface,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+                side: BorderSide(color: dc.border),
               ),
-            ]),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Los folios fueron reservados en PostgreSQL y sincronizados inmediatamente en este dispositivo.',
-                  style: TextStyle(fontSize: 13, color: PesaColors.textSecondary),
-                ),
-                const SizedBox(height: 12),
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: PesaColors.surfaceMuted,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: PesaColors.border),
+              title: Row(children: [
+                Icon(Icons.check_circle_rounded, color: dc.dotGreen, size: 24),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Formato(s) Generado(s) y Asignado(s)',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: dc.textPrimary),
                   ),
-                  child: Row(children: [
-                    const Icon(Icons.assignment_turned_in_outlined, color: _red, size: 20),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Folio(s): $folio',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w800,
-                          color: _red,
-                          fontSize: 14,
-                          fontFeatures: [FontFeature.tabularFigures()],
+                ),
+              ]),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Los folios fueron reservados en PostgreSQL y sincronizados inmediatamente en este dispositivo.',
+                    style: TextStyle(fontSize: 13, color: dc.textSecondary),
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: dc.surfaceMuted,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: dc.border),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.assignment_turned_in_outlined, color: dc.brandAccent, size: 20),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Folio(s): $folio',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: dc.brandAccent,
+                            fontSize: 14,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
                         ),
                       ),
-                    ),
-                  ]),
+                    ]),
+                  ),
+                ],
+              ),
+              actions: [
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _red,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () {
+                    Navigator.pop(dlgCtx);
+                    _salir(true);
+                  },
+                  child: const Text('Aceptar'),
                 ),
               ],
-            ),
-            actions: [
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: _red,
-                  foregroundColor: Colors.white,
-                  elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                onPressed: () {
-                  Navigator.pop(dlgCtx);
-                  _salir(true);
-                },
-                child: const Text('Aceptar'),
-              ),
-            ],
-          ),
+            );
+          },
         );
       }
     } catch (e) {
@@ -1111,12 +1118,13 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final bool cover = isCoverScreen(context);
 
     return AppShell(
       currentRoute: '/nuevo-doc',
       child: Scaffold(
-        backgroundColor: _bg,
+        backgroundColor: c.canvas,
         body: SafeArea(
           bottom: false,
           child: Column(
@@ -1136,21 +1144,21 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  const Text(
+                                  Text(
                                     'Asistente de Generación de Formatos',
                                     style: TextStyle(
                                       fontSize: 20,
                                       fontWeight: FontWeight.w800,
-                                      color: PesaColors.textPrimary,
+                                      color: c.textPrimary,
                                       letterSpacing: -0.3,
                                     ),
                                   ),
                                   const SizedBox(height: 4),
-                                  const Text(
+                                  Text(
                                     'Completa los pasos guiados para reservar folios y generar o asignar los documentos.',
                                     style: TextStyle(
                                       fontSize: 13,
-                                      color: PesaColors.textSecondary,
+                                      color: c.textSecondary,
                                     ),
                                   ),
                                   if (_error != null) ...[
@@ -1158,18 +1166,18 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                                     Container(
                                       padding: const EdgeInsets.all(12),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFFEF2F2),
-                                        border: Border.all(color: const Color(0xFFFECACA)),
+                                        color: c.isDark ? const Color(0xFF2D191D) : const Color(0xFFFEF2F2),
+                                        border: Border.all(color: c.brandAccent.withValues(alpha: 0.45)),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: Row(
                                         children: [
-                                          const Icon(Icons.error_outline, color: _red, size: 18),
+                                          Icon(Icons.error_outline, color: c.brandAccent, size: 18),
                                           const SizedBox(width: 8),
                                           Expanded(
                                             child: Text(
                                               _error!,
-                                              style: const TextStyle(color: _red, fontSize: 12.5, fontWeight: FontWeight.w600),
+                                              style: TextStyle(color: c.brandAccent, fontSize: 12.5, fontWeight: FontWeight.w600),
                                             ),
                                           ),
                                         ],
@@ -1201,27 +1209,28 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
   }
 
   Widget _buildTopHeader(bool cover) {
+    final c = PesaColors.of(context);
     return Container(
       padding: EdgeInsets.fromLTRB(cover ? 8 : 20, 10, cover ? 12 : 20, 10),
-      decoration: const BoxDecoration(
-        color: PesaColors.surface,
-        border: Border(bottom: BorderSide(color: _border)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
       child: Row(
         children: [
           if (cover)
             IconButton(
-              icon: const Icon(Icons.menu_rounded, color: PesaColors.textPrimary, size: 22),
+              icon: Icon(Icons.menu_rounded, color: c.textPrimary, size: 22),
               tooltip: 'Menú principal',
               onPressed: () => AppShell.toggleMenu(context),
             ),
-          const Expanded(
+          Expanded(
             child: Text(
               'Generar Formatos',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: PesaColors.textPrimary,
+                color: c.textPrimary,
                 fontWeight: FontWeight.w700,
                 fontSize: 16,
               ),
@@ -1229,9 +1238,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
           ),
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              foregroundColor: PesaColors.textPrimary,
-              side: const BorderSide(color: _border),
-              backgroundColor: PesaColors.surface,
+              foregroundColor: c.textPrimary,
+              side: BorderSide(color: c.border),
+              backgroundColor: c.surface,
               padding: EdgeInsets.symmetric(horizontal: cover ? 10 : 12, vertical: 8),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -1263,12 +1272,13 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     required String title,
     required Widget child,
   }) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: PesaColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _border),
+        border: Border.all(color: c.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1296,10 +1306,10 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w700,
-                    color: PesaColors.textPrimary,
+                    color: c.textPrimary,
                   ),
                 ),
               ),
@@ -1372,6 +1382,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
   }
 
   Widget _buildStep3ParametrosYEquipos(double width) {
+    final c = PesaColors.of(context);
     final int cols3 = width >= 760 ? 3 : 1;
     final rules = _activeRules;
     final bool allowCca = _tipoDoc == 'OS' && rules.tieneCalibracion;
@@ -1399,11 +1410,11 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                       InkWell(
                         onTap: _crearNuevoClienteInline,
                         borderRadius: BorderRadius.circular(6),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                           child: Text(
                             '+ Nuevo',
-                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _red),
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.brandAccent),
                           ),
                         ),
                       ),
@@ -1415,8 +1426,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                     borderRadius: BorderRadius.circular(8),
                     child: InputDecorator(
                       decoration: _inputDeco(
+                        context,
                         hint: 'Seleccionar cliente…',
-                        suffixIcon: const Icon(Icons.search_rounded, size: 18, color: PesaColors.textSecondary),
+                        suffixIcon: Icon(Icons.search_rounded, size: 18, color: c.textSecondary),
                       ),
                       child: Text(
                         _clienteNombre.isNotEmpty ? _clienteNombre : 'Buscar y seleccionar cliente…',
@@ -1425,7 +1437,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         style: TextStyle(
                           fontSize: 13.5,
                           fontWeight: _clienteNombre.isNotEmpty ? FontWeight.w600 : FontWeight.w400,
-                          color: _clienteNombre.isNotEmpty ? PesaColors.textPrimary : PesaColors.textTertiary,
+                          color: _clienteNombre.isNotEmpty ? c.textPrimary : c.textTertiary,
                         ),
                       ),
                     ),
@@ -1444,11 +1456,11 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         InkWell(
                           onTap: _crearNuevaSucursalInline,
                           borderRadius: BorderRadius.circular(6),
-                          child: const Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                             child: Text(
                               '+ Nueva',
-                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _red),
+                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.brandAccent),
                             ),
                           ),
                         ),
@@ -1461,7 +1473,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                               ? _sucursalId
                               : null,
                           isExpanded: true,
-                          decoration: _inputDeco(hint: 'Seleccionar sucursal…'),
+                          decoration: _inputDeco(context, hint: 'Seleccionar sucursal…'),
                           items: _sucursalesCliente.asMap().entries.map((entry) {
                             final s = entry.value;
                             final sid = s['id'] as int?;
@@ -1507,7 +1519,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         )
                       : TextFormField(
                           controller: _sucursalCtrl,
-                          decoration: _inputDeco(hint: 'Sucursal o dirección de planta'),
+                          decoration: _inputDeco(context, hint: 'Sucursal o dirección de planta'),
                           onChanged: (v) {
                             if (_direccionCtrl.text.trim().isEmpty) {
                               _direccionCtrl.text = v;
@@ -1582,8 +1594,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                     controller: _fechaCtrl,
                     readOnly: true,
                     decoration: _inputDeco(
+                      context,
                       hint: 'YYYY-MM-DD',
-                      suffixIcon: const Icon(Icons.calendar_today_outlined, size: 16, color: PesaColors.textSecondary),
+                      suffixIcon: Icon(Icons.calendar_today_outlined, size: 16, color: c.textSecondary),
                     ),
                     onTap: () async {
                       final init = DateTime.tryParse(_fechaCtrl.text) ?? DateTime.now();
@@ -1633,6 +1646,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 controller: _correoCtrl,
                 keyboardType: TextInputType.emailAddress,
                 decoration: _inputDeco(
+                  context,
                   hint: 'calidad@empresa.com',
                   suffixIcon: _correoCtrl.text.isNotEmpty
                       ? IconButton(
@@ -1651,12 +1665,12 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                   children: _correosFrecuentes.take(5).map((email) {
                     final sel = _correoCtrl.text.trim().toLowerCase() == email.toLowerCase();
                     return ChoiceChip(
-                      label: Text(email, style: TextStyle(fontSize: 11.5, color: sel ? Colors.white : PesaColors.textPrimary)),
+                      label: Text(email, style: TextStyle(fontSize: 11.5, color: sel ? Colors.white : c.textPrimary)),
                       selected: sel,
                       showCheckmark: false,
                       selectedColor: _red,
-                      backgroundColor: PesaColors.surfaceMuted,
-                      side: BorderSide(color: sel ? _red : _border),
+                      backgroundColor: c.surfaceMuted,
+                      side: BorderSide(color: sel ? _red : c.border),
                       visualDensity: VisualDensity.compact,
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       onSelected: (_) => setState(() => _correoCtrl.text = email),
@@ -1680,6 +1694,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 minLines: 2,
                 maxLines: 4,
                 decoration: _inputDeco(
+                  context,
                   hint: 'Ej: Se reemplaza el 1100a por otro tanque y se recalibran celdas de carga. Falla en celda N°3 — pendiente revisión.',
                 ),
               ),
@@ -1687,26 +1702,26 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
           ),
 
           const SizedBox(height: 16),
-          const Divider(height: 1, color: PesaColors.divider),
+          Divider(height: 1, color: c.divider),
           const SizedBox(height: 12),
 
           // ── Subtítulo de Equipos ─────────────────────────────────────────
           RichText(
-            text: const TextSpan(
+            text: TextSpan(
               children: [
                 TextSpan(
                   text: 'Datos del Instrumento por Equipo  ',
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
-                    color: PesaColors.textPrimary,
+                    color: c.textPrimary,
                   ),
                 ),
                 TextSpan(
                   text: '(todos los campos son opcionales — el técnico puede completarlos en campo)',
                   style: TextStyle(
                     fontSize: 12,
-                    color: PesaColors.textSecondary,
+                    color: c.textSecondary,
                   ),
                 ),
               ],
@@ -1737,6 +1752,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
     required bool allowCca,
     required bool allowDve,
   }) {
+    final c = PesaColors.of(context);
     final int cols4 = width >= 840 ? 4 : (width >= 500 ? 2 : 1);
     final int cols3 = width >= 720 ? 3 : 1;
     final tiposList = _opcionesTipoInstrumento();
@@ -1754,9 +1770,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
       key: ValueKey('instrumento_card_$index'),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: PesaColors.surface,
+        color: c.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _border),
+        border: Border.all(color: c.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1784,18 +1800,18 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                       children: [
                         TextSpan(
                           text: 'Instrumento ${index + 1} ',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w700,
-                            color: PesaColors.textPrimary,
+                            color: c.textPrimary,
                           ),
                         ),
-                        const TextSpan(
+                        TextSpan(
                           text: '· (datos opcionales)',
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
-                            color: PesaColors.textSecondary,
+                            color: c.textSecondary,
                           ),
                         ),
                       ],
@@ -1805,7 +1821,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 Icon(
                   eq.expanded ? Icons.remove_rounded : Icons.add_rounded,
                   size: 18,
-                  color: PesaColors.textSecondary,
+                  color: c.textSecondary,
                 ),
               ],
             ),
@@ -1897,7 +1913,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                   key: ValueKey('tipo_inst_$index'),
                   value: safeTipoInst,
                   isExpanded: true,
-                  decoration: _inputDeco(hint: 'Seleccionar tipo de instrumento…'),
+                  decoration: _inputDeco(context, hint: 'Seleccionar tipo de instrumento…'),
                   items: tiposList
                       .map((t) => DropdownMenuItem<String>(
                             value: t,
@@ -1937,7 +1953,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         key: ValueKey('aplica_exc_$index'),
                         value: eq.aplicaExcentricidad,
                         isExpanded: true,
-                        decoration: _inputDeco(),
+                        decoration: _inputDeco(context),
                         items: const [
                           DropdownMenuItem(value: true, child: Text('SÍ', style: TextStyle(fontSize: 13.5))),
                           DropdownMenuItem(value: false, child: Text('NO', style: TextStyle(fontSize: 13.5))),
@@ -1989,7 +2005,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         key: ValueKey('geo_puntos_$index'),
                         value: safeGeo,
                         isExpanded: true,
-                        decoration: _inputDeco(),
+                        decoration: _inputDeco(context),
                         items: _geometriasOpciones
                             .map((g) => DropdownMenuItem<String>(
                                   value: g,
@@ -2020,7 +2036,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         key: ValueKey('aplica_exc_$index'),
                         value: eq.aplicaExcentricidad,
                         isExpanded: true,
-                        decoration: _inputDeco(),
+                        decoration: _inputDeco(context),
                         items: const [
                           DropdownMenuItem(value: true, child: Text('SÍ', style: TextStyle(fontSize: 13.5))),
                           DropdownMenuItem(value: false, child: Text('NO', style: TextStyle(fontSize: 13.5))),
@@ -2058,7 +2074,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         key: ValueKey('motivo_no_$index'),
                         value: safeMotivo,
                         isExpanded: true,
-                        decoration: _inputDeco(),
+                        decoration: _inputDeco(context),
                         items: _motivosNoAplica
                             .map((m) => DropdownMenuItem<String>(
                                   value: m,
@@ -2084,19 +2100,19 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 key: ValueKey('enlaces_sustitucion_card_$index'),
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: PesaColors.surfaceMuted,
+                  color: c.surfaceMuted,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: _border),
+                  border: Border.all(color: c.border),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Calibración por Enlaces de Sustitución  —  NOM-010-SCFI / OIML R 76',
                       style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w700,
-                        color: PesaColors.textPrimary,
+                        color: c.textPrimary,
                       ),
                     ),
                     const SizedBox(height: 10),
@@ -2114,7 +2130,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                               key: ValueKey('aplica_enlaces_$index'),
                               value: eq.aplicaEnlacesSustitucion,
                               isExpanded: true,
-                              decoration: _inputDeco(),
+                              decoration: _inputDeco(context),
                               items: const [
                                 DropdownMenuItem(value: true, child: Text('SÍ', style: TextStyle(fontSize: 13.5))),
                                 DropdownMenuItem(value: false, child: Text('NO', style: TextStyle(fontSize: 13.5))),
@@ -2142,15 +2158,15 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                               ),
                             ],
                           ),
-                        const Align(
+                        Align(
                           alignment: Alignment.centerLeft,
                           child: Padding(
-                            padding: EdgeInsets.only(top: 16),
+                            padding: const EdgeInsets.only(top: 16),
                             child: Text(
                               'La carga de pesa patrón la determina el técnico en campo — no se fija aquí.',
                               style: TextStyle(
                                 fontSize: 11.5,
-                                color: PesaColors.textSecondary,
+                                color: c.textSecondary,
                                 height: 1.35,
                               ),
                             ),
@@ -2201,7 +2217,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                       DropdownButtonFormField<String>(
                         value: eq.inicialCalibrador,
                         isExpanded: true,
-                        decoration: _inputDeco(),
+                        decoration: _inputDeco(context),
                         items: const ['Ninguna', 'J', 'I', 'A']
                             .map((ini) => DropdownMenuItem(value: ini, child: Text(ini, style: const TextStyle(fontSize: 13.5))))
                             .toList(),
@@ -2258,6 +2274,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
   }
 
   Widget _buildStep4ConfirmarFolios(double width) {
+    final c = PesaColors.of(context);
     final rango = _calcularRangoPreview();
     return _buildStepCard(
       stepNumber: 4,
@@ -2270,12 +2287,12 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
             runSpacing: 10,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-              const Text(
+              Text(
                 'Folio Inicial (Consecutivo) *',
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w700,
-                  color: PesaColors.textPrimary,
+                  color: c.textPrimary,
                 ),
               ),
               SizedBox(
@@ -2283,13 +2300,14 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 child: TextFormField(
                   key: const Key('folio_inicial_input'),
                   controller: _folioInicialCtrl,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: PesaColors.textPrimary,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                    color: c.textPrimary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                   decoration: _inputDeco(
+                    context,
                     hint: _loadingFolio ? 'Consultando…' : 'Ej: OS-26-863',
                     suffixIcon: _loadingFolio
                         ? const Padding(
@@ -2302,7 +2320,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                           )
                         : IconButton(
                             tooltip: 'Consultar consecutivo en vivo',
-                            icon: const Icon(Icons.refresh_rounded, size: 17, color: PesaColors.textSecondary),
+                            icon: Icon(Icons.refresh_rounded, size: 17, color: c.textSecondary),
                             onPressed: () => _cargarSiguienteFolio(_tipoDoc),
                           ),
                   ),
@@ -2313,9 +2331,9 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: PesaColors.surfaceMuted,
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: _border),
+                    border: Border.all(color: c.border),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -2324,17 +2342,17 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                         width: 6,
                         height: 6,
                         decoration: BoxDecoration(
-                          color: _folioOrigen.contains('vivo') ? PesaColors.dotGreen : PesaColors.dotAmber,
+                          color: _folioOrigen.contains('vivo') ? c.dotGreen : c.dotAmber,
                           shape: BoxShape.circle,
                         ),
                       ),
                       const SizedBox(width: 6),
                       Text(
                         _folioOrigen,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
-                          color: PesaColors.textSecondary,
+                          color: c.textSecondary,
                         ),
                       ),
                     ],
@@ -2347,17 +2365,17 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: PesaColors.surfaceMuted,
+                color: c.surfaceMuted,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _border),
+                border: Border.all(color: c.border),
               ),
               child: Text(
                 'Rango de folios a reservar: $rango',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w700,
-                  color: PesaColors.textPrimary,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  color: c.textPrimary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ),
@@ -2368,19 +2386,20 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
   }
 
   Widget _buildStickyFooter(bool cover) {
+    final c = PesaColors.of(context);
     return Container(
       padding: EdgeInsets.fromLTRB(cover ? 12 : 20, 10, cover ? 12 : 20, 10 + MediaQuery.of(context).viewPadding.bottom),
-      decoration: const BoxDecoration(
-        color: PesaColors.surface,
-        border: Border(top: BorderSide(color: _border)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(top: BorderSide(color: c.border)),
       ),
       child: Row(
         children: [
           OutlinedButton(
             style: OutlinedButton.styleFrom(
-              foregroundColor: PesaColors.textPrimary,
-              side: const BorderSide(color: _border),
-              backgroundColor: PesaColors.surface,
+              foregroundColor: c.textPrimary,
+              side: BorderSide(color: c.border),
+              backgroundColor: c.surface,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -2396,10 +2415,10 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                     : 'Listo para generar y asignar folios.',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
-                  color: PesaColors.dotGreen,
+                  color: c.dotGreen,
                 ),
               ),
             ),
@@ -2411,7 +2430,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
             child: ElevatedButton(
               key: const Key('submit_nuevo_doc_btn'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: _loading ? PesaColors.textTertiary : _red,
+                backgroundColor: _loading ? c.textTertiary : _red,
                 foregroundColor: Colors.white,
                 elevation: 0,
                 padding: EdgeInsets.symmetric(horizontal: cover ? 14 : 22, vertical: 13),
@@ -2449,26 +2468,27 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
 
 // ── Helpers UI corporativos minimalistas ────────────────────────────────────
 
-InputDecoration _inputDeco({String? hint, Widget? suffixIcon}) {
+InputDecoration _inputDeco(BuildContext context, {String? hint, Widget? suffixIcon}) {
+  final c = PesaColors.of(context);
   return InputDecoration(
     hintText: hint,
-    hintStyle: const TextStyle(fontSize: 13, color: PesaColors.textTertiary),
+    hintStyle: TextStyle(fontSize: 13, color: c.textTertiary),
     suffixIcon: suffixIcon,
     isDense: true,
     filled: true,
-    fillColor: PesaColors.surface,
+    fillColor: c.isDark ? c.surfaceElevated : c.surface,
     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: PesaColors.border),
+      borderSide: BorderSide(color: c.border),
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: PesaColors.border),
+      borderSide: BorderSide(color: c.border),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: const BorderSide(color: PesaColors.brand, width: 1.6),
+      borderSide: BorderSide(color: c.brandAccent, width: 1.6),
     ),
   );
 }
@@ -2479,14 +2499,15 @@ class _FieldLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Text(
       text,
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: const TextStyle(
+      style: TextStyle(
         fontSize: 11.5,
         fontWeight: FontWeight.w700,
-        color: PesaColors.textSecondary,
+        color: c.textSecondary,
       ),
     );
   }
@@ -2505,6 +2526,7 @@ class _LabeledTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2512,8 +2534,8 @@ class _LabeledTextField extends StatelessWidget {
         const SizedBox(height: 5),
         TextFormField(
           controller: controller,
-          style: const TextStyle(fontSize: 13.5, color: PesaColors.textPrimary),
-          decoration: _inputDeco(hint: hint),
+          style: TextStyle(fontSize: 13.5, color: c.textPrimary),
+          decoration: _inputDeco(context, hint: hint),
         ),
       ],
     );
@@ -2541,6 +2563,7 @@ class _LabeledAutoField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2568,24 +2591,25 @@ class _LabeledAutoField extends StatelessWidget {
             return TextFormField(
               controller: textCtrl,
               focusNode: fNode,
-              style: const TextStyle(fontSize: 13.5, color: PesaColors.textPrimary),
-              decoration: _inputDeco(hint: hint),
+              style: TextStyle(fontSize: 13.5, color: c.textPrimary),
+              decoration: _inputDeco(ctx, hint: hint),
             );
           },
           optionsViewBuilder: (ctx, onSelected, options) {
+            final oc = PesaColors.of(ctx);
             return Align(
               alignment: Alignment.topLeft,
               child: Material(
                 elevation: 6,
                 borderRadius: BorderRadius.circular(10),
-                color: PesaColors.surface,
+                color: oc.surface,
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 220, maxWidth: 360),
                   child: ListView.separated(
                     padding: EdgeInsets.zero,
                     shrinkWrap: true,
                     itemCount: options.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, __) => Divider(height: 1, color: oc.divider),
                     itemBuilder: (ctx, i) {
                       final opt = options.elementAt(i);
                       final titulo = [
@@ -2600,9 +2624,9 @@ class _LabeledAutoField extends StatelessWidget {
                       ].join(' · ');
                       return ListTile(
                         dense: true,
-                        title: Text(titulo, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700)),
+                        title: Text(titulo, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: oc.textPrimary)),
                         subtitle: sub.isNotEmpty
-                            ? Text(sub, style: const TextStyle(fontSize: 11, color: PesaColors.textSecondary))
+                            ? Text(sub, style: TextStyle(fontSize: 11, color: oc.textSecondary))
                             : null,
                         onTap: () => onSelected(opt),
                       );
@@ -2636,12 +2660,13 @@ class _CompactIntStepper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Container(
       height: 44,
       decoration: BoxDecoration(
-        color: PesaColors.surface,
+        color: c.isDark ? c.surfaceElevated : c.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: PesaColors.border),
+        border: Border.all(color: c.border),
       ),
       child: Row(
         children: [
@@ -2650,7 +2675,7 @@ class _CompactIntStepper extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 6),
             constraints: const BoxConstraints(minWidth: 34, minHeight: 38),
             icon: const Icon(Icons.remove_rounded, size: 17),
-            color: value > min ? PesaColors.textPrimary : PesaColors.textTertiary,
+            color: value > min ? c.textPrimary : c.textTertiary,
             onPressed: value > min ? () => onChanged(value - 1) : null,
           ),
           Expanded(
@@ -2659,11 +2684,11 @@ class _CompactIntStepper extends StatelessWidget {
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w700,
-                color: PesaColors.textPrimary,
-                fontFeatures: [FontFeature.tabularFigures()],
+                color: c.textPrimary,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ),
@@ -2672,7 +2697,7 @@ class _CompactIntStepper extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 6),
             constraints: const BoxConstraints(minWidth: 34, minHeight: 38),
             icon: const Icon(Icons.add_rounded, size: 17),
-            color: value < max ? PesaColors.textPrimary : PesaColors.textTertiary,
+            color: value < max ? c.textPrimary : c.textTertiary,
             onPressed: value < max ? () => onChanged(value + 1) : null,
           ),
         ],
@@ -2698,6 +2723,7 @@ class _SelectableOptionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(10),
@@ -2705,10 +2731,10 @@ class _SelectableOptionCard extends StatelessWidget {
         duration: const Duration(milliseconds: 140),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         decoration: BoxDecoration(
-          color: selected ? PesaColors.surfaceMuted : PesaColors.surface,
+          color: selected ? c.surfaceMuted : c.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: selected ? PesaColors.brand : PesaColors.border,
+            color: selected ? c.brandAccent : c.border,
             width: selected ? 1.8 : 1,
           ),
         ),
@@ -2720,16 +2746,16 @@ class _SelectableOptionCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: selected ? PesaColors.brand : PesaColors.surfaceMuted,
+                    color: selected ? c.brand : c.surfaceMuted,
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: selected ? PesaColors.brand : PesaColors.border),
+                    border: Border.all(color: selected ? c.brand : c.border),
                   ),
                   child: Text(
                     badge,
                     style: TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.w800,
-                      color: selected ? Colors.white : PesaColors.textSecondary,
+                      color: selected ? Colors.white : c.textSecondary,
                       letterSpacing: 0.4,
                     ),
                   ),
@@ -2743,7 +2769,7 @@ class _SelectableOptionCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: selected ? PesaColors.brand : PesaColors.textPrimary,
+                      color: selected ? c.brandAccent : c.textPrimary,
                     ),
                   ),
                 ),
@@ -2754,9 +2780,9 @@ class _SelectableOptionCard extends StatelessWidget {
               subtitle,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11.5,
-                color: PesaColors.textSecondary,
+                color: c.textSecondary,
                 height: 1.3,
               ),
             ),
@@ -2840,6 +2866,7 @@ class _CatalogDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final validIds = items.map((e) => int.tryParse('${e[idKey] ?? ''}')).whereType<int>().toSet();
     final safeValue = (value != null && validIds.contains(value)) ? value : null;
 
@@ -2850,9 +2877,9 @@ class _CatalogDropdown extends StatelessWidget {
         hint,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
-        style: const TextStyle(fontSize: 13, color: PesaColors.textTertiary),
+        style: TextStyle(fontSize: 13, color: c.textTertiary),
       ),
-      decoration: _inputDeco(),
+      decoration: _inputDeco(context),
       items: items.map((item) {
         final id = int.tryParse('${item[idKey] ?? 0}') ?? 0;
         String label = '—';
@@ -2890,15 +2917,16 @@ class _ClienteSearchSheetState extends State<_ClienteSearchSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final qNorm = LocalDbService.normalizarTexto(_query);
     final filtered = _query.trim().isEmpty
         ? widget.clientes
-        : widget.clientes.where((c) {
+        : widget.clientes.where((cli) {
             final nom = LocalDbService.normalizarTexto(
-              (c['nombre'] ?? c['razon_social'] ?? '').toString(),
+              (cli['nombre'] ?? cli['razon_social'] ?? '').toString(),
             );
-            final rfc = LocalDbService.normalizarTexto((c['rfc'] ?? '').toString());
-            final dir = LocalDbService.normalizarTexto((c['direccion'] ?? '').toString());
+            final rfc = LocalDbService.normalizarTexto((cli['rfc'] ?? '').toString());
+            final dir = LocalDbService.normalizarTexto((cli['direccion'] ?? '').toString());
             return nom.contains(qNorm) || rfc.contains(qNorm) || dir.contains(qNorm);
           }).toList();
 
@@ -2918,12 +2946,12 @@ class _ClienteSearchSheetState extends State<_ClienteSearchSheet> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(children: [
-              const Icon(Icons.business_rounded, color: PesaColors.brand),
+              Icon(Icons.business_rounded, color: c.brandAccent),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Seleccionar Cliente (${filtered.length})',
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: c.textPrimary),
                 ),
               ),
               IconButton(
@@ -2938,7 +2966,7 @@ class _ClienteSearchSheetState extends State<_ClienteSearchSheet> {
                 hintText: 'Buscar por razón social, nombre comercial, RFC o dirección...',
                 prefixIcon: const Icon(Icons.search),
                 filled: true,
-                fillColor: PesaColors.surfaceMuted,
+                fillColor: c.surfaceMuted,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
                   borderSide: BorderSide.none,
@@ -2950,27 +2978,27 @@ class _ClienteSearchSheetState extends State<_ClienteSearchSheet> {
             const SizedBox(height: 10),
             Expanded(
               child: filtered.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text(
                         'Sin coincidencias en el catálogo de clientes',
-                        style: TextStyle(color: PesaColors.textSecondary),
+                        style: TextStyle(color: c.textSecondary),
                       ),
                     )
                   : ListView.separated(
                       controller: scrollCtrl,
                       itemCount: filtered.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      separatorBuilder: (_, __) => Divider(height: 1, color: c.divider),
                       itemBuilder: (ctx, i) {
-                        final c = filtered[i];
-                        final nom = (c['nombre'] ?? c['razon_social'] ?? '').toString();
-                        final rfc = (c['rfc'] ?? '').toString().trim();
-                        final sucs = (c['sucursales'] as List?) ?? const [];
-                        final dir = (c['direccion'] ?? '').toString().trim();
+                        final cli = filtered[i];
+                        final nom = (cli['nombre'] ?? cli['razon_social'] ?? '').toString();
+                        final rfc = (cli['rfc'] ?? '').toString().trim();
+                        final sucs = (cli['sucursales'] as List?) ?? const [];
+                        final dir = (cli['direccion'] ?? '').toString().trim();
                         return ListTile(
                           dense: true,
                           title: Text(
                             nom,
-                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
+                            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, color: c.textPrimary),
                           ),
                           subtitle: Text(
                             [
@@ -2980,10 +3008,10 @@ class _ClienteSearchSheetState extends State<_ClienteSearchSheet> {
                             ].join(' • '),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary),
+                            style: TextStyle(fontSize: 11.5, color: c.textSecondary),
                           ),
-                          trailing: const Icon(Icons.chevron_right, size: 18),
-                          onTap: () => Navigator.pop(ctx, c),
+                          trailing: Icon(Icons.chevron_right, size: 18, color: c.textSecondary),
+                          onTap: () => Navigator.pop(ctx, cli),
                         );
                       },
                     ),

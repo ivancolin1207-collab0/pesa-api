@@ -46,7 +46,6 @@ class ObservacionesBasculaScreen extends StatefulWidget {
 
 class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen> {
   static const Color _pesaRed = PesaColors.brand;
-  static const Color _pesaDark = PesaColors.textPrimary;
 
   static const Map<int, String> _checklistLabels = {
     1: 'Charola / Plato / Cubierta (Sin golpes, deformaciones ni corrosión)',
@@ -122,15 +121,18 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   List<String> _contactosSugeridos = [];
 
+  // BLINDAJE DE FIRMA: tinta negra (#000000) fija sobre fondo blanco (#FFFFFF) incluso en Dark Mode
   final _sigClienteCtrl = SignatureController(
     penStrokeWidth: 2.5,
-    penColor: const Color(0xFF1D1D1F),
-    exportBackgroundColor: Colors.white,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+    exportBackgroundColor: PesaColors.signatureCanvas,
   );
   final _sigTecnicoCtrl = SignatureController(
     penStrokeWidth: 2.5,
-    penColor: const Color(0xFF1D1D1F),
-    exportBackgroundColor: Colors.white,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+    exportBackgroundColor: PesaColors.signatureCanvas,
   );
 
   Uint8List? _firmaTecPre;
@@ -1162,6 +1164,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final folio = (widget.orden['folio'] ?? widget.orden['folio_os'] ?? 'OSOB-26-001').toString().trim();
     final now = DateTime.now();
     final fechaHoyFmt = '${now.day.toString().padLeft(2, '0')} / ${now.month.toString().padLeft(2, '0')} / ${now.year}';
@@ -1172,14 +1175,14 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
         await _guardarBorradorLocal();
       },
       child: Scaffold(
-        backgroundColor: PesaColors.canvas,
+        backgroundColor: c.canvas,
         appBar: AppBar(
-          backgroundColor: PesaColors.surface,
-          foregroundColor: PesaColors.textPrimary,
+          backgroundColor: c.surface,
+          foregroundColor: c.textPrimary,
           elevation: 0,
-          bottom: const PreferredSize(
-            preferredSize: Size.fromHeight(1),
-            child: Divider(height: 1, color: PesaColors.border),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
+            child: Divider(height: 1, color: c.border),
           ),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
@@ -1198,24 +1201,24 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   children: [
                     Text(
                       'Inspección y Revisión ($folio)',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 15.5,
                         fontWeight: FontWeight.w700,
-                        color: PesaColors.textPrimary,
-                        fontFeatures: [FontFeature.tabularFigures()],
+                        color: c.textPrimary,
+                        fontFeatures: const [FontFeature.tabularFigures()],
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                     Text(
                       'OSOB · $fechaHoyFmt',
-                      style: const TextStyle(fontSize: 11, color: PesaColors.textSecondary),
+                      style: TextStyle(fontSize: 11, color: c.textSecondary),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
               const SizedBox(width: 6),
-              const PesaStatusBadge(label: 'OSOB', dotColor: PesaColors.brand),
+              PesaStatusBadge(label: 'OSOB', dotColor: c.brandAccent),
             ],
           ),
           actions: [
@@ -1278,8 +1281,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                             icon: const Icon(Icons.preview_outlined, size: 18),
                             label: const Text('Vista Previa'),
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: PesaColors.textPrimary,
-                              side: const BorderSide(color: PesaColors.borderStrong),
+                              foregroundColor: c.textPrimary,
+                              side: BorderSide(color: c.borderStrong),
                               minimumSize: const Size(0, 52),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
@@ -1292,8 +1295,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: _pesaRed,
                                   foregroundColor: Colors.white,
-                                  disabledBackgroundColor: PesaColors.surfaceMuted,
-                                  disabledForegroundColor: PesaColors.textTertiary,
+                                  disabledBackgroundColor: c.surfaceMuted,
+                                  disabledForegroundColor: c.textTertiary,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                   elevation: 0,
                                 ),
@@ -1357,11 +1360,12 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
   }
 
   Widget _buildSectionTitleBanner(String title, {Widget? trailing}) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: const BoxDecoration(
-        color: _pesaDark,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+      decoration: BoxDecoration(
+        color: c.isDark ? c.elevated : PesaColors.textPrimary,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
       ),
       child: Row(
         children: [
@@ -1383,10 +1387,15 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
   }
 
   Widget _buildControlHeaderCard(String folio, String fechaHoyFmt) {
+    final c = PesaColors.of(context);
     return Card(
-      elevation: 1,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Column(
@@ -1398,8 +1407,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                 Flexible(
                   child: Text(
                     'FOLIO: $folio',
-                    style: const TextStyle(
-                      color: _pesaRed,
+                    style: TextStyle(
+                      color: c.brandAccent,
                       fontWeight: FontWeight.w800,
                       fontSize: 15,
                     ),
@@ -1408,14 +1417,14 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFCE8E9),
+                    color: c.brandSoft,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: _pesaRed, width: 0.8),
+                    border: Border.all(color: c.brandAccent, width: 0.8),
                   ),
-                  child: const Text(
+                  child: Text(
                     'OSOB DIGITAL',
                     style: TextStyle(
-                      color: _pesaRed,
+                      color: c.brandAccent,
                       fontWeight: FontWeight.bold,
                       fontSize: 11.5,
                     ),
@@ -1423,7 +1432,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                 ),
               ],
             ),
-            const Divider(height: 16),
+            Divider(height: 16, color: c.border),
             Wrap(
               spacing: 18,
               runSpacing: 10,
@@ -1432,8 +1441,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Text('Fecha: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    Text(fechaHoyFmt, style: const TextStyle(fontSize: 13)),
+                    Text('Fecha: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary)),
+                    Text(fechaHoyFmt, style: TextStyle(fontSize: 13, color: c.textSecondary)),
                   ],
                 ),
                 SizedBox(
@@ -1458,11 +1467,16 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   // ── SECCIÓN 1: Datos del Cliente y del Equipo ─────────────────────────────
   Widget _buildSeccion1Card() {
+    final c = PesaColors.of(context);
     const tipos = ['Mesa', 'Camionera', 'Colgante', 'Tolva', 'Tanque', 'Otro'];
     return Card(
-      elevation: 1,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1490,9 +1504,9 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   ],
                 ),
                 const SizedBox(height: 12),
-                const Text(
+                Text(
                   'Tipo de Instrumento:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
                 ),
                 const SizedBox(height: 6),
                 Wrap(
@@ -1505,10 +1519,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                       selected: sel,
                       showCheckmark: false,
                       selectedColor: _pesaRed,
-                      backgroundColor: Colors.white,
-                      side: BorderSide(color: sel ? _pesaRed : PesaColors.borderStrong),
+                      backgroundColor: c.elevated,
+                      side: BorderSide(color: sel ? _pesaRed : c.borderStrong),
                       labelStyle: TextStyle(
-                        color: sel ? Colors.white : PesaColors.textPrimary,
+                        color: sel ? Colors.white : c.textPrimary,
                         fontWeight: sel ? FontWeight.bold : FontWeight.w500,
                       ),
                       onSelected: (_) {
@@ -1528,9 +1542,9 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   height: 46,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: PesaColors.textPrimary,
-                      backgroundColor: PesaColors.surface,
-                      side: const BorderSide(color: PesaColors.borderStrong, width: 1.2),
+                      foregroundColor: c.textPrimary,
+                      backgroundColor: c.surface,
+                      side: BorderSide(color: c.borderStrong, width: 1.2),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _guardandoParcial ? null : _guardarEquipoSinFinalizar,
@@ -1559,10 +1573,15 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   // ── SECCIÓN 2: Checklist de Inspección Física y Mecánica ──────────────────
   Widget _buildSeccion2Card() {
+    final c = PesaColors.of(context);
     return Card(
-      elevation: 1,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1581,16 +1600,16 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                 });
                 _programarAutoGuardado();
               },
-              icon: const Icon(Icons.done_all, size: 16, color: Colors.greenAccent),
+              icon: Icon(Icons.done_all, size: 16, color: c.dotGreen),
               label: const Text('Marcar todos B', style: TextStyle(fontSize: 11.5)),
             ),
           ),
           Container(
-            color: const Color(0xFFF9FAFB),
+            color: c.surfaceMuted,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            child: const Text(
+            child: Text(
               'Instrucción: Marcar con una "X" el estado actual de cada componente (B = Bueno / Operativo, R = Regular / Requiere ajuste o limpieza, M = Malo / Requiere reemplazo, N/A = No aplica).',
-              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Color(0xFF4B5563)),
+              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: c.textSecondary),
             ),
           ),
           _buildSubcategoryBar('A) Estructura y Receptor de Carga'),
@@ -1605,17 +1624,19 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
   }
 
   Widget _buildSubcategoryBar(String title) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-      color: const Color(0xFFE5E7EB),
+      color: c.elevated,
       child: Text(
         title,
-        style: const TextStyle(color: _pesaRed, fontWeight: FontWeight.bold, fontSize: 12.5),
+        style: TextStyle(color: c.brandAccent, fontWeight: FontWeight.bold, fontSize: 12.5),
       ),
     );
   }
 
   Widget _buildChecklistItemWidget(int num) {
+    final c = PesaColors.of(context);
     final label = _checklistLabels[num] ?? '';
     final cur = _chkEstado[num] ?? 'B';
     const opts = ['B', 'R', 'M', 'N/A'];
@@ -1645,8 +1666,8 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: num.isEven ? const Color(0xFFF9FAFB) : Colors.white,
-        border: const Border(bottom: BorderSide(color: Color(0xFFE5E7EB), width: 0.8)),
+        color: num.isEven ? c.surfaceMuted : c.surface,
+        border: Border(bottom: BorderSide(color: c.border, width: 0.8)),
       ),
       child: cover
           ? Column(
@@ -1654,7 +1675,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
               children: [
                 Text(
                   '$num. $label',
-                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: _pesaDark),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.textPrimary),
                 ),
                 const SizedBox(height: 8),
                 segmented,
@@ -1669,7 +1690,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   flex: 4,
                   child: Text(
                     '$num. $label',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _pesaDark),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.textPrimary),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -1683,10 +1704,15 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   // ── SECCIÓN 3: Pruebas Rápidas de Funcionamiento ──────────────────────────
   Widget _buildSeccion3Card() {
+    final c = PesaColors.of(context);
     return Card(
-      elevation: 1,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1704,7 +1730,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   },
                   extraField: _textInput('Comentarios', _estabCeroComCtrl),
                 ),
-                const Divider(height: 16),
+                Divider(height: 16, color: c.border),
                 _buildPruebaRapidaItem(
                   label: 'Retorno a Cero tras descarga',
                   estado: _retornoCeroEstado,
@@ -1714,7 +1740,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   },
                   extraField: _textInput('Comentarios', _retornoCeroComCtrl),
                 ),
-                const Divider(height: 16),
+                Divider(height: 16, color: c.border),
                 _buildPruebaRapidaItem(
                   label: 'Prueba de Excentricidad (Esquinas)',
                   estado: _excentricidadEstado,
@@ -1724,7 +1750,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   },
                   extraField: _textInput('Dif. máx. detectada', _excentricidadDifCtrl),
                 ),
-                const Divider(height: 16),
+                Divider(height: 16, color: c.border),
                 _buildPruebaRapidaItem(
                   label: 'Repetibilidad de lectura',
                   estado: _repetibilidadEstado,
@@ -1734,7 +1760,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   },
                   extraField: _textInput('Carga de prueba', _repetibilidadCargaCtrl),
                 ),
-                const Divider(height: 16),
+                Divider(height: 16, color: c.border),
                 _buildPruebaRapidaItem(
                   label: 'Exactitud preliminar de pesaje',
                   estado: _exactitudEstado,
@@ -1744,12 +1770,15 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   },
                   extraField: Row(
                     children: [
-                      const Text('Requiere ajuste: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                      Text('Requiere ajuste: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: c.textPrimary)),
                       const SizedBox(width: 6),
                       ChoiceChip(
                         label: const Text('Sí'),
                         selected: _exactitudReqAjuste == 'Sí',
-                        selectedColor: const Color(0xFFFCE8E9),
+                        showCheckmark: false,
+                        selectedColor: _pesaRed,
+                        backgroundColor: c.elevated,
+                        labelStyle: TextStyle(color: _exactitudReqAjuste == 'Sí' ? Colors.white : c.textPrimary),
                         onSelected: (_) {
                           setState(() => _exactitudReqAjuste = 'Sí');
                           _programarAutoGuardado();
@@ -1759,7 +1788,10 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                       ChoiceChip(
                         label: const Text('No'),
                         selected: _exactitudReqAjuste == 'No',
-                        selectedColor: const Color(0xFFFCE8E9),
+                        showCheckmark: false,
+                        selectedColor: _pesaRed,
+                        backgroundColor: c.elevated,
+                        labelStyle: TextStyle(color: _exactitudReqAjuste == 'No' ? Colors.white : c.textPrimary),
                         onSelected: (_) {
                           setState(() => _exactitudReqAjuste = 'No');
                           _programarAutoGuardado();
@@ -1782,6 +1814,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     required ValueChanged<String> onChangedEstado,
     required Widget extraField,
   }) {
+    final c = PesaColors.of(context);
     final selector = PesaSegmentedSelector<String>(
       options: const ['Cumple', 'No cumple'],
       selected: estado,
@@ -1791,7 +1824,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('• $label', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+        Text('• $label', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary)),
         const SizedBox(height: 8),
         FoldableTwoColumn(
           firstFlex: 4,
@@ -1808,6 +1841,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   // ── SECCIÓN 4: Diagnóstico General, Observaciones y Refacciones ───────────
   Widget _buildSeccion4Card() {
+    final c = PesaColors.of(context);
     const dictamenes = [
       ('OPERATIVO', 'OPERATIVO (Apto para uso normal / Listo para calibración)'),
       ('OPERATIVO CON OBSERVACIONES', 'OPERATIVO CON OBSERVACIONES (Funciona, pero requiere mantenimiento preventivo/correctivo pronto)'),
@@ -1815,9 +1849,13 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     ];
 
     return Card(
-      elevation: 1,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1827,9 +1865,9 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'Observaciones técnicas y hallazgos detallados:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
                 ),
                 const SizedBox(height: 6),
                 TextField(
@@ -1843,16 +1881,16 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text(
+                Text(
                   'Acciones realizadas durante la revisión:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
                 ),
                 CheckboxListTile(
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   activeColor: _pesaRed,
-                  title: const Text('Limpieza superficial e interna'),
+                  title: Text('Limpieza superficial e interna', style: TextStyle(color: c.textPrimary)),
                   value: _accLimpieza,
                   onChanged: (v) {
                     setState(() => _accLimpieza = v ?? false);
@@ -1864,7 +1902,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   activeColor: _pesaRed,
-                  title: const Text('Nivelación de patas y ajuste de topes'),
+                  title: Text('Nivelación de patas y ajuste de topes', style: TextStyle(color: c.textPrimary)),
                   value: _accNivelacion,
                   onChanged: (v) {
                     setState(() => _accNivelacion = v ?? false);
@@ -1876,7 +1914,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   activeColor: _pesaRed,
-                  title: const Text('Ajuste de peso (calibración interna / ajuste con masa patrón)'),
+                  title: Text('Ajuste de peso (calibración interna / ajuste con masa patrón)', style: TextStyle(color: c.textPrimary)),
                   value: _accAjustePeso,
                   onChanged: (v) {
                     setState(() => _accAjustePeso = v ?? false);
@@ -1888,7 +1926,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
                   activeColor: _pesaRed,
-                  title: const Text('Revisión eléctrica y reapriete de conexiones'),
+                  title: Text('Revisión eléctrica y reapriete de conexiones', style: TextStyle(color: c.textPrimary)),
                   value: _accRevElectrica,
                   onChanged: (v) {
                     setState(() => _accRevElectrica = v ?? false);
@@ -1896,9 +1934,9 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   },
                 ),
                 const SizedBox(height: 10),
-                const Text(
+                Text(
                   'Refacciones o servicios adicionales requeridos:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
                 ),
                 const SizedBox(height: 6),
                 TextField(
@@ -1912,9 +1950,9 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text(
+                Text(
                   'Dictamen de Estado Operativo del Equipo:',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
                 ),
                 const SizedBox(height: 4),
                 for (final d in dictamenes)
@@ -1928,6 +1966,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                       d.$2,
                       style: TextStyle(
                         fontSize: 12.5,
+                        color: c.textPrimary,
                         fontWeight: _dictamenEstado == d.$1 ? FontWeight.bold : FontWeight.normal,
                       ),
                     ),
@@ -1948,19 +1987,21 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
 
   // ── SECCIÓN 5: Firmas de Conformidad ──────────────────────────────────────
   Widget _buildSeccion5Card() {
+    final c = PesaColors.of(context);
     Widget buildTecBox() {
       return Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300),
+          color: c.surfaceMuted,
+          border: Border.all(color: c.border),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Realizó Revisión (Técnico)',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaRed),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.brandAccent),
             ),
             const SizedBox(height: 8),
             _textInput('Nombre', _tecNombreCtrl),
@@ -1973,14 +2014,15 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                 width: double.infinity,
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade50,
+                  color: PesaColors.signatureCanvas,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.green.shade300),
+                  border: Border.all(color: c.dotGreen),
                 ),
                 child: Column(
                   children: [
                     Expanded(child: Image.memory(_firmaTecPre!, fit: BoxFit.contain)),
                     TextButton.icon(
+                      style: TextButton.styleFrom(foregroundColor: PesaColors.signatureInk),
                       onPressed: () => setState(() => _usarFirmaPre = false),
                       icon: const Icon(Icons.edit, size: 14),
                       label: const Text('Firmar manualmente', style: TextStyle(fontSize: 11)),
@@ -1994,9 +2036,9 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   Container(
                     height: 110,
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: PesaColors.signatureCanvas,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade400),
+                      border: Border.all(color: c.borderStrong),
                     ),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
@@ -2004,7 +2046,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                         child: Signature(
                           controller: _sigTecnicoCtrl,
                           height: 110,
-                          backgroundColor: Colors.white,
+                          backgroundColor: PesaColors.signatureCanvas,
                         ),
                       ),
                     ),
@@ -2028,15 +2070,16 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
       return Container(
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300),
+          color: c.surfaceMuted,
+          border: Border.all(color: c.border),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Recibió de Conformidad (Cliente / Usuario)',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaRed),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.brandAccent),
             ),
             const SizedBox(height: 8),
             _textInput('Nombre * (Obligatorio)', _cliNombreCtrl),
@@ -2045,13 +2088,13 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
-                  children: _contactosSugeridos.map((c) {
+                  children: _contactosSugeridos.map((contacto) {
                     return Padding(
                       padding: const EdgeInsets.only(right: 4),
                       child: ActionChip(
                         visualDensity: VisualDensity.compact,
-                        label: Text(c, style: const TextStyle(fontSize: 11)),
-                        onPressed: () => setState(() => _cliNombreCtrl.text = c),
+                        label: Text(contacto, style: const TextStyle(fontSize: 11)),
+                        onPressed: () => setState(() => _cliNombreCtrl.text = contacto),
                       ),
                     );
                   }).toList(),
@@ -2068,9 +2111,9 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
             Container(
               height: 110,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: PesaColors.signatureCanvas,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade400),
+                border: Border.all(color: c.borderStrong),
               ),
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -2078,7 +2121,7 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
                   child: Signature(
                     controller: _sigClienteCtrl,
                     height: 110,
-                    backgroundColor: Colors.white,
+                    backgroundColor: PesaColors.signatureCanvas,
                   ),
                 ),
               ),
@@ -2097,9 +2140,13 @@ class _ObservacionesBasculaScreenState extends State<ObservacionesBasculaScreen>
     }
 
     return Card(
-      elevation: 1,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

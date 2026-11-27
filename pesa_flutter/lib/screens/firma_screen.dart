@@ -37,11 +37,17 @@ class _FirmaScreenState extends State<FirmaScreen>
     with SingleTickerProviderStateMixin {
   late final TabController _tabCtrl;
 
-  // ── Controladores de lienzo ───────────────────────────────────────────────
+  // ── Controladores de lienzo (Blindados: siempre tinta negra sobre papel blanco) ──
   final _ctrlTecnico = SignatureController(
-      penStrokeWidth: 3, penColor: const Color(0xFF1D1D1F));
+    penStrokeWidth: 3,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+  );
   final _ctrlCliente = SignatureController(
-      penStrokeWidth: 3, penColor: const Color(0xFF1D1D1F));
+    penStrokeWidth: 3,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+  );
 
   // ── Campos de texto para el ingeniero/cliente ─────────────────────────────
   final _nombreIngCtrl = TextEditingController();
@@ -183,24 +189,25 @@ class _FirmaScreenState extends State<FirmaScreen>
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final folio = widget.capturaData['folio_os'] as String? ?? 'OS';
     final bool cover = isCoverScreen(context);
 
     return Scaffold(
-      backgroundColor: PesaColors.canvas,
+      backgroundColor: c.canvas,
       appBar: AppBar(
-        backgroundColor: PesaColors.surface,
-        foregroundColor: PesaColors.textPrimary,
+        backgroundColor: c.surface,
+        foregroundColor: c.textPrimary,
         elevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Firmas — $folio',
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 17, color: PesaColors.textPrimary)),
+                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 17, color: c.textPrimary)),
             if ((widget.capturaData['cliente'] ?? '').toString().isNotEmpty)
               Text(
                 widget.capturaData['cliente'].toString(),
-                style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary),
+                style: TextStyle(fontSize: 11.5, color: c.textSecondary),
               ),
           ],
         ),
@@ -208,19 +215,19 @@ class _FirmaScreenState extends State<FirmaScreen>
             ? PreferredSize(
                 preferredSize: const Size.fromHeight(50),
                 child: Container(
-                  decoration: const BoxDecoration(
-                    color: PesaColors.surface,
+                  decoration: BoxDecoration(
+                    color: c.surface,
                     border: Border(
-                      top: BorderSide(color: PesaColors.divider),
-                      bottom: BorderSide(color: PesaColors.border),
+                      top: BorderSide(color: c.divider),
+                      bottom: BorderSide(color: c.border),
                     ),
                   ),
                   child: TabBar(
                     controller: _tabCtrl,
-                    indicatorColor: _red,
+                    indicatorColor: c.brandAccent,
                     indicatorWeight: 2.5,
-                    labelColor: _red,
-                    unselectedLabelColor: PesaColors.textSecondary,
+                    labelColor: c.brandAccent,
+                    unselectedLabelColor: c.textSecondary,
                     labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
                     tabs: const [
                       Tab(
@@ -235,9 +242,9 @@ class _FirmaScreenState extends State<FirmaScreen>
                   ),
                 ),
               )
-            : const PreferredSize(
-                preferredSize: Size.fromHeight(1),
-                child: Divider(height: 1, color: PesaColors.border),
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(1),
+                child: Divider(height: 1, color: c.border),
               ),
       ),
       body: SafeArea(
@@ -277,19 +284,20 @@ class _FirmaScreenState extends State<FirmaScreen>
   // ── Barra de resumen corporativa ──────────────────────────────────────────
 
   Widget _buildResumenBar() {
+    final c = PesaColors.of(context);
     final dictamen = widget.capturaData['dictamen'] as String? ?? 'APTO';
     final isApto   = dictamen == 'APTO';
     final obsTxt   = _trunc(widget.capturaData['observaciones'] as String? ?? '', 60);
     return Container(
-      decoration: const BoxDecoration(
-        color: PesaColors.surface,
-        border: Border(bottom: BorderSide(color: PesaColors.border)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(children: [
         PesaStatusBadge(
           label: 'Dictamen: $dictamen',
-          dotColor: isApto ? PesaColors.dotGreen : PesaColors.dotAmber,
+          dotColor: isApto ? c.dotGreen : c.dotAmber,
         ),
         if (obsTxt.isNotEmpty) ...[
           const SizedBox(width: 10),
@@ -298,9 +306,9 @@ class _FirmaScreenState extends State<FirmaScreen>
               'Obs: $obsTxt',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: PesaColors.textSecondary,
+                color: c.textSecondary,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -313,6 +321,7 @@ class _FirmaScreenState extends State<FirmaScreen>
   // ── Tab 1 — Firma del Tecnico ─────────────────────────────────────────────
 
   Widget _buildTabTecnico() {
+    final c = PesaColors.of(context);
     final tecnico = widget.capturaData['tecnico'] as String? ?? 'Tecnico';
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -321,16 +330,16 @@ class _FirmaScreenState extends State<FirmaScreen>
         children: [
           // Encabezado
           Row(children: [
-            const Icon(Icons.engineering, color: _red),
+            Icon(Icons.engineering, color: c.brandAccent),
             const SizedBox(width: 8),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Firma del Tecnico Metrológico',
-                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                  Text('Firma del Tecnico Metrológico',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: c.textPrimary)),
                   Text(tecnico,
-                      style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                      style: TextStyle(color: c.textSecondary, fontSize: 12)),
                 ],
               ),
             ),
@@ -347,26 +356,26 @@ class _FirmaScreenState extends State<FirmaScreen>
               child: PesaCard(
                 padding: const EdgeInsets.all(24),
                 child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  const PesaStatusBadge(
+                  PesaStatusBadge(
                     label: 'Firma del perfil lista',
-                    dotColor: PesaColors.dotGreen,
+                    dotColor: c.dotGreen,
                   ),
                   const SizedBox(height: 14),
-                  const Text(
+                  Text(
                     'Firma del Técnico cargada desde tu perfil',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 15,
-                      color: PesaColors.textPrimary,
+                      color: c.textPrimary,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
+                  Text(
                     'Se usará tu firma registrada al inicio de sesión.\n'
                     'No es necesario firmar de nuevo.',
                     textAlign: TextAlign.center,
-                    style: TextStyle(color: PesaColors.textSecondary, fontSize: 13),
+                    style: TextStyle(color: c.textSecondary, fontSize: 13),
                   ),
                   const SizedBox(height: 18),
                   OutlinedButton.icon(
@@ -392,15 +401,17 @@ class _FirmaScreenState extends State<FirmaScreen>
   }
 
   Widget _badgePrecargada([String texto = 'Del perfil']) {
+    final c = PesaColors.of(context);
     return PesaStatusBadge(
       label: texto,
-      dotColor: PesaColors.dotGreen,
+      dotColor: c.dotGreen,
     );
   }
 
   // ── Tab 2 — Firma del Ingeniero / Cliente ─────────────────────────────────
 
   Widget _buildTabCliente() {
+    final c = PesaColors.of(context);
     final String loteId = (widget.capturaData['id_lote'] ?? widget.capturaData['lote'] ?? '').toString().trim();
     return SigningScrollLock(
       builder: (ctx, scrollPhysics, _) => LayoutBuilder(
@@ -415,11 +426,11 @@ class _FirmaScreenState extends State<FirmaScreen>
               children: [
                 // Encabezado
                 Row(children: [
-                  const Icon(Icons.person_outline, color: _red),
+                  Icon(Icons.person_outline, color: c.brandAccent),
                   const SizedBox(width: 8),
-                  const Expanded(
+                  Expanded(
                     child: Text('Firma del Ingeniero de Planta / Cliente',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: c.textPrimary)),
                   ),
                   _firmaCliPrecargada
                       ? _badgePrecargada('Validada')
@@ -468,16 +479,16 @@ class _FirmaScreenState extends State<FirmaScreen>
                       padding: const EdgeInsets.only(top: 6.0),
                       child: Row(
                         children: [
-                          const Icon(Icons.layers, size: 14, color: _red),
+                          Icon(Icons.layers, size: 14, color: c.brandAccent),
                           const SizedBox(width: 4),
-                          const Text('Responsable del Lote: ',
-                              style: TextStyle(fontSize: 11, color: _red, fontWeight: FontWeight.bold)),
+                          Text('Responsable del Lote: ',
+                              style: TextStyle(fontSize: 11, color: c.brandAccent, fontWeight: FontWeight.bold)),
                           ActionChip(
                             visualDensity: VisualDensity.compact,
-                            backgroundColor: PesaColors.surfaceMuted,
-                            side: const BorderSide(color: _red),
-                            avatar: const Icon(Icons.touch_app, size: 13, color: _red),
-                            label: Text(respLote, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary)),
+                            backgroundColor: c.surfaceMuted,
+                            side: BorderSide(color: c.brandAccent),
+                            avatar: Icon(Icons.touch_app, size: 13, color: c.brandAccent),
+                            label: Text(respLote, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: c.textPrimary)),
                             onPressed: () {
                               setState(() {
                                 _nombreIngCtrl.text = respLote;
@@ -496,10 +507,10 @@ class _FirmaScreenState extends State<FirmaScreen>
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      const Icon(Icons.history, size: 14, color: Colors.grey),
+                      Icon(Icons.history, size: 14, color: c.textSecondary),
                       const SizedBox(width: 4),
-                      const Text('Contactos registrados en planta: ',
-                          style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500)),
+                      Text('Contactos registrados en planta: ',
+                          style: TextStyle(fontSize: 11, color: c.textSecondary, fontWeight: FontWeight.w500)),
                       Expanded(
                         child: SingleChildScrollView(
                           scrollDirection: Axis.horizontal,
@@ -510,10 +521,10 @@ class _FirmaScreenState extends State<FirmaScreen>
                                 padding: const EdgeInsets.only(right: 6),
                                 child: ActionChip(
                                   visualDensity: VisualDensity.compact,
-                                  backgroundColor: isSelected ? PesaColors.surfaceMuted : Colors.white,
-                                  side: BorderSide(color: isSelected ? _red : PesaColors.borderStrong),
-                                  avatar: Icon(Icons.person_outline, size: 13, color: isSelected ? _red : PesaColors.textSecondary),
-                                  label: Text(contacto, style: TextStyle(fontSize: 11.5, color: isSelected ? _red : PesaColors.textPrimary, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500)),
+                                  backgroundColor: isSelected ? c.surfaceMuted : c.surface,
+                                  side: BorderSide(color: isSelected ? c.brandAccent : c.borderStrong),
+                                  avatar: Icon(Icons.person_outline, size: 13, color: isSelected ? c.brandAccent : c.textSecondary),
+                                  label: Text(contacto, style: TextStyle(fontSize: 11.5, color: isSelected ? c.brandAccent : c.textPrimary, fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500)),
                                   onPressed: () {
                                     setState(() {
                                       _nombreIngCtrl.text = contacto;
@@ -541,26 +552,26 @@ class _FirmaScreenState extends State<FirmaScreen>
                   PesaCard(
                     padding: const EdgeInsets.all(24),
                     child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      const PesaStatusBadge(
+                      PesaStatusBadge(
                         label: 'Firma del cliente validada',
-                        dotColor: PesaColors.dotGreen,
+                        dotColor: c.dotGreen,
                       ),
                       const SizedBox(height: 14),
-                      const Text(
+                      Text(
                         'Firma del Cliente registrada previamente',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
                           fontSize: 15,
-                          color: PesaColors.textPrimary,
+                          color: c.textPrimary,
                         ),
                       ),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'Esta orden ya cuenta con la firma del cliente sincronizada.\n'
                         'No es necesario volver a solicitarla.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: PesaColors.textSecondary, fontSize: 13),
+                        style: TextStyle(color: c.textSecondary, fontSize: 13),
                       ),
                       const SizedBox(height: 18),
                       OutlinedButton.icon(
@@ -600,7 +611,7 @@ class _FirmaScreenState extends State<FirmaScreen>
           hasSignature: ctrl.isNotEmpty,
           hintText: 'Firme sobre la línea con el lápiz o dedo',
           child: SignatureGestureShield(
-            child: Signature(controller: ctrl, backgroundColor: Colors.white),
+            child: Signature(controller: ctrl, backgroundColor: PesaColors.signatureCanvas),
           ),
         ),
       ),
@@ -616,11 +627,12 @@ class _FirmaScreenState extends State<FirmaScreen>
   }
 
   Widget _firmaEstadoBadge(SignatureController ctrl) {
+    final c = PesaColors.of(context);
     return AnimatedBuilder(
       animation: ctrl,
       builder: (_, __) => PesaStatusBadge(
         label: ctrl.isNotEmpty ? 'Lista' : 'Pendiente',
-        dotColor: ctrl.isNotEmpty ? PesaColors.dotGreen : PesaColors.dotAmber,
+        dotColor: ctrl.isNotEmpty ? c.dotGreen : c.dotAmber,
       ),
     );
   }
@@ -628,14 +640,15 @@ class _FirmaScreenState extends State<FirmaScreen>
   // ── Barra de accion final ─────────────────────────────────────────────────
 
   Widget _buildActionBar() {
+    final c = PesaColors.of(context);
     return AnimatedBuilder(
       animation: _correoCtrl,
       builder: (_, __) {
         final bool bloqueadoPorCorreo = !_correoCtrl.isValido;
         return Container(
-          decoration: const BoxDecoration(
-            color: PesaColors.surface,
-            border: Border(top: BorderSide(color: PesaColors.border)),
+          decoration: BoxDecoration(
+            color: c.surface,
+            border: Border(top: BorderSide(color: c.border)),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -650,7 +663,7 @@ class _FirmaScreenState extends State<FirmaScreen>
                     _progressChip('Ing./Cliente', _ctrlCliente, isPrecargada: _firmaCliPrecargada),
                     PesaStatusBadge(
                       label: _correoCtrl.isValido ? 'Correo: Listo' : 'Correo: Pendiente',
-                      dotColor: _correoCtrl.isValido ? PesaColors.dotGreen : PesaColors.dotRed,
+                      dotColor: _correoCtrl.isValido ? c.dotGreen : c.dotRed,
                     ),
                   ],
                 ),
@@ -683,8 +696,8 @@ class _FirmaScreenState extends State<FirmaScreen>
                         style: ElevatedButton.styleFrom(
                           backgroundColor: PesaColors.brand,
                           foregroundColor: Colors.white,
-                          disabledBackgroundColor: PesaColors.surfaceMuted,
-                          disabledForegroundColor: PesaColors.textTertiary,
+                          disabledBackgroundColor: c.surfaceMuted,
+                          disabledForegroundColor: c.textTertiary,
                           elevation: 0,
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                           shape: RoundedRectangleBorder(
@@ -712,13 +725,14 @@ class _FirmaScreenState extends State<FirmaScreen>
   }
 
   Widget _progressChip(String label, SignatureController ctrl, {bool isPrecargada = false}) {
+    final c = PesaColors.of(context);
     return AnimatedBuilder(
       animation: ctrl,
       builder: (_, __) {
         final ok = isPrecargada || ctrl.isNotEmpty;
         return PesaStatusBadge(
           label: '$label: ${ok ? "Lista" : "Pendiente"}',
-          dotColor: ok ? PesaColors.dotGreen : PesaColors.dotAmber,
+          dotColor: ok ? c.dotGreen : c.dotAmber,
         );
       },
     );
@@ -1163,31 +1177,34 @@ class _FirmaScreenState extends State<FirmaScreen>
                 ],
                 const SizedBox(height: 12),
                 if (fueSincronizado)
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE8F5E9),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFF81C784)),
-                    ),
-                    child: const Row(
-                      children: [
-                        Icon(Icons.cloud_done, color: Color(0xFF2E7D32), size: 20),
-                        SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Orden y PDF sincronizados con el servidor',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF1B5E20),
+                  Builder(builder: (dlgCtx) {
+                    final dc = PesaColors.of(dlgCtx);
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: dc.surfaceElevated,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: dc.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.cloud_done, color: dc.dotGreen, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Orden y PDF sincronizados con el servidor',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: dc.textPrimary,
+                              ),
                             ),
                           ),
-                        ),
-                      ],
-                    ),
-                  )
+                        ],
+                      ),
+                    );
+                  })
                 else
                   const Text(
                     'Los datos se sincronizaran automaticamente al '

@@ -1,7 +1,7 @@
 name: pesa_tablet
 description: "Servicios PESA â€” App de campo para tecnico en tablet Android. Offline-first con sincronizacion automatica."
 publish_to: 'none'
-version: 4.0.4+154
+version: 4.0.5+155
 
 environment:
   sdk: '>=3.3.0 <4.0.0'

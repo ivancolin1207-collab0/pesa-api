@@ -370,7 +370,8 @@ class MetrologicaTableWidget(QWidget):
                 f = QFont()
                 f.setBold(True)
                 item.setFont(f)
-                item.setForeground(QBrush(QColor(_DARK)))
+                from ui.theme import PALETTE as _P
+                item.setForeground(QBrush(QColor(_P["text_primary"])))
                 self._table.setItem(row, col, item)
             else:
                 sb = _make_cell_spinbox()
@@ -991,7 +992,8 @@ class ExcentricidadCondicionalWidget(QWidget):
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             f = QFont(); f.setBold(True); item.setFont(f)
-            item.setForeground(QBrush(QColor(_DARK)))
+            from ui.theme import PALETTE as _P
+            item.setForeground(QBrush(QColor(_P["text_primary"])))
             self._table.setItem(row, 0, item)
 
             # Col 1: CARGA (kg) — spinbox editable, sync con _sb_carga al salir
@@ -1034,7 +1036,8 @@ class ExcentricidadCondicionalWidget(QWidget):
             item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
             f = QFont(); f.setBold(True); item.setFont(f)
-            item.setForeground(QBrush(QColor(_DARK)))
+            from ui.theme import PALETTE as _P
+            item.setForeground(QBrush(QColor(_P["text_primary"])))
             self._table.setItem(row, 0, item)
             for col in [1, 2, 3]:
                 sb = _make_cell_spinbox(decimals)
@@ -1440,7 +1443,8 @@ class ExactitudWidget(MetrologicaTableWidget):
         it0.setFlags(Qt.ItemFlag.ItemIsEnabled)
         it0.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         f0 = QFont(); f0.setBold(True); it0.setFont(f0)
-        it0.setForeground(QBrush(QColor(_DARK)))
+        from ui.theme import PALETTE as _P
+        it0.setForeground(QBrush(QColor(_P["text_primary"])))
         self._table.setItem(row, 0, it0)
 
         d = getattr(self, '_d', None)
@@ -1467,7 +1471,8 @@ class ExactitudWidget(MetrologicaTableWidget):
         it0.setFlags(Qt.ItemFlag.ItemIsEnabled)
         it0.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         f0 = QFont(); f0.setBold(True); it0.setFont(f0)
-        it0.setForeground(QBrush(QColor(_DARK)))
+        from ui.theme import PALETTE as _P
+        it0.setForeground(QBrush(QColor(_P["text_primary"])))
         self._table.setItem(row, 0, it0)
 
         d = getattr(self, '_d', None)

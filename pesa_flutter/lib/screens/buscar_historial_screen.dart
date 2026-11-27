@@ -25,8 +25,6 @@ class BuscarHistorialScreen extends StatefulWidget {
 
 class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
   static const _red = PesaColors.brand;
-  static const _border = PesaColors.border;
-  static const _bg = PesaColors.canvas;
 
   final _searchCtrl = TextEditingController();
   Timer? _searchDebounce;
@@ -193,20 +191,21 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
   }
 
   Widget _buildHeader(BuildContext context, List<Map<String, dynamic>> rows, bool cover) {
+    final c = PesaColors.of(context);
     final sync = context.watch<SyncService>();
     final syncLabel = sync.syncSummaryLabel;
     return Container(
       padding: EdgeInsets.fromLTRB(cover ? 12 : 18, 12, cover ? 12 : 18, 12),
-      decoration: const BoxDecoration(
-        color: PesaColors.surface,
-        border: Border(bottom: BorderSide(color: _border)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
       child: Column(
         children: [
           Row(children: [
             if (cover)
               IconButton(
-                icon: const Icon(Icons.menu_rounded, color: PesaColors.textPrimary),
+                icon: Icon(Icons.menu_rounded, color: c.textPrimary),
                 constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                 onPressed: () => AppShell.toggleMenu(context),
               ),
@@ -223,21 +222,21 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Buscar / Historial de Órdenes',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.w800,
-                      color: PesaColors.textPrimary,
+                      color: c.textPrimary,
                     ),
                   ),
                   Text(
                     '${rows.length} de ${_all.length} registros · $syncLabel',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary),
+                    style: TextStyle(fontSize: 11.5, color: c.textSecondary),
                   ),
                 ],
               ),
@@ -245,8 +244,8 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
             const SizedBox(width: 6),
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                foregroundColor: PesaColors.textPrimary,
-                side: const BorderSide(color: _border),
+                foregroundColor: c.textPrimary,
+                side: BorderSide(color: c.border),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 minimumSize: const Size(0, 40),
               ),
@@ -256,7 +255,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                       height: 14,
                       child: CircularProgressIndicator(strokeWidth: 2, color: _red),
                     )
-                  : const Icon(Icons.sync_rounded, size: 16, color: PesaColors.textPrimary),
+                  : Icon(Icons.sync_rounded, size: 16, color: c.textPrimary),
               label: Text(
                 cover ? 'Sincronizar' : 'Sincronizar ahora',
                 style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
@@ -270,10 +269,13 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                 await _load();
                 if (!context.mounted) return;
                 final warns = syncSvc.syncWarnings;
+                final sc = PesaColors.of(context);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     behavior: SnackBarBehavior.floating,
-                    backgroundColor: warns.isNotEmpty ? PesaColors.brand : PesaColors.textPrimary,
+                    backgroundColor: warns.isNotEmpty
+                        ? PesaColors.brand
+                        : (sc.isDark ? sc.elevated : PesaColors.textPrimary),
                     content: Text(
                       warns.isNotEmpty
                           ? 'Sincronización con alertas: ${warns.join(" · ")}'
@@ -287,19 +289,20 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
           ]),
           if (_searchingRemote) ...[
             const SizedBox(height: 6),
-            const LinearProgressIndicator(minHeight: 2, color: _red, backgroundColor: PesaColors.surfaceMuted),
+            LinearProgressIndicator(minHeight: 2, color: _red, backgroundColor: c.surfaceMuted),
           ],
           const SizedBox(height: 10),
           ConstrainedBox(
             constraints: const BoxConstraints(minHeight: 44),
             child: TextField(
               controller: _searchCtrl,
+              style: TextStyle(color: c.textPrimary),
               decoration: InputDecoration(
                 hintText: 'Buscar folio, Rice Lake, modelo, serie, ID, CCA, DVE, cliente…',
-                prefixIcon: const Icon(Icons.search_rounded, size: 19, color: PesaColors.textSecondary),
+                prefixIcon: Icon(Icons.search_rounded, size: 19, color: c.textSecondary),
                 suffixIcon: _query.isNotEmpty
                     ? IconButton(
-                        icon: const Icon(Icons.clear, size: 17, color: PesaColors.textSecondary),
+                        icon: Icon(Icons.clear, size: 17, color: c.textSecondary),
                         onPressed: () {
                           _searchDebounce?.cancel();
                           _searchCtrl.clear();
@@ -310,18 +313,18 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                 filled: true,
-                fillColor: PesaColors.surfaceMuted,
+                fillColor: c.surfaceMuted,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: PesaColors.border),
+                  borderSide: BorderSide(color: c.border),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: PesaColors.border),
+                  borderSide: BorderSide(color: c.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: _red, width: 1.5),
+                  borderSide: BorderSide(color: c.brandAccent, width: 1.5),
                 ),
               ),
               onChanged: _onSearchChanged,
@@ -343,11 +346,11 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                         selected: _filtroFormato == fmt,
                         showCheckmark: false,
                         selectedColor: _red,
-                        backgroundColor: Colors.white,
-                        side: BorderSide(color: _filtroFormato == fmt ? _red : _border),
+                        backgroundColor: c.surface,
+                        side: BorderSide(color: _filtroFormato == fmt ? _red : c.border),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         labelStyle: TextStyle(
-                          color: _filtroFormato == fmt ? Colors.white : PesaColors.textPrimary,
+                          color: _filtroFormato == fmt ? Colors.white : c.textPrimary,
                         ),
                         onSelected: (_) => setState(() => _filtroFormato = fmt),
                       ),
@@ -362,6 +365,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
   }
 
   Widget _buildListItem(BuildContext context, Map<String, dynamic> os, {required bool isMasterDetail, required bool isSelected}) {
+    final c = PesaColors.of(context);
     final folioTxt = (os['folio_os'] ?? os['folio'] ?? '—').toString().trim();
     final specs = construirEspecificacionesInstrumento(os);
     final cca = extraerNumeroCca(os);
@@ -373,16 +377,16 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
     final cardContent = Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isSelected ? PesaColors.surfaceMuted : PesaColors.surface,
+        color: isSelected ? c.surfaceMuted : c.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border(
           left: BorderSide(
-            color: isSelected ? _red : _border,
+            color: isSelected ? c.brandAccent : c.border,
             width: isSelected ? 3.5 : 1,
           ),
-          top: const BorderSide(color: _border),
-          right: const BorderSide(color: _border),
-          bottom: const BorderSide(color: _border),
+          top: BorderSide(color: c.border),
+          right: BorderSide(color: c.border),
+          bottom: BorderSide(color: c.border),
         ),
       ),
       child: Column(
@@ -394,17 +398,17 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
               Expanded(
                 child: Text(
                   folioTxt.isNotEmpty ? folioTxt : '—',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w800,
-                    color: PesaColors.textPrimary,
+                    color: c.textPrimary,
                   ),
                 ),
               ),
               const SizedBox(width: 8),
               PesaStatusBadge(
                 label: cerrada ? 'Cerrada' : 'En proceso',
-                dotColor: cerrada ? PesaColors.dotGreen : PesaColors.dotAmber,
+                dotColor: cerrada ? c.dotGreen : c.dotAmber,
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
               ),
             ],
@@ -416,9 +420,9 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
               runSpacing: 4,
               children: [
                 if (cca.isNotEmpty)
-                  _pill(cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca'),
+                  _pill(context, cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca'),
                 if (dve.isNotEmpty)
-                  _pill(dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve'),
+                  _pill(context, dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve'),
               ],
             ),
           ],
@@ -429,9 +433,9 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
               softWrap: true,
               maxLines: isMasterDetail ? 2 : 3,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: PesaColors.textSecondary,
+                color: c.textSecondary,
                 height: 1.35,
               ),
             ),
@@ -449,17 +453,17 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                   softWrap: true,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11.5, color: PesaColors.textPrimary, height: 1.3),
+                  style: TextStyle(fontSize: 11.5, color: c.textPrimary, height: 1.3),
                 ),
               ),
               if (fecha.isNotEmpty) ...[
                 const SizedBox(width: 8),
                 Text(
                   fecha,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: PesaColors.textSecondary,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                    color: c.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
               ],
@@ -488,7 +492,9 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                   style: ElevatedButton.styleFrom(
                     minimumSize: const Size(0, 40),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    backgroundColor: cerrada ? PesaColors.textPrimary : _red,
+                    backgroundColor: cerrada
+                        ? (c.isDark ? c.elevated : PesaColors.textPrimary)
+                        : _red,
                     foregroundColor: Colors.white,
                   ),
                   onPressed: () async {
@@ -517,6 +523,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
   }
 
   Widget _buildDetailPane(BuildContext context, Map<String, dynamic>? os) {
+    final c = PesaColors.of(context);
     if (os == null) {
       return const PesaEmptyState(
         icon: Icons.manage_search_rounded,
@@ -539,20 +546,20 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
         children: [
           Text(
             label.toUpperCase(),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 10,
               fontWeight: FontWeight.w700,
-              color: PesaColors.textSecondary,
+              color: c.textSecondary,
               letterSpacing: 0.5,
             ),
           ),
           const SizedBox(height: 3),
           Text(
             value.isNotEmpty ? value : '—',
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13.5,
               fontWeight: FontWeight.w600,
-              color: PesaColors.textPrimary,
+              color: c.textPrimary,
             ),
           ),
         ],
@@ -578,10 +585,10 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                         children: [
                           Text(
                             folioTxt.isNotEmpty ? folioTxt : '—',
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 22,
                               fontWeight: FontWeight.w800,
-                              color: PesaColors.textPrimary,
+                              color: c.textPrimary,
                               letterSpacing: -0.3,
                             ),
                           ),
@@ -589,7 +596,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                             const SizedBox(height: 3),
                             Text(
                               'Fecha de servicio: $fecha',
-                              style: const TextStyle(fontSize: 12.5, color: PesaColors.textSecondary),
+                              style: TextStyle(fontSize: 12.5, color: c.textSecondary),
                             ),
                           ],
                         ],
@@ -597,7 +604,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                     ),
                     PesaStatusBadge(
                       label: cerrada ? 'Cerrada' : 'En proceso',
-                      dotColor: cerrada ? PesaColors.dotGreen : PesaColors.dotAmber,
+                      dotColor: cerrada ? c.dotGreen : c.dotAmber,
                     ),
                   ],
                 ),
@@ -608,9 +615,9 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
                     runSpacing: 4,
                     children: [
                       if (cca.isNotEmpty)
-                        _pill(cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca'),
+                        _pill(context, cca.toUpperCase().startsWith('CCA') ? cca : 'CCA $cca'),
                       if (dve.isNotEmpty)
-                        _pill(dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve'),
+                        _pill(context, dve.toUpperCase().startsWith('DVE') ? dve : 'DVE $dve'),
                     ],
                   ),
                 ],
@@ -650,12 +657,12 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'DATOS DEL SERVICIO Y CLIENTE',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: PesaColors.textSecondary,
+                    color: c.textSecondary,
                     letterSpacing: 0.6,
                   ),
                 ),
@@ -683,21 +690,21 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'ESPECIFICACIONES DEL INSTRUMENTO',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: PesaColors.textSecondary,
+                      color: c.textSecondary,
                       letterSpacing: 0.6,
                     ),
                   ),
                   const SizedBox(height: 8),
                   Text(
                     specs,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13.5,
-                      color: PesaColors.textPrimary,
+                      color: c.textPrimary,
                       height: 1.45,
                     ),
                   ),
@@ -712,6 +719,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final cover = isCoverScreen(context);
     final rows = _filtered;
 
@@ -750,7 +758,7 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
     return AppShell(
       currentRoute: '/historial',
       child: Scaffold(
-        backgroundColor: _bg,
+        backgroundColor: c.canvas,
         body: SafeArea(
           bottom: false,
           child: Column(
@@ -774,20 +782,23 @@ class _BuscarHistorialScreenState extends State<BuscarHistorialScreen> {
     );
   }
 
-  Widget _pill(String label) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
-        decoration: BoxDecoration(
-          color: PesaColors.surfaceMuted,
-          borderRadius: BorderRadius.circular(5),
-          border: Border.all(color: PesaColors.borderStrong),
+  Widget _pill(BuildContext context, String label) {
+    final c = PesaColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+      decoration: BoxDecoration(
+        color: c.surfaceMuted,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: c.borderStrong),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w700,
+          color: c.textPrimary,
         ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            fontSize: 10.5,
-            fontWeight: FontWeight.w700,
-            color: PesaColors.textPrimary,
-          ),
-        ),
-      );
+      ),
+    );
+  }
 }

@@ -150,13 +150,34 @@ class VectorNavIcon(QWidget):
             p.drawArc(QRectF(3.5, 8.2, 13.0, 4.2), int(180 * 16), int(180 * 16))
             p.drawArc(QRectF(3.5, 12.6, 13.0, 4.2), int(180 * 16), int(180 * 16))
         elif k == "configuracion":
+            from ui.theme import PALETTE as _P
             dl(p, 3.0, 6.0, 17.0, 6.0)
             dl(p, 3.0, 10.0, 17.0, 10.0)
             dl(p, 3.0, 14.0, 17.0, 14.0)
-            p.setBrush(QColor("#FFFFFF"))
+            p.setBrush(QColor(_P["surface"]))
             p.drawEllipse(QRectF(6.0, 4.2, 3.6, 3.6))
             p.drawEllipse(QRectF(11.5, 8.2, 3.6, 3.6))
             p.drawEllipse(QRectF(7.5, 12.2, 3.6, 3.6))
+        elif k == "sun":
+            p.drawEllipse(QRectF(6.5, 6.5, 7.0, 7.0))
+            dl(p, 10.0, 2.2, 10.0, 4.2)
+            dl(p, 10.0, 15.8, 10.0, 17.8)
+            dl(p, 2.2, 10.0, 4.2, 10.0)
+            dl(p, 15.8, 10.0, 17.8, 10.0)
+            dl(p, 4.5, 4.5, 5.9, 5.9)
+            dl(p, 14.1, 14.1, 15.5, 15.5)
+            dl(p, 15.5, 4.5, 14.1, 5.9)
+            dl(p, 5.9, 14.1, 4.5, 15.5)
+        elif k == "moon":
+            path = QPainterPath()
+            path.moveTo(14.8, 12.6)
+            path.cubicTo(13.6, 15.1, 10.8, 16.5, 8.0, 15.7)
+            path.cubicTo(5.0, 14.9, 3.3, 11.8, 4.1, 8.8)
+            path.cubicTo(4.7, 6.5, 6.6, 4.8, 8.9, 4.3)
+            path.cubicTo(7.4, 6.4, 7.5, 9.3, 9.3, 11.2)
+            path.cubicTo(10.8, 12.7, 13.0, 13.2, 14.8, 12.6)
+            path.closeSubpath()
+            p.drawPath(path)
         elif k == "brand":
             # Balanza metrológica corporativa vectorial
             dl(p, 10.0, 3.5, 10.0, 15.5)
@@ -225,40 +246,48 @@ class SidebarNavButton(QPushButton):
         else:
             self._apply_inactive()
 
+    def apply_theme(self, _is_dark: bool = False) -> None:
+        if self._active:
+            self._apply_active()
+        else:
+            self._apply_inactive()
+
     def _apply_active(self):
-        self.setStyleSheet("""
-            QPushButton {
-                background-color: #F2F2F7;
+        from ui.theme import PALETTE as _P
+        self.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {_P['surface_muted']};
                 border: none;
-                border-left: 3px solid #C8102E;
+                border-left: 3px solid {_P['brand_accent']};
                 border-radius: 10px;
                 margin: 2px 8px;
-            }
+            }}
         """)
-        self._lbl_icon.set_color("#C8102E")
+        self._lbl_icon.set_color(_P["brand_accent"])
         self._lbl_text.setStyleSheet(
-            "font-size: 13px; font-weight: 700; color: #C8102E; background: transparent;"
+            f"font-size: 13px; font-weight: 700; color: {_P['brand_accent']}; background: transparent;"
         )
 
     def _apply_inactive(self):
-        self.setStyleSheet("""
-            QPushButton {
+        from ui.theme import PALETTE as _P
+        self.setStyleSheet(f"""
+            QPushButton {{
                 background-color: transparent;
                 border: none;
                 border-left: 3px solid transparent;
                 border-radius: 10px;
                 margin: 2px 8px;
-            }
-            QPushButton:hover {
-                background-color: #F2F2F7;
-            }
-            QPushButton:pressed {
-                background-color: #E5E5EA;
-            }
+            }}
+            QPushButton:hover {{
+                background-color: {_P['surface_hover']};
+            }}
+            QPushButton:pressed {{
+                background-color: {_P['border']};
+            }}
         """)
-        self._lbl_icon.set_color("#6E6E73")
+        self._lbl_icon.set_color(_P["text_secondary"])
         self._lbl_text.setStyleSheet(
-            "font-size: 13px; font-weight: 500; color: #6E6E73; background: transparent;"
+            f"font-size: 13px; font-weight: 500; color: {_P['text_secondary']}; background: transparent;"
         )
 
     def is_active(self) -> bool:
@@ -326,18 +355,30 @@ class UserChip(QFrame):
             self._lbl_role.show()
 
     def _update_frame_style(self):
-        self.setStyleSheet("""
-            QFrame#user_chip {
-                background-color: #F5F5F7;
+        from ui.theme import PALETTE as _P
+        self.setStyleSheet(f"""
+            QFrame#user_chip {{
+                background-color: {_P['surface_elevated']};
                 border-radius: 10px;
-                border: 1px solid #E5E7EB;
-            }
+                border: 1px solid {_P['border']};
+            }}
         """)
+
+    def apply_theme(self, _is_dark: bool = False) -> None:
+        from ui.theme import PALETTE as _P
+        self._update_frame_style()
+        self._lbl_name.setStyleSheet(
+            f"font-size: 12px; font-weight: 600; color: {_P['text_primary']}; background: transparent;"
+        )
+        self._lbl_role.setStyleSheet(
+            f"font-size: 10.5px; color: {_P['text_secondary']}; font-weight: 500; background: transparent;"
+        )
 
     def update_user(self, nombre: str, role: str) -> None:
         """Actualiza el chip con los datos del usuario autenticado."""
+        from ui.theme import PALETTE as _P
         initials = "".join(p[0].upper() for p in nombre.split() if p)[:2] or "US"
-        color, _bg = self._ROLE_COLORS.get(role, ("#111827", "#F5F5F7"))
+        color, _bg = self._ROLE_COLORS.get(role, ("#C8102E", _P["surface_elevated"]))
 
         self._avatar.setText(initials)
         self._avatar.setStyleSheet(f"""
@@ -349,7 +390,7 @@ class UserChip(QFrame):
         """)
         self._lbl_name.setText(nombre)
         self._lbl_name.setStyleSheet(
-            "font-size: 12px; font-weight: 600; color: #111827; background: transparent;"
+            f"font-size: 12px; font-weight: 600; color: {_P['text_primary']}; background: transparent;"
         )
 
         role_labels = {
@@ -358,7 +399,7 @@ class UserChip(QFrame):
         }
         self._lbl_role.setText(role_labels.get(role, role.title()))
         self._lbl_role.setStyleSheet(
-            "font-size: 10.5px; color: #6B7280; font-weight: 500; background: transparent;"
+            f"font-size: 10.5px; color: {_P['text_secondary']}; font-weight: 500; background: transparent;"
         )
 
 
@@ -368,19 +409,18 @@ class UserChip(QFrame):
 class ConnectionIndicator(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
+        self._connected: Optional[bool] = None
         lay = QHBoxLayout(self)
         lay.setContentsMargins(14, 4, 14, 4)
         lay.setSpacing(6)
 
         self._dot = QLabel()
         self._dot.setFixedSize(6, 6)
-        self._dot.setStyleSheet("background-color: #D97706; border-radius: 3px;")
 
         self._lbl = QLabel("Verificando…")
-        self._lbl.setStyleSheet("font-size: 10.5px; color: #6B7280; font-weight: 500;")
-
         lay.addWidget(self._dot)
         lay.addWidget(self._lbl, stretch=1)
+        self.set_status(None)
 
     def set_collapsed(self, collapsed: bool) -> None:
         if collapsed:
@@ -388,15 +428,23 @@ class ConnectionIndicator(QWidget):
         else:
             self._lbl.show()
 
+    def apply_theme(self, _is_dark: bool = False) -> None:
+        self.set_status(self._connected)
+
     def set_status(self, connected: Optional[bool]) -> None:
+        from ui.theme import PALETTE as _P
+        self._connected = connected
+        self._lbl.setStyleSheet(
+            f"font-size: 10.5px; color: {_P['text_secondary']}; font-weight: 500; background: transparent;"
+        )
         if connected is True:
-            self._dot.setStyleSheet("background-color: #16A34A; border-radius: 3px;")
+            self._dot.setStyleSheet(f"background-color: {_P['dot_green']}; border-radius: 3px;")
             self._lbl.setText("BD Conectada")
         elif connected is False:
-            self._dot.setStyleSheet("background-color: #C8102E; border-radius: 3px;")
+            self._dot.setStyleSheet(f"background-color: {_P['dot_red']}; border-radius: 3px;")
             self._lbl.setText("Sin conexión")
         else:
-            self._dot.setStyleSheet("background-color: #D97706; border-radius: 3px;")
+            self._dot.setStyleSheet(f"background-color: {_P['dot_amber']}; border-radius: 3px;")
             self._lbl.setText("Verificando…")
 
 
@@ -424,6 +472,13 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._setup_statusbar()
         self._start_conn_monitor()
+
+        try:
+            from ui.theme import theme_manager
+            theme_manager.subscribe(self.apply_theme)
+            self.apply_theme(theme_manager.is_dark)
+        except Exception:
+            pass
 
         # Aplicar permisos de rol en el sidebar y precalentar catálogos en segundo plano
         QTimer.singleShot(0, self.aplicar_permisos_rol)
@@ -465,11 +520,11 @@ class MainWindow(QMainWindow):
         self._sidebar = self._build_sidebar()
         root.addWidget(self._sidebar)
 
-        # Área de contenido (header + stack) sobre canvas Apple #F5F5F7
-        content_wrapper = QWidget()
-        content_wrapper.setStyleSheet("background-color: #F5F5F7;")
-        content_wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        cw_lay = QVBoxLayout(content_wrapper)
+        # Área de contenido (header + stack) sobre canvas adaptado al tema
+        self._content_wrapper = QWidget()
+        self._content_wrapper.setObjectName("content_wrapper")
+        self._content_wrapper.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        cw_lay = QVBoxLayout(self._content_wrapper)
         cw_lay.setContentsMargins(0, 0, 0, 0)
         cw_lay.setSpacing(0)
 
@@ -479,36 +534,26 @@ class MainWindow(QMainWindow):
 
         # Stack de páginas con tamaño expandible
         self._stack = QStackedWidget()
-        self._stack.setStyleSheet("background-color: #F5F5F7;")
+        self._stack.setObjectName("main_stack")
         self._stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         cw_lay.addWidget(self._stack, stretch=1)
 
-        root.addWidget(content_wrapper, stretch=1)
+        root.addWidget(self._content_wrapper, stretch=1)
 
     def _build_sidebar(self) -> QWidget:
         sb = QWidget()
         sb.setObjectName("sidebar")
         sb.setFixedWidth(232)
-        sb.setStyleSheet("""
-            QWidget#sidebar {
-                background-color: #FBFBFD;
-                border-right: 1px solid #E5E5EA;
-            }
-            QWidget#sidebar QLabel {
-                border: none;
-                background-color: transparent;
-            }
-        """)
 
         lay = QVBoxLayout(sb)
         lay.setContentsMargins(0, 0, 0, 0)
         lay.setSpacing(0)
 
         # ── Logo / Marca ───────────────────────────────────────────────────────
-        brand = QWidget()
-        brand.setFixedHeight(72)
-        brand.setStyleSheet("background-color: #FFFFFF;")
-        bl = QVBoxLayout(brand)
+        self._brand_widget = QWidget()
+        self._brand_widget.setObjectName("sidebar_brand")
+        self._brand_widget.setFixedHeight(72)
+        bl = QVBoxLayout(self._brand_widget)
         bl.setContentsMargins(16, 18, 14, 8)
         bl.setSpacing(2)
 
@@ -534,28 +579,21 @@ class MainWindow(QMainWindow):
         name_lay = QVBoxLayout()
         name_lay.setSpacing(0)
         self._lbl_brand_name = QLabel("Básculas PESA")
-        self._lbl_brand_name.setStyleSheet(
-            "font-size: 14px; font-weight: 700; color: #0F172A; letter-spacing: -0.2px;"
-        )
         self._lbl_brand_sub = QLabel("ERP Metrológico")
-        self._lbl_brand_sub.setStyleSheet("font-size: 10px; color: #475569; letter-spacing: 0.4px; font-weight: 600;")
         name_lay.addWidget(self._lbl_brand_name)
         name_lay.addWidget(self._lbl_brand_sub)
         brand_row.addLayout(name_lay, stretch=1)
         bl.addLayout(brand_row)
-        lay.addWidget(brand)
+        lay.addWidget(self._brand_widget)
 
         # Separador fino
-        lay.addWidget(self._hsep())
+        self._sep_top = self._hsep()
+        lay.addWidget(self._sep_top)
         lay.addSpacing(8)
 
         # ── Navegación ────────────────────────────────────────────────────────
         self._sec_nav_label = QLabel("MENÚ")
         self._sec_nav_label.setObjectName("sidebar_section")
-        self._sec_nav_label.setStyleSheet(
-            "color: #86868B; font-size: 10px; font-weight: 700; "
-            "letter-spacing: 1.2px; padding-left: 16px; padding-bottom: 4px;"
-        )
         lay.addWidget(self._sec_nav_label)
 
         for key, icon, label, tip, roles in _NAV_ITEMS:
@@ -568,7 +606,8 @@ class MainWindow(QMainWindow):
             btn.setVisible(False)
 
         lay.addStretch()
-        lay.addWidget(self._hsep())
+        self._sep_bot = self._hsep()
+        lay.addWidget(self._sep_bot)
         lay.addSpacing(8)
 
         # ── Chip de usuario ────────────────────────────────────────────────────
@@ -585,32 +624,29 @@ class MainWindow(QMainWindow):
         cw.addWidget(self._user_chip)
         lay.addWidget(chip_wrapper)
 
+        # ── Botón compacto de cambio rápido de tema (Sol / Luna) ───────────────
+        self._btn_theme_toggle = QPushButton()
+        self._btn_theme_toggle.setObjectName("btn_theme_toggle")
+        self._btn_theme_toggle.setFixedHeight(32)
+        self._btn_theme_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn_theme_toggle.setToolTip("Alternar entre Modo Claro y Modo Oscuro")
+        tt_lay = QHBoxLayout(self._btn_theme_toggle)
+        tt_lay.setContentsMargins(10, 0, 10, 0)
+        tt_lay.setSpacing(8)
+        self._theme_icon = VectorNavIcon("moon", "#6E6E73", self._btn_theme_toggle)
+        self._theme_lbl = QLabel("Modo Oscuro")
+        self._theme_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        tt_lay.addWidget(self._theme_icon)
+        tt_lay.addWidget(self._theme_lbl, stretch=1)
+        self._btn_theme_toggle.clicked.connect(self._on_toggle_theme)
+        lay.addWidget(self._btn_theme_toggle)
+
         # ── Botón Cerrar Sesión ────────────────────────────────────────────────
         self._btn_logout = QPushButton("Cerrar Sesión")
         self._btn_logout.setObjectName("btn_logout")
         self._btn_logout.setFixedHeight(32)
         self._btn_logout.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn_logout.setToolTip("")
-        self._btn_logout.setStyleSheet("""
-            QPushButton#btn_logout {
-                background: #FFFFFF;
-                color: #475569;
-                border: 1px solid #E2E8F0;
-                border-radius: 7px;
-                font-size: 12px;
-                font-weight: 600;
-                margin: 2px 8px 4px 8px;
-                padding: 0 8px;
-            }
-            QPushButton#btn_logout:hover {
-                background: #F5F5F7;
-                color: #C8102E;
-                border-color: #C8102E;
-            }
-            QPushButton#btn_logout:pressed {
-                background: #F2F2F7;
-            }
-        """)
         self._btn_logout.clicked.connect(self._on_cerrar_sesion)
         lay.addWidget(self._btn_logout)
 
@@ -622,12 +658,160 @@ class MainWindow(QMainWindow):
 
         # Versión — color muy discreto, no compite con el resto
         self._ver_label = QLabel(f"v{APP_VERSION}")
-        self._ver_label.setStyleSheet(
-            "color: #C7C7CC; font-size: 9px; padding-left: 16px; padding-bottom: 10px;"
-        )
         lay.addWidget(self._ver_label)
 
         return sb
+
+    def _on_toggle_theme(self) -> None:
+        try:
+            from ui.theme import theme_manager
+            theme_manager.toggle_light_dark()
+        except Exception as exc:
+            logger.warning("Error cambiando tema: %s", exc)
+
+    def apply_theme(self, is_dark: bool) -> None:
+        """Actualiza Sidebar, Header, StatusBar y controles del shell en vivo."""
+        from ui.theme import PALETTE as _P
+        sb_bg = _P["surface"]
+        canvas = _P["canvas"]
+        elevated = _P["surface_elevated"]
+        hover = _P["surface_hover"]
+        border = _P["border"]
+        tp = _P["text_primary"]
+        ts = _P["text_secondary"]
+        tt = _P["text_tertiary"]
+        accent = _P["brand_accent"]
+
+        if hasattr(self, "_content_wrapper"):
+            self._content_wrapper.setStyleSheet(f"QWidget#content_wrapper {{ background-color: {canvas}; }}")
+        if hasattr(self, "_stack"):
+            self._stack.setStyleSheet(f"QStackedWidget#main_stack {{ background-color: {canvas}; }}")
+
+        if hasattr(self, "_sidebar"):
+            self._sidebar.setStyleSheet(f"""
+                QWidget#sidebar {{
+                    background-color: {sb_bg};
+                    border-right: 1px solid {border};
+                }}
+                QWidget#sidebar QLabel {{
+                    border: none;
+                    background-color: transparent;
+                }}
+            """)
+        if hasattr(self, "_brand_widget"):
+            self._brand_widget.setStyleSheet(f"QWidget#sidebar_brand {{ background-color: {sb_bg}; }}")
+        if hasattr(self, "_lbl_brand_name"):
+            self._lbl_brand_name.setStyleSheet(
+                f"font-size: 14px; font-weight: 700; color: {tp}; letter-spacing: -0.2px;"
+            )
+        if hasattr(self, "_lbl_brand_sub"):
+            self._lbl_brand_sub.setStyleSheet(
+                f"font-size: 10px; color: {ts}; letter-spacing: 0.4px; font-weight: 600;"
+            )
+        if hasattr(self, "_sec_nav_label"):
+            self._sec_nav_label.setStyleSheet(
+                f"color: {tt}; font-size: 10px; font-weight: 700; "
+                "letter-spacing: 1.2px; padding-left: 16px; padding-bottom: 4px;"
+            )
+        for sep_attr in ("_sep_top", "_sep_bot"):
+            sep = getattr(self, sep_attr, None)
+            if sep is not None:
+                sep.setStyleSheet(f"background: {border}; border: none; margin: 0 12px;")
+
+        if hasattr(self, "_btn_theme_toggle"):
+            self._btn_theme_toggle.setStyleSheet(f"""
+                QPushButton#btn_theme_toggle {{
+                    background: {elevated if is_dark else sb_bg};
+                    color: {tp};
+                    border: 1px solid {border};
+                    border-radius: 7px;
+                    margin: 2px 8px 4px 8px;
+                    padding: 0 6px;
+                }}
+                QPushButton#btn_theme_toggle:hover {{
+                    background: {hover};
+                    border-color: {ts};
+                }}
+            """)
+            self._theme_icon._key = "sun" if is_dark else "moon"
+            self._theme_icon.set_color("#FF9F0A" if is_dark else ts)
+            self._theme_lbl.setText("Modo Claro" if is_dark else "Modo Oscuro")
+            self._theme_lbl.setStyleSheet(
+                f"font-size: 12px; font-weight: 600; color: {tp}; background: transparent;"
+            )
+
+        if hasattr(self, "_btn_logout"):
+            self._btn_logout.setStyleSheet(f"""
+                QPushButton#btn_logout {{
+                    background: {elevated if is_dark else sb_bg};
+                    color: {ts};
+                    border: 1px solid {border};
+                    border-radius: 7px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    margin: 2px 8px 4px 8px;
+                    padding: 0 8px;
+                }}
+                QPushButton#btn_logout:hover {{
+                    background: {hover};
+                    color: {accent};
+                    border-color: {accent};
+                }}
+                QPushButton#btn_logout:pressed {{
+                    background: {elevated};
+                }}
+            """)
+        if hasattr(self, "_ver_label"):
+            self._ver_label.setStyleSheet(
+                f"color: {tt}; font-size: 9px; padding-left: 16px; padding-bottom: 10px;"
+            )
+
+        if hasattr(self, "_header"):
+            self._header.setStyleSheet(f"""
+                QWidget#content_header {{
+                    background-color: {sb_bg};
+                    border-bottom: 1px solid {border};
+                }}
+                QWidget#content_header QLabel {{
+                    border: none;
+                    background-color: transparent;
+                }}
+            """)
+        if hasattr(self, "_lbl_breadcrumb"):
+            self._lbl_breadcrumb.setStyleSheet(
+                f"color: {tp}; font-size: 15px; font-weight: 700; letter-spacing: -0.2px; background: transparent;"
+            )
+        if hasattr(self, "_header_role_chip"):
+            self._header_role_chip.setStyleSheet(f"""
+                background-color: {elevated};
+                color: {tp};
+                border: 1px solid {border};
+                font-size: 10.5px;
+                font-weight: 700;
+                border-radius: 8px;
+                padding: 0 12px;
+                letter-spacing: 0.5px;
+            """)
+        if hasattr(self, "_header_conn_badge") and self._header_conn_badge is not None:
+            self._header_conn_badge.update()
+        if self.statusBar() is not None:
+            self.statusBar().setStyleSheet(f"""
+                QStatusBar {{
+                    background-color: {canvas};
+                    color: {ts};
+                    font-size: 11px;
+                    border-top: 1px solid {border};
+                    padding: 0 12px;
+                    min-height: 24px;
+                }}
+            """)
+
+        for btn in self._nav_buttons.values():
+            btn.apply_theme(is_dark)
+        if hasattr(self, "_user_chip"):
+            self._user_chip.apply_theme(is_dark)
+        if hasattr(self, "_conn_indicator"):
+            self._conn_indicator.apply_theme(is_dark)
 
     def _toggle_sidebar(self) -> None:
         """Alterna el menú lateral entre modo expandido (220px), riel compacto (54px) y oculto (0px) con QPropertyAnimation."""
@@ -681,6 +865,8 @@ class MainWindow(QMainWindow):
             self._ver_label.setVisible(not self._sidebar_collapsed)
         if hasattr(self, "_btn_logout"):
             self._btn_logout.setText("Salir" if self._sidebar_collapsed else "Cerrar Sesión")
+        if hasattr(self, "_theme_lbl"):
+            self._theme_lbl.setVisible(not self._sidebar_collapsed)
         if hasattr(self, "_user_chip"):
             self._user_chip.set_collapsed(self._sidebar_collapsed)
         if hasattr(self, "_conn_indicator"):
@@ -1263,6 +1449,11 @@ class MainWindow(QMainWindow):
     # ── Cierre ────────────────────────────────────────────────────────────────
 
     def closeEvent(self, event) -> None:
+        try:
+            from ui.theme import theme_manager
+            theme_manager.unsubscribe(self.apply_theme)
+        except Exception:
+            pass
         try:
             from database.connection import db_pool
             db_pool.close_all()

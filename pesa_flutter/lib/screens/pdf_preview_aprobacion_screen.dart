@@ -1,11 +1,12 @@
 // lib/screens/pdf_preview_aprobacion_screen.dart
 // Pantalla obligatoria de Vista Previa del PDF (Sin Firma del Cliente)
-// para revisión de pruebas, lecturas y resultados antes de confirmar correo y firmar.
-// Estándar Apple Minimalista Industrial Básculas PESA — Responsive Z Fold8 Ultra.
+// Estándar Apple Minimalista Industrial Básculas PESA — Claro / Oscuro + Z Fold8 Ultra.
+// El PDF se renderiza siempre como hoja blanca con tinta negra rodeado por el canvas del tema (#121214 en oscuro).
 
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
+import '../theme/pesa_theme.dart';
 
 class PdfPreviewAprobacionScreen extends StatelessWidget {
   final String folio;
@@ -23,17 +24,6 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
     this.customPreviewBody,
   });
 
-  static const Color _kBgCanvas = Color(0xFFF5F5F7);
-  static const Color _kSurface = Color(0xFFFFFFFF);
-  static const Color _kTextPrimary = Color(0xFF1D1D1F);
-  static const Color _kTextSecondary = Color(0xFF6E6E73);
-  static const Color _kBorderHairline = Color(0xFFE5E5EA);
-  static const Color _kBorderStrong = Color(0xFFD2D2D7);
-  static const Color _kPesaRed = Color(0xFFC8102E);
-
-  /// Abre la pantalla de vista previa obligatoria sin firma del cliente.
-  /// Retorna `true` únicamente si el cliente aprueba ("Estoy de Acuerdo — Pasar a Firmar");
-  /// retorna `false` si decide volver a corregir o cierra la vista.
   static Future<bool> mostrar(
     BuildContext context, {
     required String folio,
@@ -57,6 +47,7 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final screenW = MediaQuery.of(context).size.width;
     final isCompact = screenW < 540;
     final cleanFolio = folio.trim().isEmpty ? 'BORRADOR' : folio.trim();
@@ -69,17 +60,17 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
         }
       },
       child: Scaffold(
-        backgroundColor: _kBgCanvas,
+        backgroundColor: c.canvas,
         appBar: AppBar(
-          backgroundColor: _kSurface,
-          foregroundColor: _kTextPrimary,
+          backgroundColor: c.surface,
+          foregroundColor: c.textPrimary,
           elevation: 0,
           scrolledUnderElevation: 0,
           surfaceTintColor: Colors.transparent,
           toolbarHeight: isCompact ? 64 : 60,
           leading: IconButton(
             tooltip: 'Volver a corregir',
-            icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: _kTextPrimary),
+            icon: Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: c.textPrimary),
             onPressed: () => Navigator.of(context).pop(false),
           ),
           titleSpacing: 4,
@@ -94,7 +85,7 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
                 style: TextStyle(
                   fontSize: isCompact ? 14 : 15.5,
                   fontWeight: FontWeight.w700,
-                  color: _kTextPrimary,
+                  color: c.textPrimary,
                   letterSpacing: -0.2,
                 ),
               ),
@@ -104,11 +95,11 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                     decoration: BoxDecoration(
-                      color: _kBgCanvas,
+                      color: c.surfaceMuted,
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: _kBorderStrong, width: 0.8),
+                      border: Border.all(color: c.borderStrong, width: 0.8),
                     ),
-                    child: const Row(
+                    child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
@@ -116,18 +107,18 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
                           height: 6,
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                              color: Color(0xFFD97706),
+                              color: c.dotAmber,
                               shape: BoxShape.circle,
                             ),
                           ),
                         ),
-                        SizedBox(width: 6),
+                        const SizedBox(width: 6),
                         Text(
                           'Sin firma del cliente',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: _kTextPrimary,
+                            color: c.textPrimary,
                           ),
                         ),
                       ],
@@ -140,10 +131,10 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
                         tipoDocumento!.trim(),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w500,
-                          color: _kTextSecondary,
+                          color: c.textSecondary,
                         ),
                       ),
                     ),
@@ -152,35 +143,35 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
               ),
             ],
           ),
-          bottom: const PreferredSize(
-            preferredSize: Size.fromHeight(1),
-            child: Divider(height: 1, thickness: 1, color: _kBorderHairline),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
+            child: Divider(height: 1, thickness: 1, color: c.border),
           ),
         ),
         body: Column(
           children: [
-            // Banner informativo sobrio para el cliente
+            // Banner informativo sobrio
             Container(
               width: double.infinity,
               padding: EdgeInsets.symmetric(
                 horizontal: isCompact ? 14 : 24,
                 vertical: 10,
               ),
-              decoration: const BoxDecoration(
-                color: _kSurface,
+              decoration: BoxDecoration(
+                color: c.surface,
                 border: Border(
-                  bottom: BorderSide(color: _kBorderHairline, width: 1),
+                  bottom: BorderSide(color: c.border, width: 1),
                 ),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 1),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 1),
                     child: Icon(
                       Icons.verified_user_outlined,
                       size: 16,
-                      color: _kTextSecondary,
+                      color: c.textSecondary,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -192,7 +183,7 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
                               'Al confirmar conformidad pasarás a validar el correo y recabar su firma para emitir el PDF final.',
                       style: TextStyle(
                         fontSize: isCompact ? 12 : 12.5,
-                        color: _kTextSecondary,
+                        color: c.textSecondary,
                         height: 1.35,
                       ),
                     ),
@@ -201,7 +192,7 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
               ),
             ),
 
-            // Visor interactivo del PDF (zoom + scroll)
+            // Visor interactivo del PDF (hoja blanca rodeada por canvas #121214 en oscuro)
             Expanded(
               child: customPreviewBody ??
                   PdfPreview(
@@ -213,42 +204,35 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
                     canChangePageFormat: false,
                     canDebug: false,
                     pdfFileName: '${cleanFolio}_VISTA_PREVIA_SIN_FIRMA.pdf',
-                    loadingWidget: const Center(
+                    loadingWidget: Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          CircularProgressIndicator(color: _kPesaRed),
-                          SizedBox(height: 12),
+                          CircularProgressIndicator(color: c.brandAccent),
+                          const SizedBox(height: 12),
                           Text(
                             'Preparando vista previa del documento...',
                             style: TextStyle(
                               fontSize: 13,
-                              color: _kTextSecondary,
+                              color: c.textSecondary,
                               fontWeight: FontWeight.w500,
                             ),
                           ),
                         ],
                       ),
                     ),
-                    scrollViewDecoration: const BoxDecoration(color: _kBgCanvas),
+                    scrollViewDecoration: BoxDecoration(color: c.canvas),
                   ),
             ),
 
             // Barra inferior fija con 2 acciones claras (>= 48dp touch targets)
             Container(
               width: double.infinity,
-              decoration: const BoxDecoration(
-                color: _kSurface,
+              decoration: BoxDecoration(
+                color: c.surface,
                 border: Border(
-                  top: BorderSide(color: _kBorderHairline, width: 1),
+                  top: BorderSide(color: c.border, width: 1),
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x0F000000),
-                    blurRadius: 12,
-                    offset: Offset(0, -3),
-                  ),
-                ],
               ),
               child: SafeArea(
                 top: false,
@@ -262,21 +246,21 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _buildAprobarButton(context),
+                            _buildAprobarButton(context, c),
                             const SizedBox(height: 8),
-                            _buildVolverButton(context),
+                            _buildVolverButton(context, c),
                           ],
                         )
                       : Row(
                           children: [
                             Expanded(
                               flex: 2,
-                              child: _buildVolverButton(context),
+                              child: _buildVolverButton(context, c),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
                               flex: 3,
-                              child: _buildAprobarButton(context),
+                              child: _buildAprobarButton(context, c),
                             ),
                           ],
                         ),
@@ -289,7 +273,7 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildVolverButton(BuildContext context) {
+  Widget _buildVolverButton(BuildContext context, PesaPalette c) {
     return SizedBox(
       height: 50,
       child: OutlinedButton.icon(
@@ -302,9 +286,9 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
         style: OutlinedButton.styleFrom(
-          foregroundColor: _kTextPrimary,
-          backgroundColor: _kSurface,
-          side: const BorderSide(color: _kBorderStrong, width: 1),
+          foregroundColor: c.textPrimary,
+          backgroundColor: c.isDark ? c.surfaceElevated : c.surface,
+          side: BorderSide(color: c.borderStrong, width: 1),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           padding: const EdgeInsets.symmetric(horizontal: 16),
         ),
@@ -312,7 +296,7 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildAprobarButton(BuildContext context) {
+  Widget _buildAprobarButton(BuildContext context, PesaPalette c) {
     return SizedBox(
       height: 50,
       child: ElevatedButton.icon(
@@ -325,7 +309,7 @@ class PdfPreviewAprobacionScreen extends StatelessWidget {
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
         ),
         style: ElevatedButton.styleFrom(
-          backgroundColor: _kPesaRed,
+          backgroundColor: c.brand,
           foregroundColor: Colors.white,
           elevation: 0,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

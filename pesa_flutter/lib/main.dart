@@ -41,6 +41,13 @@ void main() async {
     DeviceOrientation.landscapeRight,
   ]);
 
+  // Cargar preferencia de Modo Nocturno (default obligatorio: ThemeMode.system)
+  try {
+    await ThemeController.instance.load();
+  } catch (e) {
+    debugPrint('[PESA] Tema por defecto ThemeMode.system ($e)');
+  }
+
   // Inicializar SQLite local
   try {
     await LocalDbService.instance.init();
@@ -82,11 +89,16 @@ class PesaTabletApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => SyncService()),
       ],
-      child: MaterialApp.router(
-        title: 'Básculas PESA',
-        debugShowCheckedModeBanner: false,
-        theme: PesaTheme.lightTheme,
-        routerConfig: _router,
+      child: ValueListenableBuilder<ThemeMode>(
+        valueListenable: ThemeController.instance,
+        builder: (_, themeMode, __) => MaterialApp.router(
+          title: 'Básculas PESA',
+          debugShowCheckedModeBanner: false,
+          theme: PesaTheme.lightTheme,
+          darkTheme: PesaTheme.darkTheme,
+          themeMode: themeMode,
+          routerConfig: _router,
+        ),
       ),
     );
   }
@@ -330,38 +342,38 @@ class _SplashScreenState extends State<_SplashScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Scaffold(
-      backgroundColor: const Color(0xFFF9FAFB),
+      backgroundColor: c.canvas,
       body: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: const Color(0xFFC8102E),
+            color: c.brand,
             borderRadius: BorderRadius.circular(20),
           ),
           child: const Icon(Icons.scale, color: Colors.white, size: 48),
         ),
         const SizedBox(height: 20),
-        const Text('Servicios PESA',
+        Text('Servicios PESA',
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800,
-                color: Color(0xFF111827))),
+                color: c.textPrimary)),
         const SizedBox(height: 8),
-        // [FIX] Mostrar error o estado normal
         if (_splashError != null)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 32),
             child: Text(_splashError!,
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: Color(0xFFC8102E))),
+                style: TextStyle(fontSize: 13, color: c.brandAccent)),
           )
         else
-          const Text('Cargando sesión...',
-              style: TextStyle(fontSize: 13, color: Color(0xFF6B7280))),
+          Text('Cargando sesión...',
+              style: TextStyle(fontSize: 13, color: c.textSecondary)),
         const SizedBox(height: 24),
         if (_splashError == null)
-          const SizedBox(width: 24, height: 24,
+          SizedBox(width: 24, height: 24,
               child: CircularProgressIndicator(
-                  strokeWidth: 2, color: Color(0xFFC8102E))),
+                  strokeWidth: 2, color: c.brandAccent)),
       ])),
     );
   }

@@ -13,13 +13,9 @@ import '../services/api_service.dart';
 import '../services/local_db_service.dart';
 import '../services/metrology_helper.dart';
 import '../services/pdf_storage_service.dart';
+import '../theme/pesa_theme.dart';
 
-const _kBrand       = Color(0xFFC8102E);
-const _kDarkInk     = Color(0xFF111827);
-const _kBorder      = Color(0xFFE5E7EB);
-const _kTextPrim    = Color(0xFF111827);
-const _kTextSec     = Color(0xFF6B7280);
-const _kTableHead   = Color(0xFFF9FAFB);
+const _kBrand = PesaColors.brand;
 
 class CalibracionesRepositorioView extends StatefulWidget {
   const CalibracionesRepositorioView({super.key});
@@ -236,9 +232,10 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
       e.toString().replaceAll('Exception: ', '').replaceAll('HttpException: ', '');
 
   void _snack(String msg, {bool error = false}) {
+    final c = PesaColors.of(context);
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: error ? _kBrand : _kDarkInk,
+      content: Text(msg, style: const TextStyle(color: Colors.white)),
+      backgroundColor: error ? _kBrand : (c.isDark ? c.elevated : PesaColors.textPrimary),
     ));
   }
 
@@ -271,26 +268,27 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   }
 
   Widget _header(bool mobile) {
+    final p = PesaColors.of(context);
     final titulo = Row(
       children: [
         Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0xFFF5F5F7),
-            border: Border.all(color: _kBorder),
+            color: p.surfaceMuted,
+            border: Border.all(color: p.border),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: const Icon(Icons.verified_outlined, color: _kBrand, size: 22),
+          child: Icon(Icons.verified_outlined, color: p.brandAccent, size: 22),
         ),
         const SizedBox(width: 12),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('Repositorio de Calibraciones',
-                  style: TextStyle(color: _kTextPrim, fontSize: 17, fontWeight: FontWeight.w700)),
+              Text('Repositorio de Calibraciones',
+                  style: TextStyle(color: p.textPrimary, fontSize: 17, fontWeight: FontWeight.w700)),
               Text('Histórico / PDFs · Solo lectura · ${_all.length} órdenes concluidas',
-                  style: const TextStyle(color: _kTextSec, fontSize: 12)),
+                  style: TextStyle(color: p.textSecondary, fontSize: 12)),
             ],
           ),
         ),
@@ -302,7 +300,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
               ? const SizedBox(
                   width: 18, height: 18,
                   child: CircularProgressIndicator(strokeWidth: 2, color: _kBrand))
-              : const Icon(Icons.refresh_rounded, color: _kTextPrim),
+              : Icon(Icons.refresh_rounded, color: p.textPrimary),
         ),
       ],
     );
@@ -315,25 +313,25 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
           key: const Key('calib_repo_search'),
           controller: _searchCtrl,
           onChanged: _onSearchChanged,
-          style: const TextStyle(fontSize: 13),
+          style: TextStyle(fontSize: 13, color: p.textPrimary),
           decoration: InputDecoration(
             hintText: 'Buscar folio, cliente, técnico…',
-            prefixIcon: const Icon(Icons.search, size: 18),
+            prefixIcon: Icon(Icons.search, size: 18, color: p.textSecondary),
             isDense: true,
             filled: true,
-            fillColor: Colors.white,
+            fillColor: p.elevated,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFFD2D2D7)),
+              borderSide: BorderSide(color: p.borderStrong),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFFD2D2D7)),
+              borderSide: BorderSide(color: p.borderStrong),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: _kBrand, width: 1.5),
+              borderSide: BorderSide(color: p.brandAccent, width: 1.5),
             ),
           ),
         ),
@@ -343,8 +341,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: _kBorder),
+        color: p.surface,
+        border: Border.all(color: p.border),
         borderRadius: BorderRadius.circular(10),
       ),
       child: mobile
@@ -353,34 +351,47 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
     );
   }
 
-  Widget _avisoBanner() => Container(
-        margin: const EdgeInsets.only(top: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFFFFF7E6),
-          border: Border.all(color: const Color(0xFFF5C26B)),
-          borderRadius: BorderRadius.circular(10),
+  Widget _avisoBanner() {
+    final p = PesaColors.of(context);
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: p.isDark ? p.elevated : const Color(0xFFFFF7E6),
+        border: Border.all(
+          color: p.isDark ? p.dotAmber.withValues(alpha: 0.45) : const Color(0xFFF5C26B),
         ),
-        child: Row(children: [
-          const Icon(Icons.info_outline, size: 16, color: Color(0xFFB7791F)),
-          const SizedBox(width: 8),
-          Expanded(child: Text(_aviso!, style: const TextStyle(fontSize: 12, color: Color(0xFF7A4F01)))),
-        ]),
-      );
-
-  Widget _vacio() => Center(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.folder_off_outlined, size: 48, color: _kTextSec.withValues(alpha: 0.6)),
-          const SizedBox(height: 8),
-          Text(
-            _query.isEmpty
-                ? 'Sin calibraciones concluidas en caché.\nPulsa actualizar para consultar el servidor.'
-                : 'Sin resultados para "$_query".',
-            textAlign: TextAlign.center,
-            style: const TextStyle(color: _kTextSec, fontSize: 13),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(children: [
+        Icon(Icons.info_outline, size: 16, color: p.isDark ? p.dotAmber : const Color(0xFFB7791F)),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            _aviso!,
+            style: TextStyle(fontSize: 12, color: p.isDark ? p.textPrimary : const Color(0xFF7A4F01)),
           ),
-        ]),
-      );
+        ),
+      ]),
+    );
+  }
+
+  Widget _vacio() {
+    final p = PesaColors.of(context);
+    return Center(
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.folder_off_outlined, size: 48, color: p.textSecondary.withValues(alpha: 0.6)),
+        const SizedBox(height: 8),
+        Text(
+          _query.isEmpty
+              ? 'Sin calibraciones concluidas en caché.\nPulsa actualizar para consultar el servidor.'
+              : 'Sin resultados para "$_query".',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: p.textSecondary, fontSize: 13),
+        ),
+      ]),
+    );
+  }
 
   static const _cols = <(String, int)>[
     ('FOLIO / INSTRUMENTO', 4),
@@ -392,27 +403,28 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   ];
 
   Widget _tabla(List<Map<String, dynamic>> rows) {
+    final p = PesaColors.of(context);
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: p.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _kBorder),
+        border: Border.all(color: p.border),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(children: [
         Container(
-          color: _kTableHead,
+          color: p.tableHead,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Row(
             children: _cols
                 .map((c) => Expanded(
                       flex: c.$2,
                       child: Text(c.$1,
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w700,
                               letterSpacing: 0.4,
-                              color: _kTextSec)),
+                              color: p.textSecondary)),
                     ))
                 .toList(),
           ),
@@ -424,7 +436,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
             child: ListView.separated(
               physics: const AlwaysScrollableScrollPhysics(),
               itemCount: rows.length,
-              separatorBuilder: (_, __) => const Divider(height: 1, color: _kBorder),
+              separatorBuilder: (_, __) => Divider(height: 1, color: p.border),
               itemBuilder: (_, i) => _filaTabla(rows[i]),
             ),
           ),
@@ -434,7 +446,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
   }
 
   Widget _filaTabla(Map<String, dynamic> r) {
-    const cell = TextStyle(fontSize: 12.5, color: _kTextPrim);
+    final p = PesaColors.of(context);
+    final cell = TextStyle(fontSize: 12.5, color: p.textPrimary);
     final folio = (r['folio_os'] ?? '').toString();
     final cca = extraerNumeroCca(r);
     final dve = extraerNumeroDve(r);
@@ -460,10 +473,10 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                       children: [
                         Text(
                           folio,
-                          style: cell.copyWith(fontWeight: FontWeight.w800, fontSize: 12, color: const Color(0xFF111827)),
+                          style: cell.copyWith(fontWeight: FontWeight.w800, fontSize: 12, color: p.textPrimary),
                         ),
-                        if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF1D1D1F), const Color(0xFFF5F5F7)),
-                        if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF1D1D1F), const Color(0xFFF5F5F7)),
+                        if (cca.isNotEmpty) _chipReg('CCA', cca, p.textPrimary, p.surfaceMuted, p.borderStrong),
+                        if (dve.isNotEmpty) _chipReg('DVE', dve, p.textPrimary, p.surfaceMuted, p.borderStrong),
                       ],
                     ),
                     if (specs.isNotEmpty) ...[
@@ -472,7 +485,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                         specs,
                         softWrap: true,
                         maxLines: 3,
-                        style: cell.copyWith(fontSize: 11, color: const Color(0xFF475569), height: 1.3),
+                        style: cell.copyWith(fontSize: 11, color: p.textSecondary, height: 1.3),
                       ),
                     ],
                     if (formatearInfoEnvioCorreo(r).isNotEmpty) ...[
@@ -480,22 +493,22 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-                        decoration: const BoxDecoration(
-                          color: Color(0xFFF5F5F7),
+                        decoration: BoxDecoration(
+                          color: p.surfaceMuted,
                           border: Border(
-                            left: BorderSide(color: Color(0xFF1D1D1F), width: 3),
-                            top: BorderSide(color: Color(0xFFE2E8F0)),
-                            right: BorderSide(color: Color(0xFFE2E8F0)),
-                            bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                            left: BorderSide(color: p.textPrimary, width: 3),
+                            top: BorderSide(color: p.border),
+                            right: BorderSide(color: p.border),
+                            bottom: BorderSide(color: p.border),
                           ),
                         ),
                         child: Text(
                           formatearInfoEnvioCorreo(r),
                           softWrap: true,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
-                            color: Color(0xFF334155),
+                            color: p.textSecondary,
                             height: 1.25,
                           ),
                         ),
@@ -516,7 +529,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         Expanded(
           flex: 3,
           child: Row(children: [
-            const Icon(Icons.engineering_outlined, size: 14, color: _kTextSec),
+            Icon(Icons.engineering_outlined, size: 14, color: p.textSecondary),
             const SizedBox(width: 4),
             Expanded(
               child: Text((r['tecnico'] ?? '—').toString(),
@@ -527,7 +540,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
         Expanded(
           flex: 3,
           child: Text((r['tipo_servicio'] ?? '—').toString(),
-              style: cell.copyWith(color: _kTextSec), maxLines: 2, overflow: TextOverflow.ellipsis),
+              style: cell.copyWith(color: p.textSecondary), maxLines: 2, overflow: TextOverflow.ellipsis),
         ),
         Expanded(
           flex: 4,
@@ -543,12 +556,12 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
     );
   }
 
-  Widget _chipReg(String pfx, String val, Color fg, Color bg) => Container(
+  Widget _chipReg(String pfx, String val, Color fg, Color bg, Color border) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
         decoration: BoxDecoration(
           color: bg,
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: const Color(0xFFD2D2D7)),
+          border: Border.all(color: border),
         ),
         child: Text(
           val.toUpperCase().startsWith(pfx.toUpperCase()) ? val : '$pfx: $val',
@@ -557,8 +570,9 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
       );
 
   Widget _listaMobile(List<Map<String, dynamic>> rows) {
+    final p = PesaColors.of(context);
     return RefreshIndicator(
-      color: const Color(0xFFC8102E),
+      color: _kBrand,
       onRefresh: _refrescarServidor,
       child: ListView.separated(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -573,20 +587,20 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
           return Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: p.surface,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: _kBorder),
+              border: Border.all(color: p.border),
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Expanded(
                   child: Text(
                     folioCard.isNotEmpty ? folioCard : '—',
-                    style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: Color(0xFF1D1D1F)),
+                    style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13.5, color: p.textPrimary),
                   ),
                 ),
                 const SizedBox(width: 8),
-                Text(_fmtFecha(r['fecha']), style: const TextStyle(fontSize: 12, color: _kTextSec)),
+                Text(_fmtFecha(r['fecha']), style: TextStyle(fontSize: 12, color: p.textSecondary)),
               ]),
               if (cca.isNotEmpty || dve.isNotEmpty) ...[
                 const SizedBox(height: 4),
@@ -594,8 +608,8 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   spacing: 6,
                   runSpacing: 4,
                   children: [
-                    if (cca.isNotEmpty) _chipReg('CCA', cca, const Color(0xFF1D1D1F), const Color(0xFFF5F5F7)),
-                    if (dve.isNotEmpty) _chipReg('DVE', dve, const Color(0xFF1D1D1F), const Color(0xFFF5F5F7)),
+                    if (cca.isNotEmpty) _chipReg('CCA', cca, p.textPrimary, p.surfaceMuted, p.borderStrong),
+                    if (dve.isNotEmpty) _chipReg('DVE', dve, p.textPrimary, p.surfaceMuted, p.borderStrong),
                   ],
                 ),
               ],
@@ -605,37 +619,37 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
                   specsCard,
                   softWrap: true,
                   maxLines: 3,
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF475569), height: 1.35),
+                  style: TextStyle(fontSize: 12, color: p.textSecondary, height: 1.35),
                 ),
               ],
               const SizedBox(height: 4),
-              Text((r['cliente'] ?? '—').toString(), style: const TextStyle(fontSize: 13, color: Color(0xFF1D1D1F))),
+              Text((r['cliente'] ?? '—').toString(), style: TextStyle(fontSize: 13, color: p.textPrimary)),
               const SizedBox(height: 2),
               Text('Técnico: ${(r['tecnico'] ?? '—')}',
-                  style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
+                  style: TextStyle(fontSize: 12, color: p.textSecondary)),
               Text((r['tipo_servicio'] ?? '—').toString(),
-                  style: const TextStyle(fontSize: 12, color: _kTextSec)),
+                  style: TextStyle(fontSize: 12, color: p.textSecondary)),
               if (formatearInfoEnvioCorreo(r).isNotEmpty) ...[
                 const SizedBox(height: 6),
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF5F5F7),
+                  decoration: BoxDecoration(
+                    color: p.surfaceMuted,
                     border: Border(
-                      left: BorderSide(color: Color(0xFF1D1D1F), width: 3),
-                      top: BorderSide(color: Color(0xFFE2E8F0)),
-                      right: BorderSide(color: Color(0xFFE2E8F0)),
-                      bottom: BorderSide(color: Color(0xFFE2E8F0)),
+                      left: BorderSide(color: p.textPrimary, width: 3),
+                      top: BorderSide(color: p.border),
+                      right: BorderSide(color: p.border),
+                      bottom: BorderSide(color: p.border),
                     ),
                   ),
                   child: Text(
                     formatearInfoEnvioCorreo(r),
                     softWrap: true,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFF334155),
+                      color: p.textSecondary,
                       height: 1.3,
                     ),
                   ),
@@ -652,6 +666,7 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
 
   /// ÚNICAS acciones permitidas: Ver PDF y Descargar (solo lectura).
   Widget _acciones(Map<String, dynamic> r, {required bool compact}) {
+    final p = PesaColors.of(context);
     final folio = (r['folio_os'] ?? '').toString();
     final busy = _busy.contains(folio);
     final tienePdf = r['tiene_pdf'] == 1 ||
@@ -670,32 +685,32 @@ class _CalibracionesRepositorioViewState extends State<CalibracionesRepositorioV
       OutlinedButton.icon(
         key: Key('calib_ver_pdf_$folio'),
         style: btnStyle.copyWith(
-          foregroundColor: const WidgetStatePropertyAll(_kDarkInk),
-          side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFD2D2D7))),
+          foregroundColor: WidgetStatePropertyAll(p.textPrimary),
+          side: WidgetStatePropertyAll(BorderSide(color: p.borderStrong)),
         ),
         onPressed: busy ? null : () => _verPdf(r),
         icon: busy
             ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: _kBrand))
-            : const Icon(Icons.picture_as_pdf_outlined, size: 15, color: _kBrand),
+            : Icon(Icons.picture_as_pdf_outlined, size: 15, color: p.brandAccent),
         label: const Text('Ver PDF'),
       ),
       const SizedBox(width: 6),
       OutlinedButton.icon(
         key: Key('calib_descargar_$folio'),
         style: btnStyle.copyWith(
-          foregroundColor: const WidgetStatePropertyAll(_kDarkInk),
-          side: const WidgetStatePropertyAll(BorderSide(color: Color(0xFFD2D2D7))),
+          foregroundColor: WidgetStatePropertyAll(p.textPrimary),
+          side: WidgetStatePropertyAll(BorderSide(color: p.borderStrong)),
         ),
         onPressed: busy ? null : () => _descargar(r),
-        icon: const Icon(Icons.download_outlined, size: 15, color: _kDarkInk),
+        icon: Icon(Icons.download_outlined, size: 15, color: p.textPrimary),
         label: const Text('Descargar'),
       ),
       if (!tienePdf) ...[
         const SizedBox(width: 6),
-        const Tooltip(
+        Tooltip(
           message: 'El servidor no reporta PDF para esta orden; se intentará descargar igualmente.',
           child: Text('Sin PDF en servidor',
-              style: TextStyle(fontSize: 10.5, color: Color(0xFFB7791F), fontStyle: FontStyle.italic)),
+              style: TextStyle(fontSize: 10.5, color: p.dotAmber, fontStyle: FontStyle.italic)),
         ),
       ],
     ];

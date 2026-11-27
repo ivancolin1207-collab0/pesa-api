@@ -342,6 +342,7 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final bool perteneceALote = loteId != null && loteId!.trim().isNotEmpty;
 
     return AnimatedBuilder(
@@ -350,15 +351,16 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
         final txt = controller.emailTextCtrl.text.trim();
         final bool valido = controller.isValido;
         final bool mostrarErrorFormato = !controller.sinCorreoCliente && txt.isNotEmpty && !controller.tieneCorreoValido;
+        final Color activeChipFg = c.isDark ? c.canvas : Colors.white;
 
         return Container(
           margin: margin,
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: PesaColors.surface,
+            color: c.surface,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: valido ? PesaColors.border : PesaColors.brand.withValues(alpha: 0.45),
+              color: valido ? c.border : c.brandAccent.withValues(alpha: 0.55),
               width: valido ? 1.0 : 1.2,
             ),
           ),
@@ -372,7 +374,7 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                   Icon(
                     valido ? Icons.check_circle_rounded : Icons.mail_outline_rounded,
                     size: 17,
-                    color: valido ? PesaColors.dotGreen : PesaColors.brand,
+                    color: valido ? c.dotGreen : c.brandAccent,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -380,10 +382,10 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                       controller.esOpcional
                           ? 'Correo del Cliente (opcional en modo Stock)'
                           : 'Correo del Cliente para envío de reporte *',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w700,
-                        color: PesaColors.textPrimary,
+                        color: c.textPrimary,
                       ),
                     ),
                   ),
@@ -391,26 +393,26 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
-                        color: PesaColors.surfaceMuted,
+                        color: c.surfaceMuted,
                         borderRadius: BorderRadius.circular(5),
-                        border: Border.all(color: PesaColors.borderStrong),
+                        border: Border.all(color: c.borderStrong),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Heredado del lote',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: PesaColors.textSecondary),
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: c.textSecondary),
                       ),
                     )
                   else if (controller.precargadoDeOficina && !controller.sinCorreoCliente && controller.tieneCorreoValido)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
-                        color: PesaColors.surfaceMuted,
+                        color: c.surfaceMuted,
                         borderRadius: BorderRadius.circular(5),
-                        border: Border.all(color: PesaColors.borderStrong),
+                        border: Border.all(color: c.borderStrong),
                       ),
-                      child: const Text(
+                      child: Text(
                         'Precargado en oficina',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: PesaColors.textSecondary),
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: c.textSecondary),
                       ),
                     ),
                 ],
@@ -430,10 +432,10 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                         decoration: BoxDecoration(
-                          color: seleccionado ? PesaColors.textPrimary : PesaColors.surfaceMuted,
+                          color: seleccionado ? c.textPrimary : c.surfaceMuted,
                           borderRadius: BorderRadius.circular(7),
                           border: Border.all(
-                            color: seleccionado ? PesaColors.textPrimary : PesaColors.borderStrong,
+                            color: seleccionado ? c.textPrimary : c.borderStrong,
                           ),
                         ),
                         child: Row(
@@ -442,7 +444,7 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                             Icon(
                               seleccionado ? Icons.check_rounded : Icons.alternate_email_rounded,
                               size: 12,
-                              color: seleccionado ? Colors.white : PesaColors.textSecondary,
+                              color: seleccionado ? activeChipFg : c.textSecondary,
                             ),
                             const SizedBox(width: 4),
                             Flexible(
@@ -452,7 +454,7 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 11.5,
                                   fontWeight: FontWeight.w600,
-                                  color: seleccionado ? Colors.white : PesaColors.textPrimary,
+                                  color: seleccionado ? activeChipFg : c.textPrimary,
                                 ),
                               ),
                             ),
@@ -470,15 +472,15 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                   controller: controller.emailTextCtrl,
                   keyboardType: TextInputType.emailAddress,
                   autocorrect: false,
-                  style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: PesaColors.textPrimary),
+                  style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.textPrimary),
                   decoration: InputDecoration(
                     hintText: 'cliente@empresa.com (puedes separar varios con coma)',
-                    hintStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: PesaColors.textTertiary),
-                    prefixIcon: const Icon(Icons.alternate_email_rounded, size: 18, color: PesaColors.textSecondary),
+                    hintStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: c.textTertiary),
+                    prefixIcon: Icon(Icons.alternate_email_rounded, size: 18, color: c.textSecondary),
                     suffixIcon: txt.isNotEmpty
                         ? IconButton(
                             tooltip: 'Limpiar correo',
-                            icon: const Icon(Icons.close_rounded, size: 17, color: PesaColors.textSecondary),
+                            icon: Icon(Icons.close_rounded, size: 17, color: c.textSecondary),
                             onPressed: () => controller.emailTextCtrl.clear(),
                           )
                         : null,
@@ -494,7 +496,7 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                   perteneceALote
                       ? 'CC automático: recepcion@basculaspesa.com.mx · Se aplicará a todo este lote.'
                       : 'CC automático: recepcion@basculaspesa.com.mx',
-                  style: const TextStyle(fontSize: 11, color: PesaColors.textSecondary),
+                  style: TextStyle(fontSize: 11, color: c.textSecondary),
                 ),
               ],
 
@@ -512,20 +514,20 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                           height: 20,
                           child: Checkbox(
                             value: controller.sinCorreoCliente,
-                            activeColor: PesaColors.textPrimary,
+                            activeColor: c.brand,
                             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             visualDensity: VisualDensity.compact,
                             onChanged: (v) => controller.setSinCorreoCliente(v ?? false),
                           ),
                         ),
                         const SizedBox(width: 7),
-                        const Expanded(
+                        Expanded(
                           child: Text(
                             'El cliente no proporciona correo (enviar solo a recepción)',
                             style: TextStyle(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w500,
-                              color: PesaColors.textSecondary,
+                              color: c.textSecondary,
                             ),
                           ),
                         ),
@@ -540,16 +542,16 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: PesaColors.surfaceMuted,
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: PesaColors.border),
+                    border: Border.all(color: c.border),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Selecciona el motivo para respaldo en recepción *',
-                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.textPrimary),
                       ),
                       const SizedBox(height: 6),
                       Wrap(
@@ -563,13 +565,13 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
-                                color: sel ? Colors.white : PesaColors.textPrimary,
+                                color: sel ? activeChipFg : c.textPrimary,
                               ),
                             ),
                             selected: sel,
-                            selectedColor: PesaColors.textPrimary,
-                            backgroundColor: Colors.white,
-                            side: BorderSide(color: sel ? PesaColors.textPrimary : PesaColors.borderStrong),
+                            selectedColor: c.textPrimary,
+                            backgroundColor: c.surface,
+                            side: BorderSide(color: sel ? c.textPrimary : c.borderStrong),
                             visualDensity: VisualDensity.compact,
                             showCheckmark: false,
                             onSelected: (_) => controller.setMotivoSeleccionado(m),
@@ -595,16 +597,16 @@ class ClienteCorreoPokaYokeCard extends StatelessWidget {
               if (!valido) ...[
                 const SizedBox(height: 6),
                 Row(
-                  children: const [
-                    Icon(Icons.info_outline_rounded, size: 14, color: PesaColors.brand),
-                    SizedBox(width: 5),
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 14, color: c.brandAccent),
+                    const SizedBox(width: 5),
                     Expanded(
                       child: Text(
                         kMsgPokaYokeCorreo,
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
-                          color: PesaColors.brand,
+                          color: c.brandAccent,
                         ),
                       ),
                     ),
@@ -627,6 +629,7 @@ class ClienteCorreoLockBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return AnimatedBuilder(
       animation: controller,
       builder: (_, __) {
@@ -635,9 +638,9 @@ class ClienteCorreoLockBanner extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 6),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
-            children: const [
-              Icon(Icons.lock_outline_rounded, size: 14, color: PesaColors.brand),
-              SizedBox(width: 5),
+            children: [
+              Icon(Icons.lock_outline_rounded, size: 14, color: c.brandAccent),
+              const SizedBox(width: 5),
               Flexible(
                 child: Text(
                   kMsgPokaYokeCorreo,
@@ -645,7 +648,7 @@ class ClienteCorreoLockBanner extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
-                    color: PesaColors.brand,
+                    color: c.brandAccent,
                   ),
                 ),
               ),

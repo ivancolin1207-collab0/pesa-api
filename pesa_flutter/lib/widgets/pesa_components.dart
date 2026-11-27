@@ -1,9 +1,9 @@
 // lib/widgets/pesa_components.dart
-// Componentes reutilizables del Sistema de Diseño Básculas PESA (Android / Tablet)
+// Componentes reutilizables del Sistema de Diseño Básculas PESA (Claro & Apple Dark)
 import 'package:flutter/material.dart';
 import '../theme/pesa_theme.dart';
 
-/// Tarjeta corporativa limpia (#FFFFFF, radio 14dp, borde 1dp #E5E5EA, sin sombras fuertes).
+/// Tarjeta corporativa limpia (adaptada a Claro `#FFFFFF` y Oscuro `#1C1C1E`).
 class PesaCard extends StatelessWidget {
   final Widget child;
   final EdgeInsetsGeometry padding;
@@ -24,15 +24,16 @@ class PesaCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final shape = RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(14),
       side: BorderSide(
-        color: borderColor ?? PesaColors.border,
+        color: borderColor ?? c.border,
         width: borderWidth,
       ),
     );
     final card = Material(
-      color: PesaColors.surface,
+      color: c.surface,
       shape: shape,
       clipBehavior: Clip.antiAlias,
       child: onTap != null
@@ -70,11 +71,12 @@ class PesaSemanticDot extends StatelessWidget {
   }
 }
 
-/// Badge neutro (#F8FAFC, borde #CBD5E1, texto #111827) con punto semántico opcional de 6dp.
+/// Badge neutro (`#F2F2F7` en Claro / `#2C2C2E` en Oscuro) con punto semántico opcional de 6dp.
 class PesaStatusBadge extends StatelessWidget {
   final String label;
   final Color? dotColor;
   final Color? textColor;
+  final bool isCancelled;
   final EdgeInsetsGeometry padding;
 
   const PesaStatusBadge({
@@ -82,13 +84,14 @@ class PesaStatusBadge extends StatelessWidget {
     required this.label,
     this.dotColor,
     this.textColor,
+    this.isCancelled = false,
     this.padding = const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
   });
 
   factory PesaStatusBadge.fromEstado(String estado) {
     final e = estado.trim().toLowerCase();
     Color dot = PesaColors.dotNeutral;
-    Color txt = PesaColors.textPrimary;
+    bool cancelled = false;
     if (e.contains('cerrad') ||
         e.contains('complet') ||
         e.contains('escan') ||
@@ -101,25 +104,48 @@ class PesaStatusBadge extends StatelessWidget {
       dot = PesaColors.dotAmber;
     } else if (e.contains('pend') || e.contains('cancel') || e.contains('asign')) {
       dot = PesaColors.dotRed;
-      if (e.contains('cancel')) txt = PesaColors.brand;
+      if (e.contains('cancel')) cancelled = true;
     }
-    return PesaStatusBadge(label: estado, dotColor: dot, textColor: txt);
+    return PesaStatusBadge(label: estado, dotColor: dot, isCancelled: cancelled);
+  }
+
+  Color _adaptDot(PesaPalette c, Color raw) {
+    if (!c.isDark) return raw;
+    if (raw == PesaColors.dotGreen) return c.dotGreen;
+    if (raw == PesaColors.dotAmber) return c.dotAmber;
+    if (raw == PesaColors.dotRed || raw == PesaColors.brand) return c.dotRed;
+    if (raw == PesaColors.dotNeutral) return c.dotNeutral;
+    return raw;
   }
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    Color resolvedText = c.textPrimary;
+    if (isCancelled) {
+      resolvedText = c.brandAccent;
+    } else if (textColor != null) {
+      if (c.isDark && textColor == PesaColors.textPrimary) {
+        resolvedText = c.textPrimary;
+      } else if (c.isDark && textColor == PesaColors.brand) {
+        resolvedText = c.brandAccent;
+      } else {
+        resolvedText = textColor!;
+      }
+    }
+
     return Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: PesaColors.surfaceMuted,
+        color: c.surfaceMuted,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: PesaColors.border, width: 1),
+        border: Border.all(color: c.border, width: 1),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           if (dotColor != null) ...[
-            PesaSemanticDot(color: dotColor!, size: 6),
+            PesaSemanticDot(color: _adaptDot(c, dotColor!), size: 6),
             const SizedBox(width: 6),
           ],
           Text(
@@ -127,7 +153,7 @@ class PesaStatusBadge extends StatelessWidget {
             style: TextStyle(
               fontSize: 11.5,
               fontWeight: FontWeight.w600,
-              color: textColor ?? PesaColors.textPrimary,
+              color: resolvedText,
             ),
           ),
         ],
@@ -181,7 +207,7 @@ class PesaPrimaryButton extends StatelessWidget {
   }
 }
 
-/// Botón secundario corporativo (#FFFFFF, borde #CBD5E1, texto #111827, 48dp).
+/// Botón secundario corporativo (adaptado a Claro y Oscuro, 48dp).
 class PesaSecondaryButton extends StatelessWidget {
   final String label;
   final IconData? icon;
@@ -216,7 +242,7 @@ class PesaSecondaryButton extends StatelessWidget {
   }
 }
 
-/// Selector segmentado ergonómico (mínimo 44-48dp) ideal para B|R|M|N/A o Cumple|No cumple.
+/// Selector segmentado ergonómico (mínimo 44-48dp) ideal para Automático|Claro|Oscuro o B|R|M|N/A.
 class PesaSegmentedSelector<T> extends StatelessWidget {
   final List<T> options;
   final T? selected;
@@ -233,12 +259,13 @@ class PesaSegmentedSelector<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.all(3),
       decoration: BoxDecoration(
-        color: PesaColors.surfaceMuted,
+        color: c.surfaceMuted,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: PesaColors.border),
+        border: Border.all(color: c.border),
       ),
       child: Row(
         children: options.map((opt) {
@@ -252,7 +279,7 @@ class PesaSegmentedSelector<T> extends StatelessWidget {
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isSel ? PesaColors.brand : Colors.transparent,
+                  color: isSel ? c.brand : Colors.transparent,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
@@ -261,7 +288,7 @@ class PesaSegmentedSelector<T> extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: isSel ? FontWeight.w700 : FontWeight.w600,
-                    color: isSel ? Colors.white : PesaColors.textPrimary,
+                    color: isSel ? Colors.white : c.textPrimary,
                   ),
                 ),
               ),
@@ -292,6 +319,7 @@ class PesaEmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -302,29 +330,29 @@ class PesaEmptyState extends StatelessWidget {
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: PesaColors.surface,
+                color: c.surface,
                 shape: BoxShape.circle,
-                border: Border.all(color: PesaColors.border),
+                border: Border.all(color: c.border),
               ),
-              child: Icon(icon, size: 26, color: PesaColors.textSecondary),
+              child: Icon(icon, size: 26, color: c.textSecondary),
             ),
             const SizedBox(height: 14),
             Text(
               title,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w700,
-                color: PesaColors.textPrimary,
+                color: c.textPrimary,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               subtitle,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13,
-                color: PesaColors.textSecondary,
+                color: c.textSecondary,
                 height: 1.4,
               ),
             ),
@@ -358,10 +386,11 @@ class PesaStepProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final safeTotal = totalSteps <= 0 ? 1 : totalSteps;
     final ratio = (currentStep / safeTotal).clamp(0.0, 1.0);
     return Container(
-      color: PesaColors.surface,
+      color: c.surface,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -370,20 +399,20 @@ class PesaStepProgressBar extends StatelessWidget {
             children: [
               Text(
                 stepLabel ?? 'Paso $currentStep de $safeTotal',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
-                  color: PesaColors.textPrimary,
+                  color: c.textPrimary,
                 ),
               ),
               const Spacer(),
               Text(
                 '${(ratio * 100).round()}%',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
-                  color: PesaColors.textSecondary,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  color: c.textSecondary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ],
@@ -394,8 +423,8 @@ class PesaStepProgressBar extends StatelessWidget {
             child: LinearProgressIndicator(
               value: ratio,
               minHeight: 4,
-              backgroundColor: PesaColors.border,
-              valueColor: const AlwaysStoppedAnimation<Color>(PesaColors.brand),
+              backgroundColor: c.border,
+              valueColor: AlwaysStoppedAnimation<Color>(c.brandAccent),
             ),
           ),
         ],
@@ -417,18 +446,19 @@ class PesaDraftIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
       decoration: BoxDecoration(
-        color: PesaColors.surfaceMuted,
+        color: c.surfaceMuted,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: PesaColors.border),
+        border: Border.all(color: c.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           PesaSemanticDot(
-            color: saving ? PesaColors.dotAmber : PesaColors.dotGreen,
+            color: saving ? c.dotAmber : c.dotGreen,
             size: 6,
           ),
           const SizedBox(width: 6),
@@ -438,10 +468,10 @@ class PesaDraftIndicator extends StatelessWidget {
                 : (savedTimeLabel != null
                     ? 'Borrador $savedTimeLabel'
                     : 'Borrador guardado'),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 11,
               fontWeight: FontWeight.w600,
-              color: PesaColors.textSecondary,
+              color: c.textSecondary,
             ),
           ),
         ],
@@ -465,6 +495,7 @@ class PesaBatchProgressBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final int activeTotal = (total - cancelled) < 0 ? 0 : (total - cancelled);
     final int safeDenom = activeTotal <= 0 ? 1 : activeTotal;
     final double ratio = activeTotal == 0 ? 0.0 : (completed / safeDenom).clamp(0.0, 1.0);
@@ -479,10 +510,10 @@ class PesaBatchProgressBar extends StatelessWidget {
           children: [
             PesaSemanticDot(
               color: activeTotal == 0
-                  ? PesaColors.dotNeutral
+                  ? c.dotNeutral
                   : (allDone
-                      ? PesaColors.dotGreen
-                      : (completed > 0 ? PesaColors.dotAmber : PesaColors.dotRed)),
+                      ? c.dotGreen
+                      : (completed > 0 ? c.dotAmber : c.dotRed)),
               size: 6,
             ),
             const SizedBox(width: 6),
@@ -490,11 +521,11 @@ class PesaBatchProgressBar extends StatelessWidget {
               child: Text(
                 labelTxt,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w600,
-                  color: PesaColors.textSecondary,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  color: c.textSecondary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ),
@@ -506,9 +537,9 @@ class PesaBatchProgressBar extends StatelessWidget {
           child: LinearProgressIndicator(
             value: ratio,
             minHeight: 4,
-            backgroundColor: PesaColors.border,
+            backgroundColor: c.border,
             valueColor: AlwaysStoppedAnimation<Color>(
-              allDone ? PesaColors.dotGreen : PesaColors.brand,
+              allDone ? c.dotGreen : c.brandAccent,
             ),
           ),
         ),
@@ -517,7 +548,8 @@ class PesaBatchProgressBar extends StatelessWidget {
   }
 }
 
-/// Marco limpio para pad de firma táctil con borde punteado y línea guía horizontal.
+/// Marco blindado para pad de firma táctil: SIEMPRE fondo blanco `#FFFFFF` + línea guía
+/// clara para garantizar contraste total de la tinta negra `#000000` incluso en Modo Nocturno.
 class PesaSignatureFrame extends StatelessWidget {
   final Widget child;
   final String hintText;
@@ -536,23 +568,23 @@ class PesaSignatureFrame extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         CustomPaint(
           foregroundPainter: _DashedBorderPainter(
-            color: hasSignature ? PesaColors.borderStrong : PesaColors.borderStrong,
+            color: hasSignature ? c.brandAccent : c.borderStrong,
             radius: 10,
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Container(
               height: height,
-              color: PesaColors.surface,
+              color: PesaColors.signatureCanvas, // BLINDAJE OBLIGATORIO: #FFFFFF siempre
               child: Stack(
                 children: [
                   Positioned.fill(child: child),
-                  // Línea guía horizontal sutil para firmar cómodamente
                   Positioned(
                     left: 24,
                     right: 24,
@@ -561,13 +593,13 @@ class PesaSignatureFrame extends StatelessWidget {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Container(height: 1, color: PesaColors.border),
+                          Container(height: 1, color: const Color(0xFFE5E5EA)),
                           const SizedBox(height: 4),
                           Text(
                             hintText,
                             style: const TextStyle(
                               fontSize: 10.5,
-                              color: PesaColors.textTertiary,
+                              color: Color(0xFF8E8E93),
                             ),
                           ),
                         ],
@@ -587,7 +619,7 @@ class PesaSignatureFrame extends StatelessWidget {
               icon: const Icon(Icons.cleaning_services_outlined, size: 16),
               label: const Text('Limpiar firma'),
               style: TextButton.styleFrom(
-                foregroundColor: PesaColors.textSecondary,
+                foregroundColor: c.textSecondary,
                 minimumSize: const Size(48, 40),
               ),
             ),

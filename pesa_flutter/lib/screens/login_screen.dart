@@ -6,6 +6,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/config_service.dart';
 import '../services/local_db_service.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/captura_firma_tecnico_dialog.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -38,13 +39,16 @@ class _LoginScreenState extends State<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const carmineRed  = Color(0xFFC8102E);
-    const bgGray      = Color(0xFFF5F5F7);
-    const cardBorder  = Color(0xFFE5E5EA);
-    const fieldBg     = Color(0xFFFFFFFF);
-    const fieldBorder = Color(0xFFD2D2D7);
-    const subTitleColor = Color(0xFF6E6E73);
-    const textDark    = Color(0xFF1D1D1F);
+    final c = PesaColors.of(context);
+    final carmineRed  = c.brand;
+    final accentRed   = c.brandAccent;
+    final bgGray      = c.canvas;
+    final cardBg      = c.surface;
+    final cardBorder  = c.border;
+    final fieldBg     = c.isDark ? c.surfaceElevated : c.surface;
+    final fieldBorder = c.borderStrong;
+    final subTitleColor = c.textSecondary;
+    final textDark    = c.textPrimary;
 
     return Scaffold(
       backgroundColor: bgGray,
@@ -55,16 +59,18 @@ class _LoginScreenState extends State<LoginScreen> {
             constraints: const BoxConstraints(maxWidth: 420),
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: cardBg,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: cardBorder, width: 1),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x0F000000),
-                    blurRadius: 24,
-                    offset: Offset(0, 8),
-                  ),
-                ],
+                boxShadow: c.isDark
+                    ? const []
+                    : const [
+                        BoxShadow(
+                          color: Color(0x0F000000),
+                          blurRadius: 24,
+                          offset: Offset(0, 8),
+                        ),
+                      ],
               ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 36),
@@ -79,18 +85,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         decoration: BoxDecoration(
                           color: carmineRed,
                           borderRadius: BorderRadius.circular(14),
-                          boxShadow: const [
-                            BoxShadow(
-                              color: Color(0x33B81D24),
-                              blurRadius: 12,
-                              offset: Offset(0, 4),
-                            )
-                          ],
                         ),
                         child: const Icon(Icons.scale_rounded, color: Colors.white, size: 40),
                       ),
                       const SizedBox(height: 18),
-                      const Text(
+                      Text(
                         'BÁSCULAS PESA',
                         style: TextStyle(
                           fontSize: 22,
@@ -100,7 +99,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         'Ecosistema Metrológico Operativo',
                         style: TextStyle(
                           fontSize: 13,
@@ -114,25 +113,25 @@ class _LoginScreenState extends State<LoginScreen> {
                       // Campo Usuario
                       TextFormField(
                         controller: _userCtrl,
-                        style: const TextStyle(fontSize: 14, color: textDark),
+                        style: TextStyle(fontSize: 14, color: textDark),
                         decoration: InputDecoration(
                           labelText: 'Usuario',
-                          labelStyle: const TextStyle(color: subTitleColor, fontSize: 13),
-                          prefixIcon: const Icon(Icons.person_outline_rounded, color: subTitleColor, size: 20),
+                          labelStyle: TextStyle(color: subTitleColor, fontSize: 13),
+                          prefixIcon: Icon(Icons.person_outline_rounded, color: subTitleColor, size: 20),
                           filled: true,
                           fillColor: fieldBg,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: fieldBorder),
+                            borderSide: BorderSide(color: fieldBorder),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: fieldBorder),
+                            borderSide: BorderSide(color: fieldBorder),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: carmineRed, width: 2),
+                            borderSide: BorderSide(color: accentRed, width: 2),
                           ),
                         ),
                         validator: (v) => (v?.isEmpty ?? true) ? 'Requerido' : null,
@@ -143,11 +142,11 @@ class _LoginScreenState extends State<LoginScreen> {
                       TextFormField(
                         controller: _passCtrl,
                         obscureText: _obscurePassword,
-                        style: const TextStyle(fontSize: 14, color: textDark),
+                        style: TextStyle(fontSize: 14, color: textDark),
                         decoration: InputDecoration(
                           labelText: 'Contraseña',
-                          labelStyle: const TextStyle(color: subTitleColor, fontSize: 13),
-                          prefixIcon: const Icon(Icons.lock_outline_rounded, color: subTitleColor, size: 20),
+                          labelStyle: TextStyle(color: subTitleColor, fontSize: 13),
+                          prefixIcon: Icon(Icons.lock_outline_rounded, color: subTitleColor, size: 20),
                           suffixIcon: IconButton(
                             icon: Icon(
                               _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
@@ -161,15 +160,15 @@ class _LoginScreenState extends State<LoginScreen> {
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: fieldBorder),
+                            borderSide: BorderSide(color: fieldBorder),
                           ),
                           enabledBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: fieldBorder),
+                            borderSide: BorderSide(color: fieldBorder),
                           ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
-                            borderSide: const BorderSide(color: carmineRed, width: 2),
+                            borderSide: BorderSide(color: accentRed, width: 2),
                           ),
                         ),
                         validator: (v) => (v?.isEmpty ?? true) ? 'Requerida' : null,
@@ -180,22 +179,27 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 14),
                         TextFormField(
                           controller: _urlCtrl,
-                          style: const TextStyle(fontSize: 13, color: textDark),
+                          style: TextStyle(fontSize: 13, color: textDark),
                           decoration: InputDecoration(
                             labelText: 'URL del servidor',
-                            labelStyle: const TextStyle(color: subTitleColor, fontSize: 13),
-                            prefixIcon: const Icon(Icons.dns_outlined, color: subTitleColor, size: 20),
+                            labelStyle: TextStyle(color: subTitleColor, fontSize: 13),
+                            prefixIcon: Icon(Icons.dns_outlined, color: subTitleColor, size: 20),
                             filled: true,
                             fillColor: fieldBg,
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(color: fieldBorder),
+                              borderSide: BorderSide(color: fieldBorder),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              borderSide: BorderSide(color: fieldBorder),
                             ),
                             focusedBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(color: carmineRed, width: 2),
+                              borderSide: BorderSide(color: accentRed, width: 2),
                             ),
                             helperText: 'Ej: https://pesa-api-za9i.onrender.com',
+                            helperStyle: TextStyle(color: subTitleColor, fontSize: 11.5),
                           ),
                         ),
                       ],
@@ -206,20 +210,20 @@ class _LoginScreenState extends State<LoginScreen> {
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
                             color: _loginedOffline
-                                ? const Color(0xFFF5F5F7)
-                                : const Color(0xFFFFF5F6),
+                                ? c.surfaceElevated
+                                : (c.isDark ? const Color(0xFF2D191D) : const Color(0xFFFFF5F6)),
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                                color: _loginedOffline
-                                    ? const Color(0xFFD2D2D7)
-                                    : const Color(0xFFC8102E)),
+                              color: _loginedOffline ? fieldBorder : accentRed,
+                            ),
                           ),
-                          child: Text(_error!,
-                              style: TextStyle(
-                                  color: _loginedOffline
-                                      ? const Color(0xFF111827)
-                                      : const Color(0xFFC8102E),
-                                  fontSize: 12.5)),
+                          child: Text(
+                            _error!,
+                            style: TextStyle(
+                              color: _loginedOffline ? textDark : accentRed,
+                              fontSize: 12.5,
+                            ),
+                          ),
                         ),
                       ],
 
@@ -232,7 +236,7 @@ class _LoginScreenState extends State<LoginScreen> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                           onChanged: (v) => setState(() => _rememberMe = v ?? true),
                         ),
-                        const Text('Recordar sesión',
+                        Text('Recordar sesión',
                             style: TextStyle(fontSize: 13, color: textDark)),
                       ]),
                       const SizedBox(height: 12),
@@ -269,11 +273,11 @@ class _LoginScreenState extends State<LoginScreen> {
                         child: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
                             foregroundColor: textDark,
-                            side: const BorderSide(color: fieldBorder),
+                            side: BorderSide(color: fieldBorder),
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(8)),
                           ),
-                          icon: const Icon(Icons.wifi_off_rounded, size: 18, color: subTitleColor),
+                          icon: Icon(Icons.wifi_off_rounded, size: 18, color: subTitleColor),
                           label: const Text('Continuar sin conexión',
                               style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
                           onPressed: _loading ? null : _onOfflineAccess,
@@ -285,7 +289,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         onPressed: () => setState(() => _showUrl = !_showUrl),
                         child: Text(
                           _showUrl ? 'Ocultar configuración' : 'Configurar servidor',
-                          style: const TextStyle(color: subTitleColor, fontSize: 12),
+                          style: TextStyle(color: subTitleColor, fontSize: 12),
                         ),
                       ),
                     ],

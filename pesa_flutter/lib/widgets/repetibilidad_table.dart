@@ -3,8 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/metrology_helper.dart';
-
-const _kRed = Color(0xFFC8102E);
+import '../theme/pesa_theme.dart';
 
 class RepetibilidadTable extends StatefulWidget {
   final List<Map<String, dynamic>> rows;
@@ -126,6 +125,7 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
   @override
   Widget build(BuildContext context) {
     super.build(context); // requerido por AutomaticKeepAliveClientMixin
+    final c = PesaColors.of(context);
     final dec = decimalsFromDivMin(widget.divMin);
     final cargaVal = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.'));
     final cargaInvalida = cargaVal != null && !isValidDivMin(cargaVal, widget.divMin);
@@ -139,6 +139,8 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
       if (fin != null && !isValidDivMin(fin, widget.divMin)) hayCamposInvalidos = true;
     }
 
+    final Color errorFill = c.isDark ? const Color(0xFF34181D) : const Color(0xFFFFEBEE);
+
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       padding: const EdgeInsets.all(16),
@@ -148,10 +150,11 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
           // ── Campo ÚNICO de Carga de Prueba ─────────────────────────────────
           Card(
             elevation: 0,
+            color: c.surface,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
               side: BorderSide(
-                color: cargaInvalida ? Colors.red : Colors.grey.shade200,
+                color: cargaInvalida ? c.dotRed : c.border,
                 width: cargaInvalida ? 1.5 : 1,
               ),
             ),
@@ -162,11 +165,11 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.fitness_center, color: _kRed, size: 20),
+                      Icon(Icons.fitness_center, color: c.brandAccent, size: 20),
                       const SizedBox(width: 12),
-                      const Text(
+                      Text(
                         'Carga de Prueba (kg):',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.textPrimary),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -198,7 +201,6 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
                               final raw = val.trim().replaceAll(',', '.');
                               final double? valor = double.tryParse(raw);
                               if (valor == null) {
-                                // No calcular ni romper, dejar en estado transitorio
                                 return;
                               }
                               _notify();
@@ -207,26 +209,34 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
-                              color: cargaInvalida ? Colors.red : _kRed,
+                              color: cargaInvalida ? c.dotRed : c.brandAccent,
                             ),
                             decoration: InputDecoration(
                               isDense: true,
                               hintText: '0.${'0' * dec}',
+                              hintStyle: TextStyle(color: c.textTertiary),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide(
-                                  color: cargaInvalida ? Colors.red : _kRed,
+                                  color: cargaInvalida ? c.dotRed : c.brandAccent,
                                   width: 1.5,
+                                ),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: BorderSide(
+                                  color: cargaInvalida ? c.dotRed : c.borderStrong,
+                                  width: 1.2,
                                 ),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide(
-                                  color: cargaInvalida ? Colors.red : _kRed,
+                                  color: cargaInvalida ? c.dotRed : c.brandAccent,
                                   width: 2,
                                 ),
                               ),
-                              fillColor: cargaInvalida ? const Color(0xFFFFEBEE) : Colors.white,
+                              fillColor: cargaInvalida ? errorFill : (c.isDark ? c.surfaceElevated : c.surface),
                               filled: true,
                               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             ),
@@ -237,7 +247,7 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
                       Flexible(
                         child: Text(
                           'Propagada a los 3 puntos\n(d=${widget.divMin ?? '?'})',
-                          style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
+                          style: TextStyle(fontSize: 10, color: c.textSecondary),
                           textAlign: TextAlign.right,
                         ),
                       ),
@@ -248,7 +258,7 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
                       padding: const EdgeInsets.only(top: 8, left: 32),
                       child: Text(
                         divMinErrorMsg(widget.divMin),
-                        style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.w600),
+                        style: TextStyle(color: c.dotRed, fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                     ),
                 ],
@@ -263,18 +273,18 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFEBEE),
+                color: errorFill,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.shade300),
+                border: Border.all(color: c.dotRed.withValues(alpha: 0.65)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                  Icon(Icons.error_outline, color: c.dotRed, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       divMinErrorMsg(widget.divMin),
-                      style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: c.dotRed, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
@@ -283,7 +293,12 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
 
           // ── Tabla de Repeticiones ─────────────────────────────────────────
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            elevation: 0,
+            color: c.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: c.border),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -291,25 +306,25 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
                 children: [
                   Row(
                     children: [
-                      const Text(
+                      Text(
                         'REPETIBILIDAD',
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 13,
-                          color: _kRed,
+                          color: c.brandAccent,
                           letterSpacing: 1,
                         ),
                       ),
                       const Spacer(),
                       Text(
                         'Captura únicamente lecturas inicial y final',
-                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                        style: TextStyle(fontSize: 10, color: c.textSecondary),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Table(
-                    border: TableBorder.all(color: Colors.grey.shade200),
+                    border: TableBorder.all(color: c.border),
                     columnWidths: const {
                       0: FlexColumnWidth(0.8),
                       1: FlexColumnWidth(1.6),
@@ -318,9 +333,9 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
                       4: FlexColumnWidth(1.5),
                     },
                     children: [
-                      _headerRow(['N', 'CARGA (kg)', 'L. INICIAL', 'L. FINAL', 'ERROR']),
+                      _headerRow(['N', 'CARGA (kg)', 'L. INICIAL', 'L. FINAL', 'ERROR'], c),
                       for (int i = 0; i < _rows.length; i++)
-                        _dataRow(i, dec),
+                        _dataRow(i, dec, c),
                     ],
                   ),
                 ],
@@ -336,23 +351,23 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
     );
   }
 
-  TableRow _headerRow(List<String> labels) => TableRow(
-    decoration: const BoxDecoration(color: Color(0xFF1C1C1C)),
+  TableRow _headerRow(List<String> labels, PesaPalette c) => TableRow(
+    decoration: BoxDecoration(color: c.isDark ? c.surfaceElevated : const Color(0xFF1C1C1E)),
     children: labels.map((l) => Padding(
       padding: const EdgeInsets.all(8),
       child: Text(
         l,
         textAlign: TextAlign.center,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
-          color: Colors.white,
+          color: c.isDark ? c.textPrimary : Colors.white,
         ),
       ),
     )).toList(),
   );
 
-  TableRow _dataRow(int i, int dec) {
+  TableRow _dataRow(int i, int dec, PesaPalette c) {
     final fin = double.tryParse(_rows[i].finalCtrl.text.trim().replaceAll(',', '.'));
     final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
     double? err;
@@ -361,16 +376,17 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
     }
 
     final cargaTxt = _cargaCtrl.text.trim().isNotEmpty ? _cargaCtrl.text.trim() : '—';
+    final Color altBg = c.isDark ? const Color(0xFF222226) : const Color(0xFFF9F9F9);
 
     return TableRow(
       decoration: BoxDecoration(
-        color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9),
+        color: i % 2 == 0 ? c.surface : altBg,
       ),
       children: [
         _cell(Text(
           '${i + 1}',
           textAlign: TextAlign.center,
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: c.textPrimary),
         )),
         // Columna de carga nominal propagada (solo lectura / informativa)
         _cell(
@@ -380,26 +396,26 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
             child: Text(
               cargaTxt,
               textAlign: TextAlign.center,
-              style: const TextStyle(
+              style: TextStyle(
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
-                color: Color(0xFF1D1D1F),
+                color: c.textPrimary,
               ),
             ),
           ),
         ),
-        _cellInput(_rows[i].inicialCtrl, dec, hint: dec == 0 ? '0' : '0.${'0' * dec}'),
-        _cellInput(_rows[i].finalCtrl, dec, hint: dec == 0 ? '0' : '0.${'0' * dec}'),
+        _cellInput(_rows[i].inicialCtrl, dec, c, hint: dec == 0 ? '0' : '0.${'0' * dec}'),
+        _cellInput(_rows[i].finalCtrl, dec, c, hint: dec == 0 ? '0' : '0.${'0' * dec}'),
         _cell(err == null
-            ? const Center(
-                child: Text('—', style: TextStyle(color: Colors.grey, fontSize: 13)))
+            ? Center(
+                child: Text('—', style: TextStyle(color: c.textSecondary, fontSize: 13)))
             : Text(
                 formatMetrologicalValue(err, widget.divMin),
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: err.abs() > (widget.divMin ?? 0.001)
-                      ? _kRed
-                      : Colors.green.shade700,
+                      ? c.brandAccent
+                      : c.dotGreen,
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
                 ),
@@ -413,9 +429,10 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
     child: child,
   );
 
-  Widget _cellInput(TextEditingController ctrl, int dec, {String? hint}) {
+  Widget _cellInput(TextEditingController ctrl, int dec, PesaPalette c, {String? hint}) {
     final val = double.tryParse(ctrl.text.trim().replaceAll(',', '.'));
     final invalido = val != null && !isValidDivMin(val, widget.divMin);
+    final Color errorFill = c.isDark ? const Color(0xFF34181D) : const Color(0xFFFFEBEE);
 
     return Padding(
       padding: const EdgeInsets.all(2),
@@ -446,7 +463,6 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
             final raw = val.trim().replaceAll(',', '.');
             final double? valor = double.tryParse(raw);
             if (valor == null) {
-              // No calcular ni romper, dejar en estado transitorio
               return;
             }
             _notify();
@@ -455,34 +471,34 @@ class _RepetibilidadTableState extends State<RepetibilidadTable>
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: invalido ? Colors.red : Colors.black87,
+            color: invalido ? c.dotRed : c.textPrimary,
           ),
           decoration: InputDecoration(
             isDense: true,
             hintText: hint ?? '0.${'0' * dec}',
-            hintStyle: TextStyle(color: Colors.grey.shade300, fontSize: 11),
+            hintStyle: TextStyle(color: c.textTertiary, fontSize: 11),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : Colors.grey.shade300,
+                color: invalido ? c.dotRed : c.borderStrong,
                 width: invalido ? 1.5 : 1,
               ),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : Colors.grey.shade300,
+                color: invalido ? c.dotRed : c.borderStrong,
                 width: invalido ? 1.5 : 1,
               ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : _kRed,
+                color: invalido ? c.dotRed : c.brandAccent,
                 width: 2,
               ),
             ),
-            fillColor: invalido ? const Color(0xFFFFEBEE) : Colors.white,
+            fillColor: invalido ? errorFill : (c.isDark ? c.surfaceElevated : c.surface),
             filled: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           ),

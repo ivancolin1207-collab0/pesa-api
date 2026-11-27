@@ -46,7 +46,6 @@ class ObservacionesCeldaScreen extends StatefulWidget {
 
 class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   static const Color _pesaRed = PesaColors.brand;
-  static const Color _pesaDark = PesaColors.textPrimary;
   static const Color _osoccBlue = PesaColors.brand;
 
   static const Map<int, String> _checklistLabels = {
@@ -120,15 +119,18 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
 
   List<String> _contactosSugeridos = [];
 
+  // BLINDAJE DE FIRMA: tinta negra (#000000) fija sobre fondo blanco (#FFFFFF) incluso en Dark Mode
   final _sigClienteCtrl = SignatureController(
     penStrokeWidth: 2.5,
-    penColor: const Color(0xFF1D1D1F),
-    exportBackgroundColor: Colors.white,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+    exportBackgroundColor: PesaColors.signatureCanvas,
   );
   final _sigTecnicoCtrl = SignatureController(
     penStrokeWidth: 2.5,
-    penColor: const Color(0xFF1D1D1F),
-    exportBackgroundColor: Colors.white,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+    exportBackgroundColor: PesaColors.signatureCanvas,
   );
 
   Uint8List? _firmaTecPre;
@@ -1063,6 +1065,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'OSOCC-26-001').toString();
     final fechaRaw = (widget.orden['fecha'] ?? DateFormat('dd/MM/yyyy').format(DateTime.now())).toString();
 
@@ -1076,14 +1079,14 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
         }
       },
       child: Scaffold(
-        backgroundColor: PesaColors.canvas,
+        backgroundColor: c.canvas,
         appBar: AppBar(
-          backgroundColor: PesaColors.surface,
-          foregroundColor: PesaColors.textPrimary,
+          backgroundColor: c.surface,
+          foregroundColor: c.textPrimary,
           elevation: 0,
-          bottom: const PreferredSize(
-            preferredSize: Size.fromHeight(1),
-            child: Divider(height: 1, color: PesaColors.border),
+          bottom: PreferredSize(
+            preferredSize: const Size.fromHeight(1),
+            child: Divider(height: 1, color: c.border),
           ),
           leading: IconButton(
             icon: const Icon(Icons.arrow_back_rounded),
@@ -1098,16 +1101,16 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Diagnóstico de Celda de Carga',
-                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: c.textPrimary),
               ),
               Text(
                 'Folio: $folio · $fechaRaw',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 11.5,
-                  color: PesaColors.textSecondary,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  color: c.textSecondary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
             ],
@@ -1174,8 +1177,8 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                                   icon: const Icon(Icons.preview_outlined, size: 18),
                                   label: const Text('Vista Previa'),
                                   style: OutlinedButton.styleFrom(
-                                    foregroundColor: PesaColors.textPrimary,
-                                    side: const BorderSide(color: PesaColors.borderStrong),
+                                    foregroundColor: c.textPrimary,
+                                    side: BorderSide(color: c.borderStrong),
                                     minimumSize: const Size(0, 52),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                   ),
@@ -1188,8 +1191,8 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: _pesaRed,
                                         foregroundColor: Colors.white,
-                                        disabledBackgroundColor: PesaColors.surfaceMuted,
-                                        disabledForegroundColor: PesaColors.textTertiary,
+                                        disabledBackgroundColor: c.surfaceMuted,
+                                        disabledForegroundColor: c.textTertiary,
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                         elevation: 0,
                                       ),
@@ -1252,11 +1255,12 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildSectionHeader(String title, {String? subtitle}) {
+    final c = PesaColors.of(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: _pesaDark,
+        color: c.isDark ? c.elevated : PesaColors.textPrimary,
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -1276,7 +1280,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
             Text(
               subtitle,
               style: const TextStyle(
-                color: Color(0xFFBAE6FD),
+                color: Colors.white70,
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
@@ -1287,12 +1291,13 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildHeaderControlCard(String folio, String fecha) {
+    final c = PesaColors.of(context);
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: const BorderSide(color: Color(0xFFE2E8F0), width: 1),
+        side: BorderSide(color: c.border, width: 1),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1307,14 +1312,14 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F7),
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFD2D2D7)),
+                    border: Border.all(color: c.borderStrong),
                   ),
                   child: Text(
                     'FOLIO: $folio',
-                    style: const TextStyle(
-                      color: Color(0xFF1D1D1F),
+                    style: TextStyle(
+                      color: c.textPrimary,
                       fontWeight: FontWeight.w800,
                       fontSize: 13.5,
                     ),
@@ -1323,28 +1328,28 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F7),
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    border: Border.all(color: c.border),
                   ),
                   child: Text(
                     'Fecha: $fecha',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF1D1D1F)),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.textPrimary),
                   ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F7),
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(4),
-                    border: Border.all(color: const Color(0xFFD2D2D7)),
+                    border: Border.all(color: c.borderStrong),
                   ),
-                  child: const Text(
+                  child: Text(
                     'OSOCC DIGITAL (1 CELDA)',
                     style: TextStyle(
                       fontSize: 10.5,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF1D1D1F),
+                      color: c.textPrimary,
                     ),
                   ),
                 ),
@@ -1364,9 +1369,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               second: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Destino:',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _pesaDark),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.textPrimary),
                   ),
                   const SizedBox(height: 4),
                   Wrap(
@@ -1377,12 +1382,13 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                         label: const Text('Stock / Laboratorio Interno'),
                         selected: _destinoTipo == 'Stock',
                         showCheckmark: false,
-                        selectedColor: const Color(0xFFC8102E),
-                        backgroundColor: const Color(0xFFF5F5F7),
+                        selectedColor: PesaColors.brand,
+                        backgroundColor: c.elevated,
+                        side: BorderSide(color: _destinoTipo == 'Stock' ? PesaColors.brand : c.borderStrong),
                         labelStyle: TextStyle(
                           fontSize: 12,
                           fontWeight: _destinoTipo == 'Stock' ? FontWeight.bold : FontWeight.normal,
-                          color: _destinoTipo == 'Stock' ? Colors.white : const Color(0xFF1D1D1F),
+                          color: _destinoTipo == 'Stock' ? Colors.white : c.textPrimary,
                         ),
                         onSelected: (_) {
                           setState(() {
@@ -1399,12 +1405,13 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                         label: const Text('Cliente'),
                         selected: _destinoTipo == 'Cliente',
                         showCheckmark: false,
-                        selectedColor: const Color(0xFFC8102E),
-                        backgroundColor: const Color(0xFFF5F5F7),
+                        selectedColor: PesaColors.brand,
+                        backgroundColor: c.elevated,
+                        side: BorderSide(color: _destinoTipo == 'Cliente' ? PesaColors.brand : c.borderStrong),
                         labelStyle: TextStyle(
                           fontSize: 12,
                           fontWeight: _destinoTipo == 'Cliente' ? FontWeight.bold : FontWeight.normal,
-                          color: _destinoTipo == 'Cliente' ? Colors.white : const Color(0xFF1D1D1F),
+                          color: _destinoTipo == 'Cliente' ? Colors.white : c.textPrimary,
                         ),
                         onSelected: (_) {
                           setState(() {
@@ -1426,12 +1433,13 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildSeccion1Card() {
+    final c = PesaColors.of(context);
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Color(0xFFE5E5EA)),
+        side: BorderSide(color: c.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1503,9 +1511,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               ],
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Configuración de Cables / Colores:',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _pesaDark),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: c.textPrimary),
             ),
             const SizedBox(height: 8),
             FoldableFormGrid(
@@ -1545,9 +1553,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               height: 46,
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: PesaColors.textPrimary,
-                  backgroundColor: PesaColors.surface,
-                  side: const BorderSide(color: PesaColors.borderStrong, width: 1.2),
+                  foregroundColor: c.textPrimary,
+                  backgroundColor: c.surface,
+                  side: BorderSide(color: c.borderStrong, width: 1.2),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () async {
@@ -1572,7 +1580,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     final etiq = construirEtiquetaInstrumento({'folio_os': folio, ...parcial});
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFF1D4ED8),
+                        backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFF1D1D1F),
                         content: Text(
                           ok
                               ? 'Equipo guardado y sincronizado (orden sigue En Proceso): $etiq'
@@ -1596,12 +1604,13 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildSeccion2Card() {
+    final c = PesaColors.of(context);
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Color(0xFFE5E5EA)),
+        side: BorderSide(color: c.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1621,14 +1630,15 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildChecklistRow(int numPt, String label) {
+    final c = PesaColors.of(context);
     final currentVal = _chkEstado[numPt] ?? 'B';
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: numPt.isEven ? const Color(0xFFF9FAFB) : Colors.white,
+        color: numPt.isEven ? c.surfaceMuted : c.surface,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFFE5E7EB)),
+        border: Border.all(color: c.border),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1640,7 +1650,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 flex: 3,
                 child: Text(
                   '$numPt. $label',
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _pesaDark),
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.textPrimary),
                 ),
               ),
               const SizedBox(width: 8),
@@ -1661,10 +1671,10 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: selected ? activeColor : const Color(0xFFF3F4F6),
+                        color: selected ? activeColor : c.elevated,
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
-                          color: selected ? activeColor : const Color(0xFFD1D5DB),
+                          color: selected ? activeColor : c.borderStrong,
                         ),
                       ),
                       child: Text(
@@ -1672,7 +1682,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.bold,
-                          color: selected ? Colors.white : const Color(0xFF374151),
+                          color: selected ? Colors.white : c.textPrimary,
                         ),
                       ),
                     ),
@@ -1701,13 +1711,14 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildSeccion3Card() {
+    final c = PesaColors.of(context);
     final cover = isCoverScreen(context);
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: PesaColors.border),
+        side: BorderSide(color: c.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1723,17 +1734,17 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                 decoration: BoxDecoration(
-                  color: PesaColors.tableHeader,
+                  color: c.tableHead,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: PesaColors.border),
+                  border: Border.all(color: c.border),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
                     Expanded(
                       flex: 4,
                       child: Text(
                         'PARÁMETRO ELÉCTRICO',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: c.textPrimary),
                       ),
                     ),
                     SizedBox(
@@ -1741,7 +1752,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                       child: Text(
                         'UND',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: c.textPrimary),
                       ),
                     ),
                     Expanded(
@@ -1749,7 +1760,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                       child: Text(
                         'VALOR MEDIDO',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: c.textPrimary),
                       ),
                     ),
                     Expanded(
@@ -1757,7 +1768,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                       child: Text(
                         'ESTADO',
                         textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: c.textPrimary),
                       ),
                     ),
                   ],
@@ -1773,6 +1784,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildPruebaElectricaRow(Map<String, String> spec, {bool cover = false}) {
+    final c = PesaColors.of(context);
     final int idx = int.parse(spec['idx']!);
     final String label = spec['label']!;
     final String unidad = spec['unidad']!;
@@ -1823,9 +1835,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: idx.isEven ? PesaColors.surfaceMuted : Colors.white,
+          color: idx.isEven ? c.surfaceMuted : c.surface,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: PesaColors.border),
+          border: Border.all(color: c.border),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1835,20 +1847,20 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 Expanded(
                   child: Text(
                     '$idx. $label',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: c.textPrimary),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: c.elevated,
                     borderRadius: BorderRadius.circular(5),
-                    border: Border.all(color: PesaColors.borderStrong),
+                    border: Border.all(color: c.borderStrong),
                   ),
                   child: Text(
                     unidad,
-                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: PesaColors.textSecondary),
+                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: c.textSecondary),
                   ),
                 ),
               ],
@@ -1866,9 +1878,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
       margin: const EdgeInsets.only(bottom: 6),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: idx.isEven ? PesaColors.surfaceMuted : Colors.white,
+        color: idx.isEven ? c.surfaceMuted : c.surface,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: PesaColors.border),
+        border: Border.all(color: c.border),
       ),
       child: Row(
         children: [
@@ -1876,7 +1888,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
             flex: 4,
             child: Text(
               '$idx. $label',
-              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _pesaDark),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.textPrimary),
             ),
           ),
           SizedBox(
@@ -1884,7 +1896,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
             child: Text(
               unidad,
               textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF4B5563)),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: c.textSecondary),
             ),
           ),
           Expanded(
@@ -1904,30 +1916,31 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildSeccion4Card() {
+    final c = PesaColors.of(context);
     final dictamenOptions = [
       {
         'val': 'OPERATIVA',
         'label': 'OPERATIVA / EN TOLERANCIA (Apta para instalación o calibración)',
-        'color': const Color(0xFF15803D),
+        'color': c.dotGreen,
       },
       {
         'val': 'REPARABLE',
         'label': 'REPARABLE (Requiere reemplazo de cable, conector o reapriete)',
-        'color': const Color(0xFFB45309),
+        'color': c.dotAmber,
       },
       {
         'val': 'DAÑADA',
         'label': 'DAÑADA / DESCALIBRADA (Sobrecarga, galgas abiertas o fuga - FUERA DE SERVICIO)',
-        'color': _pesaRed,
+        'color': c.brandAccent,
       },
     ];
 
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Color(0xFFE5E5EA)),
+        side: BorderSide(color: c.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1936,9 +1949,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
           children: [
             _buildSectionHeader('4. DICTAMEN TÉCNICO Y OBSERVACIONES'),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Observaciones Técnicas y Diagnóstico:',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _pesaDark),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: c.textPrimary),
             ),
             const SizedBox(height: 6),
             TextField(
@@ -1952,9 +1965,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               ),
             ),
             const SizedBox(height: 14),
-            const Text(
+            Text(
               'Dictamen Final de la Celda:',
-              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: _pesaDark),
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: c.textPrimary),
             ),
             const SizedBox(height: 6),
             for (final opt in dictamenOptions)
@@ -1962,13 +1975,13 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                 margin: const EdgeInsets.only(bottom: 6),
                 decoration: BoxDecoration(
                   color: _dictamenEstado == opt['val']
-                      ? (opt['color'] as Color).withValues(alpha: 0.1)
-                      : const Color(0xFFF9FAFB),
+                      ? (opt['color'] as Color).withValues(alpha: c.isDark ? 0.16 : 0.1)
+                      : c.surfaceMuted,
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: _dictamenEstado == opt['val']
                         ? (opt['color'] as Color)
-                        : const Color(0xFFE5E7EB),
+                        : c.border,
                     width: _dictamenEstado == opt['val'] ? 1.5 : 1,
                   ),
                 ),
@@ -1982,7 +1995,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: _dictamenEstado == opt['val'] ? FontWeight.bold : FontWeight.w500,
-                      color: _dictamenEstado == opt['val'] ? (opt['color'] as Color) : _pesaDark,
+                      color: _dictamenEstado == opt['val'] ? (opt['color'] as Color) : c.textPrimary,
                     ),
                   ),
                   onChanged: (v) {
@@ -2000,13 +2013,14 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
   }
 
   Widget _buildSeccion5Card() {
+    final c = PesaColors.of(context);
     final esStock = _destinoTipo == 'Stock';
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: Color(0xFFE5E5EA)),
+        side: BorderSide(color: c.border),
       ),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -2021,16 +2035,16 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               first: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF9FAFB),
+                  color: c.surfaceMuted,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  border: Border.all(color: c.border),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'Evaluó / Técnico Responsable',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _pesaDark),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: c.textPrimary),
                     ),
                     const SizedBox(height: 8),
                     _buildTextField(_tecNombreCtrl, 'Nombre del Técnico'),
@@ -2042,9 +2056,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                         height: 120,
                         width: double.infinity,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: PesaColors.signatureCanvas,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                          border: Border.all(color: c.borderStrong),
                         ),
                         child: Image.memory(_firmaTecPre!, fit: BoxFit.contain),
                       ),
@@ -2060,9 +2074,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                       Container(
                         height: 120,
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: PesaColors.signatureCanvas,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: const Color(0xFFD1D5DB)),
+                          border: Border.all(color: c.borderStrong),
                         ),
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(8),
@@ -2070,7 +2084,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                             child: Signature(
                               controller: _sigTecnicoCtrl,
                               height: 120,
-                              backgroundColor: Colors.white,
+                              backgroundColor: PesaColors.signatureCanvas,
                             ),
                           ),
                         ),
@@ -2090,9 +2104,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
               second: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF9FAFB),
+                  color: c.surfaceMuted,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  border: Border.all(color: c.border),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -2101,7 +2115,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                       esStock
                           ? 'Recibió / Almacén o Laboratorio (Opcional en Stock)'
                           : 'Recibió / Cliente (Obligatorio)',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _pesaDark),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: c.textPrimary),
                     ),
                     const SizedBox(height: 8),
                     _buildTextField(
@@ -2112,11 +2126,11 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                       const SizedBox(height: 6),
                       Wrap(
                         spacing: 6,
-                        children: _contactosSugeridos.take(4).map((c) {
+                        children: _contactosSugeridos.take(4).map((contacto) {
                           return ActionChip(
-                            label: Text(c, style: const TextStyle(fontSize: 11)),
+                            label: Text(contacto, style: const TextStyle(fontSize: 11)),
                             onPressed: () {
-                              setState(() => _cliNombreCtrl.text = c);
+                              setState(() => _cliNombreCtrl.text = contacto);
                               _programarAutoGuardado();
                             },
                           );
@@ -2133,9 +2147,9 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                     Container(
                       height: 120,
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: PesaColors.signatureCanvas,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFD1D5DB)),
+                        border: Border.all(color: c.borderStrong),
                       ),
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(8),
@@ -2143,7 +2157,7 @@ class _ObservacionesCeldaScreenState extends State<ObservacionesCeldaScreen> {
                           child: Signature(
                             controller: _sigClienteCtrl,
                             height: 120,
-                            backgroundColor: Colors.white,
+                            backgroundColor: PesaColors.signatureCanvas,
                           ),
                         ),
                       ),

@@ -3,8 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../services/metrology_helper.dart';
-
-const _kRed = Color(0xFFC8102E);
+import '../theme/pesa_theme.dart';
 
 class ExactitudTable extends StatefulWidget {
   final int numPuntos;
@@ -118,7 +117,9 @@ class _ExactitudTableState extends State<ExactitudTable>
   @override
   Widget build(BuildContext context) {
     super.build(context); // requerido por AutomaticKeepAliveClientMixin
+    final c = PesaColors.of(context);
     final dec = getDecimalsFromD(widget.divMin);
+    final Color errorFill = c.isDark ? const Color(0xFF34181D) : const Color(0xFFFFEBEE);
 
     // Revisar si hay campos inválidos
     bool hayCamposInvalidos = false;
@@ -143,51 +144,56 @@ class _ExactitudTableState extends State<ExactitudTable>
               margin: const EdgeInsets.only(bottom: 12),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFEBEE),
+                color: errorFill,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.red.shade300),
+                border: Border.all(color: c.dotRed.withValues(alpha: 0.65)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline, color: Colors.red, size: 18),
+                  Icon(Icons.error_outline, color: c.dotRed, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       divMinErrorMsg(widget.divMin),
-                      style: const TextStyle(color: Colors.red, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: c.dotRed, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ),
                 ],
               ),
             ),
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            elevation: 0,
+            color: c.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: c.border),
+            ),
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
                 children: [
                   Row(
                     children: [
-                      const Text(
+                      Text(
                         'EXACTITUD',
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 13,
-                          color: _kRed,
+                          color: c.brandAccent,
                           letterSpacing: 1,
                         ),
                       ),
                       const Spacer(),
                       Text(
                         'd = ${widget.divMin != null ? formatMetrologicalValue(widget.divMin, widget.divMin) : '?'}\n($dec decimales)',
-                        style: TextStyle(fontSize: 10, color: Colors.grey.shade500),
+                        style: TextStyle(fontSize: 10, color: c.textSecondary),
                         textAlign: TextAlign.right,
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Table(
-                    border: TableBorder.all(color: Colors.grey.shade200),
+                    border: TableBorder.all(color: c.border),
                     columnWidths: const {
                       0: FlexColumnWidth(0.8),
                       1: FlexColumnWidth(1.8),
@@ -196,9 +202,9 @@ class _ExactitudTableState extends State<ExactitudTable>
                       4: FlexColumnWidth(1.5),
                     },
                     children: [
-                      _hdr(['N', 'VALOR NOMINAL', 'L. INICIAL', 'L. FINAL', 'ERROR']),
+                      _hdr(['N', 'VALOR NOMINAL', 'L. INICIAL', 'L. FINAL', 'ERROR'], c),
                       for (int i = 0; i < n; i++)
-                        _row(i, dec),
+                        _row(i, dec, c),
                     ],
                   ),
                 ],
@@ -214,33 +220,34 @@ class _ExactitudTableState extends State<ExactitudTable>
     );
   }
 
-  TableRow _hdr(List<String> l) => TableRow(
-    decoration: const BoxDecoration(color: Color(0xFF1C1C1C)),
+  TableRow _hdr(List<String> l, PesaPalette c) => TableRow(
+    decoration: BoxDecoration(color: c.isDark ? c.surfaceElevated : const Color(0xFF1C1C1E)),
     children: l.map((s) => Padding(
       padding: const EdgeInsets.all(8),
       child: Text(
         s,
         textAlign: TextAlign.center,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
-          color: Colors.white,
+          color: c.isDark ? c.textPrimary : Colors.white,
         ),
       ),
     )).toList(),
   );
 
-  TableRow _row(int i, int dec) {
+  TableRow _row(int i, int dec, PesaPalette c) {
     final fin = double.tryParse(_finalCtrls[i].text.trim().replaceAll(',', '.'));
     final nom = double.tryParse(_nomCtrls[i].text.trim().replaceAll(',', '.'));
     double? err;
     if (fin != null && nom != null) {
       err = fin - nom;
     }
+    final Color altBg = c.isDark ? const Color(0xFF222226) : const Color(0xFFF9F9F9);
 
     return TableRow(
       decoration: BoxDecoration(
-        color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9),
+        color: i % 2 == 0 ? c.surface : altBg,
       ),
       children: [
         Padding(
@@ -248,24 +255,24 @@ class _ExactitudTableState extends State<ExactitudTable>
           child: Text(
             '${i + 1}',
             textAlign: TextAlign.center,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: c.textPrimary),
           ),
         ),
-        _inp(_nomCtrls[i], dec, hint: 'Nominal'),
-        _inp(_initCtrls[i], dec, hint: 'Inicial'),
-        _inp(_finalCtrls[i], dec, hint: 'Final'),
+        _inp(_nomCtrls[i], dec, c, hint: 'Nominal'),
+        _inp(_initCtrls[i], dec, c, hint: 'Inicial'),
+        _inp(_finalCtrls[i], dec, c, hint: 'Final'),
         Padding(
           padding: const EdgeInsets.all(4),
           child: err == null
-              ? const Center(
-                  child: Text('—', style: TextStyle(color: Colors.grey, fontSize: 13)))
+              ? Center(
+                  child: Text('—', style: TextStyle(color: c.textSecondary, fontSize: 13)))
               : Text(
                   formatMetrologicalValue(err, widget.divMin),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: err.abs() > (widget.divMin ?? 0.001)
-                        ? _kRed
-                        : Colors.green.shade700,
+                        ? c.brandAccent
+                        : c.dotGreen,
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
@@ -275,22 +282,23 @@ class _ExactitudTableState extends State<ExactitudTable>
     );
   }
 
-  Widget _inp(TextEditingController c, int dec, {String? hint}) {
-    final val = double.tryParse(c.text.trim().replaceAll(',', '.'));
+  Widget _inp(TextEditingController ctrl, int dec, PesaPalette c, {String? hint}) {
+    final val = double.tryParse(ctrl.text.trim().replaceAll(',', '.'));
     final invalido = val != null && !isValidDivMin(val, widget.divMin);
+    final Color errorFill = c.isDark ? const Color(0xFF34181D) : const Color(0xFFFFEBEE);
 
     return Padding(
       padding: const EdgeInsets.all(2),
       child: Focus(
         onFocusChange: (hasFocus) {
-          if (!hasFocus && c.text.trim().isNotEmpty) {
-            double? n = double.tryParse(c.text.replaceAll(',', '.'));
-            if (n != null) c.text = formatMetrologicalValue(n, widget.divMin);
+          if (!hasFocus && ctrl.text.trim().isNotEmpty) {
+            double? n = double.tryParse(ctrl.text.replaceAll(',', '.'));
+            if (n != null) ctrl.text = formatMetrologicalValue(n, widget.divMin);
             setState(() {});
           }
         },
         child: TextField(
-          controller: c,
+          controller: ctrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
           textInputAction: TextInputAction.next,
           inputFormatters: [
@@ -300,34 +308,34 @@ class _ExactitudTableState extends State<ExactitudTable>
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: invalido ? Colors.red : Colors.black87,
+            color: invalido ? c.dotRed : c.textPrimary,
           ),
           decoration: InputDecoration(
             isDense: true,
             hintText: hint ?? (dec == 0 ? '0' : '0.${'0' * dec}'),
-            hintStyle: TextStyle(color: Colors.grey.shade300, fontSize: 11),
+            hintStyle: TextStyle(color: c.textTertiary, fontSize: 11),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : Colors.grey.shade300,
+                color: invalido ? c.dotRed : c.borderStrong,
                 width: invalido ? 1.5 : 1,
               ),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : Colors.grey.shade300,
+                color: invalido ? c.dotRed : c.borderStrong,
                 width: invalido ? 1.5 : 1,
               ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : _kRed,
+                color: invalido ? c.dotRed : c.brandAccent,
                 width: 2,
               ),
             ),
-            fillColor: invalido ? const Color(0xFFFFEBEE) : Colors.white,
+            fillColor: invalido ? errorFill : (c.isDark ? c.surfaceElevated : c.surface),
             filled: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           ),

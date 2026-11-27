@@ -591,16 +591,17 @@ class BloqueFecha(QFrame):
             self._table.setItem(row, _IDX_ESCANEO, CeldaEstado(txt, bg, fg))
 
             # Entrega Impresa — eje central de la REGLA ESTRICTA
+            from ui.theme import PALETTE as _P
             impresa = lote.get("entrega_impresa_recibida", False)
             txt_imp, bg_imp, fg_imp = _bool_icon(impresa if impresa is not None else None)
             item_imp = CeldaEstado(txt_imp, bg_imp, fg_imp)
             if impresa:
-                item_imp.setBackground(QColor("#F5F5F7"))
-                item_imp.setForeground(QColor("#111827"))
+                item_imp.setBackground(QColor(_P["surface_muted"]))
+                item_imp.setForeground(QColor(_P["text_primary"]))
                 item_imp.setText("  ✓ Entregado  ")
             else:
-                item_imp.setBackground(QColor("#FFFFFF"))
-                item_imp.setForeground(QColor("#C8102E"))
+                item_imp.setBackground(QColor(_P["surface"]))
+                item_imp.setForeground(QColor(_P["brand_accent"]))
                 item_imp.setText("  ✗ Pendiente  ")
             self._table.setItem(row, _IDX_IMPRESA, item_imp)
 

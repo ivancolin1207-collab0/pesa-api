@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/metrology_helper.dart';
 import '../services/pdf_service.dart';
+import '../theme/pesa_theme.dart';
 
 class EnlacesSustitucionTable extends StatefulWidget {
   final List<Map<String, dynamic>> rows;
@@ -345,10 +346,12 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final maxErr = _calcularMaxError();
     final dec = getDecimalsFromD(widget.divMin);
     final maxErrStr = formatoMilesEspacio(formatearErrorSinCeros(maxErr));
     final totalSustituto = _calcularTotalSustituto();
+    final Color altBg = c.isDark ? const Color(0xFF222226) : const Color(0xFFF9F9F9);
 
     return SingleChildScrollView(
       controller: _scrollController,
@@ -365,11 +368,12 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
           // ── Card de Cargas de Sustitución (Sustituto / Peso) ──
           if (widget.onSustitutosChanged != null || _sustitutosList.isNotEmpty) ...[
             Card(
+              color: c.surface,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
-                side: BorderSide(color: Colors.grey.shade200),
+                side: BorderSide(color: c.border),
               ),
-              elevation: 1,
+              elevation: 0,
               child: Padding(
                 padding: const EdgeInsets.all(14),
                 child: Column(
@@ -377,21 +381,22 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.layers, size: 20, color: _kRed),
+                        Icon(Icons.layers, size: 20, color: c.brandAccent),
                         const SizedBox(width: 8),
-                        const Text(
-                          'MATERIALES / PESOS SUSTITUTOS',
-                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _kRed, letterSpacing: 0.5),
+                        Expanded(
+                          child: Text(
+                            'MATERIALES / PESOS SUSTITUTOS',
+                            style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: c.brandAccent, letterSpacing: 0.5),
+                          ),
                         ),
-                        const Spacer(),
-                        ElevatedButton.icon(
+                        OutlinedButton.icon(
                           onPressed: _addSustituto,
                           icon: const Icon(Icons.add, size: 16),
                           label: const Text('Agregar sustituto', style: TextStyle(fontSize: 12)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFD9E2F3),
-                            foregroundColor: const Color(0xFF1D4ED8),
-                            elevation: 0,
+                          style: OutlinedButton.styleFrom(
+                            backgroundColor: c.surfaceElevated,
+                            foregroundColor: c.textPrimary,
+                            side: BorderSide(color: c.borderStrong),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           ),
                         ),
@@ -400,66 +405,67 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                     const SizedBox(height: 6),
                     Text(
                       'Si no se capturan sustitutos con peso > 0, este recuadro se oculta y elimina automáticamente del PDF final.',
-                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      style: TextStyle(fontSize: 11, color: c.textSecondary),
                     ),
                     const SizedBox(height: 10),
                     if (_sustNombreCtrls.isEmpty)
                       Container(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
                         alignment: Alignment.center,
                         decoration: BoxDecoration(
-                          color: Colors.grey.shade50,
+                          color: c.surfaceElevated,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.grey.shade200),
+                          border: Border.all(color: c.border),
                         ),
                         child: Text(
                           'No hay sustitutos registrados. Presiona "+ Agregar sustituto" para capturar materiales.',
-                          style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                          style: TextStyle(fontSize: 12, color: c.textSecondary),
+                          textAlign: TextAlign.center,
                         ),
                       )
                     else ...[
                       Table(
-                        border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
+                        border: TableBorder.all(color: c.border, width: 0.8),
                         columnWidths: const {
                           0: FlexColumnWidth(2.5),
                           1: FlexColumnWidth(2.0),
                           2: FlexColumnWidth(0.8),
                         },
                         children: [
-                          const TableRow(
-                            decoration: BoxDecoration(color: Color(0xFFD9E2F3)),
+                          TableRow(
+                            decoration: BoxDecoration(color: c.surfaceElevated),
                             children: [
-                              Padding(padding: EdgeInsets.all(8), child: Text('SUSTITUTO', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
-                              Padding(padding: EdgeInsets.all(8), child: Text('PESO', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
-                              Padding(padding: EdgeInsets.all(8), child: Text('ACCIONES', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.black))),
+                              Padding(padding: const EdgeInsets.all(8), child: Text('SUSTITUTO', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: c.textPrimary))),
+                              Padding(padding: const EdgeInsets.all(8), child: Text('PESO', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: c.textPrimary))),
+                              Padding(padding: const EdgeInsets.all(8), child: Text('ACCIONES', textAlign: TextAlign.center, style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: c.textPrimary))),
                             ],
                           ),
                           for (int i = 0; i < _sustNombreCtrls.length; i++)
                             TableRow(
-                              decoration: BoxDecoration(color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9)),
+                              decoration: BoxDecoration(color: i % 2 == 0 ? c.surface : altBg),
                               children: [
-                                _sustInput(_sustNombreCtrls[i], hint: 'Ej. Agua 1, Bloque A', isNum: false),
-                                _sustInput(_sustPesoCtrls[i], hint: '0.00', isNum: true),
+                                _sustInput(_sustNombreCtrls[i], c, hint: 'Ej. Agua 1, Bloque A', isNum: false),
+                                _sustInput(_sustPesoCtrls[i], c, hint: '0.00', isNum: true),
                                 IconButton(
-                                  icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                  icon: Icon(Icons.delete_outline, size: 18, color: c.dotRed),
                                   onPressed: () => _removeSustituto(i),
                                   tooltip: 'Eliminar',
                                 ),
                               ],
                             ),
                           TableRow(
-                            decoration: const BoxDecoration(color: Color(0xFFF3F4F6)),
+                            decoration: BoxDecoration(color: c.surfaceElevated),
                             children: [
-                              const Padding(
-                                padding: EdgeInsets.all(8),
-                                child: Text('TOTAL', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.black)),
+                              Padding(
+                                padding: const EdgeInsets.all(8),
+                                child: Text('TOTAL', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: c.textPrimary)),
                               ),
                               Padding(
                                 padding: const EdgeInsets.all(8),
                                 child: Text(
                                   formatoMilesEspacio(dec > 0 ? totalPesoStr(dec, totalSustituto) : totalSustituto.round().toString()),
                                   textAlign: TextAlign.right,
-                                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: _kRed),
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: c.brandAccent),
                                 ),
                               ),
                               const SizedBox.shrink(),
@@ -477,8 +483,12 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
 
           // ── Card Tabla Exactitud con Cargas de Sustitución ──
           Card(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            elevation: 1,
+            color: c.surface,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: c.border),
+            ),
+            elevation: 0,
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -486,11 +496,13 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                 children: [
                   Row(
                     children: [
-                      const Text(
-                        'EXACTITUD — CARGAS DE SUSTITUCIÓN',
-                        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _kRed, letterSpacing: 0.5),
+                      Expanded(
+                        child: Text(
+                          'EXACTITUD — CARGAS DE SUSTITUCIÓN',
+                          style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: c.brandAccent, letterSpacing: 0.5),
+                        ),
                       ),
-                      const Spacer(),
+                      const SizedBox(width: 8),
                       ElevatedButton.icon(
                         onPressed: _addPoint,
                         icon: const Icon(Icons.add, size: 16),
@@ -498,7 +510,7 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _kRed,
                           foregroundColor: Colors.white,
-                          elevation: 1,
+                          elevation: 0,
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         ),
                       ),
@@ -508,7 +520,7 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                   SizedBox(
                     width: double.infinity,
                     child: Table(
-                      border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
+                      border: TableBorder.all(color: c.border, width: 0.8),
                       columnWidths: const {
                         0: FlexColumnWidth(0.8), // N
                         1: FlexColumnWidth(2.0), // PESAS
@@ -521,8 +533,8 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                       },
                       defaultVerticalAlignment: TableCellVerticalAlignment.middle,
                       children: [
-                        _hdr(['N', 'PESAS', 'AGUA', 'AGUA + PESAS', 'INDICACIÓN', 'REGRESO', 'ERROR', '']),
-                        for (int i = 0; i < _pesasCtrls.length; i++) _row(i),
+                        _hdr(['N', 'PESAS', 'AGUA', 'AGUA + PESAS', 'INDICACIÓN', 'REGRESO', 'ERROR', ''], c),
+                        for (int i = 0; i < _pesasCtrls.length; i++) _row(i, c),
                       ],
                     ),
                   ),
@@ -531,15 +543,15 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: Colors.grey.shade50,
+                      color: c.surfaceElevated,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: c.border),
                     ),
                     child: Row(
                       children: [
-                        const Text(
+                        Text(
                           'ERROR MÁXIMO ENCONTRADO:',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.black87),
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: c.textPrimary),
                         ),
                         const Spacer(),
                         Text(
@@ -547,7 +559,7 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w900,
-                            color: maxErr > 0 ? _kRed : Colors.green.shade700,
+                            color: maxErr > 0 ? c.brandAccent : c.dotGreen,
                           ),
                         ),
                       ],
@@ -565,21 +577,21 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
 
   String totalPesoStr(int dec, double val) => val.toStringAsFixed(dec);
 
-  TableRow _hdr(List<String> l) => TableRow(
-        decoration: const BoxDecoration(color: Color(0xFF1C1C1C)),
+  TableRow _hdr(List<String> l, PesaPalette c) => TableRow(
+        decoration: BoxDecoration(color: c.isDark ? c.surfaceElevated : const Color(0xFF1C1C1E)),
         children: l
             .map((s) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
                   child: Text(
                     s,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Colors.white),
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: c.isDark ? c.textPrimary : Colors.white),
                   ),
                 ))
             .toList(),
       );
 
-  TableRow _row(int i) {
+  TableRow _row(int i, PesaPalette c) {
     final err = _calcularErrorFila(i);
     final errStr = err != null
         ? formatoMilesEspacio(formatearErrorSinCeros(err))
@@ -587,21 +599,22 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
 
     final key = i < _rowKeys.length ? _rowKeys[i] : null;
     final fns = i < _rowFocusNodes.length ? _rowFocusNodes[i] : null;
+    final Color altBg = c.isDark ? const Color(0xFF222226) : const Color(0xFFF9F9F9);
 
     return TableRow(
-      decoration: BoxDecoration(color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9)),
+      decoration: BoxDecoration(color: i % 2 == 0 ? c.surface : altBg),
       children: [
         Container(
           key: key,
           padding: const EdgeInsets.all(8),
           alignment: Alignment.center,
-          child: Text('${i + 1}', textAlign: TextAlign.center, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+          child: Text('${i + 1}', textAlign: TextAlign.center, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: c.textPrimary)),
         ),
-        _input(_pesasCtrls[i], focusNode: fns != null ? fns[0] : null, onTap: () => _scrollToRow(i)),
-        _input(_aguaCtrls[i], focusNode: fns != null ? fns[1] : null, onTap: () => _scrollToRow(i)),
-        _input(_aguaPesasCtrls[i], hint: 'Auto', focusNode: fns != null ? fns[2] : null, onTap: () => _scrollToRow(i)),
-        _input(_indicacionCtrls[i], focusNode: fns != null ? fns[3] : null, onTap: () => _scrollToRow(i)),
-        _input(_regresoCtrls[i], focusNode: fns != null ? fns[4] : null, onTap: () => _scrollToRow(i)),
+        _input(_pesasCtrls[i], c, focusNode: fns != null ? fns[0] : null, onTap: () => _scrollToRow(i)),
+        _input(_aguaCtrls[i], c, focusNode: fns != null ? fns[1] : null, onTap: () => _scrollToRow(i)),
+        _input(_aguaPesasCtrls[i], c, hint: 'Auto', focusNode: fns != null ? fns[2] : null, onTap: () => _scrollToRow(i)),
+        _input(_indicacionCtrls[i], c, focusNode: fns != null ? fns[3] : null, onTap: () => _scrollToRow(i)),
+        _input(_regresoCtrls[i], c, focusNode: fns != null ? fns[4] : null, onTap: () => _scrollToRow(i)),
         Padding(
           padding: const EdgeInsets.all(8),
           child: Text(
@@ -610,13 +623,13 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
             style: TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 12,
-              color: err != null ? (err.abs() > 0 ? _kRed : Colors.green.shade700) : Colors.black87,
+              color: err != null ? (err.abs() > 0 ? c.brandAccent : c.dotGreen) : c.textSecondary,
             ),
           ),
         ),
         if (_pesasCtrls.length > 5)
           IconButton(
-            icon: const Icon(Icons.remove_circle_outline, size: 18, color: Colors.grey),
+            icon: Icon(Icons.remove_circle_outline, size: 18, color: c.textSecondary),
             onPressed: () => _removePoint(i),
             tooltip: 'Eliminar punto',
           )
@@ -627,7 +640,8 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
   }
 
   Widget _input(
-    TextEditingController c, {
+    TextEditingController ctrl,
+    PesaPalette c, {
     String? hint,
     FocusNode? focusNode,
     VoidCallback? onTap,
@@ -636,44 +650,44 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
         child: SizedBox(
           height: 38,
           child: TextField(
-            controller: c,
+            controller: ctrl,
             focusNode: focusNode,
             onTap: onTap,
             textAlign: TextAlign.center,
             keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.textPrimary),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+              hintStyle: TextStyle(fontSize: 11, color: c.textTertiary),
               contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
               filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Colors.grey.shade300)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: Colors.grey.shade300)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _kRed, width: 1.5)),
+              fillColor: c.isDark ? c.surfaceElevated : c.surface,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.borderStrong)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.borderStrong)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.brandAccent, width: 1.5)),
             ),
           ),
         ),
       );
 
-  Widget _sustInput(TextEditingController c, {required String hint, required bool isNum}) => Padding(
+  Widget _sustInput(TextEditingController ctrl, PesaPalette c, {required String hint, required bool isNum}) => Padding(
         padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
         child: SizedBox(
           height: 32,
           child: TextField(
-            controller: c,
+            controller: ctrl,
             textAlign: isNum ? TextAlign.right : TextAlign.left,
             keyboardType: isNum ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textPrimary),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: TextStyle(fontSize: 11, color: Colors.grey.shade400),
+              hintStyle: TextStyle(fontSize: 11, color: c.textTertiary),
               contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
               filled: true,
-              fillColor: Colors.white,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.grey.shade300)),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: Colors.grey.shade300)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: const BorderSide(color: _kRed, width: 1.5)),
+              fillColor: c.isDark ? c.surfaceElevated : c.surface,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: c.borderStrong)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: c.borderStrong)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(4), borderSide: BorderSide(color: c.brandAccent, width: 1.5)),
             ),
           ),
         ),

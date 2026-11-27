@@ -365,39 +365,21 @@ def main() -> int:
 
     app = QApplication(sys.argv)
 
-    # ── CRITICO: Forzar estilo Fusion + paleta CLARA para evitar que Windows 11
-    #    Dark Mode sobreescriba los popups flotantes de QComboBox con fondo negro.
-    #    Fusion es el unico estilo de Qt que respeta 100% el QSS del popup.
+    # ── Tema Dual Apple Minimalist (Claro / Oscuro / Automático del Sistema) ──
+    # Default obligatorio en primera ejecución: "system" (sigue el tema de Windows
+    # en vivo vía app.styleHints().colorSchemeChanged). Fusion garantiza 100% fidelidad QSS.
+    _theme_initialized = False
     try:
-        from PyQt6.QtWidgets import QStyleFactory
-        from PyQt6.QtGui     import QPalette, QColor
-        app.setStyle(QStyleFactory.create("Fusion"))
-
-        # Paleta clara corporativa PESA
-        pal = QPalette()
-        # Fondos
-        pal.setColor(QPalette.ColorRole.Window,          QColor("#F0F2F5"))
-        pal.setColor(QPalette.ColorRole.WindowText,      QColor("#0F172A"))
-        pal.setColor(QPalette.ColorRole.Base,            QColor("#FFFFFF"))   # combo/list background
-        pal.setColor(QPalette.ColorRole.AlternateBase,   QColor("#F8FAFC"))
-        pal.setColor(QPalette.ColorRole.ToolTipBase,     QColor("#1E293B"))
-        pal.setColor(QPalette.ColorRole.ToolTipText,     QColor("#FFFFFF"))
-        pal.setColor(QPalette.ColorRole.Text,            QColor("#0F172A"))   # combo/list text
-        pal.setColor(QPalette.ColorRole.Button,          QColor("#FFFFFF"))
-        pal.setColor(QPalette.ColorRole.ButtonText,      QColor("#0F172A"))
-        pal.setColor(QPalette.ColorRole.BrightText,      QColor("#C8102E"))
-        pal.setColor(QPalette.ColorRole.Link,            QColor("#C8102E"))
-        pal.setColor(QPalette.ColorRole.Highlight,       QColor("#E5E7EB"))   # seleccion neutra corporativa
-        pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#111827"))   # texto seleccionado oscuro
-        pal.setColor(QPalette.ColorRole.PlaceholderText, QColor("#94A3B8"))
-        # Disabled
-        pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Text,       QColor("#CBD5E1"))
-        pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.ButtonText, QColor("#CBD5E1"))
-        pal.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base,       QColor("#F1F5F9"))
-        app.setPalette(pal)
-        logger.debug("Tema Fusion + paleta clara corporativa PESA aplicada") if 'logger' in dir() else None
+        from ui.theme import theme_manager
+        _resolved = theme_manager.init_app(app)
+        _theme_initialized = True
     except Exception as _e:
-        pass  # Si falla, Qt usara el estilo del sistema (aceptable)
+        _resolved = "light"
+        try:
+            from PyQt6.QtWidgets import QStyleFactory
+            app.setStyle(QStyleFactory.create("Fusion"))
+        except Exception:
+            pass
 
     # ① CRITICO: evitar que Qt cierre el event loop cuando el LoginDialog
     #    se acepta (y aun no hay ninguna ventana visible)
@@ -411,7 +393,7 @@ def main() -> int:
         app.setApplicationName(_cfg.APP_NAME)
         app.setApplicationVersion(_cfg.APP_VERSION)
         app.setOrganizationName(getattr(_cfg, "APP_ORGANIZATION", "PESA"))
-        logger.info("Iniciando %s v%s", _cfg.APP_NAME, _cfg.APP_VERSION)
+        logger.info("Iniciando %s v%s (tema=%s)", _cfg.APP_NAME, _cfg.APP_VERSION, _resolved)
     except Exception as exc:
         logger.warning("No se pudo cargar config.py: %s", exc)
 
@@ -428,15 +410,15 @@ def main() -> int:
     except Exception as exc:
         logger.warning("Error configurando fuente: %s", exc)
 
-    # ── QSS (tolerante a fallos) ───────────────────────────────────────────────
-    try:
-        stylesheet = _load_qss_safe(logger)
-        if stylesheet:
-            app.setStyleSheet(stylesheet)
-            logger.info("QSS aplicado (%d bytes)", len(stylesheet))
-    except Exception as exc:
-        logger.warning("Error aplicando QSS (se usará estilo por defecto): %s", exc)
-        # NO crashear — el estilo por defecto de Qt es perfectamente funcional
+    # ── QSS fallback solo si theme_manager no pudo inicializar ─────────────────
+    if not _theme_initialized:
+        try:
+            stylesheet = _load_qss_safe(logger)
+            if stylesheet:
+                app.setStyleSheet(stylesheet)
+                logger.info("QSS fallback aplicado (%d bytes)", len(stylesheet))
+        except Exception as exc:
+            logger.warning("Error aplicando QSS (se usará estilo por defecto): %s", exc)
 
     # ── Conexión a BD (nunca bloquea) ─────────────────────────────────────────
     try:

@@ -266,6 +266,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
   @override
   Widget build(BuildContext context) {
     super.build(context); // requerido por AutomaticKeepAliveClientMixin
+    final c = PesaColors.of(context);
     if (!widget.aplicaExcentricidad) {
       final selMotivo = inferirMotivoNoExcentricidad(
         widget.motivoNoExcentricidad,
@@ -282,10 +283,10 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
         padding: EdgeInsets.all(isCoverScreen(context) ? 12 : 16),
         child: Card(
           elevation: 0,
-          color: PesaColors.surface,
+          color: c.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: PesaColors.borderStrong, width: 1.2),
+            side: BorderSide(color: c.borderStrong, width: 1.2),
           ),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 18),
@@ -293,27 +294,27 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                const Row(
+                Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.block, size: 24, color: _kRed),
-                    SizedBox(width: 10),
+                    Icon(Icons.block, size: 24, color: c.brandAccent),
+                    const SizedBox(width: 10),
                     Flexible(
                       child: Text(
                         'NO APLICA PRUEBA DE EXCENTRICIDAD',
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: PesaColors.textPrimary,
+                          color: c.textPrimary,
                         ),
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 6),
-                const Text(
+                Text(
                   'Selecciona el tipo de instrumento por el cual no aplica la prueba:',
-                  style: TextStyle(fontSize: 12, color: PesaColors.textSecondary),
+                  style: TextStyle(fontSize: 12, color: c.textSecondary),
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 14),
@@ -334,31 +335,31 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                         width: isCoverScreen(context) ? 142 : 154,
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                         decoration: BoxDecoration(
-                          color: active ? PesaColors.surfaceMuted : Colors.white,
+                          color: active ? c.surfaceMuted : c.surface,
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                            color: active ? _kRed : PesaColors.borderStrong,
+                            color: active ? c.brandAccent : c.borderStrong,
                             width: active ? 1.8 : 1.0,
                           ),
                         ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(ic, size: 26, color: active ? _kRed : PesaColors.textSecondary),
+                            Icon(ic, size: 26, color: active ? c.brandAccent : c.textSecondary),
                             const SizedBox(height: 4),
                             Text(
                               k,
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w700,
-                                color: active ? _kRed : PesaColors.textPrimary,
+                                color: active ? c.brandAccent : c.textPrimary,
                               ),
                             ),
                             const SizedBox(height: 2),
                             Text(
                               sub,
                               textAlign: TextAlign.center,
-                              style: const TextStyle(fontSize: 10, color: PesaColors.textSecondary),
+                              style: TextStyle(fontSize: 10, color: c.textSecondary),
                             ),
                           ],
                         ),
@@ -383,10 +384,10 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
         // ── Selector de Geometría de Excentricidad ──────────────────────
         Card(
           elevation: 0,
-          color: PesaColors.surface,
+          color: c.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: PesaColors.border),
+            side: BorderSide(color: c.border),
           ),
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -399,17 +400,17 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    const Row(
+                    Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.architecture_outlined, color: _kRed, size: 20),
-                        SizedBox(width: 8),
+                        Icon(Icons.architecture_outlined, color: c.brandAccent, size: 20),
+                        const SizedBox(width: 8),
                         Text(
                           'Geometría de Excentricidad',
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
-                            color: PesaColors.textPrimary,
+                            color: c.textPrimary,
                           ),
                         ),
                       ],
@@ -417,16 +418,16 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: PesaColors.surfaceMuted,
+                        color: c.surfaceMuted,
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: PesaColors.borderStrong),
+                        border: Border.all(color: c.borderStrong),
                       ),
                       child: Text(
                         _isCamioneraOrFerro ? '$_numPos Secciones' : '5 Puntos',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: PesaColors.textPrimary,
+                          color: c.textPrimary,
                         ),
                       ),
                     ),
@@ -442,6 +443,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                       icon: Icons.crop_square,
                       value: 'Plataforma',
                       selected: _geometriaActual == 'Plataforma',
+                      c: c,
                       onTap: () => _onGeometriaSelected('Plataforma'),
                     ),
                     _buildGeometryOption(
@@ -449,6 +451,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                       icon: Icons.circle_outlined,
                       value: 'Circular',
                       selected: _geometriaActual == 'Circular',
+                      c: c,
                       onTap: () => _onGeometriaSelected('Circular'),
                     ),
                     _buildGeometryOption(
@@ -456,6 +459,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                       icon: Icons.view_column_outlined,
                       value: 'Camionera',
                       selected: _geometriaActual == 'Camionera',
+                      c: c,
                       onTap: () => _onGeometriaSelected('Camionera'),
                     ),
                   ],
@@ -467,22 +471,22 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                     spacing: 6,
                     runSpacing: 6,
                     children: [
-                      const Text(
+                      Text(
                         'Secciones:',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: PesaColors.textSecondary),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textSecondary),
                       ),
                       for (final n in [3, 4, 5, 6])
                         ChoiceChip(
                           label: Text('$n sec', style: TextStyle(
                             fontSize: 11,
                             fontWeight: _numPos == n ? FontWeight.bold : FontWeight.normal,
-                            color: _numPos == n ? Colors.white : PesaColors.textPrimary,
+                            color: _numPos == n ? Colors.white : c.textPrimary,
                           )),
                           selected: _numPos == n,
                           showCheckmark: false,
                           selectedColor: _kRed,
-                          backgroundColor: Colors.white,
-                          side: BorderSide(color: _numPos == n ? _kRed : PesaColors.border),
+                          backgroundColor: c.surface,
+                          side: BorderSide(color: _numPos == n ? _kRed : c.border),
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           visualDensity: VisualDensity.compact,
                           onSelected: (selected) {
@@ -501,11 +505,11 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
         // ── Campo Único: Carga de Prueba (kg) ─────────────────────────────
         Card(
           elevation: 0,
-          color: PesaColors.surface,
+          color: c.surface,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
             side: BorderSide(
-              color: cargaInvalida ? _kRed : PesaColors.border,
+              color: cargaInvalida ? c.dotRed : c.border,
               width: cargaInvalida ? 1.5 : 1,
             ),
           ),
@@ -520,17 +524,17 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                   spacing: 8,
                   runSpacing: 4,
                   children: [
-                    const Row(
+                    Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.scale_outlined, color: _kRed, size: 19),
-                        SizedBox(width: 8),
+                        Icon(Icons.scale_outlined, color: c.brandAccent, size: 19),
+                        const SizedBox(width: 8),
                         Text(
                           'Carga de Prueba (kg)',
                           style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w700,
-                            color: PesaColors.textPrimary,
+                            color: c.textPrimary,
                           ),
                         ),
                       ],
@@ -538,10 +542,10 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                     if (widget.divMin != null)
                       Text(
                         'd = ${widget.divMin} ($dec dec.)',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w600,
-                          color: PesaColors.textSecondary,
+                          color: c.textSecondary,
                         ),
                       ),
                   ],
@@ -577,26 +581,26 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: cargaInvalida ? _kRed : PesaColors.textPrimary,
+                      color: cargaInvalida ? c.dotRed : c.textPrimary,
                       fontFeatures: const [FontFeature.tabularFigures()],
                     ),
                     decoration: InputDecoration(
                       isDense: true,
                       hintText: '0.${'0' * dec}',
-                      hintStyle: const TextStyle(color: PesaColors.textTertiary, fontSize: 13),
+                      hintStyle: TextStyle(color: c.textTertiary, fontSize: 13),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: cargaInvalida ? _kRed : PesaColors.borderStrong),
+                        borderSide: BorderSide(color: cargaInvalida ? c.dotRed : c.borderStrong),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: BorderSide(color: cargaInvalida ? _kRed : PesaColors.borderStrong),
+                        borderSide: BorderSide(color: cargaInvalida ? c.dotRed : c.borderStrong),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: _kRed, width: 1.8),
+                        borderSide: BorderSide(color: c.brandAccent, width: 1.8),
                       ),
-                      fillColor: Colors.white,
+                      fillColor: c.isDark ? c.surfaceElevated : c.surface,
                       filled: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                     ),
@@ -606,7 +610,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                   const SizedBox(height: 6),
                   Text(
                     divMinErrorMsg(widget.divMin),
-                    style: const TextStyle(color: _kRed, fontSize: 11, fontWeight: FontWeight.w600),
+                    style: TextStyle(color: c.dotRed, fontSize: 11, fontWeight: FontWeight.w600),
                   ),
                 ],
               ],
@@ -618,36 +622,36 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
 
     final tableCard = Card(
       elevation: 0,
-      color: PesaColors.surface,
+      color: c.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: const BorderSide(color: PesaColors.border),
+        side: BorderSide(color: c.border),
       ),
       child: Padding(
         padding: EdgeInsets.all(isCoverScreen(context) ? 12 : 16),
         child: Column(
           children: [
-            const Row(
+            Row(
               children: [
                 Text(
                   'EXCENTRICIDAD',
                   style: TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: 13,
-                    color: _kRed,
+                    color: c.brandAccent,
                     letterSpacing: 0.8,
                   ),
                 ),
-                Spacer(),
+                const Spacer(),
                 Text(
                   'Error = L. Final - Carga',
-                  style: TextStyle(fontSize: 10.5, color: PesaColors.textSecondary),
+                  style: TextStyle(fontSize: 10.5, color: c.textSecondary),
                 ),
               ],
             ),
             const SizedBox(height: 12),
             Table(
-              border: TableBorder.all(color: PesaColors.border),
+              border: TableBorder.all(color: c.border),
               columnWidths: const {
                 0: FlexColumnWidth(1.6),
                 1: FlexColumnWidth(1.8),
@@ -655,9 +659,9 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                 3: FlexColumnWidth(1.5),
               },
               children: [
-                _hdr(['POSICIÓN', 'L. INICIAL', 'L. FINAL', 'ERROR']),
+                _hdr(['POSICIÓN', 'L. INICIAL', 'L. FINAL', 'ERROR'], c),
                 for (int i = 0; i < _numPos; i++)
-                  _row(i, _posLabels, dec),
+                  _row(i, _posLabels, dec, c),
               ],
             ),
 
@@ -672,8 +676,8 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
                   if (_numPos > 2)
                     OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: _kRed,
-                        side: const BorderSide(color: _kRed),
+                        foregroundColor: c.brandAccent,
+                        side: BorderSide(color: c.brandAccent),
                         minimumSize: const Size(0, 42),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       ),
@@ -715,23 +719,23 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
     );
   }
 
-  TableRow _hdr(List<String> labels) => TableRow(
-    decoration: const BoxDecoration(color: Color(0xFF1C1C1C)),
+  TableRow _hdr(List<String> labels, PesaPalette c) => TableRow(
+    decoration: BoxDecoration(color: c.isDark ? c.surfaceElevated : const Color(0xFF1C1C1E)),
     children: labels.map((l) => Padding(
       padding: const EdgeInsets.all(8),
       child: Text(
         l,
         textAlign: TextAlign.center,
-        style: const TextStyle(
+        style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
-          color: Colors.white,
+          color: c.isDark ? c.textPrimary : Colors.white,
         ),
       ),
     )).toList(),
   );
 
-  TableRow _row(int i, List<String> posLabels, int dec) {
+  TableRow _row(int i, List<String> posLabels, int dec, PesaPalette c) {
     final ini = double.tryParse(_inicialCtrls[i].text.trim().replaceAll(',', '.'));
     final fin = double.tryParse(_finalCtrls[i].text.trim().replaceAll(',', '.'));
     final carga = double.tryParse(_cargaCtrl.text.trim().replaceAll(',', '.')) ?? 0.0;
@@ -743,33 +747,34 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
     );
 
     final posLabel = i < posLabels.length ? posLabels[i] : 'Sección ${i + 1}';
+    final Color altBg = c.isDark ? const Color(0xFF222226) : const Color(0xFFF9F9F9);
 
     return TableRow(
       decoration: BoxDecoration(
-        color: i % 2 == 0 ? Colors.white : const Color(0xFFF9F9F9),
+        color: i % 2 == 0 ? c.surface : altBg,
       ),
       children: [
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           child: Text(
             posLabel,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+            style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: c.textPrimary),
           ),
         ),
-        _inputField(_inicialCtrls[i], dec),
-        _inputField(_finalCtrls[i], dec),
+        _inputField(_inicialCtrls[i], dec, c),
+        _inputField(_finalCtrls[i], dec, c),
         Padding(
           padding: const EdgeInsets.all(4),
           child: err == null
-              ? const Center(
-                  child: Text('—', style: TextStyle(color: Colors.grey, fontSize: 12)))
+              ? Center(
+                  child: Text('—', style: TextStyle(color: c.textSecondary, fontSize: 12)))
               : Text(
                   formatMetrologicalValue(err, widget.divMin),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: err.abs() > (widget.divMin ?? 0.001)
-                        ? _kRed
-                        : Colors.green.shade700,
+                        ? c.brandAccent
+                        : c.dotGreen,
                     fontWeight: FontWeight.w700,
                     fontSize: 13,
                   ),
@@ -779,21 +784,22 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
     );
   }
 
-  Widget _inputField(TextEditingController c, int dec) {
-    final val = double.tryParse(c.text.trim().replaceAll(',', '.'));
+  Widget _inputField(TextEditingController ctrl, int dec, PesaPalette c) {
+    final val = double.tryParse(ctrl.text.trim().replaceAll(',', '.'));
     final invalido = val != null && !isValidDivMin(val, widget.divMin);
+    final Color errorFill = c.isDark ? const Color(0xFF34181D) : const Color(0xFFFFEBEE);
 
     return Padding(
       padding: const EdgeInsets.all(2),
       child: Focus(
         onFocusChange: (hasFocus) {
-          if (!hasFocus && c.text.trim().isNotEmpty) {
-            final raw = c.text.trim().replaceAll(',', '.');
+          if (!hasFocus && ctrl.text.trim().isNotEmpty) {
+            final raw = ctrl.text.trim().replaceAll(',', '.');
             final double? n = double.tryParse(raw);
             if (n != null) {
               final formatted = formatMetrologicalValue(n, widget.divMin);
-              if (c.text != formatted) {
-                c.text = formatted;
+              if (ctrl.text != formatted) {
+                ctrl.text = formatted;
               }
             }
             _notify();
@@ -801,7 +807,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
           }
         },
         child: TextField(
-          controller: c,
+          controller: ctrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
           textInputAction: TextInputAction.next,
           inputFormatters: [
@@ -812,7 +818,6 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
             final raw = val.trim().replaceAll(',', '.');
             final double? valor = double.tryParse(raw);
             if (valor == null) {
-              // No calcular ni romper, dejar en estado transitorio
               return;
             }
             _notify();
@@ -821,34 +826,34 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
           style: TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: invalido ? Colors.red : Colors.black87,
+            color: invalido ? c.dotRed : c.textPrimary,
           ),
           decoration: InputDecoration(
             isDense: true,
             hintText: dec == 0 ? '0' : '0.${'0' * dec}',
-            hintStyle: TextStyle(color: Colors.grey.shade300, fontSize: 11),
+            hintStyle: TextStyle(color: c.textTertiary, fontSize: 11),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : Colors.grey.shade300,
+                color: invalido ? c.dotRed : c.borderStrong,
                 width: invalido ? 1.5 : 1,
               ),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : Colors.grey.shade300,
+                color: invalido ? c.dotRed : c.borderStrong,
                 width: invalido ? 1.5 : 1,
               ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(6),
               borderSide: BorderSide(
-                color: invalido ? Colors.red : _kRed,
+                color: invalido ? c.dotRed : c.brandAccent,
                 width: 2,
               ),
             ),
-            fillColor: invalido ? const Color(0xFFFFEBEE) : Colors.white,
+            fillColor: invalido ? errorFill : (c.isDark ? c.surfaceElevated : c.surface),
             filled: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           ),
@@ -862,6 +867,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
     required IconData icon,
     required String value,
     required bool selected,
+    required PesaPalette c,
     required VoidCallback onTap,
   }) {
     return InkWell(
@@ -871,10 +877,10 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? const Color(0xFFF2F2F7) : const Color(0xFFFFFFFF),
+          color: selected ? c.surfaceMuted : c.surface,
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: selected ? _kRed : const Color(0xFFD2D2D7),
+            color: selected ? c.brandAccent : c.borderStrong,
             width: selected ? 1.5 : 1.0,
           ),
         ),
@@ -884,7 +890,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
             Icon(
               selected ? Icons.check_circle_rounded : icon,
               size: 16,
-              color: selected ? _kRed : Colors.grey.shade700,
+              color: selected ? c.brandAccent : c.textSecondary,
             ),
             const SizedBox(width: 6),
             Text(
@@ -892,7 +898,7 @@ class _ExcentricidadTableState extends State<ExcentricidadTable>
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: selected ? FontWeight.bold : FontWeight.w500,
-                color: selected ? _kRed : const Color(0xFF1D1D1F),
+                color: selected ? c.brandAccent : c.textPrimary,
               ),
             ),
           ],

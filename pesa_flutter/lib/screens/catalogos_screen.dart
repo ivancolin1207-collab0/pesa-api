@@ -48,11 +48,12 @@ class _CatalogosScreenState extends State<CatalogosScreen>
       await _serviciosKey.currentState?.reload();
       await _instrumentosKey.currentState?.reload();
       if (mounted) {
+        final c = PesaColors.of(context);
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             behavior: SnackBarBehavior.floating,
-            backgroundColor: PesaColors.textPrimary,
-            content: Text('Catálogos actualizados desde servidor'),
+            backgroundColor: c.isDark ? c.elevated : PesaColors.textPrimary,
+            content: const Text('Catálogos actualizados desde servidor', style: TextStyle(color: Colors.white)),
           ),
         );
       }
@@ -71,6 +72,7 @@ class _CatalogosScreenState extends State<CatalogosScreen>
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final auth = context.watch<AuthService>();
     final bool isAdmin = auth.isAdmin;
     final media = MediaQuery.of(context);
@@ -79,16 +81,16 @@ class _CatalogosScreenState extends State<CatalogosScreen>
     return AppShell(
       currentRoute: '/catalogos',
       child: Scaffold(
-        backgroundColor: PesaColors.canvas,
+        backgroundColor: c.canvas,
         body: SafeArea(
           bottom: false,
           child: Column(
             children: [
               Container(
                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                decoration: const BoxDecoration(
-                  color: PesaColors.surface,
-                  border: Border(bottom: BorderSide(color: PesaColors.border)),
+                decoration: BoxDecoration(
+                  color: c.surface,
+                  border: Border(bottom: BorderSide(color: c.border)),
                 ),
                 child: Column(
                   children: [
@@ -97,7 +99,7 @@ class _CatalogosScreenState extends State<CatalogosScreen>
                         if (!isWide)
                           IconButton(
                             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                            icon: const Icon(Icons.menu_rounded, color: PesaColors.textPrimary),
+                            icon: Icon(Icons.menu_rounded, color: c.textPrimary),
                             tooltip: 'Menú principal',
                             onPressed: () => AppShell.toggleMenu(context),
                           ),
@@ -115,10 +117,10 @@ class _CatalogosScreenState extends State<CatalogosScreen>
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
+                              Text(
                                 'Catálogos del Sistema',
                                 style: TextStyle(
-                                  color: PesaColors.textPrimary,
+                                  color: c.textPrimary,
                                   fontWeight: FontWeight.w700,
                                   fontSize: 17,
                                 ),
@@ -129,8 +131,8 @@ class _CatalogosScreenState extends State<CatalogosScreen>
                                     : 'Consulta de clientes, sucursales, técnicos y servicios',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: PesaColors.textSecondary,
+                                style: TextStyle(
+                                  color: c.textSecondary,
                                   fontSize: 12,
                                 ),
                               ),
@@ -141,14 +143,14 @@ class _CatalogosScreenState extends State<CatalogosScreen>
                           constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                           tooltip: 'Actualizar catálogos',
                           onPressed: _sincronizarTodo,
-                          icon: const Icon(Icons.sync_rounded, color: PesaColors.textPrimary),
+                          icon: Icon(Icons.sync_rounded, color: c.textPrimary),
                         ),
                         if (isAdmin)
                           IconButton(
                             constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                             tooltip: 'Nuevo documento / asignar orden',
                             onPressed: () => context.push('/nuevo-doc'),
-                            icon: const Icon(Icons.post_add_rounded, color: PesaColors.brand),
+                            icon: Icon(Icons.post_add_rounded, color: c.brandAccent),
                           ),
                       ],
                     ),
@@ -156,9 +158,9 @@ class _CatalogosScreenState extends State<CatalogosScreen>
                     TabBar(
                       controller: _tabController,
                       isScrollable: !isWide,
-                      labelColor: PesaColors.brand,
-                      unselectedLabelColor: PesaColors.textSecondary,
-                      indicatorColor: PesaColors.brand,
+                      labelColor: c.brandAccent,
+                      unselectedLabelColor: c.textSecondary,
+                      indicatorColor: c.brandAccent,
                       indicatorWeight: 2.5,
                       labelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
                       unselectedLabelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w500),
@@ -285,16 +287,18 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
     await showDialog<void>(
       context: context,
       builder: (dlgCtx) => StatefulBuilder(
-        builder: (ctx, setDlgState) => AlertDialog(
-          backgroundColor: PesaColors.surface,
+        builder: (ctx, setDlgState) {
+          final dc = PesaColors.of(ctx);
+          return AlertDialog(
+          backgroundColor: dc.surface,
           surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: PesaColors.border),
+            side: BorderSide(color: dc.border),
           ),
           title: Text(
             editing ? 'Editar Cliente' : 'Nuevo Cliente',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: dc.textPrimary),
           ),
           content: SizedBox(
             width: 460,
@@ -365,11 +369,15 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
                         if (mounted) Navigator.of(dlgCtx).pop();
                         await reload(forceRemote: true);
                         if (mounted) {
+                          final sc = PesaColors.of(context);
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               behavior: SnackBarBehavior.floating,
-                              backgroundColor: PesaColors.textPrimary,
-                              content: Text(editing ? 'Cliente actualizado' : 'Cliente registrado correctamente'),
+                              backgroundColor: sc.isDark ? sc.elevated : PesaColors.textPrimary,
+                              content: Text(
+                                editing ? 'Cliente actualizado' : 'Cliente registrado correctamente',
+                                style: const TextStyle(color: Colors.white),
+                              ),
                             ),
                           );
                         }
@@ -389,7 +397,8 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
               child: Text(saving ? 'Guardando...' : 'Guardar Cliente'),
             ),
           ],
-        ),
+        );
+        },
       ),
     );
   }
@@ -402,7 +411,7 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: PesaColors.surface,
+      backgroundColor: PesaColors.of(context).surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
       ),
@@ -418,6 +427,7 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final c = PesaColors.of(context);
     final q = _query.trim().toLowerCase();
     final filtered = q.isEmpty
         ? _clientes
@@ -440,7 +450,7 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
                   onChanged: (v) => setState(() => _query = v),
                   decoration: InputDecoration(
                     hintText: 'Buscar cliente, RFC o dirección...',
-                    prefixIcon: const Icon(Icons.search_rounded, color: PesaColors.textSecondary, size: 20),
+                    prefixIcon: Icon(Icons.search_rounded, color: c.textSecondary, size: 20),
                     suffixIcon: _query.isNotEmpty
                         ? IconButton(
                             onPressed: () {
@@ -498,15 +508,15 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
                         itemCount: filtered.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 10),
                         itemBuilder: (_, idx) {
-                          final c = filtered[idx];
-                          final nom = (c['razon_social'] ?? c['nombre'] ?? '—').toString();
-                          final rfc = (c['rfc'] ?? '').toString().trim();
-                          final tel = (c['telefono'] ?? '').toString().trim();
-                          final dir = (c['direccion'] ?? '').toString().trim();
-                          final sucs = (c['sucursales'] as List?) ?? const [];
+                          final cli = filtered[idx];
+                          final nom = (cli['razon_social'] ?? cli['nombre'] ?? '—').toString();
+                          final rfc = (cli['rfc'] ?? '').toString().trim();
+                          final tel = (cli['telefono'] ?? '').toString().trim();
+                          final dir = (cli['direccion'] ?? '').toString().trim();
+                          final sucs = (cli['sucursales'] as List?) ?? const [];
 
                           return PesaCard(
-                            onTap: () => _abrirSucursalesCliente(c),
+                            onTap: () => _abrirSucursalesCliente(cli),
                             padding: const EdgeInsets.all(14),
                             child: Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -517,10 +527,10 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
                                     children: [
                                       Text(
                                         nom,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.w700,
-                                          color: PesaColors.textPrimary,
+                                          color: c.textPrimary,
                                         ),
                                       ),
                                       const SizedBox(height: 4),
@@ -535,8 +545,8 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
                                           PesaStatusBadge(
                                             label: '${sucs.length} sucursal(es)',
                                             dotColor: sucs.isNotEmpty
-                                                ? PesaColors.dotGreen
-                                                : PesaColors.dotNeutral,
+                                                ? c.dotGreen
+                                                : c.dotNeutral,
                                           ),
                                         ],
                                       ),
@@ -546,9 +556,9 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
                                           dir,
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 12,
-                                            color: PesaColors.textSecondary,
+                                            color: c.textSecondary,
                                           ),
                                         ),
                                       ],
@@ -560,15 +570,15 @@ class _ClientesCrudTabState extends State<_ClientesCrudTab>
                                   IconButton(
                                     constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                                     tooltip: 'Editar cliente',
-                                    onPressed: () => _abrirFormCliente(c),
-                                    icon: const Icon(Icons.edit_outlined, color: PesaColors.textSecondary, size: 20),
+                                    onPressed: () => _abrirFormCliente(cli),
+                                    icon: Icon(Icons.edit_outlined, color: c.textSecondary, size: 20),
                                   ),
                                 ],
                                 IconButton(
                                   constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                                   tooltip: 'Ver / administrar sucursales',
-                                  onPressed: () => _abrirSucursalesCliente(c),
-                                  icon: const Icon(Icons.location_on_outlined, color: PesaColors.brand, size: 20),
+                                  onPressed: () => _abrirSucursalesCliente(cli),
+                                  icon: Icon(Icons.location_on_outlined, color: c.brandAccent, size: 20),
                                 ),
                               ],
                             ),
@@ -664,14 +674,19 @@ class _SucursalesSheetState extends State<_SucursalesSheet> {
     await showDialog<void>(
       context: context,
       builder: (dlgCtx) => StatefulBuilder(
-        builder: (ctx, setDlgState) => AlertDialog(
-          backgroundColor: PesaColors.surface,
+        builder: (ctx, setDlgState) {
+          final dc = PesaColors.of(ctx);
+          return AlertDialog(
+          backgroundColor: dc.surface,
           surfaceTintColor: Colors.transparent,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: PesaColors.border),
+            side: BorderSide(color: dc.border),
           ),
-          title: Text(editing ? 'Editar Sucursal / Planta' : 'Nueva Sucursal / Planta'),
+          title: Text(
+            editing ? 'Editar Sucursal / Planta' : 'Nueva Sucursal / Planta',
+            style: TextStyle(color: dc.textPrimary),
+          ),
           content: SizedBox(
             width: 440,
             child: Form(
@@ -760,13 +775,15 @@ class _SucursalesSheetState extends State<_SucursalesSheet> {
               child: Text(saving ? 'Guardando...' : 'Guardar Sucursal'),
             ),
           ],
-        ),
+        );
+        },
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return SafeArea(
       child: ConstrainedBox(
         constraints: BoxConstraints(
@@ -783,19 +800,19 @@ class _SucursalesSheetState extends State<_SucursalesSheet> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Sucursales y Plantas',
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w700,
-                            color: PesaColors.textPrimary,
+                            color: c.textPrimary,
                           ),
                         ),
                         Text(
                           widget.clienteNombre,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12.5,
-                            color: PesaColors.textSecondary,
+                            color: c.textSecondary,
                           ),
                         ),
                       ],
@@ -840,19 +857,19 @@ class _SucursalesSheetState extends State<_SucursalesSheet> {
                                         children: [
                                           Text(
                                             nom,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontWeight: FontWeight.w700,
                                               fontSize: 13.5,
-                                              color: PesaColors.textPrimary,
+                                              color: c.textPrimary,
                                             ),
                                           ),
                                           if (dir.isNotEmpty) ...[
                                             const SizedBox(height: 3),
                                             Text(
                                               dir,
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontSize: 12,
-                                                color: PesaColors.textSecondary,
+                                                color: c.textSecondary,
                                               ),
                                             ),
                                           ],
@@ -860,9 +877,9 @@ class _SucursalesSheetState extends State<_SucursalesSheet> {
                                             const SizedBox(height: 3),
                                             Text(
                                               'Contacto: $con',
-                                              style: const TextStyle(
+                                              style: TextStyle(
                                                 fontSize: 11.5,
-                                                color: PesaColors.textTertiary,
+                                                color: c.textTertiary,
                                               ),
                                             ),
                                           ],
@@ -873,7 +890,7 @@ class _SucursalesSheetState extends State<_SucursalesSheet> {
                                       IconButton(
                                         constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
                                         onPressed: () => _abrirFormSucursal(s),
-                                        icon: const Icon(Icons.edit_outlined, size: 19, color: PesaColors.textSecondary),
+                                        icon: Icon(Icons.edit_outlined, size: 19, color: c.textSecondary),
                                       ),
                                   ],
                                 ),
@@ -942,6 +959,7 @@ class _SimpleCatalogTabState extends State<_SimpleCatalogTab>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final c = PesaColors.of(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator(color: PesaColors.brand));
     }
@@ -977,18 +995,18 @@ class _SimpleCatalogTabState extends State<_SimpleCatalogTab>
                       children: [
                         Text(
                           nombre,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
-                            color: PesaColors.textPrimary,
+                            color: c.textPrimary,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           'Usuario: $usuario · Rol: $rol',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: PesaColors.textSecondary,
+                            color: c.textSecondary,
                           ),
                         ),
                       ],
@@ -996,7 +1014,7 @@ class _SimpleCatalogTabState extends State<_SimpleCatalogTab>
                   ),
                   PesaStatusBadge(
                     label: activo ? 'Activo' : 'Inactivo',
-                    dotColor: activo ? PesaColors.dotGreen : PesaColors.dotNeutral,
+                    dotColor: activo ? c.dotGreen : c.dotNeutral,
                   ),
                 ],
               ),
@@ -1012,19 +1030,19 @@ class _SimpleCatalogTabState extends State<_SimpleCatalogTab>
               children: [
                 Text(
                   nombre,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 14,
                     fontWeight: FontWeight.w700,
-                    color: PesaColors.textPrimary,
+                    color: c.textPrimary,
                   ),
                 ),
                 if (desc.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
                     desc,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 12,
-                      color: PesaColors.textSecondary,
+                      color: c.textSecondary,
                     ),
                   ),
                 ],

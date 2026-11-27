@@ -100,8 +100,8 @@ class CapturFirmaTecnicoDialog extends StatefulWidget {
 class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
   final SignatureController _ctrl = SignatureController(
     penStrokeWidth: 3.2,
-    penColor: PesaColors.textPrimary,
-    exportPenColor: PesaColors.textPrimary,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
     exportBackgroundColor: Colors.transparent,
   );
   bool _saving = false;
@@ -202,17 +202,18 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final displayTitle = widget.nombreCompleto.trim().isNotEmpty
         ? widget.nombreCompleto.trim()
         : widget.username;
 
     return Dialog(
-      backgroundColor: PesaColors.surface,
+      backgroundColor: c.surface,
       surfaceTintColor: Colors.transparent,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: PesaColors.border),
+        side: BorderSide(color: c.border),
       ),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 520),
@@ -228,7 +229,7 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                     width: 40,
                     height: 40,
                     decoration: BoxDecoration(
-                      color: PesaColors.brand,
+                      color: c.brand,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Icon(Icons.draw_outlined, color: Colors.white, size: 22),
@@ -238,12 +239,12 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Firma Digital del Técnico',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 16,
-                            color: PesaColors.textPrimary,
+                            color: c.textPrimary,
                           ),
                         ),
                         const SizedBox(height: 2),
@@ -251,8 +252,8 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                           displayTitle,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: PesaColors.textSecondary,
+                          style: TextStyle(
+                            color: c.textSecondary,
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
@@ -264,7 +265,7 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                     IconButton(
                       tooltip: 'Cerrar',
                       onPressed: () => Navigator.of(context).pop<Uint8List?>(null),
-                      icon: const Icon(Icons.close, color: PesaColors.textSecondary),
+                      icon: Icon(Icons.close, color: c.textSecondary),
                     ),
                 ],
               ),
@@ -272,20 +273,20 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: PesaColors.surfaceMuted,
+                  color: c.surfaceMuted,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: PesaColors.border),
+                  border: Border.all(color: c.border),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.verified_user_outlined, color: PesaColors.brand, size: 18),
-                    SizedBox(width: 8),
+                    Icon(Icons.verified_user_outlined, color: c.brandAccent, size: 18),
+                    const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Esta firma se inserta automáticamente en tus órdenes de servicio y PDFs oficiales.',
                         style: TextStyle(
                           fontSize: 12,
-                          color: PesaColors.textSecondary,
+                          color: c.textSecondary,
                           height: 1.35,
                         ),
                       ),
@@ -294,12 +295,12 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                 ),
               ),
               const SizedBox(height: 14),
-              const Text(
+              Text(
                 'Traza tu firma en el recuadro',
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w600,
-                  color: PesaColors.textPrimary,
+                  color: c.textPrimary,
                 ),
               ),
               const SizedBox(height: 6),
@@ -310,10 +311,10 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                   return Container(
                     height: 196,
                     decoration: BoxDecoration(
-                      color: PesaColors.surface,
+                      color: PesaColors.signatureCanvas, // BLINDAJE OBLIGATORIO: #FFFFFF siempre
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: hasInk ? PesaColors.brand : PesaColors.borderStrong,
+                        color: hasInk ? c.brandAccent : c.borderStrong,
                         width: hasInk ? 1.5 : 1,
                       ),
                     ),
@@ -338,7 +339,7 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                                   'Firme sobre la línea',
                                   style: TextStyle(
                                     fontSize: 14,
-                                    color: PesaColors.textTertiary,
+                                    color: Color(0xFF8E8E93),
                                   ),
                                 ),
                               ),
@@ -354,20 +355,20 @@ class _CapturFirmaTecnicoDialogState extends State<CapturFirmaTecnicoDialog> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF5F6),
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: PesaColors.brand),
+                    border: Border.all(color: c.brandAccent),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.error_outline, color: PesaColors.brand, size: 16),
+                      Icon(Icons.error_outline, color: c.brandAccent, size: 16),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           _errorMsg!,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontSize: 12,
-                            color: PesaColors.brand,
+                            color: c.brandAccent,
                             fontWeight: FontWeight.w600,
                           ),
                         ),

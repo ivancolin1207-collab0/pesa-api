@@ -40,9 +40,7 @@ class RevisionBasculaScreen extends StatefulWidget {
 }
 
 class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
-  static const Color _pesaRed = Color(0xFFC8102E);
-  static const Color _pesaDark = Color(0xFF1D1D1F);
-  static const Color _pesaSlate = Color(0xFF6E6E73);
+  static const Color _pesaRed = PesaColors.brand;
 
   /// 11 filas exactas del formato físico oficial (Sección 3)
   static const List<List<String>> _ohmsParams = [
@@ -98,15 +96,18 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   final _correoCtrl = ClienteCorreoController();
   List<String> _contactosSugeridos = [];
 
+  // BLINDAJE DE FIRMA: tinta negra (#000000) fija sobre fondo blanco (#FFFFFF) incluso en Dark Mode
   final _sigClienteCtrl = SignatureController(
     penStrokeWidth: 2.5,
-    penColor: Colors.black,
-    exportBackgroundColor: Colors.white,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+    exportBackgroundColor: PesaColors.signatureCanvas,
   );
   final _sigTecnicoCtrl = SignatureController(
     penStrokeWidth: 2.5,
-    penColor: Colors.black,
-    exportBackgroundColor: Colors.white,
+    penColor: PesaColors.signatureInk,
+    exportPenColor: PesaColors.signatureInk,
+    exportBackgroundColor: PesaColors.signatureCanvas,
   );
 
   Uint8List? _firmaTecPre;
@@ -867,6 +868,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   // ══════════════════════════════════════════════════════════════════════════
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final folio = (widget.orden['folio_os'] ?? widget.orden['folio'] ?? 'RE').toString();
     final cliente = _pickFromMap(_datosCombinados, ['cliente', 'razon_social'], 'Cliente');
     final direccion = _pickFromMap(_datosCombinados, [
@@ -880,32 +882,32 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
 
     return Scaffold(
       resizeToAvoidBottomInset: true,
-      backgroundColor: PesaColors.canvas,
+      backgroundColor: c.canvas,
       appBar: AppBar(
-        backgroundColor: PesaColors.surface,
-        foregroundColor: PesaColors.textPrimary,
+        backgroundColor: c.surface,
+        foregroundColor: c.textPrimary,
         elevation: 0,
-        bottom: const PreferredSize(
-          preferredSize: Size.fromHeight(1),
-          child: Divider(height: 1, color: PesaColors.border),
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Divider(height: 1, color: c.border),
         ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Ficha Técnica Diagnóstica · $folio',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: PesaColors.textPrimary),
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.textPrimary),
             ),
             Text(
               'REVISIÓN DE CELDAS Y BÁSCULA · $cliente',
-              style: const TextStyle(fontSize: 11, color: PesaColors.textSecondary),
+              style: TextStyle(fontSize: 11, color: c.textSecondary),
             ),
           ],
         ),
         actions: [
           IconButton(
             tooltip: 'Guardar avance local',
-            icon: const Icon(Icons.save_outlined, color: PesaColors.textPrimary),
+            icon: Icon(Icons.save_outlined, color: c.textPrimary),
             onPressed: () async {
               await _guardarBorradorSilencioso();
               if (!mounted) return;
@@ -961,8 +963,8 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                           icon: const Icon(Icons.preview_outlined, size: 18),
                           label: const Text('Vista Previa'),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: PesaColors.textPrimary,
-                            side: const BorderSide(color: PesaColors.borderStrong),
+                            foregroundColor: c.textPrimary,
+                            side: BorderSide(color: c.borderStrong),
                             minimumSize: const Size(0, 52),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           ),
@@ -975,8 +977,8 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: PesaColors.brand,
                                 foregroundColor: Colors.white,
-                                disabledBackgroundColor: PesaColors.surfaceMuted,
-                                disabledForegroundColor: PesaColors.textTertiary,
+                                disabledBackgroundColor: c.surfaceMuted,
+                                disabledForegroundColor: c.textTertiary,
                                 elevation: 0,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
@@ -1039,12 +1041,13 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
 
   // ── Encabezado numerado estilo formato físico oficial ──────────────────────
   Widget _buildOfficialSectionHeader(int number, String title, {Widget? trailing}) {
+    final c = PesaColors.of(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: const BoxDecoration(
-        color: _pesaDark,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(10)),
+      decoration: BoxDecoration(
+        color: c.isDark ? c.elevated : PesaColors.textPrimary,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(10)),
       ),
       child: Row(
         children: [
@@ -1081,10 +1084,15 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   // TARJETA SECCIONES 1 Y 2: DATOS DEL CLIENTE, EQUIPO / INDICADOR Y N° CELDAS
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildSeccion1y2Card(String cliente, String direccion) {
+    final c = PesaColors.of(context);
     return Card(
-      elevation: 1.5,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1099,22 +1107,22 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: c.border),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         '1. RAZÓN SOCIAL / CLIENTE: $cliente',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: c.textPrimary),
                       ),
                       if (direccion.isNotEmpty) ...[
                         const SizedBox(height: 2),
                         Text(
                           'DIRECCIÓN: $direccion',
-                          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+                          style: TextStyle(fontSize: 11.5, color: c.textSecondary),
                         ),
                       ],
                     ],
@@ -1127,9 +1135,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F7),
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _pesaRed.withValues(alpha: 0.35)),
+                    border: Border.all(color: c.brandAccent.withValues(alpha: 0.45)),
                   ),
                   child: Wrap(
                     spacing: 10,
@@ -1140,11 +1148,11 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.linear_scale, color: _pesaRed, size: 20),
+                          Icon(Icons.linear_scale, color: c.brandAccent, size: 20),
                           const SizedBox(width: 8),
-                          const Text(
+                          Text(
                             'NÚMERO DE CELDAS (PUNTOS DE APOYO):',
-                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaDark),
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
                           ),
                         ],
                       ),
@@ -1159,12 +1167,14 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                                 '$preset',
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  color: _numCeldas == preset ? Colors.white : _pesaDark,
+                                  color: _numCeldas == preset ? Colors.white : c.textPrimary,
                                 ),
                               ),
                               selected: _numCeldas == preset,
+                              showCheckmark: false,
                               selectedColor: _pesaRed,
-                              backgroundColor: Colors.white,
+                              backgroundColor: c.surface,
+                              side: BorderSide(color: _numCeldas == preset ? _pesaRed : c.borderStrong),
                               onSelected: (_) {
                                 setState(() => _numCeldas = preset);
                                 _guardarBorradorSilencioso();
@@ -1174,19 +1184,21 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: c.elevated,
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.grey.shade400),
+                              border: Border.all(color: c.borderStrong),
                             ),
                             child: DropdownButtonHideUnderline(
                               child: DropdownButton<int>(
                                 value: _numCeldas,
+                                dropdownColor: c.surface,
+                                style: TextStyle(fontSize: 12.5, color: c.textPrimary),
                                 isDense: true,
                                 items: List.generate(
                                   12,
                                   (i) => DropdownMenuItem(
                                     value: i + 1,
-                                    child: Text('${i + 1} Celdas', style: const TextStyle(fontSize: 12.5)),
+                                    child: Text('${i + 1} Celdas', style: TextStyle(fontSize: 12.5, color: c.textPrimary)),
                                   ),
                                 ),
                                 onChanged: (v) {
@@ -1235,9 +1247,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF5F5F7),
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: c.border),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1245,15 +1257,16 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text(
+                          Text(
                             'DATOS DE CELDAS DE CARGA',
-                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: _pesaSlate),
+                            style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: c.textSecondary),
                           ),
                           DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
                               value: _tipoEstructura,
+                              dropdownColor: c.surface,
                               isDense: true,
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _pesaRed),
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: c.brandAccent),
                               items: const [
                                 DropdownMenuItem(value: 'PLATAFORMA', child: Text('Estructura: PLATAFORMA')),
                                 DropdownMenuItem(value: 'CAMIONERA', child: Text('Estructura: CAMIONERA')),
@@ -1285,9 +1298,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                   height: 40,
                   child: OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF111827),
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: Color(0xFFD2D2D7), width: 1.2),
+                      foregroundColor: c.textPrimary,
+                      backgroundColor: c.surface,
+                      side: BorderSide(color: c.borderStrong, width: 1.2),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     onPressed: _guardandoParcial
@@ -1319,7 +1332,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                                 final etiq = construirEtiquetaInstrumento({'folio_os': folio, ...parcial});
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFF1D4ED8),
+                                    backgroundColor: ok ? const Color(0xFF15803D) : const Color(0xFF1D1D1F),
                                     content: Text(
                                       ok
                                           ? 'Equipo guardado y sincronizado (orden sigue En Proceso): $etiq'
@@ -1336,7 +1349,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                         ? const SizedBox(
                             width: 15,
                             height: 15,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF1D4ED8)),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: _pesaRed),
                           )
                         : const Icon(Icons.cloud_upload_outlined, size: 18),
                     label: Text(
@@ -1356,19 +1369,21 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   }
 
   Widget _buildCompactField(String label, TextEditingController ctrl) {
+    final c = PesaColors.of(context);
     return TextField(
       controller: ctrl,
       scrollPadding: const EdgeInsets.only(bottom: 180),
-      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.textPrimary),
       onChanged: (_) => _guardarBorradorSilencioso(),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: const TextStyle(fontSize: 11),
+        labelStyle: TextStyle(fontSize: 11, color: c.textSecondary),
         isDense: true,
         filled: true,
-        fillColor: Colors.white,
+        fillColor: c.elevated,
         contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.border)),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.border)),
       ),
     );
   }
@@ -1378,11 +1393,16 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   // 11 filas oficiales x C-1..C-N expandida al 100% del ancho
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildSeccion3OhmsCard() {
+    final p = PesaColors.of(context);
     final sPlural = _numCeldas > 1 ? 'S' : '';
     return Card(
-      elevation: 1.5,
+      color: p.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: p.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1414,9 +1434,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                         // Encabezado oscuro [PARAMETRO ELECTRICO | UND | C-1 .. C-N]
                         Container(
                           height: 34,
-                          decoration: const BoxDecoration(
-                            color: _pesaDark,
-                            borderRadius: BorderRadius.vertical(top: Radius.circular(6)),
+                          decoration: BoxDecoration(
+                            color: p.isDark ? p.elevated : PesaColors.textPrimary,
+                            borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
                           ),
                           child: Row(
                             children: [
@@ -1468,11 +1488,11 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                         for (int r = 0; r < _ohmsParams.length; r++)
                           Container(
                             decoration: BoxDecoration(
-                              color: r.isEven ? const Color(0xFFF9FAFB) : Colors.white,
+                              color: r.isEven ? p.surfaceMuted : p.surface,
                               border: Border(
-                                left: BorderSide(color: Colors.grey.shade300),
-                                right: BorderSide(color: Colors.grey.shade300),
-                                bottom: BorderSide(color: Colors.grey.shade300),
+                                left: BorderSide(color: p.border),
+                                right: BorderSide(color: p.border),
+                                bottom: BorderSide(color: p.border),
                               ),
                             ),
                             padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1484,10 +1504,10 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                                     padding: const EdgeInsets.symmetric(horizontal: 8),
                                     child: Text(
                                       _ohmsParams[r][1],
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.w600,
-                                        color: _pesaDark,
+                                        color: p.textPrimary,
                                       ),
                                     ),
                                   ),
@@ -1500,7 +1520,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.bold,
-                                        color: _ohmsParams[r][2] == 'mV' ? _pesaRed : Colors.grey.shade700,
+                                        color: _ohmsParams[r][2] == 'mV' ? p.brandAccent : p.textSecondary,
                                       ),
                                     ),
                                   ),
@@ -1519,25 +1539,29 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                                         scrollPadding: const EdgeInsets.only(bottom: 220),
                                         textAlign: TextAlign.center,
                                         onChanged: (_) => _guardarBorradorSilencioso(),
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 13,
                                           fontWeight: FontWeight.bold,
-                                          color: _pesaDark,
+                                          color: p.textPrimary,
                                         ),
                                         decoration: InputDecoration(
                                           hintText: '—',
-                                          hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                                          hintStyle: TextStyle(color: p.textTertiary, fontSize: 12),
                                           isDense: true,
                                           filled: true,
-                                          fillColor: Colors.white,
+                                          fillColor: p.elevated,
                                           contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
                                           border: OutlineInputBorder(
                                             borderRadius: BorderRadius.circular(5),
-                                            borderSide: BorderSide(color: Colors.grey.shade300),
+                                            borderSide: BorderSide(color: p.border),
+                                          ),
+                                          enabledBorder: OutlineInputBorder(
+                                            borderRadius: BorderRadius.circular(5),
+                                            borderSide: BorderSide(color: p.border),
                                           ),
                                           focusedBorder: OutlineInputBorder(
                                             borderRadius: BorderRadius.circular(5),
-                                            borderSide: const BorderSide(color: _pesaRed, width: 1.5),
+                                            borderSide: BorderSide(color: p.brandAccent, width: 1.5),
                                           ),
                                         ),
                                       ),
@@ -1564,12 +1588,17 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   // Barra inferior: Cables [OK] [Falla] | Conectores [OK] [Falla]
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildSeccion4FuncionalidadCard() {
+    final c = PesaColors.of(context);
     final indItems = _currentIndicadorItems;
 
     return Card(
-      elevation: 1.5,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1611,9 +1640,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8F9FA),
+                    color: c.surfaceMuted,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: c.border),
                   ),
                   child: Wrap(
                     spacing: 28,
@@ -1648,9 +1677,10 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   }
 
   Widget _buildIndicadorDisplayBox(List<String> indItems) {
+    final c = PesaColors.of(context);
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -1658,9 +1688,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: const BoxDecoration(
-              color: _pesaSlate,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
+            decoration: BoxDecoration(
+              color: c.isDark ? c.elevated : PesaColors.textSecondary,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1689,7 +1719,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
           ),
           for (int i = 0; i < indItems.length; i++)
             Container(
-              color: i.isEven ? const Color(0xFFF8F9FA) : Colors.white,
+              color: i.isEven ? c.surfaceMuted : c.surface,
               child: CheckboxListTile(
                 dense: true,
                 visualDensity: const VisualDensity(horizontal: -2, vertical: -3),
@@ -1697,7 +1727,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                 activeColor: _pesaRed,
                 title: Text(
                   indItems[i],
-                  style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.textPrimary),
                 ),
                 value: _funcIndicador[indItems[i]] ?? false,
                 onChanged: (v) {
@@ -1712,9 +1742,10 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   }
 
   Widget _buildEstadoIndividualCeldasBox() {
+    final c = PesaColors.of(context);
     return Container(
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(
@@ -1722,9 +1753,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: const BoxDecoration(
-              color: _pesaSlate,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
+            decoration: BoxDecoration(
+              color: c.isDark ? c.elevated : PesaColors.textSecondary,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1754,9 +1785,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: i.isEven ? const Color(0xFFF8F9FA) : Colors.white,
+                color: i.isEven ? c.surfaceMuted : c.surface,
                 border: Border(
-                  bottom: i < _numCeldas - 1 ? BorderSide(color: Colors.grey.shade200) : BorderSide.none,
+                  bottom: i < _numCeldas - 1 ? BorderSide(color: c.border) : BorderSide.none,
                 ),
               ),
               child: _buildOkFallaSelector(
@@ -1778,6 +1809,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
     required String currentValue,
     required ValueChanged<String> onChanged,
   }) {
+    final c = PesaColors.of(context);
     final isOk = currentValue.toUpperCase() == 'OK';
     final isFalla = currentValue.toUpperCase() == 'FALLA';
 
@@ -1788,7 +1820,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
           width: 82,
           child: Text(
             label,
-            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _pesaDark),
+            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary),
           ),
         ),
         InkWell(
@@ -1797,9 +1829,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: isOk ? Colors.green.shade700 : Colors.white,
+              color: isOk ? Colors.green.shade700 : c.elevated,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: isOk ? Colors.green.shade700 : Colors.grey.shade400),
+              border: Border.all(color: isOk ? Colors.green.shade700 : c.borderStrong),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1807,7 +1839,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                 Icon(
                   isOk ? Icons.check_box : Icons.check_box_outline_blank,
                   size: 17,
-                  color: isOk ? Colors.white : Colors.grey.shade700,
+                  color: isOk ? Colors.white : c.textSecondary,
                 ),
                 const SizedBox(width: 5),
                 Text(
@@ -1815,7 +1847,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 12.5,
-                    color: isOk ? Colors.white : _pesaDark,
+                    color: isOk ? Colors.white : c.textPrimary,
                   ),
                 ),
               ],
@@ -1829,9 +1861,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: isFalla ? _pesaRed : Colors.white,
+              color: isFalla ? _pesaRed : c.elevated,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: isFalla ? _pesaRed : Colors.grey.shade400),
+              border: Border.all(color: isFalla ? _pesaRed : c.borderStrong),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1839,7 +1871,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                 Icon(
                   isFalla ? Icons.check_box : Icons.check_box_outline_blank,
                   size: 17,
-                  color: isFalla ? Colors.white : Colors.grey.shade700,
+                  color: isFalla ? Colors.white : c.textSecondary,
                 ),
                 const SizedBox(width: 5),
                 Text(
@@ -1847,7 +1879,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 12.5,
-                    color: isFalla ? Colors.white : _pesaDark,
+                    color: isFalla ? Colors.white : c.textPrimary,
                   ),
                 ),
               ],
@@ -1862,6 +1894,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   // TARJETA SECCIÓN 5: OBSERVACIONES Y FIRMAS
   // ══════════════════════════════════════════════════════════════════════════
   Widget _buildSeccion5ObservacionesFirmasCard(String cliente) {
+    final c = PesaColors.of(context);
     final loteKey = _pickFromMap(_datosCombinados, ['lote_id', 'id_lote']);
     final sugerenciaLote = (loteKey.isNotEmpty && loteKey.toLowerCase() != 'null' && loteKey.toLowerCase() != 'none')
         ? LoteSession.getUltimoResponsable(loteKey)
@@ -1872,9 +1905,13 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         _nombreReceptorCtrl.text.trim() != sugerenciaLote;
 
     return Card(
-      elevation: 1.5,
+      color: c.surface,
+      elevation: 0,
       margin: EdgeInsets.zero,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10),
+        side: BorderSide(color: c.border),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1903,11 +1940,12 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                   Padding(
                     padding: const EdgeInsets.only(bottom: 8),
                     child: ActionChip(
-                      avatar: const Icon(Icons.person_pin_circle, size: 18, color: Color(0xFF1565C0)),
-                      backgroundColor: const Color(0xFFE3F2FD),
+                      avatar: Icon(Icons.person_pin_circle, size: 18, color: c.brandAccent),
+                      backgroundColor: c.surfaceMuted,
+                      side: BorderSide(color: c.borderStrong),
                       label: Text(
                         'Usar receptor del lote: $sugerenciaLote',
-                        style: const TextStyle(color: Color(0xFF0D47A1), fontWeight: FontWeight.w600),
+                        style: TextStyle(color: c.textPrimary, fontWeight: FontWeight.w600),
                       ),
                       onPressed: () {
                         setState(() => _nombreReceptorCtrl.text = sugerenciaLote);
@@ -1918,9 +1956,9 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
 
                 // Chips de contactos frecuentes de esta planta
                 if (_contactosSugeridos.isNotEmpty) ...[
-                  const Text(
+                  Text(
                     'Contactos frecuentes en planta:',
-                    style: TextStyle(fontSize: 11.5, color: Colors.grey),
+                    style: TextStyle(fontSize: 11.5, color: c.textSecondary),
                   ),
                   const SizedBox(height: 4),
                   Wrap(
@@ -1928,10 +1966,10 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
                     runSpacing: 4,
                     children: _contactosSugeridos
                         .map(
-                          (c) => ActionChip(
-                            label: Text(c, style: const TextStyle(fontSize: 12)),
+                          (contacto) => ActionChip(
+                            label: Text(contacto, style: const TextStyle(fontSize: 12)),
                             onPressed: () {
-                              setState(() => _nombreReceptorCtrl.text = c);
+                              setState(() => _nombreReceptorCtrl.text = contacto);
                               _guardarBorradorSilencioso();
                             },
                           ),
@@ -1971,6 +2009,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   }
 
   Widget _buildFirmaClienteBlock() {
+    final c = PesaColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1981,7 +2020,7 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('FIRMA DEL CLIENTE *', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            Text('FIRMA DEL CLIENTE *', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary)),
             TextButton.icon(
               onPressed: () => _sigClienteCtrl.clear(),
               icon: const Icon(Icons.refresh, size: 16),
@@ -1992,14 +2031,14 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
         Container(
           height: 145,
           decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: PesaColors.borderStrong),
+            color: PesaColors.signatureCanvas,
+            border: Border.all(color: c.borderStrong),
             borderRadius: BorderRadius.circular(8),
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(8),
             child: SignatureGestureShield(
-              child: Signature(controller: _sigClienteCtrl, backgroundColor: Colors.white),
+              child: Signature(controller: _sigClienteCtrl, backgroundColor: PesaColors.signatureCanvas),
             ),
           ),
         ),
@@ -2008,18 +2047,19 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
   }
 
   Widget _buildFirmaTecnicoBlock() {
+    final c = PesaColors.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('FIRMA DEL TÉCNICO *', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            Text('FIRMA DEL TÉCNICO *', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: c.textPrimary)),
             if (_firmaTecPre != null)
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text('Usar precargada', style: TextStyle(fontSize: 12)),
+                  Text('Usar precargada', style: TextStyle(fontSize: 12, color: c.textSecondary)),
                   Switch(
                     value: _usarFirmaPre,
                     activeColor: _pesaRed,
@@ -2040,8 +2080,8 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
             height: 145,
             width: double.infinity,
             decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: Colors.grey.shade400),
+              color: PesaColors.signatureCanvas,
+              border: Border.all(color: c.borderStrong),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Center(child: Image.memory(_firmaTecPre!, height: 110)),
@@ -2050,14 +2090,14 @@ class _RevisionBasculaScreenState extends State<RevisionBasculaScreen> {
           Container(
             height: 145,
             decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border.all(color: PesaColors.borderStrong),
+              color: PesaColors.signatureCanvas,
+              border: Border.all(color: c.borderStrong),
               borderRadius: BorderRadius.circular(8),
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: SignatureGestureShield(
-                child: Signature(controller: _sigTecnicoCtrl, backgroundColor: Colors.white),
+                child: Signature(controller: _sigTecnicoCtrl, backgroundColor: PesaColors.signatureCanvas),
               ),
             ),
           ),

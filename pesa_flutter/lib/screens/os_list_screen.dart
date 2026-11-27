@@ -44,36 +44,41 @@ String formatearFechaHoraEnvio(dynamic val) {
 /// Banner institucional neutro minimalista de trazabilidad de envío de correo.
 Widget buildEmailAuditBanner(String infoCorreo, {EdgeInsetsGeometry? margin}) {
   if (infoCorreo.trim().isEmpty) return const SizedBox.shrink();
-  return Container(
-    width: double.infinity,
-    margin: margin ?? const EdgeInsets.only(top: 6),
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-    decoration: BoxDecoration(
-      color: PesaColors.surfaceMuted,
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: PesaColors.border),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Padding(
-          padding: EdgeInsets.only(top: 1.5, right: 6),
-          child: Icon(Icons.mark_email_read_outlined, size: 13, color: PesaColors.textSecondary),
+  return Builder(
+    builder: (context) {
+      final c = PesaColors.of(context);
+      return Container(
+        width: double.infinity,
+        margin: margin ?? const EdgeInsets.only(top: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: c.surfaceMuted,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: c.border),
         ),
-        Expanded(
-          child: Text(
-            infoCorreo,
-            softWrap: true,
-            style: const TextStyle(
-              fontSize: 10.5,
-              fontWeight: FontWeight.w600,
-              color: PesaColors.textPrimary,
-              height: 1.3,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 1.5, right: 6),
+              child: Icon(Icons.mark_email_read_outlined, size: 13, color: c.textSecondary),
             ),
-          ),
+            Expanded(
+              child: Text(
+                infoCorreo,
+                softWrap: true,
+                style: TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: c.textPrimary,
+                  height: 1.3,
+                ),
+              ),
+            ),
+          ],
         ),
-      ],
-    ),
+      );
+    },
   );
 }
 
@@ -88,14 +93,8 @@ String normalizarTexto(String texto) {
   return resultado;
 }
 
-// ── Design Tokens — Básculas PESA Minimalista Corporativo v3.2 ──────────────
+// ── Design Tokens — Básculas PESA Minimalista Corporativo (Dual Light/Dark v4.0.5) ──
 const _kCarmineRed = PesaColors.brand;
-const _kBgColor    = PesaColors.canvas;
-const _kCardBg     = PesaColors.surface;
-const _kBorder     = PesaColors.border;
-const _kTextPrim   = PesaColors.textPrimary;
-const _kTextSec    = PesaColors.textSecondary;
-const _kTableHead  = PesaColors.tableHeader;
 
 /// Enrutador dinámico por tipo de documento:
 /// OSOB -> ObservacionesBasculaScreen (PRIMERA condición prioritaria)
@@ -1404,70 +1403,73 @@ class _OsListScreenState extends State<OsListScreen> {
     final updated = await showDialog<bool>(
       context: context,
       builder: (dlgCtx) => StatefulBuilder(
-        builder: (ctx, setDlg) => AlertDialog(
-          backgroundColor: PesaColors.surface,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: const BorderSide(color: PesaColors.border),
-          ),
-          title: Text('Reasignar $folio', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<int>(
-                value: tecSel,
-                decoration: const InputDecoration(labelText: 'Técnico Asignado'),
-                items: tecnicos.map((t) {
-                  final id = int.tryParse('${t['id']}') ?? 0;
-                  final nom = (t['nombre'] ?? t['nombre_completo'] ?? 'Técnico').toString();
-                  return DropdownMenuItem<int>(value: id, child: Text(nom));
-                }).toList(),
-                onChanged: (v) => setDlg(() => tecSel = v),
+        builder: (ctx, setDlg) {
+          final dc = PesaColors.of(ctx);
+          return AlertDialog(
+            backgroundColor: dc.surface,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(color: dc.border),
+            ),
+            title: Text('Reasignar $folio', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: dc.textPrimary)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<int>(
+                  value: tecSel,
+                  decoration: const InputDecoration(labelText: 'Técnico Asignado'),
+                  items: tecnicos.map((t) {
+                    final id = int.tryParse('${t['id']}') ?? 0;
+                    final nom = (t['nombre'] ?? t['nombre_completo'] ?? 'Técnico').toString();
+                    return DropdownMenuItem<int>(value: id, child: Text(nom));
+                  }).toList(),
+                  onChanged: (v) => setDlg(() => tecSel = v),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: modSel,
+                  decoration: const InputDecoration(labelText: 'Modalidad'),
+                  items: const ['Digital', 'Físico', 'Híbrido']
+                      .map((m) => DropdownMenuItem<String>(value: m, child: Text(m)))
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setDlg(() => modSel = v);
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(false),
+                child: const Text('Cancelar'),
               ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: modSel,
-                decoration: const InputDecoration(labelText: 'Modalidad'),
-                items: const ['Digital', 'Físico', 'Híbrido']
-                    .map((m) => DropdownMenuItem<String>(value: m, child: Text(m)))
-                    .toList(),
-                onChanged: (v) {
-                  if (v != null) setDlg(() => modSel = v);
-                },
+              ElevatedButton(
+                onPressed: saving || tecSel == null
+                    ? null
+                    : () async {
+                        setDlg(() => saving = true);
+                        try {
+                          await ApiService.instance.asignarOrdenAdmin(
+                            folio,
+                            idTecnico: tecSel!,
+                            modalidad: modSel,
+                          );
+                          if (context.mounted) Navigator.of(dlgCtx).pop(true);
+                        } catch (e) {
+                          setDlg(() => saving = false);
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(backgroundColor: _kCarmineRed, content: Text('Error al reasignar: $e')),
+                            );
+                          }
+                        }
+                      },
+                child: Text(saving ? 'Guardando...' : 'Reasignar Orden'),
               ),
             ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: saving ? null : () => Navigator.of(dlgCtx).pop(false),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: saving || tecSel == null
-                  ? null
-                  : () async {
-                      setDlg(() => saving = true);
-                      try {
-                        await ApiService.instance.asignarOrdenAdmin(
-                          folio,
-                          idTecnico: tecSel!,
-                          modalidad: modSel,
-                        );
-                        if (context.mounted) Navigator.of(dlgCtx).pop(true);
-                      } catch (e) {
-                        setDlg(() => saving = false);
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(backgroundColor: _kCarmineRed, content: Text('Error al reasignar: $e')),
-                          );
-                        }
-                      }
-                    },
-              child: Text(saving ? 'Guardando...' : 'Reasignar Orden'),
-            ),
-          ],
-        ),
+          );
+        },
       ),
     );
 
@@ -1763,35 +1765,38 @@ class _OsListScreenState extends State<OsListScreen> {
       if (mounted) {
         await showDialog<void>(
           context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: PesaColors.surface,
-            surfaceTintColor: Colors.transparent,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            title: const Row(
-              children: [
-                Icon(Icons.info_outline_rounded, color: _kCarmineRed, size: 24),
-                SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    'Lote sin órdenes listas para enviar',
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _kTextPrim),
+          builder: (ctx) {
+            final dc = PesaColors.of(ctx);
+            return AlertDialog(
+              backgroundColor: dc.surface,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              title: Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, color: dc.brandAccent, size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Lote sin órdenes listas para enviar',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: dc.textPrimary),
+                    ),
                   ),
+                ],
+              ),
+              content: Text(
+                activas.isEmpty
+                    ? 'Todas las órdenes de este lote están marcadas como no utilizadas ($canceladasCount canceladas).'
+                    : 'Aún no hay ninguna orden completada con PDF firmado en este lote (${activas.length} activas pendientes).',
+                style: TextStyle(fontSize: 13.5, height: 1.4, color: dc.textSecondary),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Entendido'),
                 ),
               ],
-            ),
-            content: Text(
-              activas.isEmpty
-                  ? 'Todas las órdenes de este lote están marcadas como no utilizadas ($canceladasCount canceladas).'
-                  : 'Aún no hay ninguna orden completada con PDF firmado en este lote (${activas.length} activas pendientes).',
-              style: const TextStyle(fontSize: 13.5, height: 1.4, color: _kTextSec),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Entendido'),
-              ),
-            ],
-          ),
+            );
+          },
         );
       }
       return;
@@ -1810,23 +1815,25 @@ class _OsListScreenState extends State<OsListScreen> {
         barrierDismissible: false,
         builder: (sCtx) => StatefulBuilder(
           builder: (ctx, setSmartState) {
+            final dc = PesaColors.of(ctx);
+            final Color activeChipFg = dc.isDark ? dc.canvas : Colors.white;
             final bool requiereOtroTxt = motivoSmart == 'Otro motivo';
             final String motivoEfectivo = requiereOtroTxt ? otroSmartCtrl.text.trim() : motivoSmart;
             final bool motivoOk = motivoEfectivo.length >= 3;
 
             return AlertDialog(
-              backgroundColor: PesaColors.surface,
+              backgroundColor: dc.surface,
               surfaceTintColor: Colors.transparent,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               title: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.layers_clear_outlined, color: _kCarmineRed, size: 24),
+                  Icon(Icons.layers_clear_outlined, color: dc.brandAccent, size: 24),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       '¿Enviar solo las ${completadas.length} órdenes completadas?',
-                      style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: _kTextPrim),
+                      style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: dc.textPrimary),
                     ),
                   ),
                 ],
@@ -1839,12 +1846,12 @@ class _OsListScreenState extends State<OsListScreen> {
                     Text(
                       'Quedan ${pendientes.length} orden(es) sin llenar en este lote (${foliosPendientes.join(', ')}). '
                       'Puedes descartarlas automáticamente sin borrar su consecutivo y enviar únicamente los ${completadas.length} reportes terminados.',
-                      style: const TextStyle(fontSize: 13, height: 1.4, color: _kTextSec),
+                      style: TextStyle(fontSize: 13, height: 1.4, color: dc.textSecondary),
                     ),
                     const SizedBox(height: 14),
-                    const Text(
+                    Text(
                       'Motivo de órdenes no utilizadas (1 toque):',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _kTextPrim),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: dc.textPrimary),
                     ),
                     const SizedBox(height: 8),
                     Wrap(
@@ -1856,13 +1863,13 @@ class _OsListScreenState extends State<OsListScreen> {
                           label: Text(op),
                           selected: sel,
                           showCheckmark: false,
-                          selectedColor: _kTextPrim,
-                          backgroundColor: PesaColors.surfaceMuted,
-                          side: BorderSide(color: sel ? _kTextPrim : PesaColors.borderStrong),
+                          selectedColor: dc.textPrimary,
+                          backgroundColor: dc.surfaceMuted,
+                          side: BorderSide(color: sel ? dc.textPrimary : dc.borderStrong),
                           labelStyle: TextStyle(
                             fontSize: 11.5,
                             fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                            color: sel ? Colors.white : _kTextPrim,
+                            color: sel ? activeChipFg : dc.textPrimary,
                           ),
                           onSelected: procesandoDescarteMasivo
                               ? null
@@ -1897,8 +1904,8 @@ class _OsListScreenState extends State<OsListScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _kCarmineRed,
                           foregroundColor: Colors.white,
-                          disabledBackgroundColor: PesaColors.surfaceMuted,
-                          disabledForegroundColor: PesaColors.textTertiary,
+                          disabledBackgroundColor: dc.surfaceMuted,
+                          disabledForegroundColor: dc.textTertiary,
                           elevation: 0,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
@@ -1945,8 +1952,8 @@ class _OsListScreenState extends State<OsListScreen> {
                       height: 42,
                       child: OutlinedButton(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: _kTextPrim,
-                          side: const BorderSide(color: PesaColors.borderStrong),
+                          foregroundColor: dc.textPrimary,
+                          side: BorderSide(color: dc.borderStrong),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         onPressed: procesandoDescarteMasivo ? null : () => Navigator.of(ctx).pop(false),
@@ -2106,17 +2113,19 @@ class _OsListScreenState extends State<OsListScreen> {
       barrierDismissible: !isSendingModal,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (ctx, setModalState) {
+          final dc = PesaColors.of(ctx);
+          final Color activeChipFg = dc.isDark ? dc.canvas : Colors.white;
           return PopScope(
             canPop: !isSendingModal,
             child: AlertDialog(
-              backgroundColor: Colors.white,
+              backgroundColor: dc.surface,
               surfaceTintColor: Colors.transparent,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               title: Row(
                 children: [
                   Icon(
                     yaEnviado ? Icons.mark_email_read_rounded : Icons.mail_outline_rounded,
-                    color: _kCarmineRed,
+                    color: dc.brandAccent,
                     size: 24,
                   ),
                   const SizedBox(width: 10),
@@ -2125,7 +2134,7 @@ class _OsListScreenState extends State<OsListScreen> {
                       esLote
                           ? (yaEnviado ? 'Reenviar Lote por Correo' : 'Confirmación Final de Envío de Lote')
                           : (yaEnviado ? 'Reenviar Reporte — $folio' : 'Confirmar Envío de Reporte — $folio'),
-                      style: const TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: _kTextPrim),
+                      style: TextStyle(fontSize: 16.5, fontWeight: FontWeight.w800, color: dc.textPrimary),
                     ),
                   ),
                 ],
@@ -2143,7 +2152,7 @@ class _OsListScreenState extends State<OsListScreen> {
                           Text(
                             'Se enviará un SOLO correo institucional con ${itemsEnvio.length} reporte(s) PDF firmado(s).'
                             '${canceladasCount > 0 ? ' ($canceladasCount orden(es) no utilizada(s) excluida(s)).' : ''}',
-                            style: const TextStyle(fontSize: 13, height: 1.4, color: _kTextSec),
+                            style: TextStyle(fontSize: 13, height: 1.4, color: dc.textSecondary),
                           ),
                           const SizedBox(height: 10),
                         ],
@@ -2153,31 +2162,31 @@ class _OsListScreenState extends State<OsListScreen> {
                             constraints: const BoxConstraints(maxHeight: 160),
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             decoration: BoxDecoration(
-                              color: PesaColors.surfaceMuted,
+                              color: dc.surfaceMuted,
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: PesaColors.border),
+                              border: Border.all(color: dc.border),
                             ),
                             child: SingleChildScrollView(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Text(
+                                  Text(
                                     'ASUNTO Y FOLIOS ACTIVOS A ENVIAR',
                                     style: TextStyle(
                                       fontSize: 10.5,
                                       fontWeight: FontWeight.w700,
-                                      color: _kTextSec,
+                                      color: dc.textSecondary,
                                       letterSpacing: 0.4,
                                     ),
                                   ),
                                   const SizedBox(height: 3),
                                   Text(
                                     asuntoPreview,
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12.5,
                                       fontWeight: FontWeight.w700,
-                                      color: _kTextPrim,
+                                      color: dc.textPrimary,
                                       height: 1.35,
                                     ),
                                   ),
@@ -2186,10 +2195,10 @@ class _OsListScreenState extends State<OsListScreen> {
                                     etiquetasEnvio.isNotEmpty
                                         ? etiquetasEnvio.join('\n')
                                         : 'Folios (${foliosEnvio.length}): ${foliosEnvio.join(', ')}',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: _kTextPrim,
+                                      color: dc.textPrimary,
                                       height: 1.4,
                                     ),
                                   ),
@@ -2204,7 +2213,7 @@ class _OsListScreenState extends State<OsListScreen> {
                             controller: emailCtrl,
                             keyboardType: TextInputType.emailAddress,
                             enabled: !isSendingModal,
-                            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: _kTextPrim),
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: dc.textPrimary),
                             validator: (val) {
                               if (soloRecepcionModal) return null;
                               final v = (val ?? '').trim();
@@ -2217,7 +2226,7 @@ class _OsListScreenState extends State<OsListScreen> {
                             decoration: InputDecoration(
                               labelText: 'Destinatario (Cliente)',
                               hintText: 'cliente@empresa.com',
-                              prefixIcon: const Icon(Icons.alternate_email_rounded, color: _kCarmineRed, size: 19),
+                              prefixIcon: Icon(Icons.alternate_email_rounded, color: dc.brandAccent, size: 19),
                               suffixIcon: emailCtrl.text.isNotEmpty
                                   ? IconButton(
                                       icon: const Icon(Icons.clear_rounded, size: 17),
@@ -2232,55 +2241,55 @@ class _OsListScreenState extends State<OsListScreen> {
                           ),
                           if (correosFrecuentes.isNotEmpty) ...[
                             const SizedBox(height: 8),
-                            const Text(
+                            Text(
                               'Correos frecuentes del cliente (toca para elegir):',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _kTextSec),
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: dc.textSecondary),
                             ),
                             const SizedBox(height: 5),
                             Wrap(
                               spacing: 6,
                               runSpacing: 6,
-                              children: correosFrecuentes.map((c) {
-                                final activo = emailCtrl.text.trim().toLowerCase() == c.toLowerCase();
+                              children: correosFrecuentes.map((mail) {
+                                final activo = emailCtrl.text.trim().toLowerCase() == mail.toLowerCase();
                                 return ActionChip(
                                   visualDensity: VisualDensity.compact,
-                                  backgroundColor: activo ? _kTextPrim : PesaColors.surfaceMuted,
-                                  side: BorderSide(color: activo ? _kTextPrim : PesaColors.borderStrong),
+                                  backgroundColor: activo ? dc.textPrimary : dc.surfaceMuted,
+                                  side: BorderSide(color: activo ? dc.textPrimary : dc.borderStrong),
                                   label: Text(
-                                    c,
+                                    mail,
                                     style: TextStyle(
                                       fontSize: 11.5,
                                       fontWeight: activo ? FontWeight.w700 : FontWeight.w500,
-                                      color: activo ? Colors.white : _kTextPrim,
+                                      color: activo ? activeChipFg : dc.textPrimary,
                                     ),
                                   ),
                                   onPressed: isSendingModal
                                       ? null
                                       : () => setModalState(() {
-                                            emailCtrl.text = c;
+                                            emailCtrl.text = mail;
                                           }),
                                 );
                               }).toList(),
                             ),
                           ],
                           const SizedBox(height: 8),
-                          const Text(
+                          Text(
                             'CC institucional automática: recepcion@basculaspesa.com.mx',
-                            style: TextStyle(fontSize: 11.5, color: _kTextSec),
+                            style: TextStyle(fontSize: 11.5, color: dc.textSecondary),
                           ),
                         ] else ...[
                           Container(
                             width: double.infinity,
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: PesaColors.surfaceMuted,
+                              color: dc.surfaceMuted,
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: PesaColors.borderStrong),
+                              border: Border.all(color: dc.borderStrong),
                             ),
                             child: Text(
                               'Envío exclusivo de respaldo a recepcion@basculaspesa.com.mx\n'
                               'Motivo registrado: $motivoSinCorreoModal',
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _kTextPrim, height: 1.35),
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: dc.textPrimary, height: 1.35),
                             ),
                           ),
                         ],
@@ -2299,17 +2308,17 @@ class _OsListScreenState extends State<OsListScreen> {
                                   height: 20,
                                   child: Checkbox(
                                     value: soloRecepcionModal,
-                                    activeColor: _kTextPrim,
+                                    activeColor: dc.brand,
                                     onChanged: isSendingModal
                                         ? null
                                         : (v) => setModalState(() => soloRecepcionModal = v ?? false),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
-                                const Expanded(
+                                Expanded(
                                   child: Text(
                                     'El cliente no cuenta con correo (enviar respaldo solo a recepción)',
-                                    style: TextStyle(fontSize: 11.5, color: _kTextSec, fontWeight: FontWeight.w500),
+                                    style: TextStyle(fontSize: 11.5, color: dc.textSecondary, fontWeight: FontWeight.w500),
                                   ),
                                 ),
                               ],
@@ -2590,22 +2599,23 @@ class _OsListScreenState extends State<OsListScreen> {
       context: context,
       builder: (dCtx) => StatefulBuilder(
         builder: (ctx, setModalSt) {
+          final dc = PesaColors.of(ctx);
           final bool esOtro = motivoSel == 'Otro motivo';
           final String motFinal = esOtro ? otroCtrl.text.trim() : motivoSel;
           final bool valido = motFinal.length >= 3;
 
           return AlertDialog(
-            backgroundColor: PesaColors.surface,
+            backgroundColor: dc.surface,
             surfaceTintColor: Colors.transparent,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Row(
               children: [
-                const Icon(Icons.remove_circle_outline_rounded, color: _kCarmineRed, size: 22),
+                Icon(Icons.remove_circle_outline_rounded, color: dc.brandAccent, size: 22),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Marcar $folio como no utilizada',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _kTextPrim),
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: dc.textPrimary),
                   ),
                 ),
               ],
@@ -2615,14 +2625,14 @@ class _OsListScreenState extends State<OsListScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'El folio conservará su consecutivo para auditoría, se excluirá del correo del lote y no contará como orden pendiente.',
-                    style: TextStyle(fontSize: 12.5, height: 1.4, color: _kTextSec),
+                    style: TextStyle(fontSize: 12.5, height: 1.4, color: dc.textSecondary),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     'Selecciona el motivo:',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _kTextPrim),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: dc.textPrimary),
                   ),
                   const SizedBox(height: 8),
                   for (final op in _motivosCancelacionRapidos)
@@ -2634,10 +2644,10 @@ class _OsListScreenState extends State<OsListScreen> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                           decoration: BoxDecoration(
-                            color: motivoSel == op ? PesaColors.surfaceMuted : Colors.white,
+                            color: motivoSel == op ? dc.surfaceMuted : dc.surface,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: motivoSel == op ? _kTextPrim : PesaColors.border,
+                              color: motivoSel == op ? dc.brandAccent : dc.border,
                               width: motivoSel == op ? 1.4 : 1.0,
                             ),
                           ),
@@ -2646,7 +2656,7 @@ class _OsListScreenState extends State<OsListScreen> {
                               Icon(
                                 motivoSel == op ? Icons.radio_button_checked_rounded : Icons.radio_button_off_rounded,
                                 size: 18,
-                                color: motivoSel == op ? _kCarmineRed : PesaColors.textTertiary,
+                                color: motivoSel == op ? dc.brandAccent : dc.textTertiary,
                               ),
                               const SizedBox(width: 8),
                               Expanded(
@@ -2655,7 +2665,7 @@ class _OsListScreenState extends State<OsListScreen> {
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: motivoSel == op ? FontWeight.w700 : FontWeight.w500,
-                                    color: _kTextPrim,
+                                    color: dc.textPrimary,
                                   ),
                                 ),
                               ),
@@ -2689,8 +2699,8 @@ class _OsListScreenState extends State<OsListScreen> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _kCarmineRed,
                   foregroundColor: Colors.white,
-                  disabledBackgroundColor: PesaColors.surfaceMuted,
-                  disabledForegroundColor: PesaColors.textTertiary,
+                  disabledBackgroundColor: dc.surfaceMuted,
+                  disabledForegroundColor: dc.textTertiary,
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
@@ -2735,7 +2745,7 @@ class _OsListScreenState extends State<OsListScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          backgroundColor: _kTextPrim,
+          backgroundColor: const Color(0xFF1C1C1E),
           content: Text(
             okServer
                 ? 'Orden $folio marcada como no utilizada ($motivoConfirmado)'
@@ -2753,28 +2763,31 @@ class _OsListScreenState extends State<OsListScreen> {
 
     final bool? conf = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: PesaColors.surface,
-        surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: Text('Reactivar $folio', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-        content: const Text(
-          '¿Deseas reactivar esta orden para que vuelva a estar disponible para captura?',
-          style: TextStyle(fontSize: 13.5, color: _kTextSec),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancelar')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _kCarmineRed,
-              foregroundColor: Colors.white,
-              elevation: 0,
-            ),
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Reactivar Orden'),
+      builder: (ctx) {
+        final dc = PesaColors.of(ctx);
+        return AlertDialog(
+          backgroundColor: dc.surface,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: Text('Reactivar $folio', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: dc.textPrimary)),
+          content: Text(
+            '¿Deseas reactivar esta orden para que vuelva a estar disponible para captura?',
+            style: TextStyle(fontSize: 13.5, color: dc.textSecondary),
           ),
-        ],
-      ),
+          actions: [
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Cancelar')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _kCarmineRed,
+                foregroundColor: Colors.white,
+                elevation: 0,
+              ),
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Reactivar Orden'),
+            ),
+          ],
+        );
+      },
     );
     if (conf != true || !mounted) return;
 
@@ -2909,8 +2922,9 @@ class _OsListScreenState extends State<OsListScreen> {
       },
     );
 
+    final c = PesaColors.of(context);
     final content = Scaffold(
-      backgroundColor: _kBgColor,
+      backgroundColor: c.canvas,
       body: SafeArea(
         bottom: false,
         child: repoActivo
@@ -3223,6 +3237,7 @@ class _MobilePhoneDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final bottom = MediaQuery.of(context).viewPadding.bottom;
     final auth = context.watch<AuthService>();
     final isOnline = sync.state != SyncState.offline && sync.state != SyncState.error;
@@ -3230,21 +3245,21 @@ class _MobilePhoneDashboard extends StatelessWidget {
     final firstName = rawName.isNotEmpty ? rawName.split(RegExp(r'\s+')).first : 'Técnico';
 
     return Container(
-      color: _kBgColor,
+      color: c.canvas,
       child: Column(
         children: [
           // ── 1. HEADER LIMPIO CON SALUDO + ESTADO RED (PUNTO 6dp) ─────────
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: const BoxDecoration(
-              color: _kCardBg,
-              border: Border(bottom: BorderSide(color: _kBorder)),
+            decoration: BoxDecoration(
+              color: c.surface,
+              border: Border(bottom: BorderSide(color: c.border)),
             ),
             child: Row(
               children: [
                 IconButton(
-                  icon: const Icon(Icons.menu_rounded, color: _kTextPrim, size: 24),
-                  constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                  icon: Icon(Icons.menu_rounded, color: c.textPrimary, size: 24),
+                  constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                   onPressed: () => AppShell.toggleMenu(context),
                   tooltip: 'Menú',
                 ),
@@ -3258,36 +3273,47 @@ class _MobilePhoneDashboard extends StatelessWidget {
                         'Hola, $firstName',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _kTextPrim,
+                        style: TextStyle(
+                          color: c.textPrimary,
                           fontWeight: FontWeight.w700,
                           fontSize: 16,
                           letterSpacing: -0.2,
                         ),
                       ),
-                      const Text(
+                      Text(
                         'Básculas PESA · Órdenes',
-                        style: TextStyle(color: _kTextSec, fontSize: 11.5),
+                        style: TextStyle(color: c.textSecondary, fontSize: 11.5),
                       ),
                     ],
                   ),
                 ),
                 PesaStatusBadge(
                   label: isOnline ? 'En línea' : 'Offline',
-                  dotColor: isOnline ? PesaColors.dotGreen : PesaColors.dotAmber,
+                  dotColor: isOnline ? c.dotGreen : c.dotAmber,
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 2),
+                IconButton(
+                  key: const Key('dashboard_theme_toggle_mobile'),
+                  constraints: const BoxConstraints(minWidth: 40, minHeight: 44),
+                  icon: Icon(
+                    c.isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+                    color: c.textPrimary,
+                    size: 20,
+                  ),
+                  tooltip: c.isDark ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro',
+                  onPressed: () => ThemeController.instance.toggleLightDark(context),
+                ),
                 GestureDetector(
                   onLongPress: () => state._mostrarMenuSincronizacion(context),
                   child: IconButton(
-                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                     icon: sync.state == SyncState.syncing
                         ? const SizedBox(
                             width: 18, height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2, color: _kCarmineRed),
                           )
-                        : const Icon(Icons.sync_rounded, color: _kTextPrim, size: 22),
+                        : Icon(Icons.sync_rounded, color: c.textPrimary, size: 22),
                     onPressed: () {
                       if (sync.state == SyncState.syncing) {
                         sync.forceResetSync();
@@ -3300,8 +3326,8 @@ class _MobilePhoneDashboard extends StatelessWidget {
                 ),
                 if (!hideTecnico)
                   IconButton(
-                    constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-                    icon: const Icon(Icons.add_circle_rounded, color: _kCarmineRed, size: 26),
+                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                    icon: Icon(Icons.add_circle_rounded, color: c.brandAccent, size: 26),
                     tooltip: 'Nuevo Documento',
                     onPressed: () async {
                       await context.push('/nuevo-doc');
@@ -3311,10 +3337,10 @@ class _MobilePhoneDashboard extends StatelessWidget {
                 if (puedeVerRepositorio && onToggleRepositorio != null)
                   IconButton(
                     key: const Key('os_vista_selector'),
-                    constraints: const BoxConstraints(minWidth: 44, minHeight: 48),
+                    constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
                     icon: Icon(
                       vistaRepositorio ? Icons.assignment_outlined : Icons.folder_copy_outlined,
-                      color: vistaRepositorio ? _kCarmineRed : _kTextPrim,
+                      color: vistaRepositorio ? c.brandAccent : c.textPrimary,
                       size: 21,
                     ),
                     tooltip: vistaRepositorio ? 'Ver Órdenes' : 'Repositorio Calibraciones',
@@ -3328,9 +3354,9 @@ class _MobilePhoneDashboard extends StatelessWidget {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF5F5F7),
-              border: Border(bottom: BorderSide(color: _kBorder)),
+            decoration: BoxDecoration(
+              color: c.canvas,
+              border: Border(bottom: BorderSide(color: c.border)),
             ),
             child: Row(
               children: [
@@ -3340,8 +3366,8 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       : Icons.cloud_done_outlined,
                   size: 14,
                   color: sync.syncWarnings.isNotEmpty
-                      ? const Color(0xFFB45309)
-                      : _kTextSec,
+                      ? c.dotAmber
+                      : c.textSecondary,
                 ),
                 const SizedBox(width: 6),
                 Expanded(
@@ -3351,9 +3377,9 @@ class _MobilePhoneDashboard extends StatelessWidget {
                         : sync.syncSummaryLabel,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11.5,
-                      color: _kTextSec,
+                      color: c.textSecondary,
                       fontWeight: FontWeight.w500,
                     ),
                   ),
@@ -3368,9 +3394,9 @@ class _MobilePhoneDashboard extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                     child: Text(
                       sync.state == SyncState.syncing ? 'Sincronizando…' : 'Sincronizar ahora',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11.5,
-                        color: _kCarmineRed,
+                        color: c.brandAccent,
                         fontWeight: FontWeight.w700,
                       ),
                     ),
@@ -3380,13 +3406,13 @@ class _MobilePhoneDashboard extends StatelessWidget {
             ),
           ),
           if (state._searchingRemote)
-            const LinearProgressIndicator(
+            LinearProgressIndicator(
               minHeight: 2,
               color: _kCarmineRed,
-              backgroundColor: Color(0xFFE2E8F0),
+              backgroundColor: c.border,
             ),
 
-          // ── 2. KPI SUMMARY (Grid 2x2 Corporativo — cifras en carbón tabular) ─
+          // ── 2. KPI SUMMARY (Grid 2x2 Corporativo — cifras en tabular) ───
           Container(
             padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
             child: Row(
@@ -3395,6 +3421,7 @@ class _MobilePhoneDashboard extends StatelessWidget {
                   child: Column(
                     children: [
                       _buildMobileKpiCard(
+                        context,
                         'TOTAL PERÍODO',
                         state._kpiTotal,
                         active: state._quickStatus == 'Todas',
@@ -3405,9 +3432,10 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       _buildMobileKpiCard(
+                        context,
                         'CERRADAS',
                         state._kpiCerrado,
-                        dotColor: PesaColors.dotGreen,
+                        dotColor: c.dotGreen,
                         active: state._quickStatus == 'Cerradas',
                         onTap: () {
                           state.setState(() => state._quickStatus = state._quickStatus == 'Cerradas' ? 'Todas' : 'Cerradas');
@@ -3422,9 +3450,10 @@ class _MobilePhoneDashboard extends StatelessWidget {
                   child: Column(
                     children: [
                       _buildMobileKpiCard(
+                        context,
                         'EN PROCESO',
                         state._kpiProceso,
-                        dotColor: PesaColors.dotAmber,
+                        dotColor: c.dotAmber,
                         active: state._quickStatus == 'En Proceso',
                         onTap: () {
                           state.setState(() => state._quickStatus = state._quickStatus == 'En Proceso' ? 'Todas' : 'En Proceso');
@@ -3433,9 +3462,10 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       ),
                       const SizedBox(height: 8),
                       _buildMobileKpiCard(
+                        context,
                         'FORMATOS FÍSICOS',
                         state._kpiFisico,
-                        dotColor: PesaColors.dotNeutral,
+                        dotColor: c.dotNeutral,
                         active: state._modalidad == 'Solo Físicos',
                         onTap: () {
                           state.setState(() => state._modalidad = state._modalidad == 'Solo Físicos' ? 'Todas las Modalidades' : 'Solo Físicos');
@@ -3469,11 +3499,11 @@ class _MobilePhoneDashboard extends StatelessWidget {
                           labelStyle: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
-                            color: state._quickStatus == st ? Colors.white : _kTextPrim,
+                            color: state._quickStatus == st ? Colors.white : c.textPrimary,
                           ),
-                          backgroundColor: Colors.white,
+                          backgroundColor: c.surface,
                           side: BorderSide(
-                            color: state._quickStatus == st ? _kCarmineRed : _kBorder,
+                            color: state._quickStatus == st ? _kCarmineRed : c.border,
                           ),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           onSelected: (_) {
@@ -3484,6 +3514,7 @@ class _MobilePhoneDashboard extends StatelessWidget {
                         const SizedBox(width: 6),
                       ],
                       _buildMobileChipDropdown(
+                        context: context,
                         label: state._periodo == 'Todo' ? 'Periodo' : state._periodo,
                         items: const ['Todo', 'Hoy', 'Semana', 'Mes'],
                         onSelected: (val) {
@@ -3493,6 +3524,7 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       _buildMobileChipDropdown(
+                        context: context,
                         label: state._modalidad,
                         items: const ['Todas las Modalidades', 'Solo Físicos', 'Solo Digitales'],
                         onSelected: (val) {
@@ -3502,6 +3534,7 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       _buildMobileChipDropdown(
+                        context: context,
                         label: state._filtroTipoServicio,
                         items: state._listaTiposServicio,
                         onSelected: (val) {
@@ -3511,6 +3544,7 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       _buildMobileChipDropdown(
+                        context: context,
                         label: state._filtroEmpresa,
                         items: state._listaEmpresas,
                         onSelected: (val) {
@@ -3526,14 +3560,14 @@ class _MobilePhoneDashboard extends StatelessWidget {
                   constraints: const BoxConstraints(minHeight: 44),
                   child: TextField(
                     controller: state._searchCtrl,
-                    style: const TextStyle(fontSize: 13.5, color: _kTextPrim),
+                    style: TextStyle(fontSize: 13.5, color: c.textPrimary),
                     decoration: InputDecoration(
                       hintText: 'Buscar folio, cliente, marca, modelo, serie, CCA/DVE…',
-                      hintStyle: const TextStyle(color: PesaColors.textTertiary, fontSize: 13),
-                      prefixIcon: const Icon(Icons.search_rounded, size: 20, color: _kTextSec),
+                      hintStyle: TextStyle(color: c.textTertiary, fontSize: 13),
+                      prefixIcon: Icon(Icons.search_rounded, size: 20, color: c.textSecondary),
                       suffixIcon: state._query.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(Icons.close_rounded, size: 18, color: _kTextSec),
+                              icon: Icon(Icons.close_rounded, size: 18, color: c.textSecondary),
                               onPressed: () {
                                 state._searchDebounceTimer?.cancel();
                                 state._searchCtrl.clear();
@@ -3545,18 +3579,18 @@ class _MobilePhoneDashboard extends StatelessWidget {
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       filled: true,
-                      fillColor: Colors.white,
+                      fillColor: c.isDark ? c.surfaceElevated : c.surface,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: PesaColors.borderStrong),
+                        borderSide: BorderSide(color: c.borderStrong),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: PesaColors.borderStrong),
+                        borderSide: BorderSide(color: c.borderStrong),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: _kCarmineRed, width: 1.5),
+                        borderSide: BorderSide(color: c.brandAccent, width: 1.5),
                       ),
                     ),
                     onChanged: state._onSearchQueryChanged,
@@ -3582,12 +3616,14 @@ class _MobilePhoneDashboard extends StatelessWidget {
   }
 
   Widget _buildMobileKpiCard(
+    BuildContext context,
     String label,
     int value, {
     Color? dotColor,
     bool active = false,
     VoidCallback? onTap,
   }) {
+    final c = PesaColors.of(context);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -3595,10 +3631,10 @@ class _MobilePhoneDashboard extends StatelessWidget {
         width: double.infinity,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: _kCardBg,
+          color: c.surface,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: active ? _kCarmineRed : _kBorder,
+            color: active ? c.brandAccent : c.border,
             width: active ? 1.5 : 1,
           ),
         ),
@@ -3617,8 +3653,8 @@ class _MobilePhoneDashboard extends StatelessWidget {
                     label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _kTextSec,
+                    style: TextStyle(
+                      color: c.textSecondary,
                       fontSize: 10.5,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 0.4,
@@ -3631,12 +3667,12 @@ class _MobilePhoneDashboard extends StatelessWidget {
             Text(
               value.toString(),
               maxLines: 1,
-              style: const TextStyle(
-                color: _kTextPrim,
+              style: TextStyle(
+                color: c.textPrimary,
                 fontSize: 22,
                 fontWeight: FontWeight.w700,
                 height: 1.1,
-                fontFeatures: [FontFeature.tabularFigures()],
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
             ),
           ],
@@ -3646,27 +3682,30 @@ class _MobilePhoneDashboard extends StatelessWidget {
   }
 
   Widget _buildMobileChipDropdown({
+    required BuildContext context,
     required String label,
     required List<String> items,
     required ValueChanged<String> onSelected,
   }) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10),
       height: 32,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: _kBorder),
+        color: c.surface,
+        border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(16),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
-          hint: Text(label, style: const TextStyle(fontSize: 12, color: _kTextPrim)),
+          dropdownColor: c.surface,
+          hint: Text(label, style: TextStyle(fontSize: 12, color: c.textPrimary)),
           isDense: true,
-          icon: const Icon(Icons.arrow_drop_down, size: 18, color: _kTextSec),
+          icon: Icon(Icons.arrow_drop_down, size: 18, color: c.textSecondary),
           items: items.map((item) {
             return DropdownMenuItem<String>(
               value: item,
-              child: Text(item, style: const TextStyle(fontSize: 12, color: _kTextPrim)),
+              child: Text(item, style: TextStyle(fontSize: 12, color: c.textPrimary)),
             );
           }).toList(),
           onChanged: (v) {
@@ -3744,10 +3783,8 @@ class _MobileOsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final folioStr  = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
-    final estado    = (os['estado'] as String? ?? '').toUpperCase().trim();
-    final estatus   = (os['estatus'] as String? ?? '').toUpperCase().trim();
-    final modalidad = (os['modalidad'] as String? ?? 'DIGITAL').toUpperCase();
     final syncSt    = (os['sync_status'] as String? ?? '');
 
     final bool isCancelada = _OsListScreenState.esCancelada(os);
@@ -3766,8 +3803,8 @@ class _MobileOsCard extends StatelessWidget {
         : (isCerrado
             ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
             : (noIniciada ? 'Sin Formato' : 'En Proceso'));
-    final Color estatusFg = isCancelada ? PesaColors.textSecondary : _kTextPrim;
-    final Color estatusBg = PesaColors.surfaceMuted;
+    final Color estatusFg = isCancelada ? c.textSecondary : c.textPrimary;
+    final Color estatusBg = c.surfaceMuted;
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
@@ -3779,14 +3816,24 @@ class _MobileOsCard extends StatelessWidget {
         (pdfReal && syncSt != 'PENDIENTE_ACTUALIZAR');
 
     final fechaStr = (os['fecha'] as String? ?? '').split('T').first.split(' ').first;
+    final ButtonStyle secondaryBtnStyle = ElevatedButton.styleFrom(
+      backgroundColor: c.isDark ? c.surfaceElevated : c.surface,
+      foregroundColor: c.textPrimary,
+      elevation: 0,
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(6),
+        side: BorderSide(color: c.borderStrong),
+      ),
+    );
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: isCancelada ? PesaColors.surfaceMuted : _kCardBg,
+        color: isCancelada ? c.surfaceMuted : c.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _kBorder, width: 1),
-        boxShadow: isCancelada
+        border: Border.all(color: c.border, width: 1),
+        boxShadow: (isCancelada || c.isDark)
             ? const []
             : [
                 BoxShadow(
@@ -3818,7 +3865,7 @@ class _MobileOsCard extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 13.5,
                             fontWeight: FontWeight.w800,
-                            color: isCancelada ? PesaColors.textTertiary : const Color(0xFF111827),
+                            color: isCancelada ? c.textTertiary : c.textPrimary,
                             decoration: isCancelada ? TextDecoration.lineThrough : null,
                             height: 1.25,
                           ),
@@ -3830,21 +3877,9 @@ class _MobileOsCard extends StatelessWidget {
                             runSpacing: 4,
                             children: [
                               if (ccaVal.isNotEmpty)
-                                _RegPillChip(
-                                  prefix: 'CCA',
-                                  value: ccaVal,
-                                  fg: const Color(0xFF1D1D1F),
-                                  bg: const Color(0xFFF5F5F7),
-                                  border: const Color(0xFFD2D2D7),
-                                ),
+                                _RegPillChip(prefix: 'CCA', value: ccaVal),
                               if (dveVal.isNotEmpty)
-                                _RegPillChip(
-                                  prefix: 'DVE',
-                                  value: dveVal,
-                                  fg: const Color(0xFF1D1D1F),
-                                  bg: const Color(0xFFF5F5F7),
-                                  border: const Color(0xFFD2D2D7),
-                                ),
+                                _RegPillChip(prefix: 'DVE', value: dveVal),
                             ],
                           ),
                         ],
@@ -3854,9 +3889,9 @@ class _MobileOsCard extends StatelessWidget {
                             specsStr,
                             softWrap: true,
                             maxLines: 3,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: Color(0xFF4B5563),
+                              color: c.textSecondary,
                               height: 1.35,
                             ),
                           ),
@@ -3872,6 +3907,7 @@ class _MobileOsCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: estatusBg,
                   borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: c.border),
                 ),
                 child: Text(
                   estatusLabel,
@@ -3886,15 +3922,15 @@ class _MobileOsCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
 
-          // Fila Media: Cliente (14px semi-bold) + Sucursal multilínea sin cortar (#86868B)
+          // Fila Media: Cliente (14px semi-bold) + Sucursal multilínea sin cortar
           Text(
             os['cliente'] as String? ?? 'Sin cliente',
             softWrap: true,
             maxLines: 2,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: _kTextPrim,
+              color: c.textPrimary,
             ),
           ),
           if ((os['sucursal'] ?? '').toString().isNotEmpty) ...[
@@ -3903,9 +3939,9 @@ class _MobileOsCard extends StatelessWidget {
               os['sucursal'].toString(),
               softWrap: true,
               maxLines: 3,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
-                color: _kTextSec,
+                color: c.textSecondary,
                 height: 1.3,
               ),
             ),
@@ -3914,22 +3950,22 @@ class _MobileOsCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFFF5F5F7),
+              color: c.surfaceMuted,
               borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: const Color(0xFFE2E8F0), width: 0.8),
+              border: Border.all(color: c.border, width: 0.8),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.person_outline, size: 13, color: _kTextSec),
+                Icon(Icons.person_outline, size: 13, color: c.textSecondary),
                 const SizedBox(width: 4),
                 Flexible(
                   child: Text(
                     'Técnico: ${os['tecnico_nombre'] ?? os['tecnico'] ?? 'Sin asignar'}',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: _kTextPrim,
+                      color: c.textPrimary,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -3949,14 +3985,14 @@ class _MobileOsCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF2F2F7),
+                  color: c.surfaceElevated,
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
                   os['tipo_servicio'] as String? ?? 'Servicio',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: _kTextPrim,
+                    color: c.textPrimary,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
@@ -3964,9 +4000,9 @@ class _MobileOsCard extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 fechaStr,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12,
-                  color: _kTextSec,
+                  color: c.textSecondary,
                 ),
               ),
               EmailStatusBadge(
@@ -3992,24 +4028,24 @@ class _MobileOsCard extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: c.surface,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: PesaColors.border),
+                border: Border.all(color: c.border),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.remove_circle_outline_rounded, size: 15, color: PesaColors.textSecondary),
+                  Icon(Icons.remove_circle_outline_rounded, size: 15, color: c.textSecondary),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       'No utilizada: ${(os['motivo_cancelacion'] ?? '').toString().trim().isNotEmpty ? os['motivo_cancelacion'].toString().trim() : 'Descartada del lote'}',
-                      style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 11.5, color: c.textSecondary, fontWeight: FontWeight.w600),
                     ),
                   ),
                   if (esAdmin)
                     TextButton.icon(
                       style: TextButton.styleFrom(
-                        foregroundColor: _kTextPrim,
+                        foregroundColor: c.textPrimary,
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       ),
@@ -4028,16 +4064,7 @@ class _MobileOsCard extends StatelessWidget {
                   child: SizedBox(
                     height: 44,
                     child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF1D1D1F),
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: Color(0xFFD2D2D7)),
-                        ),
-                      ),
+                      style: secondaryBtnStyle,
                       onPressed: () => onAbrirPdf(context, os),
                       icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
                       label: const Text(
@@ -4052,16 +4079,7 @@ class _MobileOsCard extends StatelessWidget {
                   child: SizedBox(
                     height: 44,
                     child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF1D1D1F),
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: Color(0xFFD2D2D7)),
-                        ),
-                      ),
+                      style: secondaryBtnStyle,
                       onPressed: () => onDescargarPdf(context, os),
                       icon: const Icon(Icons.download_outlined, size: 15),
                       label: const Text(
@@ -4076,16 +4094,7 @@ class _MobileOsCard extends StatelessWidget {
                   child: SizedBox(
                     height: 44,
                     child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF1D1D1F),
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: Color(0xFFD2D2D7)),
-                        ),
-                      ),
+                      style: secondaryBtnStyle,
                       onPressed: () => onRehacer(context, os),
                       icon: const Icon(Icons.refresh_rounded, size: 15),
                       label: const Text(
@@ -4113,10 +4122,10 @@ class _MobileOsCard extends StatelessWidget {
                         final bool enviando = st != null && st._estaEnviandoEmail;
                         return ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: enviando ? const Color(0xFFF5F5F7) : Colors.white,
-                            foregroundColor: enviando ? const Color(0xFF94A3B8) : const Color(0xFF1D1D1F),
+                            backgroundColor: enviando ? c.surfaceMuted : (c.isDark ? c.surfaceElevated : c.surface),
+                            foregroundColor: enviando ? c.textTertiary : c.textPrimary,
                             elevation: 0,
-                            side: const BorderSide(color: Color(0xFFD2D2D7)),
+                            side: BorderSide(color: c.borderStrong),
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                           ),
@@ -4138,16 +4147,7 @@ class _MobileOsCard extends StatelessWidget {
                   child: SizedBox(
                     height: 40,
                     child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF1D1D1F),
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: Color(0xFFD2D2D7)),
-                        ),
-                      ),
+                      style: secondaryBtnStyle,
                       onPressed: () => onSubirPdfManual(context, os),
                       icon: const Icon(Icons.upload_file_rounded, size: 16),
                       label: const Text(
@@ -4163,13 +4163,13 @@ class _MobileOsCard extends StatelessWidget {
                     height: 40,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: _kCarmineRed,
+                        backgroundColor: c.isDark ? c.surfaceElevated : c.surface,
+                        foregroundColor: c.brandAccent,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: _kCarmineRed),
+                          side: BorderSide(color: c.brandAccent),
                         ),
                       ),
                       onPressed: () => onEliminarDatos(context, os),
@@ -4235,16 +4235,7 @@ class _MobileOsCard extends StatelessWidget {
                   child: SizedBox(
                     height: 40,
                     child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xFF1D1D1F),
-                        elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 4),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(6),
-                          side: const BorderSide(color: Color(0xFFD2D2D7)),
-                        ),
-                      ),
+                      style: secondaryBtnStyle,
                       onPressed: () => onSubirPdfManual(context, os),
                       icon: const Icon(Icons.upload_file_rounded, size: 16),
                       label: const Text(
@@ -4260,16 +4251,7 @@ class _MobileOsCard extends StatelessWidget {
                     child: SizedBox(
                       height: 40,
                       child: ElevatedButton.icon(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: const Color(0xFF1D1D1F),
-                          elevation: 0,
-                          padding: const EdgeInsets.symmetric(horizontal: 4),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(6),
-                            side: const BorderSide(color: Color(0xFFD2D2D7)),
-                          ),
-                        ),
+                        style: secondaryBtnStyle,
                         onPressed: () => context.findAncestorStateOfType<_OsListScreenState>()?._mostrarModalDescartarOrden(context, os),
                         icon: const Icon(Icons.remove_circle_outline_rounded, size: 15),
                         label: const Text(
@@ -4287,13 +4269,13 @@ class _MobileOsCard extends StatelessWidget {
                       height: 40,
                       child: ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: _kCarmineRed,
+                          backgroundColor: c.isDark ? c.surfaceElevated : c.surface,
+                          foregroundColor: c.brandAccent,
                           elevation: 0,
                           padding: const EdgeInsets.symmetric(horizontal: 4),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(6),
-                            side: const BorderSide(color: _kCarmineRed),
+                            side: BorderSide(color: c.brandAccent),
                           ),
                         ),
                         onPressed: () => onEliminarDatos(context, os),
@@ -4340,6 +4322,7 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final count = widget.group.items.length;
     final cancelledCount = widget.group.items.where(_OsListScreenState.esCancelada).length;
     final activeCount = (count - cancelledCount).clamp(0, count);
@@ -4351,9 +4334,9 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: c.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: _kBorder, width: 1),
+        border: Border.all(color: c.border, width: 1),
       ),
       child: Column(
         children: [
@@ -4367,13 +4350,13 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF5F5F7),
+                      color: c.surfaceMuted,
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: const Color(0xFFD2D2D7)),
+                      border: Border.all(color: c.borderStrong),
                     ),
                     child: Text(
                       cancelledCount > 0 ? 'LOTE · $activeCount/$count activas' : 'LOTE · $count OS',
-                      style: const TextStyle(color: _kTextPrim, fontSize: 10, fontWeight: FontWeight.w700),
+                      style: TextStyle(color: c.textPrimary, fontSize: 10, fontWeight: FontWeight.w700),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -4384,13 +4367,13 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                       children: [
                         Text(
                           first['cliente'] as String? ?? 'Cliente del Lote',
-                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: _kTextPrim),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: c.textPrimary),
                           overflow: TextOverflow.ellipsis,
                         ),
                         const SizedBox(height: 2),
                         Text(
                           'Técnico: ${first['tecnico_nombre'] ?? first['tecnico'] ?? 'Sin asignar'}',
-                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: _kTextSec),
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: c.textSecondary),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -4405,10 +4388,10 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                       final bool enviando = widget.state._estaEnviandoEmail;
                       return ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: enviando ? const Color(0xFFF5F5F7) : Colors.white,
-                          foregroundColor: enviando ? const Color(0xFF94A3B8) : _kTextPrim,
+                          backgroundColor: enviando ? c.surfaceMuted : (c.isDark ? c.surfaceElevated : c.surface),
+                          foregroundColor: enviando ? c.textTertiary : c.textPrimary,
                           elevation: 0,
-                          side: const BorderSide(color: Color(0xFFD2D2D7)),
+                          side: BorderSide(color: c.borderStrong),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                         ),
@@ -4424,7 +4407,7 @@ class _MobileLoteCardState extends State<_MobileLoteCard> {
                   const SizedBox(width: 4),
                   Icon(
                     _expanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-                    color: _kCarmineRed,
+                    color: c.brandAccent,
                   ),
                 ],
               ),
@@ -4520,10 +4503,10 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
           onToggleRepositorio: onToggleRepositorio,
         ),
         if (state._searchingRemote)
-          const LinearProgressIndicator(
+          LinearProgressIndicator(
             minHeight: 2,
             color: _kCarmineRed,
-            backgroundColor: Color(0xFFE2E8F0),
+            backgroundColor: PesaColors.of(context).border,
           ),
         Expanded(
           child: FoldableTwoPane(
@@ -4543,16 +4526,17 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
     List<_OsGroup> groups,
     _OsGroup? selectedGroup,
   ) {
+    final c = PesaColors.of(context);
     return Container(
-      color: _kBgColor,
+      color: c.canvas,
       child: Column(
         children: [
           // ── Barra de búsqueda y filtros rápidos ─────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
-            decoration: const BoxDecoration(
-              color: _kCardBg,
-              border: Border(bottom: BorderSide(color: _kBorder)),
+            decoration: BoxDecoration(
+              color: c.surface,
+              border: Border(bottom: BorderSide(color: c.border)),
             ),
             child: Column(
               children: [
@@ -4560,14 +4544,14 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   constraints: const BoxConstraints(minHeight: 42),
                   child: TextField(
                     controller: state._searchCtrl,
-                    style: const TextStyle(fontSize: 13, color: _kTextPrim),
+                    style: TextStyle(fontSize: 13, color: c.textPrimary),
                     decoration: InputDecoration(
                       hintText: 'Buscar folio, cliente, serie, CCA/DVE…',
-                      hintStyle: const TextStyle(color: PesaColors.textTertiary, fontSize: 12.5),
-                      prefixIcon: const Icon(Icons.search_rounded, size: 19, color: _kTextSec),
+                      hintStyle: TextStyle(color: c.textTertiary, fontSize: 12.5),
+                      prefixIcon: Icon(Icons.search_rounded, size: 19, color: c.textSecondary),
                       suffixIcon: state._query.isNotEmpty
                           ? IconButton(
-                              icon: const Icon(Icons.close_rounded, size: 17, color: _kTextSec),
+                              icon: Icon(Icons.close_rounded, size: 17, color: c.textSecondary),
                               onPressed: () {
                                 state._searchDebounceTimer?.cancel();
                                 state._searchCtrl.clear();
@@ -4579,18 +4563,18 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                       isDense: true,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                       filled: true,
-                      fillColor: PesaColors.surfaceMuted,
+                      fillColor: c.surfaceMuted,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: _kBorder),
+                        borderSide: BorderSide(color: c.border),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: _kBorder),
+                        borderSide: BorderSide(color: c.border),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: _kCarmineRed, width: 1.5),
+                        borderSide: BorderSide(color: c.brandAccent, width: 1.5),
                       ),
                     ),
                     onChanged: state._onSearchQueryChanged,
@@ -4608,9 +4592,9 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                           selected: state._quickStatus == st,
                           showCheckmark: false,
                           selectedColor: _kCarmineRed,
-                          backgroundColor: Colors.white,
+                          backgroundColor: c.surface,
                           side: BorderSide(
-                            color: state._quickStatus == st ? _kCarmineRed : _kBorder,
+                            color: state._quickStatus == st ? _kCarmineRed : c.border,
                           ),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
                           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -4618,7 +4602,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                           labelStyle: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.w600,
-                            color: state._quickStatus == st ? Colors.white : _kTextPrim,
+                            color: state._quickStatus == st ? Colors.white : c.textPrimary,
                           ),
                           onSelected: (_) {
                             state.setState(() => state._quickStatus = st);
@@ -4628,6 +4612,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                         const SizedBox(width: 6),
                       ],
                       _compactFilterPill(
+                        context: context,
                         label: state._periodo == 'Todo' ? 'Periodo' : state._periodo,
                         items: const ['Todo', 'Hoy', 'Semana', 'Mes'],
                         onSelected: (v) {
@@ -4637,6 +4622,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       _compactFilterPill(
+                        context: context,
                         label: state._modalidad == 'Todas las Modalidades' ? 'Modalidad' : state._modalidad,
                         items: const ['Todas las Modalidades', 'Solo Físicos', 'Solo Digitales'],
                         onSelected: (v) {
@@ -4646,6 +4632,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                       ),
                       const SizedBox(width: 6),
                       _compactFilterPill(
+                        context: context,
                         label: state._filtroEmpresa == 'Todas las Empresas' ? 'Cliente' : state._filtroEmpresa,
                         items: state._listaEmpresas,
                         onSelected: (v) {
@@ -4656,6 +4643,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                       if (!hideTecnico && state._tecnicos.isNotEmpty) ...[
                         const SizedBox(width: 6),
                         _compactFilterPill(
+                          context: context,
                           label: state._tecnico ?? 'Técnico',
                           items: ['Todos los Técnicos', ...state._tecnicos],
                           onSelected: (v) {
@@ -4674,19 +4662,19 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
           // ── Contador discreto + acceso rápido a Resumen KPI ─────────────
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            decoration: const BoxDecoration(
-              color: _kBgColor,
-              border: Border(bottom: BorderSide(color: _kBorder)),
+            decoration: BoxDecoration(
+              color: c.canvas,
+              border: Border(bottom: BorderSide(color: c.border)),
             ),
             child: Row(
               children: [
                 Text(
                   '${groups.length} ${groups.length == 1 ? "registro" : "registros"} (${state._filtered.length} OS)',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: _kTextSec,
-                    fontFeatures: [FontFeature.tabularFigures()],
+                    color: c.textSecondary,
+                    fontFeatures: const [FontFeature.tabularFigures()],
                   ),
                 ),
                 const Spacer(),
@@ -4694,14 +4682,14 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   InkWell(
                     borderRadius: BorderRadius.circular(6),
                     onTap: () => state.setState(() => state._selectedGroupKey = null),
-                    child: const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       child: Text(
                         'Ver resumen KPI',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
-                          color: _kCarmineRed,
+                          color: c.brandAccent,
                         ),
                       ),
                     ),
@@ -4736,35 +4724,38 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
   }
 
   Widget _compactFilterPill({
+    required BuildContext context,
     required String label,
     required List<String> items,
     required ValueChanged<String> onSelected,
   }) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 9),
       height: 30,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: _kBorder),
+        color: c.surface,
+        border: Border.all(color: c.border),
         borderRadius: BorderRadius.circular(7),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
+          dropdownColor: c.surface,
           hint: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 120),
             child: Text(
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 11.5, color: _kTextPrim, fontWeight: FontWeight.w500),
+              style: TextStyle(fontSize: 11.5, color: c.textPrimary, fontWeight: FontWeight.w500),
             ),
           ),
           isDense: true,
-          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSec),
+          icon: Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: c.textSecondary),
           items: items.map((item) {
             return DropdownMenuItem<String>(
               value: item,
-              child: Text(item, style: const TextStyle(fontSize: 12, color: _kTextPrim)),
+              child: Text(item, style: TextStyle(fontSize: 12, color: c.textPrimary)),
             );
           }).toList(),
           onChanged: (v) {
@@ -4776,6 +4767,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
   }
 
   Widget _buildMasterTile(BuildContext context, _OsGroup group, {required bool isSelected}) {
+    final c = PesaColors.of(context);
     final first = group.items.first;
     final cliente = (first['cliente'] ?? 'Sin cliente').toString().trim();
     final sucursal = (first['sucursal'] ?? '').toString().trim();
@@ -4798,13 +4790,13 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(11),
           decoration: BoxDecoration(
-            color: isSelected ? PesaColors.surfaceMuted : _kCardBg,
+            color: isSelected ? c.surfaceMuted : c.surface,
             borderRadius: BorderRadius.circular(10),
             border: Border(
-              left: BorderSide(color: isSelected ? _kCarmineRed : _kTextPrim, width: 3.5),
-              top: const BorderSide(color: _kBorder),
-              right: const BorderSide(color: _kBorder),
-              bottom: const BorderSide(color: _kBorder),
+              left: BorderSide(color: isSelected ? c.brandAccent : c.textPrimary, width: 3.5),
+              top: BorderSide(color: c.border),
+              right: BorderSide(color: c.border),
+              bottom: BorderSide(color: c.border),
             ),
           ),
           child: Column(
@@ -4815,13 +4807,13 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                      color: PesaColors.surfaceMuted,
+                      color: c.surfaceMuted,
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: PesaColors.borderStrong),
+                      border: Border.all(color: c.borderStrong),
                     ),
                     child: Text(
                       cancelledCount > 0 ? 'LOTE · $activeCount/$count activas' : 'LOTE · $count OS',
-                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: _kTextPrim),
+                      style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: c.textPrimary),
                     ),
                   ),
                   if (rango.isNotEmpty) ...[
@@ -4831,12 +4823,12 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                         rango,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: _kTextPrim),
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w700, color: c.textPrimary),
                       ),
                     ),
                   ] else
                     const Spacer(),
-                  Text(fechaStr, style: const TextStyle(fontSize: 10.5, color: _kTextSec)),
+                  Text(fechaStr, style: TextStyle(fontSize: 10.5, color: c.textSecondary)),
                 ],
               ),
               const SizedBox(height: 5),
@@ -4844,14 +4836,14 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                 cliente,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _kTextPrim),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.textPrimary),
               ),
               if (sucursal.isNotEmpty)
                 Text(
                   sucursal,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: _kTextSec),
+                  style: TextStyle(fontSize: 11, color: c.textSecondary),
                 ),
               if (tec.isNotEmpty) ...[
                 const SizedBox(height: 2),
@@ -4859,17 +4851,17 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   'Técnico: $tec',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 10.5, color: _kTextSec),
+                  style: TextStyle(fontSize: 10.5, color: c.textSecondary),
                 ),
               ],
               const SizedBox(height: 7),
               PesaBatchProgressBar(completed: done, total: count, cancelled: cancelledCount),
               if (estLote == 'enviado') ...[
                 const SizedBox(height: 5),
-                const PesaStatusBadge(
+                PesaStatusBadge(
                   label: 'Correo de lote enviado',
-                  dotColor: PesaColors.dotGreen,
-                  padding: EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                  dotColor: c.dotGreen,
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 ),
               ],
             ],
@@ -4894,16 +4886,16 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(11),
         decoration: BoxDecoration(
-          color: isSelected ? PesaColors.surfaceMuted : (isCancelada ? PesaColors.surfaceMuted : _kCardBg),
+          color: isSelected ? c.surfaceMuted : (isCancelada ? c.surfaceMuted : c.surface),
           borderRadius: BorderRadius.circular(10),
           border: Border(
             left: BorderSide(
-              color: isSelected ? _kCarmineRed : _kBorder,
+              color: isSelected ? c.brandAccent : c.border,
               width: isSelected ? 3.5 : 1,
             ),
-            top: const BorderSide(color: _kBorder),
-            right: const BorderSide(color: _kBorder),
-            bottom: const BorderSide(color: _kBorder),
+            top: BorderSide(color: c.border),
+            right: BorderSide(color: c.border),
+            bottom: BorderSide(color: c.border),
           ),
         ),
         child: Column(
@@ -4919,7 +4911,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w800,
-                      color: isCancelada ? PesaColors.textTertiary : _kTextPrim,
+                      color: isCancelada ? c.textTertiary : c.textPrimary,
                       decoration: isCancelada ? TextDecoration.lineThrough : null,
                     ),
                   ),
@@ -4930,10 +4922,10 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                       ? 'Cancelada'
                       : (isCerrado ? 'Cerrado' : (noIniciada ? 'Sin Formato' : 'En Proceso')),
                   dotColor: isCancelada
-                      ? PesaColors.dotNeutral
+                      ? c.dotNeutral
                       : (isCerrado
-                          ? PesaColors.dotGreen
-                          : (noIniciada ? PesaColors.dotRed : PesaColors.dotAmber)),
+                          ? c.dotGreen
+                          : (noIniciada ? c.dotRed : c.dotAmber)),
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 ),
               ],
@@ -4945,21 +4937,9 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                 runSpacing: 4,
                 children: [
                   if (ccaVal.isNotEmpty)
-                    _RegPillChip(
-                      prefix: 'CCA',
-                      value: ccaVal,
-                      fg: const Color(0xFF1D1D1F),
-                      bg: const Color(0xFFF5F5F7),
-                      border: const Color(0xFFD2D2D7),
-                    ),
+                    _RegPillChip(prefix: 'CCA', value: ccaVal),
                   if (dveVal.isNotEmpty)
-                    _RegPillChip(
-                      prefix: 'DVE',
-                      value: dveVal,
-                      fg: const Color(0xFF1D1D1F),
-                      bg: const Color(0xFFF5F5F7),
-                      border: const Color(0xFFD2D2D7),
-                    ),
+                    _RegPillChip(prefix: 'DVE', value: dveVal),
                 ],
               ),
             ],
@@ -4969,7 +4949,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                 specsStr,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11.5, color: _kTextSec, height: 1.3),
+                style: TextStyle(fontSize: 11.5, color: c.textSecondary, height: 1.3),
               ),
             ],
             const SizedBox(height: 5),
@@ -4980,11 +4960,11 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                     cliente,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: _kTextPrim),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: c.textPrimary),
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text(fechaStr, style: const TextStyle(fontSize: 10.5, color: _kTextSec)),
+                Text(fechaStr, style: TextStyle(fontSize: 10.5, color: c.textSecondary)),
               ],
             ),
             if (sucursal.isNotEmpty)
@@ -4992,7 +4972,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                 sucursal,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11, color: _kTextSec),
+                style: TextStyle(fontSize: 11, color: c.textSecondary),
               ),
           ],
         ),
@@ -5011,26 +4991,27 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
   }
 
   Widget _buildOverviewPane(BuildContext context) {
+    final c = PesaColors.of(context);
     return Container(
-      color: _kBgColor,
+      color: c.canvas,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text(
+            Text(
               'Resumen Operativo del Período',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
-                color: _kTextPrim,
+                color: c.textPrimary,
                 letterSpacing: -0.2,
               ),
             ),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Toca cualquier tarjeta para filtrar o selecciona una orden en el panel izquierdo para abrir su detalle inmediato.',
-              style: TextStyle(fontSize: 12.5, color: _kTextSec),
+              style: TextStyle(fontSize: 12.5, color: c.textSecondary),
             ),
             const SizedBox(height: 16),
             // Rejilla KPI 2x2 corporativa
@@ -5040,6 +5021,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
               runSpacing: 12,
               children: [
                 _overviewKpiCard(
+                  context: context,
                   label: 'TOTAL PERÍODO',
                   value: state._kpiTotal,
                   subtitle: 'Registros visibles con filtros actuales',
@@ -5050,10 +5032,11 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   },
                 ),
                 _overviewKpiCard(
+                  context: context,
                   label: 'EN PROCESO',
                   value: state._kpiProceso,
                   subtitle: 'Órdenes pendientes de captura o cierre',
-                  dotColor: PesaColors.dotAmber,
+                  dotColor: c.dotAmber,
                   active: state._quickStatus == 'En Proceso',
                   onTap: () {
                     state.setState(() => state._quickStatus =
@@ -5062,10 +5045,11 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   },
                 ),
                 _overviewKpiCard(
+                  context: context,
                   label: 'CERRADAS',
                   value: state._kpiCerrado,
                   subtitle: 'Con PDF oficial firmado y disponible',
-                  dotColor: PesaColors.dotGreen,
+                  dotColor: c.dotGreen,
                   active: state._quickStatus == 'Cerradas',
                   onTap: () {
                     state.setState(() => state._quickStatus =
@@ -5074,10 +5058,11 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   },
                 ),
                 _overviewKpiCard(
+                  context: context,
                   label: 'FORMATOS FÍSICOS',
                   value: state._kpiFisico,
                   subtitle: 'Pendientes o con escaneo adjunto',
-                  dotColor: PesaColors.dotNeutral,
+                  dotColor: c.dotNeutral,
                   active: state._modalidad == 'Solo Físicos',
                   onTap: () {
                     state.setState(() => state._modalidad =
@@ -5097,25 +5082,25 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: PesaColors.surfaceMuted,
+                      color: c.surfaceMuted,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: _kBorder),
+                      border: Border.all(color: c.border),
                     ),
-                    child: const Icon(Icons.touch_app_outlined, color: _kTextPrim, size: 22),
+                    child: Icon(Icons.touch_app_outlined, color: c.textPrimary, size: 22),
                   ),
                   const SizedBox(width: 14),
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Vista Master–Detail activa',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: _kTextPrim),
+                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.textPrimary),
                         ),
-                        SizedBox(height: 3),
+                        const SizedBox(height: 3),
                         Text(
                           'Selecciona una orden individual o un lote en el panel izquierdo para iniciar captura, abrir el PDF o despachar correos sin perder tu lugar en la lista.',
-                          style: TextStyle(fontSize: 12, color: _kTextSec, height: 1.4),
+                          style: TextStyle(fontSize: 12, color: c.textSecondary, height: 1.4),
                         ),
                       ],
                     ),
@@ -5130,6 +5115,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
   }
 
   Widget _overviewKpiCard({
+    required BuildContext context,
     required String label,
     required int value,
     required String subtitle,
@@ -5137,9 +5123,10 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
     bool active = false,
     required VoidCallback onTap,
   }) {
+    final c = PesaColors.of(context);
     return PesaCard(
       onTap: onTap,
-      borderColor: active ? _kCarmineRed : _kBorder,
+      borderColor: active ? c.brandAccent : c.border,
       borderWidth: active ? 1.5 : 1,
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -5156,10 +5143,10 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   label,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w700,
-                    color: _kTextSec,
+                    color: c.textSecondary,
                     letterSpacing: 0.5,
                   ),
                 ),
@@ -5169,12 +5156,12 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             value.toString(),
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 30,
               fontWeight: FontWeight.w800,
-              color: _kTextPrim,
+              color: c.textPrimary,
               height: 1.0,
-              fontFeatures: [FontFeature.tabularFigures()],
+              fontFeatures: const [FontFeature.tabularFigures()],
             ),
           ),
           const SizedBox(height: 6),
@@ -5182,7 +5169,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
             subtitle,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 11.5, color: _kTextSec),
+            style: TextStyle(fontSize: 11.5, color: c.textSecondary),
           ),
         ],
       ),
@@ -5190,6 +5177,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
   }
 
   Widget _buildSingleOsDetailPane(BuildContext context, Map<String, dynamic> os) {
+    final c = PesaColors.of(context);
     final folioStr = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
     final isCancelada = _OsListScreenState.esCancelada(os);
     final isCerrado = !isCancelada && _OsListScreenState.tienePdfReal(os);
@@ -5221,23 +5209,23 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
           children: [
             Text(
               k.toUpperCase(),
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w700,
-                color: _kTextSec,
+                color: c.textSecondary,
                 letterSpacing: 0.5,
               ),
             ),
             const SizedBox(height: 3),
             Text(
               v.isNotEmpty ? v : '—',
-              style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: _kTextPrim),
+              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.w600, color: c.textPrimary),
             ),
           ],
         );
 
     return Container(
-      color: _kBgColor,
+      color: c.canvas,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -5258,10 +5246,10 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                           children: [
                             Text(
                               folioStr.isNotEmpty ? folioStr : '—',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 22,
                                 fontWeight: FontWeight.w800,
-                                color: _kTextPrim,
+                                color: c.textPrimary,
                                 letterSpacing: -0.3,
                               ),
                             ),
@@ -5276,10 +5264,10 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                                       ? 'Cancelada'
                                       : (isCerrado ? 'Cerrado' : (noIniciada ? 'Sin Formato' : 'En Proceso')),
                                   dotColor: isCancelada
-                                      ? PesaColors.dotNeutral
+                                      ? c.dotNeutral
                                       : (isCerrado
-                                          ? PesaColors.dotGreen
-                                          : (noIniciada ? PesaColors.dotRed : PesaColors.dotAmber)),
+                                          ? c.dotGreen
+                                          : (noIniciada ? c.dotRed : c.dotAmber)),
                                 ),
                                 TipoServicioBadge(os: os),
                                 SyncCheckBadge(
@@ -5308,21 +5296,9 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                       runSpacing: 4,
                       children: [
                         if (ccaVal.isNotEmpty)
-                          _RegPillChip(
-                            prefix: 'CCA',
-                            value: ccaVal,
-                            fg: const Color(0xFF1D1D1F),
-                            bg: const Color(0xFFF5F5F7),
-                            border: const Color(0xFFD2D2D7),
-                          ),
+                          _RegPillChip(prefix: 'CCA', value: ccaVal),
                         if (dveVal.isNotEmpty)
-                          _RegPillChip(
-                            prefix: 'DVE',
-                            value: dveVal,
-                            fg: const Color(0xFF1D1D1F),
-                            bg: const Color(0xFFF5F5F7),
-                            border: const Color(0xFFD2D2D7),
-                          ),
+                          _RegPillChip(prefix: 'DVE', value: dveVal),
                       ],
                     ),
                   ],
@@ -5336,13 +5312,13 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
-                            color: PesaColors.surfaceMuted,
+                            color: c.surfaceMuted,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: PesaColors.border),
+                            border: Border.all(color: c.border),
                           ),
                           child: Text(
                             'No utilizada: ${(os['motivo_cancelacion'] ?? '').toString().trim().isNotEmpty ? os['motivo_cancelacion'].toString().trim() : 'Descartada del lote'}',
-                            style: const TextStyle(fontSize: 12.5, color: PesaColors.textSecondary, fontWeight: FontWeight.w600),
+                            style: TextStyle(fontSize: 12.5, color: c.textSecondary, fontWeight: FontWeight.w600),
                           ),
                         ),
                         if (esAdmin)
@@ -5389,8 +5365,8 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                         if (!noIniciada)
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
-                              foregroundColor: _kCarmineRed,
-                              side: const BorderSide(color: _kCarmineRed),
+                              foregroundColor: c.brandAccent,
+                              side: BorderSide(color: c.brandAccent),
                             ),
                             onPressed: () => state._mostrarDialogoEliminarDatosDesdeCero(context, os),
                             icon: const Icon(Icons.delete_forever_rounded, size: 17),
@@ -5444,8 +5420,8 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                         ),
                         OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: _kCarmineRed,
-                            side: const BorderSide(color: _kCarmineRed),
+                            foregroundColor: c.brandAccent,
+                            side: BorderSide(color: c.brandAccent),
                           ),
                           onPressed: () => state._mostrarDialogoEliminarDatosDesdeCero(context, os),
                           icon: const Icon(Icons.delete_forever_rounded, size: 17),
@@ -5468,12 +5444,12 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'INFORMACIÓN DEL SERVICIO',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: _kTextSec,
+                      color: c.textSecondary,
                       letterSpacing: 0.6,
                     ),
                   ),
@@ -5502,19 +5478,19 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
+                    Text(
                       'INSTRUMENTO / EQUIPO',
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
-                        color: _kTextSec,
+                        color: c.textSecondary,
                         letterSpacing: 0.6,
                       ),
                     ),
                     const SizedBox(height: 8),
                     Text(
                       specsStr,
-                      style: const TextStyle(fontSize: 13.5, color: _kTextPrim, height: 1.45),
+                      style: TextStyle(fontSize: 13.5, color: c.textPrimary, height: 1.45),
                     ),
                   ],
                 ),
@@ -5527,6 +5503,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
   }
 
   Widget _buildLoteDetailPane(BuildContext context, _OsGroup group) {
+    final c = PesaColors.of(context);
     final first = group.items.first;
     final count = group.items.length;
     final cancelledCount = group.items.where(_OsListScreenState.esCancelada).length;
@@ -5543,7 +5520,7 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
     final enviando = state._estaEnviandoEmail;
 
     return Container(
-      color: _kBgColor,
+      color: c.canvas,
       child: ListView(
         padding: const EdgeInsets.all(18),
         children: [
@@ -5567,26 +5544,26 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: PesaColors.surfaceMuted,
+                                  color: c.surfaceMuted,
                                   borderRadius: BorderRadius.circular(5),
-                                  border: Border.all(color: PesaColors.borderStrong),
+                                  border: Border.all(color: c.borderStrong),
                                 ),
                                 child: Text(
                                   cancelledCount > 0 ? 'LOTE · $activeCount/$count activas' : 'LOTE · $count OS',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w800,
-                                    color: _kTextPrim,
+                                    color: c.textPrimary,
                                   ),
                                 ),
                               ),
                               if (rango.isNotEmpty)
                                 Text(
                                   rango,
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.w800,
-                                    color: _kTextPrim,
+                                    color: c.textPrimary,
                                   ),
                                 ),
                             ],
@@ -5594,12 +5571,12 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                           const SizedBox(height: 6),
                           Text(
                             cliente,
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _kTextPrim),
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: c.textPrimary),
                           ),
                           if (sucursal.isNotEmpty)
-                            Text(sucursal, style: const TextStyle(fontSize: 12.5, color: _kTextSec)),
+                            Text(sucursal, style: TextStyle(fontSize: 12.5, color: c.textSecondary)),
                           const SizedBox(height: 3),
-                          Text('Técnico: $tec', style: const TextStyle(fontSize: 12, color: _kTextSec)),
+                          Text('Técnico: $tec', style: TextStyle(fontSize: 12, color: c.textSecondary)),
                         ],
                       ),
                     ),
@@ -5612,8 +5589,8 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
                   height: 46,
                   child: ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: done > 0 ? _kCarmineRed : PesaColors.surfaceMuted,
-                      foregroundColor: done > 0 ? Colors.white : _kTextSec,
+                      backgroundColor: done > 0 ? _kCarmineRed : c.surfaceMuted,
+                      foregroundColor: done > 0 ? Colors.white : c.textSecondary,
                       elevation: 0,
                     ),
                     icon: Icon(
@@ -5646,10 +5623,10 @@ class _FoldableMasterDetailDashboard extends StatelessWidget {
             padding: const EdgeInsets.only(left: 2, bottom: 8),
             child: Text(
               'ÓRDENES DEL LOTE ($count)',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
-                color: _kTextSec,
+                color: c.textSecondary,
                 letterSpacing: 0.6,
               ),
             ),
@@ -5837,17 +5814,18 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(12, 10, 14, 10),
-      decoration: const BoxDecoration(
-        color: _kCardBg,
-        border: Border(bottom: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.menu_rounded, color: _kTextPrim, size: 22),
+            icon: Icon(Icons.menu_rounded, color: c.textPrimary, size: 22),
             tooltip: 'Alternar menú lateral',
             onPressed: () => AppShell.toggleMenu(context),
           ),
@@ -5859,12 +5837,12 @@ class _Header extends StatelessWidget {
               children: [
                 Text(
                   vistaRepositorio ? 'Repositorio de Calibraciones' : 'Resumen Operativo de Servicios',
-                  style: const TextStyle(color: _kTextPrim, fontWeight: FontWeight.w700, fontSize: 15.5),
+                  style: TextStyle(color: c.textPrimary, fontWeight: FontWeight.w700, fontSize: 15.5),
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   sync.syncSummaryLabel,
-                  style: const TextStyle(color: _kTextSec, fontSize: 11.5),
+                  style: TextStyle(color: c.textSecondary, fontSize: 11.5),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -5874,9 +5852,9 @@ class _Header extends StatelessWidget {
             OutlinedButton.icon(
               key: const Key('os_vista_selector'),
               style: OutlinedButton.styleFrom(
-                foregroundColor: vistaRepositorio ? Colors.white : _kTextPrim,
-                backgroundColor: vistaRepositorio ? _kCarmineRed : Colors.white,
-                side: BorderSide(color: vistaRepositorio ? _kCarmineRed : _kBorder),
+                foregroundColor: vistaRepositorio ? Colors.white : c.textPrimary,
+                backgroundColor: vistaRepositorio ? _kCarmineRed : c.surface,
+                side: BorderSide(color: vistaRepositorio ? _kCarmineRed : c.border),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               ),
@@ -5893,11 +5871,23 @@ class _Header extends StatelessWidget {
             const SizedBox(width: 6),
           ],
           _SyncChip(sync: sync),
-          const SizedBox(width: 6),
+          const SizedBox(width: 4),
+          IconButton(
+            key: const Key('dashboard_theme_toggle_header'),
+            visualDensity: VisualDensity.compact,
+            icon: Icon(
+              c.isDark ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
+              color: c.textPrimary,
+              size: 19,
+            ),
+            tooltip: c.isDark ? 'Cambiar a Modo Claro' : 'Cambiar a Modo Oscuro',
+            onPressed: () => ThemeController.instance.toggleLightDark(context),
+          ),
+          const SizedBox(width: 4),
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              foregroundColor: _kTextPrim,
-              side: const BorderSide(color: _kBorder),
+              foregroundColor: c.textPrimary,
+              side: BorderSide(color: c.border),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
             ),
@@ -5959,20 +5949,21 @@ class _SyncChip extends StatelessWidget {
   const _SyncChip({required this.sync});
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     switch (sync.state) {
       case SyncState.syncing:
-        return const PesaStatusBadge(label: 'Sincronizando…', dotColor: PesaColors.dotAmber);
+        return PesaStatusBadge(label: 'Sincronizando…', dotColor: c.dotAmber);
       case SyncState.success:
-        return const PesaStatusBadge(label: 'Sincronizado', dotColor: PesaColors.dotGreen);
+        return PesaStatusBadge(label: 'Sincronizado', dotColor: c.dotGreen);
       case SyncState.error:
         final errText = (sync.errorMessage != null && sync.errorMessage!.isNotEmpty)
             ? sync.errorMessage!
             : (sync.message.isNotEmpty ? sync.message : 'Error');
-        return PesaStatusBadge(label: errText, dotColor: PesaColors.dotRed, textColor: _kCarmineRed);
+        return PesaStatusBadge(label: errText, dotColor: c.dotRed, textColor: c.brandAccent);
       case SyncState.offline:
-        return const PesaStatusBadge(label: 'Sin conexión', dotColor: PesaColors.dotAmber);
+        return PesaStatusBadge(label: 'Sin conexión', dotColor: c.dotAmber);
       default:
-        return const PesaStatusBadge(label: 'En línea', dotColor: PesaColors.dotGreen);
+        return PesaStatusBadge(label: 'En línea', dotColor: c.dotGreen);
     }
   }
 }
@@ -5989,8 +5980,9 @@ class _KpiBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Container(
-      color: _kBgColor,
+      color: c.canvas,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Row(
         children: [
@@ -5998,31 +5990,31 @@ class _KpiBar extends StatelessWidget {
             label: 'TOTAL PERIODO',
             value: total,
             sub: '${total == 1 ? "1 orden" : "$total órdenes"} en el periodo',
-            color: _kTextPrim,
+            color: c.textPrimary,
           ),
           const SizedBox(width: 12),
           _KpiCard(
             label: 'EN PROCESO',
             value: proceso,
             sub: 'órdenes pendientes de cerrar',
-            color: _kTextPrim,
-            dotColor: PesaColors.dotAmber,
+            color: c.textPrimary,
+            dotColor: c.dotAmber,
           ),
           const SizedBox(width: 12),
           _KpiCard(
             label: 'CERRADOS',
             value: cerrado,
             sub: 'Total cerradas',
-            color: _kTextPrim,
-            dotColor: PesaColors.dotGreen,
+            color: c.textPrimary,
+            dotColor: c.dotGreen,
           ),
           const SizedBox(width: 12),
           _KpiCard(
             label: 'FORMATOS FÍSICOS',
             value: fisico,
             sub: 'órdenes en formato físico',
-            color: _kTextPrim,
-            dotColor: PesaColors.dotNeutral,
+            color: c.textPrimary,
+            dotColor: c.dotNeutral,
           ),
         ],
       ),
@@ -6044,59 +6036,62 @@ class _KpiCard extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) => Expanded(
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: _kCardBg,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _kBorder),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  if (dotColor != null) ...[
-                    PesaSemanticDot(color: dotColor!, size: 6),
-                    const SizedBox(width: 6),
-                  ],
-                  Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: _kTextSec,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.6,
-                      ),
+  Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: c.surface,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: c.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                if (dotColor != null) ...[
+                  PesaSemanticDot(color: dotColor!, size: 6),
+                  const SizedBox(width: 6),
+                ],
+                Expanded(
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: c.textSecondary,
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.6,
                     ),
                   ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              Text(
-                value.toString(),
-                style: TextStyle(
-                  color: color,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  height: 1.0,
-                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              value.toString(),
+              style: TextStyle(
+                color: color,
+                fontSize: 28,
+                fontWeight: FontWeight.w700,
+                height: 1.0,
+                fontFeatures: const [FontFeature.tabularFigures()],
               ),
-              const SizedBox(height: 4),
-              Text(
-                sub,
-                style: const TextStyle(color: _kTextSec, fontSize: 10),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              sub,
+              style: TextStyle(color: c.textSecondary, fontSize: 10),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ),
-      );
+      ),
+    );
+  }
 }
 
 // ── Filter Bar (Tablet / Desktop) ─────────────────────────────────────────
@@ -6145,11 +6140,12 @@ class _FilterBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-      decoration: const BoxDecoration(
-        color: _kCardBg,
-        border: Border(bottom: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -6171,15 +6167,15 @@ class _FilterBar extends StatelessWidget {
                           p,
                           style: TextStyle(
                             fontSize: 12,
-                            color: periodo == p ? _kCarmineRed : _kTextSec,
+                            color: periodo == p ? c.brandAccent : c.textSecondary,
                             fontWeight: periodo == p ? FontWeight.w700 : FontWeight.w500,
                           ),
                         ),
                         selected: periodo == p,
-                        selectedColor: Colors.red.shade50,
-                        checkmarkColor: _kCarmineRed,
-                        side: BorderSide(color: periodo == p ? _kCarmineRed : _kBorder),
-                        backgroundColor: _kCardBg,
+                        selectedColor: c.brandAccent.withValues(alpha: c.isDark ? 0.18 : 0.10),
+                        checkmarkColor: c.brandAccent,
+                        side: BorderSide(color: periodo == p ? c.brandAccent : c.border),
+                        backgroundColor: c.surface,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                         visualDensity: VisualDensity.compact,
@@ -6191,6 +6187,7 @@ class _FilterBar extends StatelessWidget {
               ),
               // 2. Tipo de Servicio
               _buildDropdownFilter(
+                context: context,
                 label: 'Tipo de Servicio',
                 value: tipoServicio,
                 items: tiposServicio,
@@ -6199,6 +6196,7 @@ class _FilterBar extends StatelessWidget {
               ),
               // 3. Empresa / Cliente
               _buildDropdownFilter(
+                context: context,
                 label: 'Empresa / Cliente',
                 value: empresa,
                 items: empresas,
@@ -6207,6 +6205,7 @@ class _FilterBar extends StatelessWidget {
               ),
               // 4. Modalidad
               _buildDropdownFilter(
+                context: context,
                 label: 'Modalidad',
                 value: modalidad,
                 items: const ['Todas las Modalidades', 'Solo Físicos', 'Solo Digitales'],
@@ -6215,6 +6214,7 @@ class _FilterBar extends StatelessWidget {
               ),
               // 5. Estado
               _buildDropdownFilter(
+                context: context,
                 label: 'Estado',
                 value: estado ?? 'Todos los Estados',
                 items: ['Todos los Estados', ...estados],
@@ -6224,6 +6224,7 @@ class _FilterBar extends StatelessWidget {
               // 6. Técnico
               if (!hideTecnico)
                 _buildDropdownFilter(
+                  context: context,
                   label: 'Técnico',
                   value: tecnico ?? 'Todos los Técnicos',
                   items: ['Todos los Técnicos', ...tecnicos],
@@ -6236,11 +6237,11 @@ class _FilterBar extends StatelessWidget {
           SizedBox(
             child: TextField(
               controller: searchCtrl,
-              style: const TextStyle(fontSize: 13),
+              style: TextStyle(fontSize: 13, color: c.textPrimary),
               decoration: InputDecoration(
                 hintText: 'Buscar por folio, cliente, sucursal o técnico...',
-                hintStyle: const TextStyle(color: _kTextSec, fontSize: 12),
-                prefixIcon: const Icon(Icons.search, size: 16, color: _kTextSec),
+                hintStyle: TextStyle(color: c.textSecondary, fontSize: 12),
+                prefixIcon: Icon(Icons.search, size: 16, color: c.textSecondary),
                 suffixIcon: query.isNotEmpty
                     ? IconButton(icon: const Icon(Icons.close, size: 14), onPressed: onClear)
                     : null,
@@ -6248,14 +6249,14 @@ class _FilterBar extends StatelessWidget {
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: _kBorder),
+                  borderSide: BorderSide(color: c.border),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: _kCarmineRed),
+                  borderSide: BorderSide(color: c.brandAccent),
                 ),
                 filled: true,
-                fillColor: _kCardBg,
+                fillColor: c.isDark ? c.surfaceElevated : c.surface,
               ),
               onChanged: onSearch,
             ),
@@ -6266,12 +6267,14 @@ class _FilterBar extends StatelessWidget {
   }
 
   Widget _buildDropdownFilter({
+    required BuildContext context,
     required String label,
     required String value,
     required List<String> items,
     required ValueChanged<String> onChanged,
     required double width,
   }) {
+    final c = PesaColors.of(context);
     final effectiveValue = items.contains(value) ? value : (items.isNotEmpty ? items.first : '');
     return SizedBox(
       width: width,
@@ -6279,24 +6282,25 @@ class _FilterBar extends StatelessWidget {
         value: effectiveValue.isNotEmpty ? effectiveValue : null,
         isDense: true,
         isExpanded: true,
-        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSec),
-        style: const TextStyle(fontSize: 12, color: _kTextPrim, fontWeight: FontWeight.w500),
+        dropdownColor: c.surface,
+        icon: Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: c.textSecondary),
+        style: TextStyle(fontSize: 12, color: c.textPrimary, fontWeight: FontWeight.w500),
         decoration: InputDecoration(
           labelText: label,
-          labelStyle: const TextStyle(fontSize: 11, color: _kTextSec, fontWeight: FontWeight.w600),
+          labelStyle: TextStyle(fontSize: 11, color: c.textSecondary, fontWeight: FontWeight.w600),
           contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _kBorder)),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _kBorder)),
-          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: _kCarmineRed)),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.border)),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.border)),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: c.brandAccent)),
           filled: true,
-          fillColor: _kCardBg,
+          fillColor: c.isDark ? c.surfaceElevated : c.surface,
         ),
         items: items.map((item) {
           return DropdownMenuItem<String>(
             value: item,
             child: Text(
               item,
-              style: const TextStyle(fontSize: 12, color: _kTextPrim),
+              style: TextStyle(fontSize: 12, color: c.textPrimary),
               overflow: TextOverflow.ellipsis,
             ),
           );
@@ -6309,7 +6313,6 @@ class _FilterBar extends StatelessWidget {
   }
 }
 
-// ── Table Header (Tablet / Desktop - Weighted Auto-Stretch Columns) ───────
 // ── Table Header (Tablet / Desktop - 6 Columnas Nivel 1) ─────────────────
 class _TableHeader extends StatelessWidget {
   final bool hideTecnico;
@@ -6317,16 +6320,17 @@ class _TableHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-      decoration: const BoxDecoration(
-        color: _kTableHead,
-        border: Border(bottom: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: c.tableHeader,
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
       child: Row(
         children: [
-          SizedBox(width: 335, child: _TH('FOLIO / INSTRUMENTO')),
-          SizedBox(width: 85, child: _TH('FECHA')),
+          const SizedBox(width: 335, child: _TH('FOLIO / INSTRUMENTO')),
+          const SizedBox(width: 85, child: _TH('FECHA')),
           Expanded(
             flex: 3,
             child: ConstrainedBox(
@@ -6338,17 +6342,17 @@ class _TableHeader extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w700,
-                  color: _kTextPrim,
+                  color: c.textPrimary,
                   letterSpacing: 0.5,
                 ),
               ),
             ),
           ),
-          SizedBox(width: 8),
-          SizedBox(width: 135, child: _TH('TIPO SERVICIO')),
-          SizedBox(width: 80, child: _TH('MODALIDAD')),
-          SizedBox(width: 95, child: _TH('ESTATUS')),
-          SizedBox(width: 85, child: _TH('SYNC')),
+          const SizedBox(width: 8),
+          const SizedBox(width: 135, child: _TH('TIPO SERVICIO')),
+          const SizedBox(width: 80, child: _TH('MODALIDAD')),
+          const SizedBox(width: 95, child: _TH('ESTATUS')),
+          const SizedBox(width: 85, child: _TH('SYNC')),
         ],
       ),
     );
@@ -6359,15 +6363,18 @@ class _TH extends StatelessWidget {
   final String label;
   const _TH(this.label);
   @override
-  Widget build(BuildContext context) => Text(
-        label,
-        style: const TextStyle(
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-          color: _kTextPrim,
-          letterSpacing: 0.5,
-        ),
-      );
+  Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    return Text(
+      label,
+      style: TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w700,
+        color: c.textPrimary,
+        letterSpacing: 0.5,
+      ),
+    );
+  }
 }
 
 // ─── Table Row (Tablet / Desktop - Layout Reorganizado con Barra de Acciones Inferior) ─────
@@ -6431,8 +6438,8 @@ class _OsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final folioStr  = (os['folio_os'] as String? ?? os['folio'] as String? ?? '').trim();
-    final modalidad = (os['modalidad'] as String? ?? 'DIGITAL').toUpperCase();
     final syncSt    = (os['sync_status'] as String? ?? '');
     final isFisico  = esModalidadFisica(os['modalidad'] as String?);
     final isEven    = index % 2 == 0;
@@ -6452,10 +6459,8 @@ class _OsRow extends StatelessWidget {
         : (isCerrado
             ? (estatusRemoto.isNotEmpty && !estatusRemoto.toLowerCase().contains('sin formato') && !estatusRemoto.toLowerCase().contains('asignada') ? estatusRemoto : 'Cerrado')
             : 'Pend. Formato');
-    final Color estatusFg = isCancelada
-        ? PesaColors.textSecondary
-        : (isCerrado ? const Color(0xFF1D1D1F) : const Color(0xFF334155));
-    final Color estatusBg = const Color(0xFFF5F5F7);
+    final Color estatusFg = isCancelada ? c.textSecondary : c.textPrimary;
+    final Color estatusBg = c.surfaceMuted;
 
     final bool isSincronizado = syncSt == 'SINCRONIZADO' ||
         syncSt == 'SINCRONIZADO_RENDER' ||
@@ -6483,13 +6488,15 @@ class _OsRow extends StatelessWidget {
     }
 
     final fechaStr = (os['fecha'] as String? ?? '').split('T').first.split(' ').first;
+    final Color secBg = c.isDark ? c.surfaceElevated : c.surface;
+    final Color altRowBg = c.isDark ? const Color(0xFF222226) : const Color(0xFFFAFAFA);
 
     return Container(
       decoration: BoxDecoration(
-        color: isEven ? _kCardBg : const Color(0xFFFAFAFA),
+        color: isEven ? c.surface : altRowBg,
         border: Border(
-          bottom: const BorderSide(color: _kBorder),
-          left: indent ? const BorderSide(color: Color(0xFFD2D2D7), width: 3.5) : BorderSide.none,
+          bottom: BorderSide(color: c.border),
+          left: indent ? BorderSide(color: c.borderStrong, width: 3.5) : BorderSide.none,
         ),
       ),
       padding: EdgeInsets.only(
@@ -6526,29 +6533,17 @@ class _OsRow extends StatelessWidget {
                             children: [
                               Text(
                                 folioStr.isNotEmpty ? folioStr : '—',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontWeight: FontWeight.w800,
                                   fontSize: 12,
-                                  color: Color(0xFF111827),
+                                  color: c.textPrimary,
                                   height: 1.25,
                                 ),
                               ),
                               if (ccaVal.isNotEmpty)
-                                _RegPillChip(
-                                  prefix: 'CCA',
-                                  value: ccaVal,
-                                  fg: const Color(0xFF1D1D1F),
-                                  bg: const Color(0xFFF5F5F7),
-                                  border: const Color(0xFFD2D2D7),
-                                ),
+                                _RegPillChip(prefix: 'CCA', value: ccaVal),
                               if (dveVal.isNotEmpty)
-                                _RegPillChip(
-                                  prefix: 'DVE',
-                                  value: dveVal,
-                                  fg: const Color(0xFF1D1D1F),
-                                  bg: const Color(0xFFF5F5F7),
-                                  border: const Color(0xFFD2D2D7),
-                                ),
+                                _RegPillChip(prefix: 'DVE', value: dveVal),
                             ],
                           ),
                           if (specsStr.isNotEmpty) ...[
@@ -6557,9 +6552,9 @@ class _OsRow extends StatelessWidget {
                               specsStr,
                               softWrap: true,
                               maxLines: 3,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 11,
-                                color: Color(0xFF4B5563),
+                                color: c.textSecondary,
                                 height: 1.32,
                               ),
                             ),
@@ -6575,7 +6570,7 @@ class _OsRow extends StatelessWidget {
                 width: 85,
                 child: Text(
                   fechaStr,
-                  style: const TextStyle(fontSize: 11, color: _kTextPrim),
+                  style: TextStyle(fontSize: 11, color: c.textPrimary),
                 ),
               ),
               // [CLIENTE / SUCURSAL] (Expanded, flex: 3 con word-wrap en 2-3 líneas)
@@ -6590,14 +6585,14 @@ class _OsRow extends StatelessWidget {
                     children: [
                       Text(
                         os['cliente'] ?? '—',
-                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: _kTextPrim),
+                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: c.textPrimary),
                         softWrap: true,
                         maxLines: 2,
                       ),
                       if ((os['sucursal'] ?? '').toString().trim().isNotEmpty)
                         Text(
                           os['sucursal'].toString().trim(),
-                          style: const TextStyle(fontSize: 10.5, color: _kTextSec, height: 1.3),
+                          style: TextStyle(fontSize: 10.5, color: c.textSecondary, height: 1.3),
                           softWrap: true,
                           maxLines: 3,
                         ),
@@ -6607,12 +6602,12 @@ class _OsRow extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.person_outline, size: 13, color: _kTextSec),
+                              Icon(Icons.person_outline, size: 13, color: c.textSecondary),
                               const SizedBox(width: 3),
                               Flexible(
                                 child: Text(
                                   'Técnico: $tecnicoNombre',
-                                  style: const TextStyle(fontSize: 10.5, color: _kTextSec, fontWeight: FontWeight.w500),
+                                  style: TextStyle(fontSize: 10.5, color: c.textSecondary, fontWeight: FontWeight.w500),
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 1,
                                 ),
@@ -6621,16 +6616,16 @@ class _OsRow extends StatelessWidget {
                           ),
                         )
                       else
-                        const Padding(
-                          padding: EdgeInsets.only(top: 2.0),
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2.0),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.person_outline, size: 12, color: Colors.grey),
-                              SizedBox(width: 3),
+                              Icon(Icons.person_outline, size: 12, color: c.textTertiary),
+                              const SizedBox(width: 3),
                               Text(
                                 'Sin técnico asignado',
-                                style: TextStyle(fontSize: 9.5, color: Colors.grey, fontStyle: FontStyle.italic),
+                                style: TextStyle(fontSize: 9.5, color: c.textTertiary, fontStyle: FontStyle.italic),
                               ),
                             ],
                           ),
@@ -6655,8 +6650,8 @@ class _OsRow extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: _Badge(
                     label: isFisico ? 'Físico' : 'Digital',
-                    fg: const Color(0xFF1D1D1F),
-                    bg: const Color(0xFFF5F5F7),
+                    fg: c.textPrimary,
+                    bg: c.surfaceMuted,
                   ),
                 ),
               ),
@@ -6688,7 +6683,7 @@ class _OsRow extends StatelessWidget {
 
           // ── Bloque 2: Divisor ligero ──
           const SizedBox(height: 6),
-          const Divider(height: 1, thickness: 0.5, color: Color(0xFFE5E7EB)),
+          Divider(height: 1, thickness: 0.5, color: c.divider),
           const SizedBox(height: 6),
 
           // ── Bloque 3: Barra Inferior de Acciones ──
@@ -6699,54 +6694,54 @@ class _OsRow extends StatelessWidget {
               child: Wrap(
                 alignment: WrapAlignment.end,
                 crossAxisAlignment: WrapCrossAlignment.center,
-                spacing: 6.0,    // Espacio horizontal entre botones
-                runSpacing: 6.0, // Salto de línea limpio si no cabe por el sidebar
+                spacing: 6.0,
+                runSpacing: 6.0,
                 children: [
                   if (isCancelada) ...[
                     Text(
                       'No utilizada: ${(os['motivo_cancelacion'] ?? '').toString().trim().isNotEmpty ? os['motivo_cancelacion'].toString().trim() : 'Descartada del lote'}',
-                      style: const TextStyle(fontSize: 11, color: PesaColors.textSecondary, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 11, color: c.textSecondary, fontWeight: FontWeight.w600),
                     ),
                     if (esAdmin)
                       _buildBtnAccion(
                         label: "Reactivar",
                         icon: Icons.restore_rounded,
-                        color: Colors.white,
-                        fg: const Color(0xFF1D1D1F),
-                        side: const BorderSide(color: Color(0xFFD2D2D7)),
+                        color: secBg,
+                        fg: c.textPrimary,
+                        side: BorderSide(color: c.borderStrong),
                         onPressed: () => context.findAncestorStateOfType<_OsListScreenState>()?._reactivarOrdenCancelada(context, os),
                       ),
                   ] else if (isCerrado) ...[
                     _buildBtnAccion(
                       label: "Ver PDF",
                       icon: Icons.picture_as_pdf_outlined,
-                      color: Colors.white,
-                      fg: const Color(0xFF1D1D1F),
-                      side: const BorderSide(color: Color(0xFFD2D2D7)),
+                      color: secBg,
+                      fg: c.textPrimary,
+                      side: BorderSide(color: c.borderStrong),
                       onPressed: () => onAbrirPdf(context, os),
                     ),
                     _buildBtnAccion(
                       label: "Descargar",
                       icon: Icons.download_outlined,
-                      color: Colors.white,
-                      fg: const Color(0xFF1D1D1F),
-                      side: const BorderSide(color: Color(0xFFD2D2D7)),
+                      color: secBg,
+                      fg: c.textPrimary,
+                      side: BorderSide(color: c.borderStrong),
                       onPressed: () => onDescargarPdf(context, os),
                     ),
                     _buildBtnAccion(
                       label: "Rehacer",
                       icon: Icons.replay,
-                      color: Colors.white,
-                      fg: const Color(0xFF1D1D1F),
-                      side: const BorderSide(color: Color(0xFFD2D2D7)),
+                      color: secBg,
+                      fg: c.textPrimary,
+                      side: BorderSide(color: c.borderStrong),
                       onPressed: () => onRehacer(context, os),
                     ),
                     _buildBtnAccion(
                       label: "Subir PDF",
                       icon: Icons.upload_file_outlined,
-                      color: Colors.white,
-                      fg: const Color(0xFF1D1D1F),
-                      side: const BorderSide(color: Color(0xFFD2D2D7)),
+                      color: secBg,
+                      fg: c.textPrimary,
+                      side: BorderSide(color: c.borderStrong),
                       onPressed: () => onSubirPdfManual(context, os),
                     ),
                     Builder(
@@ -6764,9 +6759,9 @@ class _OsRow extends StatelessWidget {
                           icon: enviando
                               ? Icons.hourglass_top_rounded
                               : (correoEnviado ? Icons.mark_email_read_outlined : (enCola ? Icons.schedule_send : Icons.mail_outline)),
-                          color: enviando ? const Color(0xFFF5F5F7) : Colors.white,
-                          fg: enviando ? const Color(0xFF94A3B8) : const Color(0xFF1D1D1F),
-                          side: const BorderSide(color: Color(0xFFD2D2D7)),
+                          color: enviando ? c.surfaceMuted : secBg,
+                          fg: enviando ? c.textTertiary : c.textPrimary,
+                          side: BorderSide(color: c.borderStrong),
                           onPressed: enviando ? null : () {
                             if (st != null) {
                               st._procesarEnvioCorreo(item: item, esLote: false);
@@ -6780,9 +6775,9 @@ class _OsRow extends StatelessWidget {
                     _buildBtnAccion(
                       label: "Eliminar",
                       icon: Icons.delete_forever_outlined,
-                      color: Colors.white,
-                      fg: _kCarmineRed,
-                      side: const BorderSide(color: _kCarmineRed),
+                      color: secBg,
+                      fg: c.brandAccent,
+                      side: BorderSide(color: c.brandAccent),
                       onPressed: () => onEliminarDatos(context, os),
                     ),
                   ] else ...[
@@ -6806,18 +6801,18 @@ class _OsRow extends StatelessWidget {
                     _buildBtnAccion(
                       label: "Subir PDF",
                       icon: Icons.upload_file_outlined,
-                      color: Colors.white,
-                      fg: const Color(0xFF1D1D1F),
-                      side: const BorderSide(color: Color(0xFFD2D2D7)),
+                      color: secBg,
+                      fg: c.textPrimary,
+                      side: BorderSide(color: c.borderStrong),
                       onPressed: () => onSubirPdfManual(context, os),
                     ),
                     if (perteneceALote || esAdmin)
                       _buildBtnAccion(
                         label: "No se usó",
                         icon: Icons.remove_circle_outline_rounded,
-                        color: Colors.white,
-                        fg: const Color(0xFF1D1D1F),
-                        side: const BorderSide(color: Color(0xFFD2D2D7)),
+                        color: secBg,
+                        fg: c.textPrimary,
+                        side: BorderSide(color: c.borderStrong),
                         onPressed: () => context.findAncestorStateOfType<_OsListScreenState>()?._mostrarModalDescartarOrden(context, os),
                       ),
                   ],
@@ -6857,6 +6852,7 @@ class _LoteRowState extends State<_LoteRow> {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final first = widget.group.items.first;
     final count = widget.group.items.length;
     final cancelledCount = widget.group.items.where(_OsListScreenState.esCancelada).length;
@@ -6873,11 +6869,11 @@ class _LoteRowState extends State<_LoteRow> {
           onTap: () => setState(() => _expanded = !_expanded),
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: const BoxDecoration(
-              color: Colors.white,
+            decoration: BoxDecoration(
+              color: c.surface,
               border: Border(
-                bottom: BorderSide(color: _kBorder),
-                left: BorderSide(color: _kTextPrim, width: 3),
+                bottom: BorderSide(color: c.border),
+                left: BorderSide(color: c.textPrimary, width: 3),
               ),
             ),
             child: Column(
@@ -6891,18 +6887,18 @@ class _LoteRowState extends State<_LoteRow> {
                       width: 335,
                       child: Row(
                         children: [
-                          Icon(_expanded ? Icons.keyboard_arrow_down : Icons.chevron_right, size: 18, color: _kTextPrim),
+                          Icon(_expanded ? Icons.keyboard_arrow_down : Icons.chevron_right, size: 18, color: c.textPrimary),
                           const SizedBox(width: 4),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF5F5F7),
+                              color: c.surfaceMuted,
                               borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: const Color(0xFFD2D2D7)),
+                              border: Border.all(color: c.borderStrong),
                             ),
                             child: Text(
                               cancelledCount > 0 ? 'LOTE • $activeCount/$count activas' : 'LOTE • $count OS',
-                              style: const TextStyle(color: _kTextPrim, fontSize: 9.5, fontWeight: FontWeight.w700),
+                              style: TextStyle(color: c.textPrimary, fontSize: 9.5, fontWeight: FontWeight.w700),
                             ),
                           ),
                           if ((first['rango_lote'] ?? '').toString().trim().isNotEmpty) ...[
@@ -6910,7 +6906,7 @@ class _LoteRowState extends State<_LoteRow> {
                             Expanded(
                               child: Text(
                                 first['rango_lote'].toString().trim(),
-                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: _kTextPrim),
+                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: c.textPrimary),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -6922,7 +6918,7 @@ class _LoteRowState extends State<_LoteRow> {
                       width: 85,
                       child: Text(
                         (first['fecha'] as String? ?? '').split('T').first,
-                        style: const TextStyle(fontSize: 11),
+                        style: TextStyle(fontSize: 11, color: c.textPrimary),
                       ),
                     ),
                     Expanded(
@@ -6936,7 +6932,7 @@ class _LoteRowState extends State<_LoteRow> {
                           children: [
                             Text(
                               first['cliente'] ?? '—',
-                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: c.textPrimary),
                               maxLines: 1,
                               softWrap: false,
                               overflow: TextOverflow.ellipsis,
@@ -6947,12 +6943,12 @@ class _LoteRowState extends State<_LoteRow> {
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.person_outline, size: 13, color: _kTextSec),
+                                    Icon(Icons.person_outline, size: 13, color: c.textSecondary),
                                     const SizedBox(width: 3),
                                     Flexible(
                                       child: Text(
                                         'Técnico: $tecnicoNombre',
-                                        style: const TextStyle(fontSize: 10.5, color: _kTextSec, fontWeight: FontWeight.w500),
+                                        style: TextStyle(fontSize: 10.5, color: c.textSecondary, fontWeight: FontWeight.w500),
                                         overflow: TextOverflow.ellipsis,
                                         maxLines: 1,
                                       ),
@@ -6961,16 +6957,16 @@ class _LoteRowState extends State<_LoteRow> {
                                 ),
                               )
                             else
-                              const Padding(
-                                padding: EdgeInsets.only(top: 2.0),
+                              Padding(
+                                padding: const EdgeInsets.only(top: 2.0),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.person_outline, size: 12, color: PesaColors.textTertiary),
-                                    SizedBox(width: 3),
+                                    Icon(Icons.person_outline, size: 12, color: c.textTertiary),
+                                    const SizedBox(width: 3),
                                     Text(
                                       'Sin técnico asignado',
-                                      style: TextStyle(fontSize: 9.5, color: PesaColors.textTertiary),
+                                      style: TextStyle(fontSize: 9.5, color: c.textTertiary),
                                     ),
                                   ],
                                 ),
@@ -6992,15 +6988,15 @@ class _LoteRowState extends State<_LoteRow> {
                     ),
                     const SizedBox(width: 8),
                     SizedBox(width: 135, child: Align(alignment: Alignment.centerLeft, child: TipoServicioBadge(os: first))),
-                    const SizedBox(width: 80, child: Text('Lote', style: TextStyle(fontSize: 11))),
-                    const SizedBox(width: 95, child: Text('Lote', style: TextStyle(fontSize: 11, color: _kCarmineRed))),
+                    SizedBox(width: 80, child: Text('Lote', style: TextStyle(fontSize: 11, color: c.textPrimary))),
+                    SizedBox(width: 95, child: Text('Lote', style: TextStyle(fontSize: 11, color: c.brandAccent))),
                     const SizedBox(width: 85),
                   ],
                 ),
 
                 // ── Bloque 2: Divisor ligero ──
                 const SizedBox(height: 6),
-                const Divider(height: 1, thickness: 0.5, color: _kBorder),
+                Divider(height: 1, thickness: 0.5, color: c.border),
                 const SizedBox(height: 6),
 
                 // ── Bloque 3: Barra de Acciones del Lote ──
@@ -7012,11 +7008,11 @@ class _LoteRowState extends State<_LoteRow> {
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.layers_outlined, size: 14, color: _kTextSec),
+                          Icon(Icons.layers_outlined, size: 14, color: c.textSecondary),
                           const SizedBox(width: 5),
                           Text(
                             '$count órdenes en este lote • Toca para ${_expanded ? "contraer" : "expandir"}',
-                            style: const TextStyle(fontSize: 11, color: _kTextSec, fontWeight: FontWeight.w500),
+                            style: TextStyle(fontSize: 11, color: c.textSecondary, fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
@@ -7032,9 +7028,9 @@ class _LoteRowState extends State<_LoteRow> {
                             height: 29,
                             child: ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: enviando ? const Color(0xFFF5F5F7) : Colors.white,
-                                foregroundColor: enviando ? const Color(0xFF94A3B8) : _kTextPrim,
-                                side: const BorderSide(color: Color(0xFFD2D2D7)),
+                                backgroundColor: enviando ? c.surfaceMuted : (c.isDark ? c.surfaceElevated : c.surface),
+                                foregroundColor: enviando ? c.textTertiary : c.textPrimary,
+                                side: BorderSide(color: c.borderStrong),
                                 elevation: 0,
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 minimumSize: const Size(0, 29),
@@ -7119,17 +7115,17 @@ class TipoServicioBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final rules = getRules(
       id: _int(os['id_tipo_servicio']) ?? _int(os['tipo_servicio_id']),
       nombre: _nombre(os),
       folio: (os['folio_os'] ?? os['folio'])?.toString(),
     );
     final label = rules.etiquetaCorta;
-    final Color fg = rules.sinTipo ? const Color(0xFF334155) : const Color(0xFF1D1D1F);
-    const Color bg = Color(0xFFF5F5F7);
+    final Color fg = rules.sinTipo ? c.textSecondary : c.textPrimary;
     return Tooltip(
       message: rules.etiquetaLarga,
-      child: _Badge(label: label, fg: fg, bg: bg),
+      child: _Badge(label: label, fg: fg, bg: c.surfaceMuted),
     );
   }
 }
@@ -7137,34 +7133,35 @@ class TipoServicioBadge extends StatelessWidget {
 class _RegPillChip extends StatelessWidget {
   final String prefix;
   final String value;
-  final Color fg;
-  final Color bg;
+  final Color? fg;
+  final Color? bg;
   final Color? border;
 
   const _RegPillChip({
     required this.prefix,
     required this.value,
-    required this.fg,
-    required this.bg,
+    this.fg,
+    this.bg,
     this.border,
   });
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final bool hasPref = value.toUpperCase().startsWith(prefix.toUpperCase());
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
       decoration: BoxDecoration(
-        color: bg,
+        color: bg ?? c.surfaceElevated,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: border ?? const Color(0xFFD2D2D7)),
+        border: Border.all(color: border ?? c.borderStrong),
       ),
       child: Text(
         hasPref ? value : '$prefix: $value',
         style: TextStyle(
           fontSize: 10,
           fontWeight: FontWeight.w700,
-          color: fg,
+          color: fg ?? c.textPrimary,
         ),
       ),
     );
@@ -7177,20 +7174,23 @@ class _Badge extends StatelessWidget {
   const _Badge({required this.label, required this.fg, required this.bg});
 
   @override
-  Widget build(BuildContext context) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: const Color(0xFFD2D2D7)),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(fontSize: 10, color: fg, fontWeight: FontWeight.w600, height: 1.2),
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-        ),
-      );
+  Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: c.borderStrong),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(fontSize: 10, color: fg, fontWeight: FontWeight.w600, height: 1.2),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
 }
 
 class EmailStatusBadge extends StatelessWidget {
@@ -7209,6 +7209,7 @@ class EmailStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     if (enviado) {
       return InkWell(
         onTap: onTap,
@@ -7216,21 +7217,21 @@ class EmailStatusBadge extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
-            color: const Color(0xFFF5F5F7),
+            color: c.surfaceMuted,
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: const Color(0xFFD2D2D7)),
+            border: Border.all(color: c.borderStrong),
           ),
-          child: const Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.mark_email_read_outlined, size: 13, color: Color(0xFF1D1D1F)),
-              SizedBox(width: 4),
+              Icon(Icons.mark_email_read_outlined, size: 13, color: c.textPrimary),
+              const SizedBox(width: 4),
               Text(
                 'Enviado',
                 style: TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF1D1D1F),
+                  color: c.textPrimary,
                 ),
               ),
             ],
@@ -7244,9 +7245,9 @@ class EmailStatusBadge extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
           decoration: BoxDecoration(
-            color: const Color(0xFFF5F5F7),
+            color: c.surfaceMuted,
             borderRadius: BorderRadius.circular(4),
-            border: Border.all(color: const Color(0xFF94A3B8)),
+            border: Border.all(color: c.borderStrong),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -7254,18 +7255,18 @@ class EmailStatusBadge extends StatelessWidget {
               Container(
                 width: 5,
                 height: 5,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFC8102E),
+                decoration: BoxDecoration(
+                  color: c.dotRed,
                   shape: BoxShape.circle,
                 ),
               ),
               const SizedBox(width: 5),
               Text(
                 enCola ? 'En cola (Offline)' : 'Envío pendiente',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.w600,
-                  color: Color(0xFF334155),
+                  color: c.textSecondary,
                 ),
               ),
             ],

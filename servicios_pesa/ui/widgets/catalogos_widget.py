@@ -1768,12 +1768,15 @@ class TecnicosTab(_CatalogTab):
                 item.setFlags(Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable)
                 if col_idx == 0:
                     item.setData(Qt.ItemDataRole.UserRole, row_data.get("id"))
-                    item.setForeground(Qt.GlobalColor.gray)
+                    from ui.theme import PALETTE as _P
+                    item.setForeground(QColor(_P["text_secondary"]))
                 elif col_idx == 2:   # columna Rol — badge
+                    from ui.theme import PALETTE as _P
                     rol_str = str(val) if val else "Técnico"
-                    # Usar el primer rol de la lista para determinar el color del badge
                     primer_rol = rol_str.split(",")[0].strip() if rol_str else "Técnico"
-                    fg_hex, bg_hex = _ROL_BADGE.get(primer_rol, ("#1D1D1F", "#F0F0F0"))
+                    is_admin_role = primer_rol.lower().startswith("admin")
+                    fg_hex = _P["brand_accent"] if is_admin_role else _P["text_primary"]
+                    bg_hex = _P["surface_muted"]
                     item.setForeground(QColor(fg_hex))
                     item.setBackground(QColor(bg_hex))
                     f = item.font()

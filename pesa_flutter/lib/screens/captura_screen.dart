@@ -1052,10 +1052,11 @@ class _CapturaScreenState extends State<CapturaScreen>
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     if (!_dataLoaded) {
-      return const Scaffold(
-        backgroundColor: Color(0xFFF5F5F7),
-        body: Center(
+      return Scaffold(
+        backgroundColor: c.canvas,
+        body: const Center(
           child: CircularProgressIndicator(color: _kRed),
         ),
       );
@@ -1118,10 +1119,10 @@ class _CapturaScreenState extends State<CapturaScreen>
         bottom: false,
         child: Scaffold(
           resizeToAvoidBottomInset: true,
-          backgroundColor: PesaColors.canvas,
+          backgroundColor: c.canvas,
           appBar: AppBar(
-            backgroundColor: PesaColors.surface,
-            foregroundColor: PesaColors.textPrimary,
+            backgroundColor: c.surface,
+            foregroundColor: c.textPrimary,
             elevation: 0,
             leading: IconButton(
               icon: const Icon(Icons.arrow_back_rounded),
@@ -1132,18 +1133,18 @@ class _CapturaScreenState extends State<CapturaScreen>
             title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
                 folio,
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 16.5,
-                  color: PesaColors.textPrimary,
-                  fontFeatures: [FontFeature.tabularFigures()],
+                  color: c.textPrimary,
+                  fontFeatures: const [FontFeature.tabularFigures()],
                 ),
               ),
               Text(
                 _os['cliente'] ?? '',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 11.5, color: PesaColors.textSecondary),
+                style: TextStyle(fontSize: 11.5, color: c.textSecondary),
               ),
             ]),
             actions: [
@@ -1172,7 +1173,7 @@ class _CapturaScreenState extends State<CapturaScreen>
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Divider(height: 1, color: PesaColors.divider),
+                  Divider(height: 1, color: c.divider),
                   PesaStepProgressBar(
                     currentStep: _tabCtrl.index + 1,
                     totalSteps: 4,
@@ -1184,19 +1185,19 @@ class _CapturaScreenState extends State<CapturaScreen>
                     ][_tabCtrl.index.clamp(0, 3)],
                   ),
                   Container(
-                    decoration: const BoxDecoration(
-                      color: PesaColors.surface,
+                    decoration: BoxDecoration(
+                      color: c.surface,
                       border: Border(
-                        top: BorderSide(color: PesaColors.divider),
-                        bottom: BorderSide(color: PesaColors.border),
+                        top: BorderSide(color: c.divider),
+                        bottom: BorderSide(color: c.border),
                       ),
                     ),
                     child: TabBar(
                       controller: _tabCtrl,
-                      indicatorColor: _kRed,
+                      indicatorColor: c.brandAccent,
                       indicatorWeight: 2.5,
-                      labelColor: _kRed,
-                      unselectedLabelColor: PesaColors.textSecondary,
+                      labelColor: c.brandAccent,
+                      unselectedLabelColor: c.textSecondary,
                       isScrollable: true,
                       tabAlignment: TabAlignment.start,
                       labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
@@ -1228,6 +1229,7 @@ class _CapturaScreenState extends State<CapturaScreen>
 
   // ── Tab 0: Datos del Instrumento ──────────────────────────────────────────
   Widget _buildTabInstrumento() {
+    final c = PesaColors.of(context);
     final rules = _rules;
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -1245,7 +1247,7 @@ class _CapturaScreenState extends State<CapturaScreen>
             if (_historialInstrumentos.isNotEmpty)
               PesaStatusBadge(
                 label: 'Autocompletado (${_historialInstrumentos.length} eq.)',
-                dotColor: PesaColors.dotGreen,
+                dotColor: c.dotGreen,
               ),
           ],
         ),
@@ -1317,7 +1319,7 @@ class _CapturaScreenState extends State<CapturaScreen>
             ),
             DropdownButtonFormField<String>(
               value: _tipoInstrumento,
-              decoration: _kInputDeco('Tipo de Instrumento'),
+              decoration: _kInputDeco(context, 'Tipo de Instrumento'),
               hint: const Text('Seleccionar...', style: TextStyle(fontSize: 13)),
               items: _tiposInstrumento.map((t) =>
                   DropdownMenuItem(value: t, child: Text(t, style: const TextStyle(fontSize: 13))))
@@ -1462,7 +1464,7 @@ class _CapturaScreenState extends State<CapturaScreen>
                   width: 96,
                   child: DropdownButtonFormField<String>(
                     value: _unidadMedida,
-                    decoration: _kInputDeco('Unidad'),
+                    decoration: _kInputDeco(context, 'Unidad'),
                     items: const [
                       DropdownMenuItem(value: 'kg', child: Text('kg', style: TextStyle(fontWeight: FontWeight.bold))),
                       DropdownMenuItem(value: 'g',  child: Text('g',  style: TextStyle(fontWeight: FontWeight.bold))),
@@ -1485,34 +1487,35 @@ class _CapturaScreenState extends State<CapturaScreen>
         Card(
           margin: EdgeInsets.zero,
           elevation: 0,
+          color: c.surface,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
               side: BorderSide(color: _aplExc
-                  ? _kRed.withValues(alpha: 0.35)
-                  : Colors.grey.shade200)),
+                  ? c.brandAccent.withValues(alpha: 0.45)
+                  : c.border)),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
                 Icon(
                   _aplExc ? Icons.center_focus_strong : Icons.center_focus_weak,
-                  color: _aplExc ? _kRed : Colors.grey,
+                  color: _aplExc ? c.brandAccent : c.textSecondary,
                 ),
                 const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         '¿Aplica Excentricidad?',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.textPrimary),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         _aplExc
                             ? 'Sí — Prueba de excentricidad habilitada en pestaña Excentricidad'
                             : 'No — Prueba de excentricidad omitida (puedes activarla si aplica)',
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                        style: TextStyle(fontSize: 11, color: c.textSecondary),
                       ),
                     ],
                   ),
@@ -1579,24 +1582,24 @@ class _CapturaScreenState extends State<CapturaScreen>
           Card(
             margin: EdgeInsets.zero,
             elevation: 0,
-            color: const Color(0xFFFFF8F8),
+            color: c.isDark ? c.surfaceElevated : const Color(0xFFFFF8F8),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
-              side: const BorderSide(color: Color(0xFFFFCCCC), width: 1.2),
+              side: BorderSide(color: c.brandAccent.withValues(alpha: 0.45), width: 1.2),
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(
+                  Row(
                     children: [
-                      Icon(Icons.category_outlined, size: 18, color: _kRed),
-                      SizedBox(width: 8),
+                      Icon(Icons.category_outlined, size: 18, color: c.brandAccent),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Motivo / Tipo de Instrumento No Apto para Excentricidad *',
-                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _kRed),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: c.brandAccent),
                         ),
                       ),
                     ],
@@ -1630,17 +1633,19 @@ class _CapturaScreenState extends State<CapturaScreen>
                           duration: const Duration(milliseconds: 150),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           decoration: BoxDecoration(
-                            color: active ? _kRed.withValues(alpha: 0.12) : Colors.white,
+                            color: active
+                                ? c.brandAccent.withValues(alpha: c.isDark ? 0.18 : 0.12)
+                                : c.surface,
                             borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: active ? _kRed : Colors.grey.shade300,
+                              color: active ? c.brandAccent : c.borderStrong,
                               width: active ? 1.6 : 1.0,
                             ),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(ic, size: 18, color: active ? _kRed : Colors.grey.shade700),
+                              Icon(ic, size: 18, color: active ? c.brandAccent : c.textSecondary),
                               const SizedBox(width: 6),
                               Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1651,12 +1656,12 @@ class _CapturaScreenState extends State<CapturaScreen>
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w700,
-                                      color: active ? _kRed : const Color(0xFF1D1D1F),
+                                      color: active ? c.brandAccent : c.textPrimary,
                                     ),
                                   ),
                                   Text(
                                     sub,
-                                    style: TextStyle(fontSize: 9.5, color: Colors.grey.shade600),
+                                    style: TextStyle(fontSize: 9.5, color: c.textSecondary),
                                   ),
                                 ],
                               ),
@@ -1719,8 +1724,8 @@ class _CapturaScreenState extends State<CapturaScreen>
         ],
         if (rules.tieneCalibracion) ...[
           const SizedBox(height: 10),
-          const Text('Inicial del Calibrador (NOM-010-SCFI-2020):',
-              style: TextStyle(fontSize: 12, color: Color(0xFF374151),
+          Text('Inicial del Calibrador (NOM-010-SCFI-2020):',
+              style: TextStyle(fontSize: 12, color: c.textSecondary,
                   fontWeight: FontWeight.w600)),
           const SizedBox(height: 6),
           Row(children: [
@@ -1735,7 +1740,7 @@ class _CapturaScreenState extends State<CapturaScreen>
                   : _iChecked ? 'Inspector EMA'
                   : _aChecked ? 'Auxiliar'
                   : '— Sin selección',
-              style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280)),
+              style: TextStyle(fontSize: 11, color: c.textSecondary),
               overflow: TextOverflow.ellipsis,
             )),
           ]),
@@ -1760,34 +1765,33 @@ class _CapturaScreenState extends State<CapturaScreen>
         ],
 
         // ── Cargas de sustitución — COMPLETAMENTE OPCIONAL ─────────────────
-        // "No" o campos vacíos ⇒ se omite la sección y la exactitud se valida
-        // solo con pesas patrón directas (sin error ni bloqueo de guardado/PDF).
         Card(
           margin: EdgeInsets.zero,
           elevation: 0,
+          color: c.surface,
           shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(10),
               side: BorderSide(color: _usaSustitucion
-                  ? _kRed.withValues(alpha: 0.35)
-                  : Colors.grey.shade200)),
+                  ? c.brandAccent.withValues(alpha: 0.45)
+                  : c.border)),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(
               children: [
-                Icon(Icons.swap_horiz, color: _usaSustitucion ? _kRed : Colors.grey),
+                Icon(Icons.swap_horiz, color: _usaSustitucion ? c.brandAccent : c.textSecondary),
                 const SizedBox(width: 14),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         '¿Aplica cargas de sustitución?',
-                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: c.textPrimary),
                       ),
-                      SizedBox(height: 2),
+                      const SizedBox(height: 2),
                       Text(
                         'Si eliges "Sí", se habilita la tabla de cargas de sustitución en la pestaña de Exactitud.',
-                        style: TextStyle(fontSize: 11, color: Colors.grey),
+                        style: TextStyle(fontSize: 11, color: c.textSecondary),
                       ),
                     ],
                   ),
@@ -1837,7 +1841,7 @@ class _CapturaScreenState extends State<CapturaScreen>
           verticalGap: 12,
           first: DropdownButtonFormField<String>(
             value: _funcionamiento,
-            decoration: _kInputDeco('Funcionamiento'),
+            decoration: _kInputDeco(context, 'Funcionamiento'),
             items: ['Electrónico', 'Mecánico', 'Electromecánico']
                 .map((f) => DropdownMenuItem(value: f, child: Text(f, style: const TextStyle(fontSize: 13))))
                 .toList(),
@@ -1846,15 +1850,15 @@ class _CapturaScreenState extends State<CapturaScreen>
           second: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Padding(
-                padding: EdgeInsets.only(bottom: 6),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
                 child: Text('Puntos de Apoyo',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF374151))),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textSecondary)),
               ),
               Row(children: [
                 IconButton(
                   icon: const Icon(Icons.remove_circle_outline),
-                  color: _kRed,
+                  color: c.brandAccent,
                   onPressed: () => setState(() {
                     if (_puntosApoyo > 1) {
                       _puntosApoyo--;
@@ -1863,10 +1867,10 @@ class _CapturaScreenState extends State<CapturaScreen>
                   }),
                 ),
                 Text('$_puntosApoyo',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: c.textPrimary)),
                 IconButton(
                   icon: const Icon(Icons.add_circle_outline),
-                  color: _kRed,
+                  color: c.brandAccent,
                   onPressed: () => setState(() {
                     if (_puntosApoyo < 30) {
                       _puntosApoyo++;
@@ -1886,9 +1890,9 @@ class _CapturaScreenState extends State<CapturaScreen>
           height: 48,
           child: OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              foregroundColor: PesaColors.textPrimary,
-              backgroundColor: PesaColors.surface,
-              side: const BorderSide(color: PesaColors.borderStrong, width: 1.2),
+              foregroundColor: c.textPrimary,
+              backgroundColor: c.surface,
+              side: BorderSide(color: c.borderStrong, width: 1.2),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: _savingParcial ? null : _guardarEquipoSinFinalizar,
@@ -1972,20 +1976,21 @@ class _CapturaScreenState extends State<CapturaScreen>
 
   // ── Tab 2: Excentricidad ──────────────────────────────────────────────────
   Widget _buildExcentricidadTab(int nCeldas) {
+    final c = PesaColors.of(context);
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Container(
-            decoration: const BoxDecoration(
-              color: PesaColors.surface,
-              border: Border(bottom: BorderSide(color: PesaColors.border)),
+            decoration: BoxDecoration(
+              color: c.surface,
+              border: Border(bottom: BorderSide(color: c.border)),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             child: Row(children: [
               PesaSemanticDot(
-                color: _aplExc ? PesaColors.dotGreen : PesaColors.dotAmber,
+                color: _aplExc ? c.dotGreen : c.dotAmber,
                 size: 6,
               ),
               const SizedBox(width: 8),
@@ -1993,10 +1998,10 @@ class _CapturaScreenState extends State<CapturaScreen>
                 _aplExc
                     ? 'Prueba de Excentricidad activa — captura los valores de cada posición.'
                     : 'Excentricidad marcada como No Aplica.',
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.w500,
-                  color: PesaColors.textPrimary,
+                  color: c.textPrimary,
                 ),
               )),
               if (!_aplExc)
@@ -2033,9 +2038,9 @@ class _CapturaScreenState extends State<CapturaScreen>
                     _actualizarCargasSugeridas(force: false);
                     _dataVersion++;
                   }),
-                  icon: const Icon(Icons.lock_open, size: 15, color: _kRed),
-                  label: const Text('Habilitar Excentricidad',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _kRed)),
+                  icon: Icon(Icons.lock_open, size: 15, color: c.brandAccent),
+                  label: Text('Habilitar Excentricidad',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: c.brandAccent)),
                 ),
             ]),
           ),
@@ -2137,26 +2142,27 @@ class _CapturaScreenState extends State<CapturaScreen>
 
   // ── Footer de Exactitud: Observaciones del Servicio + Dictamen + Botón a Firmas ──
   Widget _buildExactitudFooter(String folio) {
+    final c = PesaColors.of(context);
     final nombreVacio = _firmaClienteNombreCtrl.text.trim().isEmpty;
     return Card(
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.grey.shade300),
+        side: BorderSide(color: c.border),
       ),
-      color: Colors.white,
+      color: c.surface,
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.notes, color: _kRed, size: 20),
-                SizedBox(width: 8),
+                Icon(Icons.notes, color: c.brandAccent, size: 20),
+                const SizedBox(width: 8),
                 Text(
                   'Observaciones del Servicio',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: c.textPrimary),
                 ),
               ],
             ),
@@ -2177,23 +2183,24 @@ class _CapturaScreenState extends State<CapturaScreen>
             const SizedBox(height: 16),
             Row(
               children: [
-                const Text(
+                Text(
                   'Dictamen: ',
-                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: c.textPrimary),
                 ),
                 const SizedBox(width: 8),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
-                    color: Colors.white,
+                    border: Border.all(color: c.borderStrong),
+                    color: c.isDark ? c.surfaceElevated : c.surface,
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: _dictamen,
+                      dropdownColor: c.surface,
                       items: ['APTO', 'NO APTO', 'CONDICIONADO']
-                          .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontWeight: FontWeight.bold))))
+                          .map((d) => DropdownMenuItem(value: d, child: Text(d, style: TextStyle(fontWeight: FontWeight.bold, color: c.textPrimary))))
                           .toList(),
                       onChanged: (v) => setState(() => _dictamen = v!),
                     ),
@@ -2209,52 +2216,53 @@ class _CapturaScreenState extends State<CapturaScreen>
               optionsBuilder: (TextEditingValue textEditingValue) {
                 if (_contactosSugeridos.isEmpty) return const Iterable<String>.empty();
                 if (textEditingValue.text.isEmpty) return _contactosSugeridos;
-                return _contactosSugeridos.where((c) =>
-                    c.toLowerCase().contains(textEditingValue.text.toLowerCase()));
+                return _contactosSugeridos.where((ct) =>
+                    ct.toLowerCase().contains(textEditingValue.text.toLowerCase()));
               },
               onSelected: (String selection) {
                 setState(() {
                   _firmaClienteNombreCtrl.text = selection;
                 });
               },
-              fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+              fieldViewBuilder: (ctx, controller, focusNode, onFieldSubmitted) {
+                final fc = PesaColors.of(ctx);
                 return TextField(
                   controller: controller,
                   focusNode: focusNode,
                   decoration: InputDecoration(
                     labelText: 'Nombre de quien recibe / Conforme Cliente *',
-                    labelStyle: const TextStyle(
-                        color: Color(0xFFC8102E), fontWeight: FontWeight.w600),
+                    labelStyle: TextStyle(
+                        color: fc.brandAccent, fontWeight: FontWeight.w600),
                     hintText: 'Nombre completo del receptor (ej. Janeth Lopez)',
                     border: OutlineInputBorder(
                         borderRadius: const BorderRadius.all(Radius.circular(8)),
                         borderSide: BorderSide(
-                            color: nombreVacio
-                                ? const Color(0xFFC8102E)
-                                : Colors.grey.shade300)),
-                    focusedBorder: const OutlineInputBorder(
-                        borderRadius: BorderRadius.all(Radius.circular(8)),
-                        borderSide:
-                            BorderSide(color: Color(0xFFC8102E), width: 2)),
+                            color: nombreVacio ? fc.brandAccent : fc.borderStrong)),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: const BorderRadius.all(Radius.circular(8)),
+                        borderSide: BorderSide(
+                            color: nombreVacio ? fc.brandAccent : fc.borderStrong)),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: const BorderRadius.all(Radius.circular(8)),
+                        borderSide: BorderSide(color: fc.brandAccent, width: 2)),
                     isDense: true,
-                    prefixIcon: const Icon(Icons.person_outline,
-                        color: Color(0xFFC8102E), size: 18),
+                    prefixIcon: Icon(Icons.person_outline, color: fc.brandAccent, size: 18),
                     suffixIcon: _contactosSugeridos.isNotEmpty
                         ? PopupMenuButton<String>(
-                            icon: const Icon(Icons.arrow_drop_down, color: Color(0xFFC8102E)),
+                            icon: Icon(Icons.arrow_drop_down, color: fc.brandAccent),
                             tooltip: 'Contactos registrados para esta planta',
                             onSelected: (val) {
                               setState(() {
                                 _firmaClienteNombreCtrl.text = val;
                               });
                             },
-                            itemBuilder: (context) => _contactosSugeridos.map((c) => PopupMenuItem(
-                              value: c,
+                            itemBuilder: (context) => _contactosSugeridos.map((ct) => PopupMenuItem(
+                              value: ct,
                               child: Row(
                                 children: [
-                                  const Icon(Icons.history, size: 16, color: Colors.grey),
+                                  Icon(Icons.history, size: 16, color: fc.textSecondary),
                                   const SizedBox(width: 8),
-                                  Text(c, style: const TextStyle(fontSize: 13)),
+                                  Text(ct, style: TextStyle(fontSize: 13, color: fc.textPrimary)),
                                 ],
                               ),
                             )).toList(),
@@ -2265,11 +2273,13 @@ class _CapturaScreenState extends State<CapturaScreen>
                   onChanged: (_) => setState(() {}),
                 );
               },
-              optionsViewBuilder: (context, onSelected, options) {
+              optionsViewBuilder: (ctx, onSelected, options) {
+                final oc = PesaColors.of(ctx);
                 return Align(
                   alignment: Alignment.topLeft,
                   child: Material(
                     elevation: 6,
+                    color: oc.surface,
                     borderRadius: BorderRadius.circular(8),
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxHeight: 200, maxWidth: 350),
@@ -2281,9 +2291,9 @@ class _CapturaScreenState extends State<CapturaScreen>
                           final opt = options.elementAt(i);
                           return ListTile(
                             dense: true,
-                            leading: const Icon(Icons.person, size: 16, color: Color(0xFFC8102E)),
-                            title: Text(opt, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                            subtitle: const Text('Contacto registrado en planta', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                            leading: Icon(Icons.person, size: 16, color: oc.brandAccent),
+                            title: Text(opt, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: oc.textPrimary)),
+                            subtitle: Text('Contacto registrado en planta', style: TextStyle(fontSize: 10, color: oc.textSecondary)),
                             onTap: () => onSelected(opt),
                           );
                         },
@@ -2297,10 +2307,10 @@ class _CapturaScreenState extends State<CapturaScreen>
               const SizedBox(height: 8),
               Row(
                 children: [
-                  const Icon(Icons.history, size: 14, color: Colors.grey),
+                  Icon(Icons.history, size: 14, color: c.textSecondary),
                   const SizedBox(width: 4),
-                  const Text('Historial planta: ',
-                      style: TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.w500)),
+                  Text('Historial planta: ',
+                      style: TextStyle(fontSize: 11, color: c.textSecondary, fontWeight: FontWeight.w500)),
                   Expanded(
                     child: SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
@@ -2311,10 +2321,12 @@ class _CapturaScreenState extends State<CapturaScreen>
                             padding: const EdgeInsets.only(right: 6),
                             child: ActionChip(
                               visualDensity: VisualDensity.compact,
-                              backgroundColor: isSelected ? const Color(0xFFFFEBEE) : Colors.grey.shade100,
-                              side: BorderSide(color: isSelected ? const Color(0xFFC8102E) : Colors.grey.shade300),
-                              avatar: Icon(Icons.person, size: 12, color: isSelected ? const Color(0xFFC8102E) : Colors.grey.shade700),
-                              label: Text(contacto, style: TextStyle(fontSize: 11, color: isSelected ? const Color(0xFFC8102E) : Colors.black87, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+                              backgroundColor: isSelected
+                                  ? c.brandAccent.withValues(alpha: c.isDark ? 0.2 : 0.12)
+                                  : c.surfaceElevated,
+                              side: BorderSide(color: isSelected ? c.brandAccent : c.borderStrong),
+                              avatar: Icon(Icons.person, size: 12, color: isSelected ? c.brandAccent : c.textSecondary),
+                              label: Text(contacto, style: TextStyle(fontSize: 11, color: isSelected ? c.brandAccent : c.textPrimary, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
                               onPressed: () {
                                 setState(() {
                                   _firmaClienteNombreCtrl.text = contacto;
@@ -2969,45 +2981,46 @@ class _ServicioBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     final nombreReal = (tipoServicioNombre ?? '').trim();
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFFF5F5F7),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: rules.sinTipo ? const Color(0xFF94A3B8) : const Color(0xFFE2E8F0)),
+        color: c.surface,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: rules.sinTipo ? c.borderStrong : c.border),
       ),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Icon(rules.sinTipo ? Icons.warning_amber_rounded : Icons.rule, size: 18,
-            color: rules.sinTipo ? const Color(0xFFC8102E) : _kRed),
+            color: c.brandAccent),
         const SizedBox(width: 10),
         Expanded(child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Tipo de Servicio: ${rules.etiquetaLarga}',
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: Color(0xFF1D1D1F)),
+              style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: c.textPrimary),
             ),
             if (nombreReal.isNotEmpty && nombreReal != rules.etiquetaLarga)
               Padding(
                 padding: const EdgeInsets.only(top: 2),
                 child: Text('Asignado por logística: $nombreReal',
-                    style: const TextStyle(fontSize: 11, color: Color(0xFF475569))),
+                    style: TextStyle(fontSize: 11, color: c.textSecondary)),
               ),
             const SizedBox(height: 6),
-            Wrap(spacing: 6, children: [
+            Wrap(spacing: 6, runSpacing: 4, children: [
               if (rules.esRemision)
-                const _Badge('Remisión — solo datos operativos', Color(0xFF1D1D1F)),
+                _Badge('Remisión — solo datos operativos', c.textPrimary),
               if (rules.esRevisionCeldas)
-                const _Badge('Revisión de Celdas', Color(0xFF1D1D1F)),
+                _Badge('Revisión de Celdas', c.textPrimary),
               if (rules.tieneCalibracion)
-                const _Badge('CCA requerido', Color(0xFF1D1D1F)),
+                _Badge('CCA requerido', c.textPrimary),
               if (rules.tieneInspeccion)
-                const _Badge('Hologramas + DVE', Color(0xFF1D1D1F)),
+                _Badge('Hologramas + DVE', c.textPrimary),
               if (rules.sinTipo)
-                const _Badge('Sin tipo — sincroniza antes de capturar', Color(0xFF334155))
+                _Badge('Sin tipo — sincroniza antes de capturar', c.textSecondary)
               else if (rules.esSoloAjuste && !rules.esRemision && !rules.esRevisionCeldas)
-                const _Badge('Solo Ajuste — sin CCA ni DVE', Color(0xFF475569)),
+                _Badge('Solo Ajuste — sin CCA ni DVE', c.textSecondary),
             ]),
           ],
         )),
@@ -3022,16 +3035,19 @@ class _Badge extends StatelessWidget {
   const _Badge(this.text, this.color);
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-    decoration: BoxDecoration(
-      color: const Color(0xFFF5F5F7),
-      border: Border.all(color: const Color(0xFFD2D2D7)),
-      borderRadius: BorderRadius.circular(4),
-    ),
-    child: Text(text, style: TextStyle(fontSize: 10, color: color,
-        fontWeight: FontWeight.w700)),
-  );
+  Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      decoration: BoxDecoration(
+        color: c.surfaceElevated,
+        border: Border.all(color: c.borderStrong),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(text, style: TextStyle(fontSize: 10, color: color,
+          fontWeight: FontWeight.w700)),
+    );
+  }
 }
 
 // ── Widgets de formulario ─────────────────────────────────────────────────
@@ -3040,9 +3056,12 @@ class _SectionTitle extends StatelessWidget {
   final String text;
   const _SectionTitle(this.text);
   @override
-  Widget build(BuildContext context) => Text(text,
-      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800,
-          color: Color(0xFF374151), letterSpacing: 0.5));
+  Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    return Text(text,
+        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800,
+            color: c.textSecondary, letterSpacing: 0.5));
+  }
 }
 
 class _EquipoHistorialAutocomplete extends StatelessWidget {
@@ -3116,20 +3135,21 @@ class _EquipoHistorialAutocomplete extends StatelessWidget {
         if (v.isNotEmpty) ctrl.text = v;
         onSelectedInstrument(selection);
       },
-      optionsViewBuilder: (context, onSelect, options) {
+      optionsViewBuilder: (ctx, onSelect, options) {
+        final oc = PesaColors.of(ctx);
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
             elevation: 6.0,
             borderRadius: BorderRadius.circular(8),
-            color: Colors.white,
+            color: oc.surface,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 240, maxWidth: 360),
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 shrinkWrap: true,
                 itemCount: options.length,
-                separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                separatorBuilder: (_, __) => Divider(height: 1, color: oc.divider),
                 itemBuilder: (BuildContext context, int index) {
                   final opt = options.elementAt(index);
                   final titleParts = [
@@ -3153,12 +3173,12 @@ class _EquipoHistorialAutocomplete extends StatelessWidget {
                         children: [
                           Text(
                             titleParts.isNotEmpty ? titleParts : (opt[fieldKey] ?? '').toString(),
-                            style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: Colors.black87),
+                            style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: oc.textPrimary),
                           ),
                           if (subParts.isNotEmpty)
                             Text(
                               subParts,
-                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF6B7280)),
+                              style: TextStyle(fontSize: 10.5, color: oc.textSecondary),
                             ),
                         ],
                       ),
@@ -3170,12 +3190,12 @@ class _EquipoHistorialAutocomplete extends StatelessWidget {
           ),
         );
       },
-      fieldViewBuilder: (context, controller, fNode, onFieldSubmitted) {
+      fieldViewBuilder: (ctx, controller, fNode, onFieldSubmitted) {
         return TextFormField(
           controller: controller,
           focusNode: fNode,
           onChanged: onChanged,
-          decoration: _kInputDeco(label + (required ? ' *' : ''), hint: hint, hasError: hasError),
+          decoration: _kInputDeco(ctx, label + (required ? ' *' : ''), hint: hint, hasError: hasError),
           style: const TextStyle(fontSize: 13),
         );
       },
@@ -3224,20 +3244,21 @@ class _AutocompleteField extends StatelessWidget {
         ctrl.text = selection;
         onSelected?.call(selection);
       },
-      optionsViewBuilder: (context, onSelect, options) {
+      optionsViewBuilder: (ctx, onSelect, options) {
+        final oc = PesaColors.of(ctx);
         return Align(
           alignment: Alignment.topLeft,
           child: Material(
             elevation: 6.0,
             borderRadius: BorderRadius.circular(8),
-            color: Colors.white,
+            color: oc.surface,
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxHeight: 220, maxWidth: 280),
               child: ListView.separated(
                 padding: const EdgeInsets.symmetric(vertical: 4),
                 shrinkWrap: true,
                 itemCount: options.length,
-                separatorBuilder: (_, __) => const Divider(height: 1, color: Color(0xFFF3F4F6)),
+                separatorBuilder: (_, __) => Divider(height: 1, color: oc.divider),
                 itemBuilder: (BuildContext context, int index) {
                   final String option = options.elementAt(index);
                   return InkWell(
@@ -3246,7 +3267,7 @@ class _AutocompleteField extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       child: Text(
                         option,
-                        style: const TextStyle(fontSize: 13, color: Colors.black87),
+                        style: TextStyle(fontSize: 13, color: oc.textPrimary),
                       ),
                     ),
                   );
@@ -3256,12 +3277,12 @@ class _AutocompleteField extends StatelessWidget {
           ),
         );
       },
-      fieldViewBuilder: (context, controller, fNode, onFieldSubmitted) {
+      fieldViewBuilder: (ctx, controller, fNode, onFieldSubmitted) {
         return TextFormField(
           controller: controller,
           focusNode: fNode,
           onChanged: onChanged,
-          decoration: _kInputDeco(label + (required ? ' *' : ''), hint: hint, hasError: hasError),
+          decoration: _kInputDeco(ctx, label + (required ? ' *' : ''), hint: hint, hasError: hasError),
           style: const TextStyle(fontSize: 13),
         );
       },
@@ -3359,7 +3380,7 @@ class _Field extends StatelessWidget {
     inputFormatters: inputFormatters,
     keyboardType: keyboardType,
     textCapitalization: textCapitalization,
-    decoration: _kInputDeco(label + (required ? ' *' : ''), hint: hint, hasError: hasError),
+    decoration: _kInputDeco(context, label + (required ? ' *' : ''), hint: hint, hasError: hasError),
     style: const TextStyle(fontSize: 13),
   );
 }
@@ -3377,7 +3398,7 @@ class _NumField extends StatelessWidget {
     onChanged: onChanged,
     keyboardType: const TextInputType.numberWithOptions(decimal: true),
     inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d.]'))],
-    decoration: _kInputDeco(label, hasError: hasError),
+    decoration: _kInputDeco(context, label, hasError: hasError),
     style: const TextStyle(fontSize: 13),
   );
 }
@@ -3389,46 +3410,54 @@ class _JiaToggle extends StatelessWidget {
   const _JiaToggle(this.label, this.val, this.onChanged);
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: () => onChanged(!val),
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 180),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-      decoration: BoxDecoration(
-        color: val ? _kRed : Colors.grey.shade200,
-        borderRadius: BorderRadius.circular(8),
+  Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    return GestureDetector(
+      onTap: () => onChanged(!val),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: val ? _kRed : c.surfaceElevated,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: val ? _kRed : c.border),
+        ),
+        child: Text(label, style: TextStyle(
+            color: val ? Colors.white : c.textPrimary,
+            fontWeight: FontWeight.w800, fontSize: 14)),
       ),
-      child: Text(label, style: TextStyle(
-          color: val ? Colors.white : Colors.grey.shade700,
-          fontWeight: FontWeight.w800, fontSize: 14)),
-    ),
-  );
+    );
+  }
 }
 
-InputDecoration _kInputDeco(String label, {String? hint, bool hasError = false}) => InputDecoration(
-  labelText: label,
-  hintText:  hint,
-  hintStyle: const TextStyle(color: Color(0xFFD1D5DB), fontSize: 12),
-  enabledBorder: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(8),
-    borderSide: BorderSide(
-      color: hasError ? const Color(0xFFC8102E) : const Color(0xFFE5E7EB),
-      width: hasError ? 2.0 : 1.0,
+InputDecoration _kInputDeco(BuildContext context, String label, {String? hint, bool hasError = false}) {
+  final c = PesaColors.of(context);
+  final Color errFill = c.isDark ? const Color(0xFF34181D) : const Color(0xFFFFEBEE);
+  return InputDecoration(
+    labelText: label,
+    hintText:  hint,
+    hintStyle: TextStyle(color: c.textTertiary, fontSize: 12),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(
+        color: hasError ? c.brandAccent : c.borderStrong,
+        width: hasError ? 2.0 : 1.0,
+      ),
     ),
-  ),
-  border: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(8),
-    borderSide: BorderSide(
-      color: hasError ? const Color(0xFFC8102E) : const Color(0xFFE5E7EB),
-      width: hasError ? 2.0 : 1.0,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(
+        color: hasError ? c.brandAccent : c.borderStrong,
+        width: hasError ? 2.0 : 1.0,
+      ),
     ),
-  ),
-  focusedBorder: OutlineInputBorder(
-    borderRadius: BorderRadius.circular(8),
-    borderSide: const BorderSide(color: _kRed, width: 2),
-  ),
-  isDense:    true,
-  filled:     true,
-  fillColor:  hasError ? const Color(0xFFFFEBEE) : Colors.white,
-  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-);
+    focusedBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(8),
+      borderSide: BorderSide(color: c.brandAccent, width: 2),
+    ),
+    isDense:    true,
+    filled:     true,
+    fillColor:  hasError ? errFill : (c.isDark ? c.surfaceElevated : c.surface),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+  );
+}

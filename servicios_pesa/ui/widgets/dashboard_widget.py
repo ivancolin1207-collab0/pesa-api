@@ -378,15 +378,14 @@ class FolioInstrumentoDelegate(QStyledItemDelegate):
         is_batch = bool(index.data(self.ROLE_IS_BATCH))
         has_widget = bool(index.data(self.ROLE_HAS_WIDGET))
 
+        from ui.theme import PALETTE as _P
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor("#F5F5F7"))
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor("#F5F5F7"))
+        if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
+            painter.fillRect(option.rect, QColor(_P["surface_hover"]))
         else:
-            painter.fillRect(option.rect, QColor("#FFFFFF"))
+            painter.fillRect(option.rect, QColor(_P["surface"]))
 
         # Si la celda contiene el QWidget estructurado de 2 niveles, no pintar DisplayRole debajo
         if has_widget:
@@ -400,7 +399,7 @@ class FolioInstrumentoDelegate(QStyledItemDelegate):
             title_font.setPointSizeF(9.2)
             title_font.setWeight(QFont.Weight.DemiBold)
             painter.setFont(title_font)
-            painter.setPen(QColor("#0F172A"))
+            painter.setPen(QColor(_P["text_primary"]))
             painter.drawText(
                 rect,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
@@ -438,22 +437,21 @@ class WordWrapTextDelegate(QStyledItemDelegate):
         folio_idx = index.siblingAtColumn(1)
         is_batch = bool(folio_idx.data(FolioInstrumentoDelegate.ROLE_IS_BATCH)) if folio_idx.isValid() else False
 
+        from ui.theme import PALETTE as _P
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        if option.state & QStyle.StateFlag.State_Selected:
-            painter.fillRect(option.rect, QColor("#F5F5F7"))
-        elif option.state & QStyle.StateFlag.State_MouseOver:
-            painter.fillRect(option.rect, QColor("#F5F5F7"))
+        if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
+            painter.fillRect(option.rect, QColor(_P["surface_hover"]))
         else:
-            painter.fillRect(option.rect, QColor("#FFFFFF"))
+            painter.fillRect(option.rect, QColor(_P["surface"]))
 
         if text:
             rect = option.rect.adjusted(10, 5, -8, -5)
             font = QFont(option.font)
             font.setPixelSize(12)
             painter.setFont(font)
-            painter.setPen(QColor("#0F172A"))
+            painter.setPen(QColor(_P["text_primary"]))
             painter.drawText(
                 rect,
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter | Qt.TextFlag.TextWordWrap,
@@ -484,20 +482,24 @@ class StatusBadgeDelegate(QStyledItemDelegate):
     """Pinta etiquetas corporativas neutras (#F5F5F7 / #D2D2D7 / #111827) con punto semántico 6px solo en estatus."""
 
     def _resolve_colors(self, text: str, col_idx: int = -1) -> tuple[str, str, str, Optional[str]]:
-        """Retorna (bg_hex, fg_hex, border_hex, dot_hex_or_None)."""
+        """Retorna (bg_hex, fg_hex, border_hex, dot_hex_or_None) adaptado al tema activo."""
+        from ui.theme import PALETTE as _P
         lower = str(text or "").strip().lower()
+        bg = _P["surface_muted"]
+        fg = _P["text_primary"]
+        brd = _P["border"]
         # Solo la columna ESTATUS (col 8) lleva punto semántico de 6px; servicio/modalidad son neutros.
         if col_idx != 8:
-            return ("#F5F5F7", "#111827", "#E5E7EB", None)
+            return (bg, fg, brd, None)
         if "cancel" in lower:
-            return ("#F5F5F7", "#C8102E", "#D2D2D7", "#C8102E")
+            return (bg, _P["brand_accent"], brd, _P["dot_red"])
         if "pend" in lower or "sin tipo" in lower or "asig" in lower:
-            return ("#F5F5F7", "#111827", "#D2D2D7", "#C8102E")
+            return (bg, fg, brd, _P["dot_red"])
         if "proceso" in lower:
-            return ("#F5F5F7", "#111827", "#D2D2D7", "#D97706")
+            return (bg, fg, brd, _P["dot_amber"])
         if any(tok in lower for tok in ("cerrad", "complet", "escan", "finaliz", "terminad", "firmad")):
-            return ("#F5F5F7", "#111827", "#D2D2D7", "#16A34A")
-        return ("#F5F5F7", "#111827", "#D2D2D7", "#6B7280")
+            return (bg, fg, brd, _P["dot_green"])
+        return (bg, fg, brd, _P["dot_neutral"])
 
     def _abbreviate(self, text: str) -> str:
         """Mantiene textos legibles y sin truncamiento dentro de la etiqueta."""
@@ -534,13 +536,14 @@ class StatusBadgeDelegate(QStyledItemDelegate):
         fg_color = QColor(fg_hex)
         brd_color = QColor(brd_hex)
 
+        from ui.theme import PALETTE as _P
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
-            painter.fillRect(option.rect, QColor("#F5F5F7"))
+            painter.fillRect(option.rect, QColor(_P["surface_hover"]))
         else:
-            painter.fillRect(option.rect, QColor("#FFFFFF"))
+            painter.fillRect(option.rect, QColor(_P["surface"]))
 
         padding_h = 8
         padding_v = 4
@@ -667,19 +670,26 @@ class SyncCheckDelegate(QStyledItemDelegate):
         raw_val = index.data(Qt.ItemDataRole.UserRole) or index.data(Qt.ItemDataRole.DisplayRole)
         cfg = self._get_cfg(str(raw_val or ""))
 
+        from ui.theme import PALETTE as _P
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         if option.state & (QStyle.StateFlag.State_Selected | QStyle.StateFlag.State_MouseOver):
-            painter.fillRect(option.rect, QColor("#F5F5F7"))
+            painter.fillRect(option.rect, QColor(_P["surface_hover"]))
         else:
-            painter.fillRect(option.rect, QColor("#FFFFFF"))
+            painter.fillRect(option.rect, QColor(_P["surface"]))
 
-        text    = cfg["text"]
-        dot_col = QColor(cfg["dot"])
-        fg_col  = QColor(cfg["fg"])
-        bg_col  = QColor(cfg["bg"])
-        brd_col = QColor(cfg["border"])
+        text = cfg["text"]
+        _dot_raw = str(cfg["dot"]).upper()
+        if _dot_raw == "#16A34A":
+            dot_col = QColor(_P["dot_green"])
+        elif _dot_raw == "#D97706":
+            dot_col = QColor(_P["dot_amber"])
+        else:
+            dot_col = QColor(_P["dot_red"])
+        fg_col  = QColor(_P["text_primary"])
+        bg_col  = QColor(_P["surface_muted"])
+        brd_col = QColor(_P["border"])
 
         font = QFont(option.font)
         font.setPixelSize(11)
@@ -4098,8 +4108,9 @@ class DashboardWidget(QWidget):
             p_suc = [s.strip() for s in suc_clean.split(" — ") if s.strip()]
             if len(p_suc) == 2 and p_suc[0].lower() == p_suc[1].lower():
                 suc_clean = p_suc[0]
+        from ui.theme import PALETTE as _P
         item.setText(self._COL_FECHA,    fecha_str)
-        item.setForeground(self._COL_FECHA, QBrush(QColor("#475569")))
+        item.setForeground(self._COL_FECHA, QBrush(QColor(_P["text_secondary"])))
         item.setText(self._COL_CLIENTE,  cliente)
         item.setToolTip(self._COL_CLIENTE, cliente)
         item.setText(self._COL_SUCURSAL, suc_clean)
@@ -4173,7 +4184,8 @@ class DashboardWidget(QWidget):
         if cancel_tooltip:
             item.setToolTip(self._COL_ESTADO, cancel_tooltip)
         if is_cancelled:
-            muted_brush = QBrush(QColor("#8E8E93"))
+            from ui.theme import PALETTE as _P
+            muted_brush = QBrush(QColor(_P["text_tertiary"]))
             for _mc in (self._COL_FECHA, self._COL_CLIENTE, self._COL_SUCURSAL, self._COL_TECNICO):
                 item.setForeground(_mc, muted_brush)
 
@@ -4184,10 +4196,7 @@ class DashboardWidget(QWidget):
         item.setData(self._COL_SYNC, Qt.ItemDataRole.DisplayRole, check_val)
         item.setToolTip(self._COL_SYNC, self._get_sync_check_tooltip(check_val))
 
-        # Fondo blanco puro en todas las filas (cero tintes pastel en filas padre/hija)
-        bg = QBrush(QColor("#FFFFFF"))
-        for col in range(self._table.columnCount()):
-            item.setBackground(col, bg)
+        # Sin fondo hardcoded en item: hereda la superficie del tema activo (#FFFFFF en Claro / #1C1C1E en Oscuro)
 
     @staticmethod
     def _extraer_consecutivo(folio: str) -> int | None:

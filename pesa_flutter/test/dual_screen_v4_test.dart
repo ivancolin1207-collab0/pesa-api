@@ -11,11 +11,14 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:signature/signature.dart';
 
 import 'package:pesa_tablet/screens/login_screen.dart';
 import 'package:pesa_tablet/screens/mi_firma_screen.dart';
 import 'package:pesa_tablet/screens/nuevo_doc_screen.dart';
 import 'package:pesa_tablet/screens/pdf_preview_aprobacion_screen.dart';
+import 'package:pesa_tablet/screens/settings_screen.dart';
 import 'package:pesa_tablet/services/api_service.dart';
 import 'package:pesa_tablet/services/auth_service.dart';
 import 'package:pesa_tablet/services/metrology_helper.dart';
@@ -419,6 +422,199 @@ void main() {
         expect(find.text('Sin firma del cliente'), findsOneWidget);
         expect(find.text('Volver a Corregir'), findsOneWidget);
         expect(find.text('Estoy de Acuerdo — Pasar a Firmar'), findsOneWidget);
+      });
+    }
+  });
+
+  group('v4.0.5 Modo Nocturno Apple Minimalista + Blindaje de Firmas', () {
+    test('ThemeController inicia por defecto en ThemeMode.system y persiste cambios', () async {
+      SharedPreferences.setMockInitialValues({});
+      await ThemeController.instance.load();
+      expect(ThemeController.instance.value, ThemeMode.system);
+
+      await ThemeController.instance.setMode(ThemeMode.dark);
+      expect(ThemeController.instance.value, ThemeMode.dark);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getString('pesa_theme_mode'), 'dark');
+
+      await ThemeController.instance.setMode(ThemeMode.light);
+      expect(ThemeController.instance.value, ThemeMode.light);
+      expect(prefs.getString('pesa_theme_mode'), 'light');
+
+      await ThemeController.instance.setMode(ThemeMode.system);
+      expect(ThemeController.instance.value, ThemeMode.system);
+      expect(prefs.getString('pesa_theme_mode'), 'system');
+    });
+
+    test('PesaTheme.darkTheme y PesaPalette.dark cumplen tokens exactos Apple PESA', () {
+      final darkTheme = PesaTheme.darkTheme;
+      expect(darkTheme.brightness, Brightness.dark);
+      expect(darkTheme.scaffoldBackgroundColor, const Color(0xFF121214));
+      expect(darkTheme.cardColor, const Color(0xFF1C1C1E));
+
+      const p = PesaPalette.dark;
+      expect(p.canvas, const Color(0xFF121214));
+      expect(p.surface, const Color(0xFF1C1C1E));
+      expect(p.elevated, const Color(0xFF2C2C2E));
+      expect(p.hover, const Color(0xFF323236));
+      expect(p.border, const Color(0xFF38383A));
+      expect(p.textPrimary, const Color(0xFFF5F5F7));
+      expect(p.textSecondary, const Color(0xFF98989D));
+      expect(p.textTertiary, const Color(0xFF636366));
+      expect(p.brandAccent, const Color(0xFFF03E55));
+      expect(p.dotGreen, const Color(0xFF30D158));
+      expect(p.dotAmber, const Color(0xFFFF9F0A));
+      expect(p.dotRed, const Color(0xFFFF453A));
+
+      // Blindaje inmutable para firmas y PDFs
+      expect(PesaColors.signatureCanvas, const Color(0xFFFFFFFF));
+      expect(PesaColors.signatureInk, const Color(0xFF000000));
+    });
+
+    Future<void> verifyDarkNoOverflowAtSize(
+      WidgetTester tester,
+      Size logicalSize,
+      Widget child,
+    ) async {
+      final errors = <FlutterErrorDetails>[];
+      final prevOnError = FlutterError.onError;
+      FlutterError.onError = (details) {
+        errors.add(details);
+      };
+      try {
+        tester.view.devicePixelRatio = 1.0;
+        tester.view.physicalSize = logicalSize;
+        addTearDown(() {
+          tester.view.resetPhysicalSize();
+          tester.view.resetDevicePixelRatio();
+        });
+
+        await tester.pumpWidget(
+          MultiProvider(
+            providers: [
+              ChangeNotifierProvider(create: (_) => AuthService()),
+              ChangeNotifierProvider(create: (_) => SyncService()),
+            ],
+            child: MaterialApp(
+              theme: PesaTheme.lightTheme,
+              darkTheme: PesaTheme.darkTheme,
+              themeMode: ThemeMode.dark,
+              home: child,
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 250));
+
+        final overflows = errors.where(
+          (e) => e.exceptionAsString().contains('RenderFlex overflowed'),
+        );
+        expect(
+          overflows,
+          isEmpty,
+          reason: 'RenderFlex overflow en Dark Mode (${logicalSize.width}x${logicalSize.height}): $overflows',
+        );
+      } finally {
+        FlutterError.onError = prevOnError;
+      }
+    }
+
+    for (final entry in <String, Size>{
+      'Cover 380x840': const Size(380, 840),
+      'Unfolded 840x920': const Size(840, 920),
+    }.entries) {
+      testWidgets('Dark Mode LoginScreen sin overflow en ${entry.key}', (tester) async {
+        await verifyDarkNoOverflowAtSize(tester, entry.value, const LoginScreen());
+        expect(find.byType(LoginScreen), findsOneWidget);
+      });
+
+      testWidgets('Dark Mode SettingsScreen muestra selector Apariencia sin overflow en ${entry.key}', (tester) async {
+        SharedPreferences.setMockInitialValues({});
+        await ThemeController.instance.load();
+        await verifyDarkNoOverflowAtSize(tester, entry.value, const SettingsScreen());
+        expect(find.text('Apariencia'), findsOneWidget);
+        expect(find.text('Automático'), findsOneWidget);
+        expect(find.text('Claro'), findsOneWidget);
+        expect(find.text('Oscuro'), findsOneWidget);
+      });
+
+      testWidgets('Dark Mode MiFirmaScreen mantiene pad de firma BLINDADO (#FFFFFF + tinta #000000) en ${entry.key}', (tester) async {
+        await verifyDarkNoOverflowAtSize(tester, entry.value, const MiFirmaScreen());
+        final sigFinder = find.byType(Signature);
+        expect(sigFinder, findsOneWidget);
+        final sigWidget = tester.widget<Signature>(sigFinder);
+        // En MiFirmaScreen el contenedor del lienzo es #FFFFFF y Signature es transparente
+        // para dejar visible la línea guía sobre papel blanco (o blanco directo).
+        final whiteAncestor = find.ancestor(
+          of: sigFinder,
+          matching: find.byWidgetPredicate(
+            (w) =>
+                w is Container &&
+                w.decoration is BoxDecoration &&
+                (w.decoration as BoxDecoration).color == const Color(0xFFFFFFFF),
+          ),
+        );
+        expect(
+          sigWidget.backgroundColor == const Color(0xFFFFFFFF) || whiteAncestor.evaluate().isNotEmpty,
+          isTrue,
+          reason: 'El lienzo de firma DEBE permanecer sobre fondo blanco #FFFFFF en Dark Mode',
+        );
+        expect(sigWidget.controller.penColor, const Color(0xFF000000),
+            reason: 'La tinta del pad de firma DEBE permanecer negra #000000 en Dark Mode');
+        expect(sigWidget.controller.exportPenColor, const Color(0xFF000000),
+            reason: 'La tinta exportada PNG DEBE permanecer negra #000000 en Dark Mode');
+      });
+
+      testWidgets('Dark Mode PesaSignatureFrame + ClienteCorreoPokaYokeCard sin overflow en ${entry.key}', (tester) async {
+        final ctrl = ClienteCorreoController();
+        final sigCtrl = SignatureController(
+          penColor: PesaColors.signatureInk,
+          exportPenColor: PesaColors.signatureInk,
+        );
+        addTearDown(() {
+          ctrl.dispose();
+          sigCtrl.dispose();
+        });
+        await verifyDarkNoOverflowAtSize(
+          tester,
+          entry.value,
+          Scaffold(
+            body: SingleChildScrollView(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  ClienteCorreoPokaYokeCard(controller: ctrl, loteId: 'LOTE-DARK-01'),
+                  const SizedBox(height: 12),
+                  PesaSignatureFrame(
+                    child: Signature(
+                      controller: sigCtrl,
+                      backgroundColor: PesaColors.signatureCanvas,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        final frame = tester.widget<PesaSignatureFrame>(find.byType(PesaSignatureFrame));
+        expect(frame, isNotNull);
+        final sig = tester.widget<Signature>(find.byType(Signature));
+        expect(sig.backgroundColor, const Color(0xFFFFFFFF));
+        expect(sig.controller.penColor, const Color(0xFF000000));
+      });
+
+      testWidgets('Dark Mode PdfPreviewAprobacionScreen sin overflow en ${entry.key}', (tester) async {
+        await verifyDarkNoOverflowAtSize(
+          tester,
+          entry.value,
+          PdfPreviewAprobacionScreen(
+            folio: 'OS-26-880',
+            pdfBytes: Uint8List.fromList([0x25, 0x50, 0x44, 0x46, 0x2D]),
+            tipoDocumento: 'Orden de Servicio (OS)',
+            customPreviewBody: const Center(child: Text('Vista previa PDF')),
+          ),
+        );
+        expect(find.text('Vista Previa para Revisión del Cliente — OS-26-880'), findsOneWidget);
       });
     }
   });

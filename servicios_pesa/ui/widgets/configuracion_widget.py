@@ -20,9 +20,11 @@ from PyQt6.QtCore    import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QLineEdit, QScrollArea,
-    QMessageBox, QSizePolicy, QProgressBar, QSpinBox,
+    QMessageBox, QSizePolicy, QProgressBar, QSpinBox, QButtonGroup,
 )
 from PyQt6.QtGui import QFont, QColor
+
+from ui.theme import PALETTE as _P, theme_manager as _theme_manager
 
 logger = logging.getLogger(__name__)
 
@@ -65,17 +67,6 @@ def _section_card() -> tuple[QFrame, QVBoxLayout]:
     card = QFrame()
     card.setObjectName("cfg_section_card")
     card.setProperty("card", True)
-    card.setStyleSheet("""
-        QFrame#cfg_section_card {
-            background: #FFFFFF;
-            border: 1px solid #E5E5EA;
-            border-radius: 14px;
-        }
-        QFrame#cfg_section_card QLabel {
-            border: none;
-            background: transparent;
-        }
-    """)
     lay = QVBoxLayout(card)
     lay.setContentsMargins(20, 18, 20, 18)
     lay.setSpacing(14)
@@ -84,16 +75,13 @@ def _section_card() -> tuple[QFrame, QVBoxLayout]:
 
 def _section_title(text: str, icon: str = "") -> QLabel:
     lbl = QLabel(text)
-    lbl.setStyleSheet(
-        f"font-size: 14px; font-weight: 700; color: {_DARK}; background: transparent;"
-    )
+    lbl.setStyleSheet("font-size: 14px; font-weight: 700; background: transparent;")
     return lbl
 
 
 def _sep() -> QFrame:
     f = QFrame()
     f.setFrameShape(QFrame.Shape.HLine)
-    f.setStyleSheet("background: rgba(0,0,0,0.06); border: none;")
     f.setFixedHeight(1)
     return f
 
@@ -102,9 +90,10 @@ def _info_row(label: str, value: str) -> QHBoxLayout:
     row = QHBoxLayout()
     lbl_k = QLabel(label)
     lbl_k.setFixedWidth(160)
-    lbl_k.setStyleSheet(f"color: {_GRAY}; font-size: 12px; background: transparent;")
+    lbl_k.setProperty("class", "muted")
+    lbl_k.setStyleSheet("font-size: 12px; background: transparent;")
     lbl_v = QLabel(value)
-    lbl_v.setStyleSheet(f"color: {_DARK}; font-size: 12px; background: transparent;")
+    lbl_v.setStyleSheet("font-size: 12px; background: transparent;")
     row.addWidget(lbl_k)
     row.addWidget(lbl_v)
     row.addStretch()
@@ -113,21 +102,31 @@ def _info_row(label: str, value: str) -> QHBoxLayout:
 
 # ══════════════════════════════════════════════════════════════════════════════
 class ConfiguracionWidget(QWidget):
-    """Panel de configuración con zona peligrosa de administrador."""
+    """Panel de configuración con selector de Apariencia (Claro / Oscuro / Sistema) y zona de administrador."""
 
     # Señal para refrescar el dashboard y las listas tras un reset
     folios_reseteados = pyqtSignal()
 
     def __init__(self, parent=None):
         super().__init__(parent if isinstance(parent, QWidget) else None)
+        self._theme_btns: dict[str, QPushButton] = {}
         self._build_ui()
+        _theme_manager.subscribe(self.apply_theme)
+        self.apply_theme(_theme_manager.is_dark)
         QTimer.singleShot(200, self._check_connection)
+
+    def closeEvent(self, event) -> None:
+        try:
+            _theme_manager.unsubscribe(self.apply_theme)
+        except Exception:
+            pass
+        super().closeEvent(event)
 
     # ══════════════════════════════════════════════════════════════════════════
     # BUILD UI
     # ══════════════════════════════════════════════════════════════════════════
     def _build_ui(self) -> None:
-        self.setStyleSheet(f"background: {_BG};")
+        self.setObjectName("cfg_root")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -136,23 +135,23 @@ class ConfiguracionWidget(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet("background: transparent; border: none;")
 
-        inner = QWidget()
-        inner.setStyleSheet(f"background: {_BG};")
-        lay = QVBoxLayout(inner)
+        self._inner = QWidget()
+        self._inner.setObjectName("cfg_inner")
+        lay = QVBoxLayout(self._inner)
         lay.setContentsMargins(28, 24, 28, 40)
         lay.setSpacing(20)
-        scroll.setWidget(inner)
+        scroll.setWidget(self._inner)
         root.addWidget(scroll)
 
         # Título
         lbl_title = QLabel("Configuración del Sistema")
-        lbl_title.setStyleSheet(
-            f"font-size: 20px; font-weight: 700; color: {_DARK}; "
-            f"letter-spacing: -0.3px; background: transparent;"
-        )
+        lbl_title.setProperty("class", "title")
+        lbl_title.setStyleSheet("font-size: 20px; font-weight: 700; letter-spacing: -0.3px; background: transparent;")
         lay.addWidget(lbl_title)
+
+        # ── 0. Apariencia (Claro | Oscuro | Sistema) ──────────────────────────
+        lay.addWidget(self._build_appearance_card())
 
         # ── 1. Estado de conexión ─────────────────────────────────────────────
         lay.addWidget(self._build_connection_card())
@@ -169,6 +168,97 @@ class ConfiguracionWidget(QWidget):
             lay.addWidget(self._build_admin_zone())
 
         lay.addStretch()
+
+    def _build_appearance_card(self) -> QFrame:
+        card, lay = _section_card()
+        lay.addWidget(_section_title("Apariencia", ""))
+        lay.addWidget(_sep())
+
+        row = QHBoxLayout()
+        row.setSpacing(16)
+
+        col_info = QVBoxLayout()
+        col_info.setSpacing(3)
+        lbl_sub = QLabel("Tema de la interfaz")
+        lbl_sub.setStyleSheet("font-size: 13px; font-weight: 600; background: transparent;")
+        self._lbl_theme_desc = QLabel(
+            "Automático sigue en vivo el tema Claro/Oscuro configurado en Windows. "
+            "Los pads de firma, correos HTML y PDFs siempre conservan fondo blanco y tinta negra."
+        )
+        self._lbl_theme_desc.setWordWrap(True)
+        self._lbl_theme_desc.setProperty("class", "muted")
+        col_info.addWidget(lbl_sub)
+        col_info.addWidget(self._lbl_theme_desc)
+        row.addLayout(col_info, stretch=1)
+
+        self._seg_frame = QFrame()
+        self._seg_frame.setObjectName("cfg_theme_segment")
+        seg_lay = QHBoxLayout(self._seg_frame)
+        seg_lay.setContentsMargins(4, 4, 4, 4)
+        seg_lay.setSpacing(4)
+
+        self._theme_btn_group = QButtonGroup(self)
+        self._theme_btn_group.setExclusive(True)
+        for key, text in [("light", "Claro"), ("dark", "Oscuro"), ("system", "Sistema")]:
+            btn = QPushButton(text)
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setFixedHeight(32)
+            btn.setMinimumWidth(84)
+            btn.clicked.connect(lambda _=False, k=key: self._on_theme_selected(k))
+            self._theme_btn_group.addButton(btn)
+            self._theme_btns[key] = btn
+            seg_lay.addWidget(btn)
+
+        row.addWidget(self._seg_frame, 0, Qt.AlignmentFlag.AlignVCenter)
+        lay.addLayout(row)
+
+        self._lbl_theme_active = QLabel("")
+        self._lbl_theme_active.setProperty("class", "muted")
+        lay.addWidget(self._lbl_theme_active)
+        return card
+
+    def _on_theme_selected(self, mode: str) -> None:
+        _theme_manager.set_mode(mode)
+        self._sync_theme_controls()
+
+    def _sync_theme_controls(self) -> None:
+        pref = _theme_manager.preference
+        resolved = _theme_manager.resolved_mode
+        is_dark = _theme_manager.is_dark
+        for key, btn in self._theme_btns.items():
+            active = (key == pref)
+            btn.blockSignals(True)
+            btn.setChecked(active)
+            btn.blockSignals(False)
+            if active:
+                btn.setStyleSheet(
+                    "QPushButton { background-color: #C8102E; color: #FFFFFF; border: 1px solid #C8102E; "
+                    "border-radius: 7px; font-size: 12px; font-weight: 700; padding: 0 12px; min-height: 30px; }"
+                )
+            else:
+                btn.setStyleSheet(
+                    f"QPushButton {{ background-color: transparent; color: {_P['text_secondary']}; border: none; "
+                    f"border-radius: 7px; font-size: 12px; font-weight: 600; padding: 0 12px; min-height: 30px; }} "
+                    f"QPushButton:hover {{ background-color: {_P['surface_hover']}; color: {_P['text_primary']}; }}"
+                )
+        if hasattr(self, "_seg_frame"):
+            self._seg_frame.setStyleSheet(
+                f"QFrame#cfg_theme_segment {{ background: {_P['surface_elevated']}; "
+                f"border: 1px solid {_P['border']}; border-radius: 10px; }}"
+            )
+        if hasattr(self, "_lbl_theme_active"):
+            res_lbl = "Oscuro" if resolved == "dark" else "Claro"
+            if pref == "system":
+                self._lbl_theme_active.setText(f"Modo actual: Sistema (Windows en modo {res_lbl})")
+            else:
+                self._lbl_theme_active.setText(f"Modo manual activo: {res_lbl}")
+
+    def apply_theme(self, _is_dark: bool = False) -> None:
+        self.setStyleSheet(f"QWidget#cfg_root {{ background: {_P['canvas']}; }}")
+        if hasattr(self, "_inner"):
+            self._inner.setStyleSheet(f"QWidget#cfg_inner {{ background: {_P['canvas']}; }}")
+        self._sync_theme_controls()
 
     # ── Tarjeta de conexión ───────────────────────────────────────────────────
     def _build_connection_card(self) -> QFrame:
@@ -359,15 +449,7 @@ class ConfiguracionWidget(QWidget):
         btn_save_seq.setFixedHeight(36)
         btn_save_seq.setFixedWidth(210)
         btn_save_seq.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn_save_seq.setStyleSheet(f"""
-            QPushButton {{
-                background: {_BLUE}; color: #FFFFFF;
-                border: none; border-radius: 8px;
-                font-size: 13px; font-weight: 700; padding: 0 12px;
-            }}
-            QPushButton:hover {{ background: #0062CC; }}
-            QPushButton:pressed {{ background: #0055BB; }}
-        """)
+        btn_save_seq.setProperty("variant", "primary")
         btn_save_seq.clicked.connect(self._on_guardar_consecutivos)
         lay.addWidget(btn_save_seq, alignment=Qt.AlignmentFlag.AlignLeft)
 

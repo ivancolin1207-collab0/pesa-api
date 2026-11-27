@@ -37,6 +37,7 @@ class PesaInput extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return TextFormField(
       controller: controller,
       keyboardType: keyboardType,
@@ -44,7 +45,7 @@ class PesaInput extends StatelessWidget {
       onChanged: onChanged,
       validator: validator,
       maxLines: maxLines,
-      style: const TextStyle(fontSize: 14, color: PesaColors.textPrimary),
+      style: TextStyle(fontSize: 14, color: c.textPrimary),
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,
@@ -64,10 +65,11 @@ class PesaToast {
   }) {
     final messenger = ScaffoldMessenger.maybeOf(context);
     if (messenger == null) return;
+    final c = PesaColors.of(context);
     messenger.showSnackBar(
       SnackBar(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: isError ? PesaColors.brand : PesaColors.textPrimary,
+        backgroundColor: isError ? PesaColors.brand : (c.isDark ? c.surfaceElevated : PesaColors.textPrimary),
         content: Text(
           message,
           style: const TextStyle(

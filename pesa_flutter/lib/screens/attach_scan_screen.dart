@@ -11,6 +11,7 @@ import '../services/api_service.dart';
 import '../services/auth_service.dart';
 import '../services/local_db_service.dart';
 import '../services/tipo_servicio_rules.dart';
+import '../theme/pesa_theme.dart';
 import '../widgets/app_shell.dart';
 
 class AttachScanScreen extends StatefulWidget {
@@ -22,9 +23,7 @@ class AttachScanScreen extends StatefulWidget {
 }
 
 class _AttachScanScreenState extends State<AttachScanScreen> {
-  static const _red    = Color(0xFFC8102E);
-  static const _border = Color(0xFFE5E5EA);
-  static const _bg     = Color(0xFFF5F5F7);
+  static const _red = PesaColors.brand;
 
   // ── Estado del Stepper ───────────────────────────────────────────────────
   int _currentStep = 0;
@@ -360,31 +359,32 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
     return AppShell(
       currentRoute: '/escaneo',
       child: Scaffold(
-        backgroundColor: _bg,
+        backgroundColor: c.canvas,
         body: SafeArea(
           bottom: false,
           child: Column(children: [
             // Header
-            _buildHeader(),
+            _buildHeader(c),
             // Indicador de pasos
-            _buildStepIndicator(),
+            _buildStepIndicator(c),
             // Contenido del paso actual
-            Expanded(child: _buildCurrentStep()),
+            Expanded(child: _buildCurrentStep(c)),
           ]),
         ),
       ),
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(PesaPalette c) {
     return Container(
-      color: Colors.white,
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _border)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
       child: Row(children: [
         Container(
@@ -396,27 +396,27 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
         const SizedBox(width: 12),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-          const Text('Adjuntar Escaneo',
-              style: TextStyle(color: Color(0xFF111827),
+          Text('Adjuntar Escaneo',
+              style: TextStyle(color: c.textPrimary,
                   fontWeight: FontWeight.w800, fontSize: 17)),
           Text(
             _folioOs != null
                 ? 'Folio seleccionado: $_folioOs'
                 : 'Digitaliza documentos físicos de servicio',
-            style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+            style: TextStyle(color: c.textSecondary, fontSize: 11),
           ),
         ])),
       ]),
     );
   }
 
-  Widget _buildStepIndicator() {
+  Widget _buildStepIndicator(PesaPalette c) {
     final steps = ['Buscar OS', 'Capturar', 'Adjuntar'];
     return Container(
-      color: Colors.white,
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: _border)),
+      decoration: BoxDecoration(
+        color: c.surface,
+        border: Border(bottom: BorderSide(color: c.border)),
       ),
       child: Row(children: [
         for (int i = 0; i < steps.length; i++) ...[
@@ -429,40 +429,41 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
           if (i < steps.length - 1)
             Expanded(child: Container(
               height: 2,
-              color: _currentStep > i ? _red : const Color(0xFFE5E7EB),
+              color: _currentStep > i ? _red : c.border,
             )),
         ],
       ]),
     );
   }
 
-  Widget _buildCurrentStep() {
+  Widget _buildCurrentStep(PesaPalette c) {
     switch (_currentStep) {
-      case 0: return _buildStep1();
-      case 1: return _buildStep2();
-      case 2: return _buildStep3();
-      default: return _buildStep1();
+      case 0: return _buildStep1(c);
+      case 1: return _buildStep2(c);
+      case 2: return _buildStep3(c);
+      default: return _buildStep1(c);
     }
   }
 
   // ── PASO 1: Buscar OS ─────────────────────────────────────────────────────
-  Widget _buildStep1() {
+  Widget _buildStep1(PesaPalette c) {
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Paso 1 — Buscar Orden de Servicio',
+        Text('Paso 1 — Buscar Orden de Servicio',
             style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700,
-                color: Color(0xFF111827))),
+                color: c.textPrimary)),
         const SizedBox(height: 6),
-        const Text('Escribe el folio o nombre del cliente',
-            style: TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+        Text('Escribe el folio o nombre del cliente',
+            style: TextStyle(fontSize: 12, color: c.textSecondary)),
         const SizedBox(height: 16),
         // Campo de búsqueda
         TextField(
           controller: _searchCtrl,
+          style: TextStyle(color: c.textPrimary),
           decoration: InputDecoration(
             hintText: 'Ej: OS-26-001 o nombre del cliente...',
-            prefixIcon: const Icon(Icons.search, color: Color(0xFF9CA3AF)),
+            prefixIcon: Icon(Icons.search, color: c.textSecondary),
             suffixIcon: _buscando
                 ? const Padding(padding: EdgeInsets.all(12),
                     child: SizedBox(width: 16, height: 16,
@@ -470,12 +471,14 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
                             color: _red)))
                 : null,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: _border)),
+                borderSide: BorderSide(color: c.border)),
+            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(color: c.border)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: _red, width: 2)),
+                borderSide: BorderSide(color: c.brandAccent, width: 2)),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: c.elevated,
           ),
           onChanged: _buscarOsPorFolio,
         ),
@@ -485,37 +488,35 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: c.surface,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _border),
-                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.05),
-                    blurRadius: 8, offset: const Offset(0, 2))],
+                border: Border.all(color: c.border),
               ),
               child: ListView.separated(
                 itemCount: _resultados.length,
-                separatorBuilder: (_, __) => const Divider(height: 1,
-                    color: _border),
+                separatorBuilder: (_, __) => Divider(height: 1,
+                    color: c.border),
                 itemBuilder: (ctx, i) {
                   final os = _resultados[i];
                   return ListTile(
                     leading: Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                          color: const Color(0xFFF5F5F7),
-                          border: Border.all(color: _border),
+                          color: c.surfaceMuted,
+                          border: Border.all(color: c.border),
                           borderRadius: BorderRadius.circular(6)),
-                      child: const Icon(Icons.assignment_outlined,
-                          size: 18, color: _red),
+                      child: Icon(Icons.assignment_outlined,
+                          size: 18, color: c.brandAccent),
                     ),
                     title: Text(os['folio_os'] ?? '—',
-                        style: const TextStyle(fontWeight: FontWeight.w700,
-                            fontSize: 13, color: _red)),
+                        style: TextStyle(fontWeight: FontWeight.w700,
+                            fontSize: 13, color: c.brandAccent)),
                     subtitle: Text(
                         '${os['cliente'] ?? ''} · ${os['fecha'] ?? ''}',
-                        style: const TextStyle(fontSize: 11,
-                            color: Color(0xFF6B7280))),
-                    trailing: const Icon(Icons.chevron_right,
-                        color: Color(0xFF9CA3AF)),
+                        style: TextStyle(fontSize: 11,
+                            color: c.textSecondary)),
+                    trailing: Icon(Icons.chevron_right,
+                        color: c.textTertiary),
                     onTap: () => _seleccionarOs(os),
                   );
                 },
@@ -526,10 +527,10 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
           Center(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               const SizedBox(height: 40),
-              Icon(Icons.search_off, size: 48, color: Colors.grey.shade300),
+              Icon(Icons.search_off, size: 48, color: c.textTertiary),
               const SizedBox(height: 12),
-              const Text('Sin resultados. Intenta con otro folio.',
-                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+              Text('Sin resultados. Intenta con otro folio.',
+                  style: TextStyle(color: c.textSecondary, fontSize: 13)),
             ]),
           ),
       ]),
@@ -537,7 +538,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
   }
 
   // ── PASO 2: Capturar imagen ───────────────────────────────────────────────
-  Widget _buildStep2() {
+  Widget _buildStep2(PesaPalette c) {
     if (_capturedImage == null) {
       // Vista de captura
       return Center(
@@ -547,18 +548,18 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
-                  color: const Color(0xFFF5F5F7),
-                  border: Border.all(color: _border),
+                  color: c.surfaceMuted,
+                  border: Border.all(color: c.border),
                   borderRadius: BorderRadius.circular(16)),
-              child: const Icon(Icons.document_scanner, size: 56, color: _red),
+              child: Icon(Icons.document_scanner, size: 56, color: c.brandAccent),
             ),
             const SizedBox(height: 20),
-            const Text('Paso 2 — Capturar Documento',
+            Text('Paso 2 — Capturar Documento',
                 style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
-                    color: Color(0xFF111827))),
+                    color: c.textPrimary)),
             const SizedBox(height: 6),
             Text('OS seleccionada: $_folioOs',
-                style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+                style: TextStyle(fontSize: 12, color: c.textSecondary)),
             const SizedBox(height: 32),
             // Botón cámara
             SizedBox(
@@ -581,8 +582,8 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
               width: 280, height: 48,
               child: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF374151),
-                  side: const BorderSide(color: _border),
+                  foregroundColor: c.textPrimary,
+                  side: BorderSide(color: c.borderStrong),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(12)),
                 ),
@@ -638,7 +639,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: Colors.green.shade600,
+                    color: c.dotGreen,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Row(mainAxisSize: MainAxisSize.min, children: [
@@ -655,12 +656,15 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
         // Barra de acciones
         Container(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-          color: Colors.white,
+          decoration: BoxDecoration(
+            color: c.surface,
+            border: Border(top: BorderSide(color: c.border)),
+          ),
           child: Row(children: [
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: _border),
-                foregroundColor: const Color(0xFF374151),
+                side: BorderSide(color: c.borderStrong),
+                foregroundColor: c.textPrimary,
               ),
               onPressed: () => setState(() {
                 _capturedImage = null;
@@ -672,9 +676,8 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
             const SizedBox(width: 8),
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                side: BorderSide(color: _filterApplied ? Colors.green : _border),
-                foregroundColor: _filterApplied
-                    ? Colors.green : const Color(0xFF374151),
+                side: BorderSide(color: _filterApplied ? c.dotGreen : c.borderStrong),
+                foregroundColor: _filterApplied ? c.dotGreen : c.textPrimary,
               ),
               onPressed: _isProcessing ? null : _applyDocumentFilter,
               icon: Icon(_filterApplied ? Icons.check : Icons.auto_fix_high,
@@ -703,7 +706,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
   }
 
   // ── PASO 3: Adjuntar y subir ──────────────────────────────────────────────
-  Widget _buildStep3() {
+  Widget _buildStep3(PesaPalette c) {
     final p = _payloadHomologado();
     String v(Object? x) {
       final s = (x ?? '').toString().trim();
@@ -717,15 +720,15 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: c.surface,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: _border),
+            border: Border.all(color: c.border),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-            const Text('Resumen del escaneo',
+            Text('Resumen del escaneo',
                 style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                    color: Color(0xFF111827))),
+                    color: c.textPrimary)),
             const SizedBox(height: 12),
             _SummaryRow(icon: Icons.assignment_outlined,
                 label: 'Folio', value: _folioOs ?? '—'),
@@ -764,24 +767,26 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
           width: double.infinity,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFFBEB),
+            color: c.isDark ? c.elevated : const Color(0xFFFFFBEB),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFFDE68A)),
+            border: Border.all(
+              color: c.isDark ? c.dotAmber.withValues(alpha: 0.45) : const Color(0xFFFDE68A),
+            ),
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Verifica que el formato físico contenga:',
+            Text('Verifica que el formato físico contenga:',
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-                    color: Color(0xFF92400E))),
+                    color: c.isDark ? c.dotAmber : const Color(0xFF92400E))),
             const SizedBox(height: 6),
             for (final item in _checklistFormato)
               Padding(
                 padding: const EdgeInsets.only(top: 3),
                 child: Row(children: [
-                  const Icon(Icons.check_box_outlined, size: 14,
-                      color: Color(0xFFB45309)),
+                  Icon(Icons.check_box_outlined, size: 14,
+                      color: c.isDark ? c.dotAmber : const Color(0xFFB45309)),
                   const SizedBox(width: 6),
-                  Expanded(child: Text(item, style: const TextStyle(
-                      fontSize: 12, color: Color(0xFF78350F)))),
+                  Expanded(child: Text(item, style: TextStyle(
+                      fontSize: 12, color: c.isDark ? c.textPrimary : const Color(0xFF78350F)))),
                 ]),
               ),
           ]),
@@ -811,8 +816,8 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
         Row(children: [
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: _border),
-              foregroundColor: const Color(0xFF374151),
+              side: BorderSide(color: c.borderStrong),
+              foregroundColor: c.textPrimary,
             ),
             onPressed: _uploading ? null : () => setState(() => _currentStep = 1),
             icon: const Icon(Icons.arrow_back, size: 16),
@@ -823,7 +828,7 @@ class _AttachScanScreenState extends State<AttachScanScreen> {
             child: ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: _uploading
-                    ? Colors.grey.shade400 : _red,
+                    ? c.textTertiary : _red,
                 foregroundColor: Colors.white,
                 minimumSize: const Size.fromHeight(52),
                 shape: RoundedRectangleBorder(
@@ -861,27 +866,26 @@ class _StepDot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isDone || isActive
-        ? const Color(0xFFC8102E)
-        : const Color(0xFFD1D5DB);
+    final c = PesaColors.of(context);
+    final color = isDone || isActive ? c.brandAccent : c.borderStrong;
     return Column(mainAxisSize: MainAxisSize.min, children: [
       Container(
         width: 28, height: 28,
         decoration: BoxDecoration(
-          color: isDone ? const Color(0xFFC8102E)
-              : isActive ? const Color(0xFFFFF5F6)
-              : const Color(0xFFF5F5F7),
+          color: isDone ? PesaColors.brand
+              : isActive ? c.brandSoft
+              : c.surfaceMuted,
           shape: BoxShape.circle,
           border: Border.all(color: color, width: 2),
         ),
         child: Center(child: isDone
             ? const Icon(Icons.check, size: 14, color: Colors.white)
             : Text('$number', style: TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w700, color: color))),
+                fontSize: 12, fontWeight: FontWeight.w700, color: isActive ? c.brandAccent : c.textSecondary))),
       ),
       const SizedBox(height: 4),
       Text(label, style: TextStyle(
-          fontSize: 10, color: color, fontWeight:
+          fontSize: 10, color: (isDone || isActive) ? c.brandAccent : c.textSecondary, fontWeight:
           isActive ? FontWeight.w700 : FontWeight.w500)),
     ]);
   }
@@ -895,13 +899,16 @@ class _SummaryRow extends StatelessWidget {
       required this.value});
 
   @override
-  Widget build(BuildContext context) => Row(children: [
-    Icon(icon, size: 16, color: const Color(0xFF9CA3AF)),
-    const SizedBox(width: 8),
-    Text('$label: ', style: const TextStyle(fontSize: 12,
-        color: Color(0xFF6B7280))),
-    Expanded(child: Text(value, style: const TextStyle(fontSize: 12,
-        fontWeight: FontWeight.w600, color: Color(0xFF111827)),
-        overflow: TextOverflow.ellipsis)),
-  ]);
+  Widget build(BuildContext context) {
+    final c = PesaColors.of(context);
+    return Row(children: [
+      Icon(icon, size: 16, color: c.textTertiary),
+      const SizedBox(width: 8),
+      Text('$label: ', style: TextStyle(fontSize: 12,
+          color: c.textSecondary)),
+      Expanded(child: Text(value, style: TextStyle(fontSize: 12,
+          fontWeight: FontWeight.w600, color: c.textPrimary),
+          overflow: TextOverflow.ellipsis)),
+    ]);
+  }
 }

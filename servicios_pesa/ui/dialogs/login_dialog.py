@@ -69,13 +69,14 @@ _WHITE    = "#FFFFFF"
 # ══════════════════════════════════════════════════════════════════════════════
 class _BackgroundWidget(QWidget):
     """
-    Widget de fondo gris neutro estilo macOS (#F5F5F7).
+    Widget de fondo neutro estilo macOS adaptado al tema activo (Claro / Oscuro).
     """
 
     def paintEvent(self, event) -> None:
+        from ui.theme import PALETTE as _P
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#F5F5F7"))
+        painter.fillRect(self.rect(), QColor(_P["canvas"]))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -504,10 +505,11 @@ class LoginDialog(QDialog):
         """)
 
     def paintEvent(self, event) -> None:
-        """Dibuja el fondo gris neutro #F5F5F7 estilo macOS."""
+        """Dibuja el fondo neutro estilo macOS adaptado al tema activo."""
+        from ui.theme import PALETTE as _P
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.fillRect(self.rect(), QColor("#F5F5F7"))
+        painter.fillRect(self.rect(), QColor(_P["canvas"]))
 
     # ══════════════════════════════════════════════════════════════════════════
     # LÓGICA DE AUTENTICACIÓN (sin cambios funcionales)
