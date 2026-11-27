@@ -134,16 +134,15 @@ class _InstrumentoDraft {
       if (geo != null) 'geometria_plataforma': geo,
       if (geo != null) 'geometria_puntos': geometriaPuntos,
       if (geo == 'camionera') 'num_secciones': numSecciones,
+      'aplica_cargas_sustitucion': enlacesActivos,
       'aplica_enlaces_sustitucion': enlacesActivos,
       'aplica_sustitucion': enlacesActivos,
       'usa_sustitucion': enlacesActivos,
       'es_enlace_sustitucion': enlacesActivos,
       'es_sustitucion': enlacesActivos,
-      if (nEnlaces != null) ...{
-        'cantidad_enlaces': nEnlaces,
-        'num_enlaces_sustitucion': nEnlaces,
-        'num_enlaces': nEnlaces,
-      },
+      'cantidad_enlaces': enlacesActivos ? (nEnlaces ?? 3) : 0,
+      'num_enlaces_sustitucion': enlacesActivos ? (nEnlaces ?? 3) : 0,
+      'num_enlaces': enlacesActivos ? (nEnlaces ?? 3) : 0,
       if (ini.isNotEmpty) 'inicial_calibrador': ini,
       if (ccaClean.isNotEmpty) 'numero_cca': ccaClean,
       if (dveDiv.isNotEmpty) 'dve': dveDiv,
@@ -866,7 +865,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
       if (esTanque) {
         eq.aplicaExcentricidad = false;
         eq.motivoNoExcentricidad = 'Tanque';
-        eq.aplicaEnlacesSustitucion = true;
+        eq.aplicaEnlacesSustitucion = false;
       } else if (esSilo) {
         eq.aplicaExcentricidad = false;
         eq.motivoNoExcentricidad = 'Silo';
@@ -1947,9 +1946,7 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                           if (v == null) return;
                           setState(() {
                             eq.aplicaExcentricidad = v;
-                            if (!v && eq.motivoNoExcentricidad == 'Tanque') {
-                              eq.aplicaEnlacesSustitucion = true;
-                            }
+                            if (v) eq.aplicaEnlacesSustitucion = false;
                           });
                         },
                       ),
@@ -2072,9 +2069,6 @@ class _NuevoDocScreenState extends State<NuevoDocScreen> {
                           if (v == null) return;
                           setState(() {
                             eq.motivoNoExcentricidad = v;
-                            if (v == 'Tanque') {
-                              eq.aplicaEnlacesSustitucion = true;
-                            }
                           });
                         },
                       ),

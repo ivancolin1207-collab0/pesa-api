@@ -5,6 +5,8 @@
 //      - Pantalla externa plegada (Cover): Size(380, 840)
 //      - Pantalla interna desplegada (Unfolded): Size(840, 920)
 //      Verificando 0 RenderFlex overflow y 0 excepciones en pantallas y widgets clave.
+import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -17,6 +19,7 @@ import 'package:pesa_tablet/screens/pdf_preview_aprobacion_screen.dart';
 import 'package:pesa_tablet/services/api_service.dart';
 import 'package:pesa_tablet/services/auth_service.dart';
 import 'package:pesa_tablet/services/metrology_helper.dart';
+import 'package:pesa_tablet/services/pdf_service.dart';
 import 'package:pesa_tablet/services/sync_service.dart';
 import 'package:pesa_tablet/services/tipo_servicio_rules.dart';
 import 'package:pesa_tablet/theme/pesa_theme.dart';
@@ -56,6 +59,104 @@ void main() {
       expect(esCorreoClienteValido('Cliente'), isFalse);
       expect(esCorreoClienteValido('Sin registrar'), isFalse);
       expect(esCorreoClienteValido(''), isFalse);
+    });
+
+    String extractPdfText(Uint8List bytes) {
+      final raw = latin1.decode(bytes, allowInvalid: true);
+      final streams = StringBuffer();
+      final reg = RegExp(r'stream\r?\n([\s\S]*?)\r?\n?endstream');
+      for (final m in reg.allMatches(raw)) {
+        final chunk = m.group(1);
+        if (chunk == null) continue;
+        try {
+          final inflated = zlib.decode(latin1.encode(chunk));
+          streams.writeln(latin1.decode(inflated, allowInvalid: true));
+        } catch (_) {
+          streams.writeln(chunk);
+        }
+      }
+      // Extraer literales PDF (...) de operadores Tj/TJ y unir con espacios
+      final litReg = RegExp(r'\(([^()\\]*(?:\\.[^()\\]*)*)\)');
+      final tokens = <String>[];
+      for (final m in litReg.allMatches(streams.toString())) {
+        final tok = (m.group(1) ?? '')
+            .replaceAll(r'\(', '(')
+            .replaceAll(r'\)', ')')
+            .replaceAll(r'\\', r'\')
+            .trim();
+        if (tok.isNotEmpty) tokens.add(tok);
+      }
+      return tokens.join(' ').replaceAll(RegExp(r'\s+'), ' ');
+    }
+
+    test('v4.0.3 PDF OS-26-880 Tanque/Silo con sustitucion=false usa EXACTITUD estandar y sin glifo roto', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final baseOs = <String, dynamic>{
+        'folio_os': 'OS-26-880',
+        'fecha': '2026-11-27',
+        'cliente': 'Pemex Transformacion Industrial',
+        'tipo_servicio': 'Ajuste',
+        'tipo_instrumento': 'Tanque / Silo',
+        'marca': 'Sartorius',
+        'modelo': 'PR1612/02',
+        'ns': '2011004405',
+        'id_equipo': 'Bascula 3',
+        'alcance_max': '10000',
+        'div_minima': '10',
+        'unidad_medida': 'kg',
+        'aplica_excentricidad': false,
+        'motivo_no_excentricidad': 'Tanque',
+        'aplica_cargas_sustitucion': false,
+        'aplica_enlaces_sustitucion': false,
+        'aplica_sustitucion': false,
+        'usa_sustitucion': false,
+        'cantidad_enlaces': 0,
+        'observaciones': 'Ajuste',
+      };
+      final repRows = [
+        {'carga': 2000, 'lectura_inicial': 2000, 'lectura_final': 2000},
+      ];
+      final exacRows = [
+        {'carga_patron': 1000, 'lectura_subida': 1000, 'lectura_bajada': 1000},
+        {'carga_patron': 2000, 'lectura_subida': 2000, 'lectura_bajada': 2000},
+      ];
+
+      // Caso 1: Tanque / Silo + aplica_cargas_sustitucion = false -> EXACTITUD estándar
+      final bytesNoSust = await PdfService.instance.buildPdfBytes(
+        osData: Map<String, dynamic>.from(baseOs),
+        repRows: repRows,
+        excRows: const [],
+        exacRows: exacRows,
+        modoPreviewSinFirma: true,
+      );
+      final txtNoSust = extractPdfText(bytesNoSust);
+      expect(txtNoSust.contains('EXACTITUD'), isTrue);
+      expect(txtNoSust.contains('AGUA + PESAS'), isFalse,
+          reason: 'No debe imprimir columnas AGUA + PESAS cuando aplica_cargas_sustitucion == false');
+      expect(txtNoSust.contains('PESAS'), isFalse,
+          reason: 'No debe imprimir columna PESAS cuando aplica_cargas_sustitucion == false');
+      expect(txtNoSust.contains('Tanque - pesaje de carga'), isTrue,
+          reason: 'Debe usar guion ASCII "-" en la leyenda de Tanque sin glifo roto. Extraído: $txtNoSust');
+      expect(txtNoSust.contains('Tanque \u2014'), isFalse);
+
+      // Caso 2: Tanque / Silo + aplica_cargas_sustitucion = true -> Tabla de Sustitución
+      final bytesConSust = await PdfService.instance.buildPdfBytes(
+        osData: {
+          ...baseOs,
+          'aplica_cargas_sustitucion': true,
+          'aplica_enlaces_sustitucion': true,
+          'cantidad_enlaces': 5,
+        },
+        repRows: repRows,
+        excRows: const [],
+        exacRows: exacRows,
+        modoPreviewSinFirma: true,
+      );
+      final txtConSust = extractPdfText(bytesConSust);
+      expect(txtConSust.contains('AGUA + PESAS'), isTrue,
+          reason: 'Debe imprimir tabla de sustitución cuando aplica_cargas_sustitucion == true');
+      expect(txtConSust.contains('PESAS'), isTrue);
+      expect(txtConSust.contains('AGUA'), isTrue);
     });
   });
 
@@ -176,6 +277,15 @@ void main() {
 
         expect(find.byKey(const ValueKey('enlaces_sustitucion_card_0')), findsOneWidget);
         expect(find.textContaining('NOM-010-SCFI / OIML R 76'), findsOneWidget);
+        // Por defecto NO se activa automáticamente al desactivar excentricidad; activarlo explícitamente muestra "3 enlaces"
+        expect(find.text('3 enlaces'), findsNothing);
+        final enlFinder = find.byKey(const ValueKey('aplica_enlaces_0'));
+        await tester.ensureVisible(enlFinder);
+        await tester.pump(const Duration(milliseconds: 200));
+        await tester.tap(enlFinder);
+        await tester.pump(const Duration(milliseconds: 350));
+        await tester.tap(find.text('SÍ').last);
+        await tester.pump(const Duration(milliseconds: 350));
         expect(find.text('3 enlaces'), findsOneWidget);
       });
 

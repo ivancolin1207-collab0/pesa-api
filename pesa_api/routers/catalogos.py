@@ -118,6 +118,7 @@ class CrearOrdenBody(BaseModel):
     num_secciones:           Optional[int] = None
     usa_sustitucion:         Optional[bool] = None
     aplica_sustitucion:      Optional[bool] = None
+    aplica_cargas_sustitucion: Optional[bool] = None
     aplica_enlaces_sustitucion: Optional[bool] = None
     cantidad_enlaces:        Optional[int] = None
     num_enlaces_sustitucion: Optional[int] = None
@@ -156,6 +157,7 @@ class ActualizarInstrumentoBody(BaseModel):
     geometria_plataforma:    Optional[str] = None
     usa_sustitucion:         Optional[bool] = None
     aplica_sustitucion:      Optional[bool] = None
+    aplica_cargas_sustitucion: Optional[bool] = None
     aplica_enlaces_sustitucion: Optional[bool] = None
     cantidad_enlaces:        Optional[int] = None
     num_enlaces_sustitucion: Optional[int] = None
@@ -916,9 +918,10 @@ async def get_ordenes(
             COALESCE(os.puntos_excentricidad, os.filas_excentricidad, 5) AS puntos_excentricidad,
             COALESCE(os.puntos_exactitud, 5) AS puntos_exactitud,
             COALESCE(os.geometria_puntos, '') AS geometria_puntos,
-            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS usa_sustitucion,
-            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_sustitucion,
-            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_enlaces_sustitucion,
+            COALESCE(os.aplica_cargas_sustitucion, os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS usa_sustitucion,
+            COALESCE(os.aplica_cargas_sustitucion, os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_sustitucion,
+            COALESCE(os.aplica_cargas_sustitucion, os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_cargas_sustitucion,
+            COALESCE(os.aplica_cargas_sustitucion, os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_enlaces_sustitucion,
             os.cantidad_enlaces AS cantidad_enlaces,
             COALESCE(os.num_secciones, 0) AS num_secciones,
             COALESCE(os.secciones_camionera, 0) AS secciones_camionera,
@@ -1085,14 +1088,20 @@ async def get_ordenes(
                             except Exception:
                                 pass
                         _sust_dt = (
-                            dt_obj.get("aplica_enlaces_sustitucion")
-                            if dt_obj.get("aplica_enlaces_sustitucion") is not None
-                            else (dt_obj.get("aplica_sustitucion") if dt_obj.get("aplica_sustitucion") is not None else dt_obj.get("usa_sustitucion"))
+                            dt_obj.get("aplica_cargas_sustitucion")
+                            if dt_obj.get("aplica_cargas_sustitucion") is not None
+                            else (
+                                dt_obj.get("aplica_enlaces_sustitucion")
+                                if dt_obj.get("aplica_enlaces_sustitucion") is not None
+                                else (dt_obj.get("aplica_sustitucion") if dt_obj.get("aplica_sustitucion") is not None else dt_obj.get("usa_sustitucion"))
+                            )
                         )
-                        if _sust_dt is not None and not d.get("usa_sustitucion"):
-                            d["usa_sustitucion"] = bool(_sust_dt)
-                            d["aplica_sustitucion"] = bool(_sust_dt)
-                            d["aplica_enlaces_sustitucion"] = bool(_sust_dt)
+                        if _sust_dt is not None:
+                            _sust_b = bool(_sust_dt)
+                            d["usa_sustitucion"] = _sust_b
+                            d["aplica_sustitucion"] = _sust_b
+                            d["aplica_cargas_sustitucion"] = _sust_b
+                            d["aplica_enlaces_sustitucion"] = _sust_b
                         _ne = d.get("cantidad_enlaces") or dt_obj.get("cantidad_enlaces") or dt_obj.get("num_enlaces_sustitucion") or dt_obj.get("num_enlaces")
                         if _ne is not None:
                             try:
@@ -1482,15 +1491,15 @@ async def crear_orden(
         f_secciones = _to_int_opt(eq_raw.get("num_secciones") or eq_raw.get("secciones_camionera"), 0)
 
         f_aplica_enl = _to_bool_opt(
-            eq_raw.get("aplica_enlaces_sustitucion")
-            if eq_raw.get("aplica_enlaces_sustitucion") is not None
+            eq_raw.get("aplica_cargas_sustitucion")
+            if eq_raw.get("aplica_cargas_sustitucion") is not None
             else (
-                eq_raw.get("aplica_sustitucion")
-                if eq_raw.get("aplica_sustitucion") is not None
+                eq_raw.get("aplica_enlaces_sustitucion")
+                if eq_raw.get("aplica_enlaces_sustitucion") is not None
                 else (
-                    eq_raw.get("usa_sustitucion")
-                    if eq_raw.get("usa_sustitucion") is not None
-                    else eq_raw.get("es_enlace_sustitucion")
+                    eq_raw.get("aplica_sustitucion")
+                    if eq_raw.get("aplica_sustitucion") is not None
+                    else eq_raw.get("usa_sustitucion")
                 )
             ),
             False,
@@ -1499,8 +1508,8 @@ async def crear_orden(
             f_aplica_enl = False
         f_cant_enl = _to_int_opt(
             eq_raw.get("cantidad_enlaces") or eq_raw.get("num_enlaces_sustitucion") or eq_raw.get("num_enlaces"),
-            3 if f_aplica_enl else None,
-        ) if f_aplica_enl else None
+            3 if f_aplica_enl else 0,
+        ) if f_aplica_enl else 0
         f_unidad = str(eq_raw.get("unidad_medida") or body.unidad_medida or "kg").strip() or "kg"
 
         f_dt_dict = {
@@ -1540,6 +1549,7 @@ async def crear_orden(
                 "num_secciones": f_secciones if f_secciones else None,
                 "usa_sustitucion": f_aplica_enl,
                 "aplica_sustitucion": f_aplica_enl,
+                "aplica_cargas_sustitucion": f_aplica_enl,
                 "aplica_enlaces_sustitucion": f_aplica_enl,
                 "es_enlace_sustitucion": f_aplica_enl,
                 "es_sustitucion": f_aplica_enl,
@@ -1903,14 +1913,22 @@ async def actualizar_instrumento_parcial(
     if geo_val is not None:
         geo_val = geo_val.strip()
     aplica_enl_val = (
-        body.aplica_enlaces_sustitucion
-        if body.aplica_enlaces_sustitucion is not None
-        else (body.aplica_sustitucion if body.aplica_sustitucion is not None else body.usa_sustitucion)
+        body.aplica_cargas_sustitucion
+        if body.aplica_cargas_sustitucion is not None
+        else (
+            body.aplica_enlaces_sustitucion
+            if body.aplica_enlaces_sustitucion is not None
+            else (body.aplica_sustitucion if body.aplica_sustitucion is not None else body.usa_sustitucion)
+        )
     )
     cant_enl_val = (
-        body.cantidad_enlaces
-        if body.cantidad_enlaces is not None
-        else (body.num_enlaces_sustitucion if body.num_enlaces_sustitucion is not None else body.num_enlaces)
+        0
+        if aplica_enl_val is False
+        else (
+            body.cantidad_enlaces
+            if body.cantidad_enlaces is not None
+            else (body.num_enlaces_sustitucion if body.num_enlaces_sustitucion is not None else body.num_enlaces)
+        )
     )
 
     merge_updates = {
@@ -1934,7 +1952,10 @@ async def actualizar_instrumento_parcial(
         "geometria_plataforma": geo_val,
         "usa_sustitucion": aplica_enl_val,
         "aplica_sustitucion": aplica_enl_val,
+        "aplica_cargas_sustitucion": aplica_enl_val,
         "aplica_enlaces_sustitucion": aplica_enl_val,
+        "es_sustitucion": aplica_enl_val,
+        "es_enlace_sustitucion": aplica_enl_val,
         "cantidad_enlaces": cant_enl_val,
         "num_enlaces_sustitucion": cant_enl_val,
         "num_enlaces": cant_enl_val,
@@ -1992,6 +2013,7 @@ async def actualizar_instrumento_parcial(
                 puntos_exactitud        = COALESCE($26, puntos_exactitud),
                 geometria_puntos        = COALESCE($27, geometria_puntos),
                 usa_sustitucion         = COALESCE($28, usa_sustitucion),
+                aplica_cargas_sustitucion = COALESCE($28, aplica_cargas_sustitucion),
                 aplica_enlaces_sustitucion = COALESCE($28, aplica_enlaces_sustitucion),
                 cantidad_enlaces        = COALESCE($29, cantidad_enlaces),
                 unidad_medida           = COALESCE($19, unidad_medida),

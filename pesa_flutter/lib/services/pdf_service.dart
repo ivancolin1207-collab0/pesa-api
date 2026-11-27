@@ -566,23 +566,24 @@ class PdfService {
     required int divMin,
     required String geo,
   }) {
-    // Evaluación ESTRICTA: el tipo se toma SOLO de tipo_instrumento (no de un
-    // motivo_no_aplica='Tanque' heredado) y la bandera SOLO de aplica_sustitucion
-    // (fallback usa_sustitucion si no existe). es_sustitucion / es_enlace_sustitucion
-    // pueden quedar 'pegadas' tras cambiar el tipo en captura y ya no se consideran.
-    final bool esTanque = (osData['tipo_instrumento']?.toString().toLowerCase().contains('tanque') ?? false);
-    final rawSust = osData.containsKey('aplica_enlaces_sustitucion') && osData['aplica_enlaces_sustitucion'] != null
-        ? osData['aplica_enlaces_sustitucion']
-        : (osData.containsKey('aplica_sustitucion') && osData['aplica_sustitucion'] != null
-            ? osData['aplica_sustitucion']
-            : osData['usa_sustitucion']);
-    final String sSust = rawSust?.toString().trim().toUpperCase() ?? '';
-    final bool aplicaSustitucion = rawSust == true || rawSust == 1 ||
-        sSust == '1' || sSust == 'TRUE' || sSust == 'SI' || sSust == 'SÍ';
-    // Plataforma (no Tanque) sin sustitución explícita ⇒ tabla tradicional.
-    final bool esSustitucion = esTanque || aplicaSustitucion;
+    // Evaluación ESTRICTA: la tabla de Cargas / Enlaces de Sustitución (PESAS / AGUA / AGUA + PESAS)
+    // se renderiza ÚNICAMENTE cuando la bandera explícita aplica_cargas_sustitucion o
+    // aplica_enlaces_sustitucion es true (1). JAMÁS se infiere por Tanque / Silo, Tolva, Grúa
+    // ni por aplica_excentricidad == false.
+    bool flagActivo(dynamic v) =>
+        v == true ||
+        v == 1 ||
+        const {'1', 'TRUE', 'SI', 'SÍ'}.contains(v?.toString().trim().toUpperCase() ?? '');
+    final bool tieneBanderasPrimarias =
+        osData['aplica_cargas_sustitucion'] != null ||
+        osData['aplica_enlaces_sustitucion'] != null;
+    final bool usarCargasSustitucion = tieneBanderasPrimarias
+        ? (flagActivo(osData['aplica_cargas_sustitucion']) ||
+            flagActivo(osData['aplica_enlaces_sustitucion']))
+        : (flagActivo(osData['aplica_sustitucion']) ||
+            flagActivo(osData['usa_sustitucion']));
 
-    if (esSustitucion) {
+    if (usarCargasSustitucion) {
       final sustitutosRaw = osData['sustitutos'] ?? osData['elementos_sustitucion'];
       List<Map<String, dynamic>> validSustitutos = [];
       if (sustitutosRaw is List) {
@@ -930,22 +931,25 @@ class PdfService {
 
     if (t.contains('grua') || t.contains('grúa') || t.contains('colgante') || t.contains('gancho')) {
       painter = _dibujarGrua;
-      descTipo = 'Báscula tipo: Grúa — pesaje suspendido';
+      descTipo = 'Báscula tipo: Grúa - pesaje suspendido';
     } else if (t.contains('patin') || t.contains('patín') || t.contains('transpaleta')) {
       painter = _dibujarPatin;
-      descTipo = 'Báscula tipo: Patín hidráulico — equipo móvil';
+      descTipo = 'Báscula tipo: Patín hidráulico - equipo móvil';
     } else if (t.contains('tanque')) {
       painter = _dibujarTanque;
-      descTipo = 'Báscula tipo: Tanque — pesaje de carga estática';
+      descTipo = 'Báscula tipo: Tanque - pesaje de carga estática';
     } else if (t.contains('tolva')) {
       painter = _dibujarTolva;
-      descTipo = 'Báscula tipo: Tolva — pesaje de proceso';
+      descTipo = 'Báscula tipo: Tolva - pesaje de proceso';
     } else if (t.contains('silo')) {
       painter = _dibujarSilo;
-      descTipo = 'Báscula tipo: Silo — almacenamiento a granel';
+      descTipo = 'Báscula tipo: Silo - almacenamiento a granel';
     } else {
       painter = _dibujarInstrumentoEspecial;
-      final limpio = motivoNo.trim().isNotEmpty ? motivoNo.trim() : 'Instrumento especial';
+      final limpio = (motivoNo.trim().isNotEmpty ? motivoNo.trim() : 'Instrumento especial')
+          .replaceAll('—', '-')
+          .replaceAll('–', '-')
+          .replaceAll('•', '-');
       descTipo = 'Báscula tipo: $limpio';
     }
 

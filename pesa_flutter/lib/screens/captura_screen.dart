@@ -141,12 +141,7 @@ class _CapturaScreenState extends State<CapturaScreen>
     }
     return false;
   }
-  bool get _aplicaSustitucion =>
-      _usaSustitucion &&
-      (_hasValidSustitutos ||
-          _pesoSustituto != null ||
-          _factorSustituto != null ||
-          _exacRows.any((r) => (r['enlace'] ?? r['carga_patron'] ?? r['carga']) != null));
+  bool get _aplicaSustitucion => _usaSustitucion;
 
   // ── Controladores Paso 0 — Instrumento ───────────────────────────────────
   final _marcaCtrl      = TextEditingController();
@@ -593,15 +588,15 @@ class _CapturaScreenState extends State<CapturaScreen>
       }
     } catch (_) {}
 
-    _usaSustitucion = _asBool(_os['usa_sustitucion']) ||
-                      _asBool(_os['es_sustitucion']) ||
-                      _asBool(_os['es_enlace_sustitucion']) ||
-                      _asBool(_os['aplica_sustitucion']) ||
-                      _asBool(_os['aplica_enlaces_sustitucion']) ||
-                      _asBool(dtInit['aplica_enlaces_sustitucion']) ||
-                      _asBool(dtInit['aplica_sustitucion']) ||
-                      _asBool(dtInit['usa_sustitucion']) ||
-                      isTanque;
+    final dynamic rawSustInit = _os['aplica_cargas_sustitucion'] ??
+        _os['aplica_enlaces_sustitucion'] ??
+        dtInit['aplica_cargas_sustitucion'] ??
+        dtInit['aplica_enlaces_sustitucion'] ??
+        _os['aplica_sustitucion'] ??
+        dtInit['aplica_sustitucion'] ??
+        _os['usa_sustitucion'] ??
+        dtInit['usa_sustitucion'];
+    _usaSustitucion = _asBool(rawSustInit);
 
     final rawEnlInit = _os['cantidad_enlaces'] ??
         _os['num_enlaces_sustitucion'] ??
@@ -832,13 +827,22 @@ class _CapturaScreenState extends State<CapturaScreen>
             _os['motivo_no_aplica'] = _motivoNoExcentricidad;
             _os['tipo_no_aplica_exc'] = _motivoNoExcentricidad.toLowerCase();
           }
-          if (draft['usa_sustitucion'] != null || draft['aplica_enlaces_sustitucion'] != null) {
-            _usaSustitucion = draft['usa_sustitucion'] == true || draft['aplica_enlaces_sustitucion'] == true;
+          if (draft['aplica_cargas_sustitucion'] != null ||
+              draft['aplica_enlaces_sustitucion'] != null ||
+              draft['aplica_sustitucion'] != null ||
+              draft['usa_sustitucion'] != null) {
+            final rawSustDraft = draft['aplica_cargas_sustitucion'] ??
+                draft['aplica_enlaces_sustitucion'] ??
+                draft['aplica_sustitucion'] ??
+                draft['usa_sustitucion'];
+            _usaSustitucion = _asBool(rawSustDraft);
           }
           final rawEnlDraft = draft['cantidad_enlaces'] ?? draft['num_enlaces_sustitucion'] ?? draft['num_enlaces'];
           final parsedEnlDraft = int.tryParse(rawEnlDraft?.toString() ?? '');
-          if (parsedEnlDraft != null && parsedEnlDraft >= 1 && parsedEnlDraft <= 20) {
+          if (_usaSustitucion && parsedEnlDraft != null && parsedEnlDraft >= 1 && parsedEnlDraft <= 20) {
             _numEnlacesSustitucion = parsedEnlDraft;
+          } else if (!_usaSustitucion) {
+            _numEnlacesSustitucion = 0;
           }
           if (draft['sustitutos'] is List) {
             _sustitutosRows = List<Map<String, dynamic>>.from(
@@ -1329,7 +1333,7 @@ class _CapturaScreenState extends State<CapturaScreen>
                 final isTolva    = vLow.contains('tolva');
 
                 if (isTanque || isSilo) {
-                  _usaSustitucion = isTanque;
+                  _usaSustitucion = false;
                   _aplExcOverride = false;
                   _os['aplica_excentricidad'] = false;
                   _motivoNoExcentricidad = isSilo ? 'Silo' : 'Tanque';
@@ -1337,9 +1341,15 @@ class _CapturaScreenState extends State<CapturaScreen>
                   _os['tipo_no_apto']            = _motivoNoExcentricidad;
                   _os['motivo_no_aplica']        = _motivoNoExcentricidad;
                   _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
-                  _os['usa_sustitucion'] = isTanque;
-                  _os['es_sustitucion'] = isTanque;
-                  _os['es_enlace_sustitucion'] = isTanque;
+                  _os['aplica_cargas_sustitucion'] = false;
+                  _os['aplica_enlaces_sustitucion'] = false;
+                  _os['aplica_sustitucion'] = false;
+                  _os['usa_sustitucion'] = false;
+                  _os['es_sustitucion'] = false;
+                  _os['es_enlace_sustitucion'] = false;
+                  _os['cantidad_enlaces'] = 0;
+                  _os['num_enlaces_sustitucion'] = 0;
+                  _os['num_enlaces'] = 0;
                 } else if (isColgante || isPatin || isTolva) {
                   _usaSustitucion = false;
                   _aplExcOverride = false;
@@ -1353,10 +1363,15 @@ class _CapturaScreenState extends State<CapturaScreen>
                   _os['tipo_no_apto']            = _motivoNoExcentricidad;
                   _os['motivo_no_aplica']        = _motivoNoExcentricidad;
                   _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
+                  _os['aplica_cargas_sustitucion'] = false;
+                  _os['aplica_enlaces_sustitucion'] = false;
                   _os['usa_sustitucion'] = false;
                   _os['aplica_sustitucion'] = false;
                   _os['es_sustitucion'] = false;
                   _os['es_enlace_sustitucion'] = false;
+                  _os['cantidad_enlaces'] = 0;
+                  _os['num_enlaces_sustitucion'] = 0;
+                  _os['num_enlaces'] = 0;
                 } else {
                   _usaSustitucion = false;
                   _aplExcOverride = true;
@@ -1365,10 +1380,15 @@ class _CapturaScreenState extends State<CapturaScreen>
                   _os['tipo_no_apto'] = '';
                   _os['motivo_no_aplica'] = '';
                   _os['tipo_no_aplica_exc'] = null;
+                  _os['aplica_cargas_sustitucion'] = false;
+                  _os['aplica_enlaces_sustitucion'] = false;
                   _os['usa_sustitucion'] = false;
                   _os['aplica_sustitucion'] = false;
                   _os['es_sustitucion'] = false;
                   _os['es_enlace_sustitucion'] = false;
+                  _os['cantidad_enlaces'] = 0;
+                  _os['num_enlaces_sustitucion'] = 0;
+                  _os['num_enlaces'] = 0;
                 }
 
                 _puntosApoyo = getPuntosApoyoPorDefecto(v, fallback: (_puntosApoyo > 1 ? _puntosApoyo : 5));
@@ -1782,6 +1802,23 @@ class _CapturaScreenState extends State<CapturaScreen>
                   selected: {_usaSustitucion},
                   onSelectionChanged: (s) => setState(() {
                     _usaSustitucion = s.first;
+                    if (_usaSustitucion && _numEnlacesSustitucion < 1) {
+                      _numEnlacesSustitucion = 5;
+                    }
+                    final int cantEnl = _usaSustitucion ? _numEnlacesSustitucion : 0;
+                    _os['aplica_cargas_sustitucion'] = _usaSustitucion;
+                    _os['aplica_enlaces_sustitucion'] = _usaSustitucion;
+                    _os['aplica_sustitucion'] = _usaSustitucion;
+                    _os['usa_sustitucion'] = _usaSustitucion;
+                    _os['es_sustitucion'] = _usaSustitucion;
+                    _os['es_enlace_sustitucion'] = _usaSustitucion;
+                    _os['cantidad_enlaces'] = cantEnl;
+                    _os['num_enlaces_sustitucion'] = cantEnl;
+                    _os['num_enlaces'] = cantEnl;
+                    if (!_usaSustitucion) {
+                      _os['aplica_sustituto'] = false;
+                      _os['sustitutos'] = const <Map<String, dynamic>>[];
+                    }
                     _dataVersion++;
                   }),
                   style: const ButtonStyle(visualDensity: VisualDensity.compact),
@@ -2353,8 +2390,15 @@ class _CapturaScreenState extends State<CapturaScreen>
       _os['motivo_no_aplica']        = _motivoNoExcentricidad;
       _os['tipo_no_aplica_exc']      = _motivoNoExcentricidad.toLowerCase();
     }
-    _os['usa_sustitucion']       = _aplicaSustitucion;
-    _os['aplica_sustitucion']    = _aplicaSustitucion;
+    _os['aplica_cargas_sustitucion']  = _usaSustitucion;
+    _os['aplica_enlaces_sustitucion'] = _usaSustitucion;
+    _os['aplica_sustitucion']         = _usaSustitucion;
+    _os['usa_sustitucion']            = _usaSustitucion;
+    _os['es_sustitucion']             = _usaSustitucion;
+    _os['es_enlace_sustitucion']      = _usaSustitucion;
+    _os['cantidad_enlaces']           = _usaSustitucion ? (_numEnlacesSustitucion > 0 ? _numEnlacesSustitucion : 5) : 0;
+    _os['num_enlaces_sustitucion']    = _os['cantidad_enlaces'];
+    _os['num_enlaces']                = _os['cantidad_enlaces'];
     _os['funcionamiento']        = _funcionamiento;
     _os['puntos_apoyo']          = _puntosApoyo;
     _os['geometria_excentricidad'] = _geometriaExcentricidad;
@@ -2385,18 +2429,20 @@ class _CapturaScreenState extends State<CapturaScreen>
       _os['div_ver']               = '';
       _os['div_verificacion']      = null;
     }
-    // Sustitución opcional: vacío / 0 / "No" ⇒ aplica_sustitucion=false, peso=null.
-    if (_aplicaSustitucion) {
+    // Sustitución opcional: "No" ⇒ todas las banderas en false y cantidad_enlaces = 0.
+    if (_usaSustitucion) {
       _os['masa_patron_disponible'] = _pesoSustituto;
       _os['peso_sustituto']         = _pesoSustituto;
       _os['factor_sustitucion']     = _factorSustituto;
+      _os['sustitutos']             = _sustitutosRows;
+      _os['aplica_sustituto']       = _hasValidSustitutos;
     } else {
       _os['masa_patron_disponible'] = null;
       _os['peso_sustituto']         = null;
       _os['factor_sustitucion']     = null;
+      _os['sustitutos']             = const <Map<String, dynamic>>[];
+      _os['aplica_sustituto']       = false;
     }
-    _os['sustitutos']             = _sustitutosRows;
-    _os['aplica_sustituto']       = _hasValidSustitutos;
 
     final maxV = double.tryParse(_capMaxCtrl.text.replaceAll(',', '.'));
     final divV = double.tryParse(_divMinCtrl.text.replaceAll(',', '.'));
@@ -2519,14 +2565,17 @@ class _CapturaScreenState extends State<CapturaScreen>
         'tipo_no_apto':            _aplExc ? '' : _motivoNoExcentricidad,
         'motivo_no_aplica':        _aplExc ? '' : _motivoNoExcentricidad,
         'tipo_no_aplica_exc':      _aplExc ? null : _motivoNoExcentricidad.toLowerCase(),
-        'usa_sustitucion':       _usaSustitucion,
-        'aplica_sustitucion':    _usaSustitucion,
+        'aplica_cargas_sustitucion':  _usaSustitucion,
         'aplica_enlaces_sustitucion': _usaSustitucion,
-        'cantidad_enlaces':      _numEnlacesSustitucion,
-        'num_enlaces_sustitucion': _numEnlacesSustitucion,
-        'num_enlaces':           _numEnlacesSustitucion,
-        'aplica_sustituto':      _hasValidSustitutos,
-        'sustitutos':            _sustitutosRows,
+        'aplica_sustitucion':         _usaSustitucion,
+        'usa_sustitucion':            _usaSustitucion,
+        'es_sustitucion':             _usaSustitucion,
+        'es_enlace_sustitucion':      _usaSustitucion,
+        'cantidad_enlaces':           _usaSustitucion ? (_numEnlacesSustitucion > 0 ? _numEnlacesSustitucion : 5) : 0,
+        'num_enlaces_sustitucion':    _usaSustitucion ? (_numEnlacesSustitucion > 0 ? _numEnlacesSustitucion : 5) : 0,
+        'num_enlaces':                _usaSustitucion ? (_numEnlacesSustitucion > 0 ? _numEnlacesSustitucion : 5) : 0,
+        'aplica_sustituto':           _usaSustitucion && _hasValidSustitutos,
+        'sustitutos':                 _usaSustitucion ? _sustitutosRows : const <Map<String, dynamic>>[],
         'masa_patron':           _masaPatronCtrl.text.trim(),
         'factor_sustitucion':    _factorSustCtrl.text.trim(),
         'rep_rows':              _repRows,
@@ -2754,16 +2803,19 @@ class _CapturaScreenState extends State<CapturaScreen>
       'holograma_anterior':    _holoAntEf,
       'holograma_actualizado': _holoActEf,
       'holograma_nuevo':       _holoActEf,
-      'usa_sustitucion':       _aplicaSustitucion,
-      'aplica_sustitucion':    _aplicaSustitucion,
-      'aplica_enlaces_sustitucion': _aplicaSustitucion,
-      'cantidad_enlaces':      _numEnlacesSustitucion,
-      'num_enlaces_sustitucion': _numEnlacesSustitucion,
-      'num_enlaces':           _numEnlacesSustitucion,
-      'aplica_sustituto':      _hasValidSustitutos,
-      'sustitutos':            _sustitutosRows,
-      'peso_sustituto':        _aplicaSustitucion ? _pesoSustituto : null,
-      'factor_sustitucion':    _aplicaSustitucion ? _factorSustituto : null,
+      'aplica_cargas_sustitucion':  _usaSustitucion,
+      'aplica_enlaces_sustitucion': _usaSustitucion,
+      'aplica_sustitucion':         _usaSustitucion,
+      'usa_sustitucion':            _usaSustitucion,
+      'es_sustitucion':             _usaSustitucion,
+      'es_enlace_sustitucion':      _usaSustitucion,
+      'cantidad_enlaces':           _usaSustitucion ? (_numEnlacesSustitucion > 0 ? _numEnlacesSustitucion : 5) : 0,
+      'num_enlaces_sustitucion':    _usaSustitucion ? (_numEnlacesSustitucion > 0 ? _numEnlacesSustitucion : 5) : 0,
+      'num_enlaces':                _usaSustitucion ? (_numEnlacesSustitucion > 0 ? _numEnlacesSustitucion : 5) : 0,
+      'aplica_sustituto':           _usaSustitucion && _hasValidSustitutos,
+      'sustitutos':                 _usaSustitucion ? _sustitutosRows : const <Map<String, dynamic>>[],
+      'peso_sustituto':             _usaSustitucion ? _pesoSustituto : null,
+      'factor_sustitucion':         _usaSustitucion ? _factorSustituto : null,
       'tipo_instrumento':      _tipoInstrumento ?? '',
       'tipo_servicio':         _os['tipo_servicio'] ?? '',
       'funcionamiento':        _funcionamiento,

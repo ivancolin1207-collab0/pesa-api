@@ -946,7 +946,27 @@ class SyncService extends ChangeNotifier {
           'fecha_creacion_logistica': os['fecha_creacion_logistica'],
         'observaciones':     os['observaciones'],
         'datos_captura':     os['datos_captura'],
-        'usa_sustitucion':   os['usa_sustitucion'] == 1 || os['usa_sustitucion'] == 'true' || os['usa_sustitucion'] == true,
+        'aplica_cargas_sustitucion':  (() {
+          final v = os['aplica_cargas_sustitucion'] ?? os['aplica_enlaces_sustitucion'] ?? os['aplica_sustitucion'] ?? os['usa_sustitucion'];
+          return v == 1 || v == '1' || v == 'true' || v == true;
+        })(),
+        'aplica_enlaces_sustitucion': (() {
+          final v = os['aplica_cargas_sustitucion'] ?? os['aplica_enlaces_sustitucion'] ?? os['aplica_sustitucion'] ?? os['usa_sustitucion'];
+          return v == 1 || v == '1' || v == 'true' || v == true;
+        })(),
+        'aplica_sustitucion':         (() {
+          final v = os['aplica_cargas_sustitucion'] ?? os['aplica_enlaces_sustitucion'] ?? os['aplica_sustitucion'] ?? os['usa_sustitucion'];
+          return v == 1 || v == '1' || v == 'true' || v == true;
+        })(),
+        'usa_sustitucion':            (() {
+          final v = os['aplica_cargas_sustitucion'] ?? os['aplica_enlaces_sustitucion'] ?? os['aplica_sustitucion'] ?? os['usa_sustitucion'];
+          return v == 1 || v == '1' || v == 'true' || v == true;
+        })(),
+        'cantidad_enlaces':           (() {
+          final v = os['aplica_cargas_sustitucion'] ?? os['aplica_enlaces_sustitucion'] ?? os['aplica_sustitucion'] ?? os['usa_sustitucion'];
+          final on = v == 1 || v == '1' || v == 'true' || v == true;
+          return on ? (int.tryParse('${os['cantidad_enlaces'] ?? os['num_enlaces_sustitucion'] ?? 5}') ?? 5) : 0;
+        })(),
         'factor_sustitucion': os['factor_sustitucion']?.toString(),
         'repetibilidad':     _decodeJson(os['rep_json']),
         'excentricidad':     _decodeJson(os['exc_json']),

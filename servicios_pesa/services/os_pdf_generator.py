@@ -305,16 +305,18 @@ def _es_tanque(os_data: dict) -> bool:
 
 def _es_modo_sustitucion(os_data: dict) -> bool:
     """
-    Formato de sustitución (Agua + Pesas, Excentricidad No Apta) SOLO si:
-      - tipo_instrumento es Tanque, o
-      - aplica_sustitucion es explícitamente verdadero.
-    Banderas heredadas (es_sustitucion / es_enlace_sustitucion / motivo 'Tanque')
-    ya NO fuerzan este formato en básculas de plataforma.
+    Tabla de Cargas / Enlaces de Sustitución (PESAS | AGUA | AGUA + PESAS)
+    ÚNICAMENTE cuando la bandera explícita `aplica_cargas_sustitucion` o
+    `aplica_enlaces_sustitucion` es verdadera.
+    JAMÁS se infiere automáticamente por Tanque / Silo, Tolva, Grúa ni por
+    `aplica_excentricidad == False`.
     """
     if not os_data:
         return False
-    if _es_tanque(os_data):
-        return True
+    prim_cargas = os_data.get("aplica_cargas_sustitucion")
+    prim_enlaces = os_data.get("aplica_enlaces_sustitucion")
+    if prim_cargas is not None or prim_enlaces is not None:
+        return _flag_sustitucion_estricto(prim_cargas) or _flag_sustitucion_estricto(prim_enlaces)
     raw = os_data.get("aplica_sustitucion")
     if raw is None:
         raw = os_data.get("usa_sustitucion")
@@ -1155,7 +1157,7 @@ class OsPdfGenerator:
         tipo_no = _inferir_tipo_no_aplica(os_data) if not _motivo_directo else _inferir_tipo_no_aplica({**os_data, "motivo_no_excentricidad": _motivo_directo})
 
         tipo_inst = str(os_data.get("tipo_instrumento") or os_data.get("tipo_equipo") or "").lower()
-        es_sust = "tanque" in tipo_inst or _es_modo_sustitucion(os_data)
+        es_sust = _es_modo_sustitucion(os_data)
         if es_sust:
             aplica_exc = False
             if "tanque" in tipo_inst and not _motivo_directo:
@@ -1797,22 +1799,22 @@ class OsPdfGenerator:
         cx = x + w / 2
 
         if "grua" in tipo or "grúa" in tipo or "gancho" in tipo or "colgante" in tipo:
-            desc_linea = "Báscula tipo: Grúa — pesaje suspendido"
+            desc_linea = "Báscula tipo: Grúa - pesaje suspendido"
             draw_fn = self._dibujar_icono_grua
         elif "patin" in tipo or "patín" in tipo or "transpaleta" in tipo:
-            desc_linea = "Báscula tipo: Patín hidráulico — equipo móvil"
+            desc_linea = "Báscula tipo: Patín hidráulico - equipo móvil"
             draw_fn = self._dibujar_icono_patin
         elif "silo" in tipo and "tanque" not in tipo:
-            desc_linea = "Báscula tipo: Silo — almacenamiento a granel"
+            desc_linea = "Báscula tipo: Silo - almacenamiento a granel"
             draw_fn = self._dibujar_icono_silo
         elif "tanque" in tipo:
-            desc_linea = "Báscula tipo: Tanque — pesaje de carga estática"
+            desc_linea = "Báscula tipo: Tanque - pesaje de carga estática"
             draw_fn = self._dibujar_icono_tanque
         elif "tolva" in tipo:
-            desc_linea = "Báscula tipo: Tolva — pesaje de proceso"
+            desc_linea = "Báscula tipo: Tolva - pesaje de proceso"
             draw_fn = self._dibujar_icono_tolva
         else:
-            limpio = (tipo_no or "Instrumento especial").strip()
+            limpio = (tipo_no or "Instrumento especial").strip().replace("—", "-").replace("–", "-").replace("•", "-")
             desc_linea = f"Báscula tipo: {limpio}"
             draw_fn = self._dibujar_icono_tolva
 

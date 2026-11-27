@@ -1883,6 +1883,8 @@ class PruebasMetrologicasWidget(QWidget):
             "sustitutos":          self.exactitud.get_sustitutos(),
             "aplica_sustituto":    self.exactitud.get_aplica_sustituto(),
             "usa_sustitucion":     self.exactitud.is_modo_sustitucion(),
+            "aplica_cargas_sustitucion": self.exactitud.is_modo_sustitucion(),
+            "aplica_enlaces_sustitucion": self.exactitud.is_modo_sustitucion(),
             "valor_repetibilidad": self.repetibilidad.get_valor(),
             "id_clase_exactitud":  self.exactitud.get_clase_exactitud(),
             "indicadores_jia":     self.exactitud.get_indicadores_jia(),
@@ -1906,22 +1908,19 @@ class PruebasMetrologicasWidget(QWidget):
     ) -> None:
         """Carga todos los datos de prueba desde la BD."""
         es_tanque = "tanque" in (tipo_instrumento or "").lower()
-        if usa_sustitucion or es_tanque:
-            self.exactitud.set_modo_sustitucion(True)
-            if sustitutos:
-                self.exactitud.set_sustitutos(sustitutos)
-            if es_tanque:
-                self.excentricidad.set_excentricidad_config(False, 0)
-                if self._tabs.count() > 1:
-                    self._tabs.setTabEnabled(1, False)
-
-        if not es_tanque:
-            if aplica_excentricidad is not None:
-                self.excentricidad.set_excentricidad_config(aplica_excentricidad, filas_excentricidad or 5)
-                if self._tabs.count() > 1:
-                    self._tabs.setTabEnabled(1, aplica_excentricidad)
-            elif tipo_instrumento:
-                self.excentricidad.set_tipo_instrumento(tipo_instrumento, numero_celdas)
+        self.exactitud.set_modo_sustitucion(bool(usa_sustitucion))
+        if bool(usa_sustitucion) and sustitutos:
+            self.exactitud.set_sustitutos(sustitutos)
+        if es_tanque or aplica_excentricidad is False:
+            self.excentricidad.set_excentricidad_config(False, 0)
+            if self._tabs.count() > 1:
+                self._tabs.setTabEnabled(1, False)
+        elif aplica_excentricidad is not None:
+            self.excentricidad.set_excentricidad_config(aplica_excentricidad, filas_excentricidad or 5)
+            if self._tabs.count() > 1:
+                self._tabs.setTabEnabled(1, aplica_excentricidad)
+        elif tipo_instrumento:
+            self.excentricidad.set_tipo_instrumento(tipo_instrumento, numero_celdas)
 
         self.repetibilidad.set_data(repetibilidad)
         self.excentricidad.set_data(excentricidad)

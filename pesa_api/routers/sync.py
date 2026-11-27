@@ -126,6 +126,7 @@ class OSCompleta(BaseModel):
     geometria_plataforma:  Optional[str]   = None
     usa_sustitucion:       Optional[bool]  = False
     aplica_sustitucion:    Optional[bool]  = False
+    aplica_cargas_sustitucion: Optional[bool] = False
     aplica_enlaces_sustitucion: Optional[bool] = False
     cantidad_enlaces:      Optional[int]   = None
     num_enlaces_sustitucion: Optional[int] = None
@@ -232,6 +233,7 @@ class PushPayload(BaseModel):
     datos_tecnicos_json: Optional[Union[str, dict]] = None
     usa_sustitucion: Optional[bool] = None
     aplica_sustitucion: Optional[bool] = None
+    aplica_cargas_sustitucion: Optional[bool] = None
     aplica_enlaces_sustitucion: Optional[bool] = None
     cantidad_enlaces: Optional[int] = None
     num_enlaces_sustitucion: Optional[int] = None
@@ -548,9 +550,10 @@ async def sync_pull(
             COALESCE(os.puntos_excentricidad, os.filas_excentricidad, 5) AS puntos_excentricidad,
             COALESCE(os.puntos_exactitud,      5)    AS puntos_exactitud,
             COALESCE(os.geometria_puntos,     '')    AS geometria_puntos,
-            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS usa_sustitucion,
-            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_sustitucion,
-            COALESCE(os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_enlaces_sustitucion,
+            COALESCE(os.aplica_cargas_sustitucion, os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS usa_sustitucion,
+            COALESCE(os.aplica_cargas_sustitucion, os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_sustitucion,
+            COALESCE(os.aplica_cargas_sustitucion, os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_cargas_sustitucion,
+            COALESCE(os.aplica_cargas_sustitucion, os.aplica_enlaces_sustitucion, os.usa_sustitucion, FALSE) AS aplica_enlaces_sustitucion,
             os.cantidad_enlaces                      AS cantidad_enlaces,
             COALESCE(os.num_secciones,         0)    AS num_secciones,
             COALESCE(os.instrumento_capacidad, '')   AS instrumento_capacidad,
@@ -889,22 +892,24 @@ async def sync_pull(
                                 d["geometria_puntos"] = str(_geo_v)
                                 d["geometria_plataforma"] = str(_geo_v)
                             _sust_dt = (
-                                dt_obj.get("aplica_enlaces_sustitucion")
-                                if dt_obj.get("aplica_enlaces_sustitucion") is not None
+                                dt_obj.get("aplica_cargas_sustitucion")
+                                if dt_obj.get("aplica_cargas_sustitucion") is not None
                                 else (
-                                    dt_obj.get("aplica_sustitucion")
-                                    if dt_obj.get("aplica_sustitucion") is not None
+                                    dt_obj.get("aplica_enlaces_sustitucion")
+                                    if dt_obj.get("aplica_enlaces_sustitucion") is not None
                                     else (
-                                        dt_obj.get("usa_sustitucion")
-                                        if dt_obj.get("usa_sustitucion") is not None
-                                        else dt_obj.get("es_enlace_sustitucion")
+                                        dt_obj.get("aplica_sustitucion")
+                                        if dt_obj.get("aplica_sustitucion") is not None
+                                        else dt_obj.get("usa_sustitucion")
                                     )
                                 )
                             )
-                            if _sust_dt is not None and not d.get("usa_sustitucion"):
-                                d["usa_sustitucion"] = bool(_sust_dt)
-                                d["aplica_sustitucion"] = bool(_sust_dt)
-                                d["aplica_enlaces_sustitucion"] = bool(_sust_dt)
+                            if _sust_dt is not None:
+                                _sust_b = bool(_sust_dt)
+                                d["usa_sustitucion"] = _sust_b
+                                d["aplica_sustitucion"] = _sust_b
+                                d["aplica_cargas_sustitucion"] = _sust_b
+                                d["aplica_enlaces_sustitucion"] = _sust_b
                             _n_enl = d.get("cantidad_enlaces") or dt_obj.get("cantidad_enlaces") or dt_obj.get("num_enlaces_sustitucion") or dt_obj.get("num_enlaces")
                             if _n_enl is not None:
                                 try:
@@ -1251,6 +1256,9 @@ async def sync_push(
             payload.numero_dve, payload.folio_dve,
             payload.aplica_excentricidad, payload.motivo_no_excentricidad,
             payload.holograma_anterior, payload.holograma_actualizado,
+            payload.aplica_cargas_sustitucion, payload.aplica_enlaces_sustitucion,
+            payload.aplica_sustitucion, payload.usa_sustitucion,
+            payload.cantidad_enlaces, payload.num_enlaces_sustitucion,
         )):
             try:
                 import re as _re
@@ -1260,27 +1268,81 @@ async def sync_push(
                 dve_raw = payload.numero_dve if payload.numero_dve is not None else payload.folio_dve
                 cca_v = "" if (cca_raw is not None and _re.match(r"^(CCA|DVE)\.\d{2}\.?$", str(cca_raw).strip(), flags=_re.I)) else cca_raw
                 dve_v = "" if (dve_raw is not None and _re.match(r"^(CCA|DVE)\.\d{2}\.?$", str(dve_raw).strip(), flags=_re.I)) else dve_raw
-                await db.execute(
-                    """
-                    UPDATE ordenes_servicio SET
-                        alcance_max             = COALESCE($1, alcance_max),
-                        capacidad_maxima        = COALESCE($1, capacidad_maxima),
-                        div_minima              = COALESCE($2, div_minima),
-                        division_minima         = COALESCE($2, division_minima),
-                        cliente                 = COALESCE($3, cliente),
-                        tipo_instrumento        = COALESCE($4, tipo_instrumento),
-                        numero_cca              = COALESCE($5, numero_cca),
-                        numero_dve              = COALESCE($6, numero_dve),
-                        aplica_excentricidad    = COALESCE($7, aplica_excentricidad),
-                        motivo_no_excentricidad = COALESCE($8, motivo_no_excentricidad),
-                        holograma_anterior      = COALESCE($9, holograma_anterior),
-                        holograma_actualizado   = COALESCE($10, holograma_actualizado)
-                    WHERE id = $11
-                    """,
-                    cap_v, div_v, payload.cliente, payload.tipo_instrumento,
-                    cca_v, dve_v, payload.aplica_excentricidad, payload.motivo_no_excentricidad,
-                    payload.holograma_anterior, payload.holograma_actualizado, os_id,
+                sust_v = (
+                    payload.aplica_cargas_sustitucion
+                    if payload.aplica_cargas_sustitucion is not None
+                    else (
+                        payload.aplica_enlaces_sustitucion
+                        if payload.aplica_enlaces_sustitucion is not None
+                        else (
+                            payload.aplica_sustitucion
+                            if payload.aplica_sustitucion is not None
+                            else payload.usa_sustitucion
+                        )
+                    )
                 )
+                cant_enl_v = (
+                    0
+                    if sust_v is False
+                    else (
+                        payload.cantidad_enlaces
+                        if payload.cantidad_enlaces is not None
+                        else (payload.num_enlaces_sustitucion if payload.num_enlaces_sustitucion is not None else payload.num_enlaces)
+                    )
+                )
+                try:
+                    await db.execute(
+                        """
+                        UPDATE ordenes_servicio SET
+                            alcance_max                = COALESCE($1, alcance_max),
+                            capacidad_maxima           = COALESCE($1, capacidad_maxima),
+                            div_minima                 = COALESCE($2, div_minima),
+                            division_minima            = COALESCE($2, division_minima),
+                            cliente                    = COALESCE($3, cliente),
+                            tipo_instrumento           = COALESCE($4, tipo_instrumento),
+                            numero_cca                 = COALESCE($5, numero_cca),
+                            numero_dve                 = COALESCE($6, numero_dve),
+                            aplica_excentricidad       = COALESCE($7, aplica_excentricidad),
+                            motivo_no_excentricidad    = COALESCE($8, motivo_no_excentricidad),
+                            holograma_anterior         = COALESCE($9, holograma_anterior),
+                            holograma_actualizado      = COALESCE($10, holograma_actualizado),
+                            usa_sustitucion            = COALESCE($11, usa_sustitucion),
+                            aplica_cargas_sustitucion  = COALESCE($11, aplica_cargas_sustitucion),
+                            aplica_enlaces_sustitucion = COALESCE($11, aplica_enlaces_sustitucion),
+                            cantidad_enlaces           = COALESCE($12, cantidad_enlaces)
+                        WHERE id = $13
+                        """,
+                        cap_v, div_v, payload.cliente, payload.tipo_instrumento,
+                        cca_v, dve_v, payload.aplica_excentricidad, payload.motivo_no_excentricidad,
+                        payload.holograma_anterior, payload.holograma_actualizado,
+                        sust_v, cant_enl_v, os_id,
+                    )
+                except Exception:
+                    await db.execute(
+                        """
+                        UPDATE ordenes_servicio SET
+                            alcance_max                = COALESCE($1, alcance_max),
+                            capacidad_maxima           = COALESCE($1, capacidad_maxima),
+                            div_minima                 = COALESCE($2, div_minima),
+                            division_minima            = COALESCE($2, division_minima),
+                            cliente                    = COALESCE($3, cliente),
+                            tipo_instrumento           = COALESCE($4, tipo_instrumento),
+                            numero_cca                 = COALESCE($5, numero_cca),
+                            numero_dve                 = COALESCE($6, numero_dve),
+                            aplica_excentricidad       = COALESCE($7, aplica_excentricidad),
+                            motivo_no_excentricidad    = COALESCE($8, motivo_no_excentricidad),
+                            holograma_anterior         = COALESCE($9, holograma_anterior),
+                            holograma_actualizado      = COALESCE($10, holograma_actualizado),
+                            usa_sustitucion            = COALESCE($11, usa_sustitucion),
+                            aplica_enlaces_sustitucion = COALESCE($11, aplica_enlaces_sustitucion),
+                            cantidad_enlaces           = COALESCE($12, cantidad_enlaces)
+                        WHERE id = $13
+                        """,
+                        cap_v, div_v, payload.cliente, payload.tipo_instrumento,
+                        cca_v, dve_v, payload.aplica_excentricidad, payload.motivo_no_excentricidad,
+                        payload.holograma_anterior, payload.holograma_actualizado,
+                        sust_v, cant_enl_v, os_id,
+                    )
             except Exception as e_ext:
                 logger.warning("[SYNC PUSH] Error guardando campos extra de equipo para %s: %s", payload.folio_os, e_ext)
 

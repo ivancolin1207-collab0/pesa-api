@@ -507,6 +507,84 @@ class TestRehacerYVistaPreviaSinFirma(unittest.TestCase):
             self.assertTrue(osocc_bytes.startswith(b"%PDF-"))
             self.assertIn("Pendiente de firma y conformidad del cliente", self._extract_pdf_text_bytes(osocc_bytes))
 
+    def test_tanque_silo_cargas_sustitucion_false_vs_true(self):
+        """
+        v4.0.3 (OS-26-880):
+          - Tanque / Silo + aplica_excentricidad=False + aplica_cargas_sustitucion=False
+            DEBE renderizar tabla EXACTITUD estándar (NO 'AGUA + PESAS') y leyenda
+            'Tanque - pesaje de carga estática' con guion ASCII (sin em-dash roto).
+          - Tanque / Silo + aplica_cargas_sustitucion=True DEBE renderizar tabla
+            de sustitución con columnas PESAS / AGUA / AGUA + PESAS.
+        """
+        from services.os_pdf_generator import OsPdfGenerator, _es_modo_sustitucion
+
+        base_data = {
+            "folio_os": "OS-26-880",
+            "fecha": "2026-11-27",
+            "cliente": "Pemex Transformacion Industrial",
+            "tipo_servicio": "Ajuste",
+            "tipo_instrumento": "Tanque / Silo",
+            "marca": "Sartorius",
+            "modelo": "PR1612/02",
+            "ns": "2011004405",
+            "id_equipo": "Bascula 3",
+            "alcance_max": "10000 kg",
+            "div_minima": "10 kg",
+            "aplica_excentricidad": False,
+            "motivo_no_excentricidad": "Tanque",
+            "observaciones": "Ajuste",
+        }
+        exac_rows = [
+            {"carga_patron": 1000, "lectura_subida": 1000, "lectura_bajada": 1000},
+            {"carga_patron": 2000, "lectura_subida": 2000, "lectura_bajada": 2000},
+        ]
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gen = OsPdfGenerator()
+
+            # Caso A: Tanque / Silo con sustitución = False
+            data_no_sust = {
+                **base_data,
+                "aplica_cargas_sustitucion": False,
+                "aplica_enlaces_sustitucion": False,
+                "aplica_sustitucion": False,
+                "usa_sustitucion": False,
+                "cantidad_enlaces": 0,
+            }
+            self.assertFalse(_es_modo_sustitucion(data_no_sust))
+            out_no = gen.generate_os_pdf(
+                data_no_sust,
+                output_path=str(Path(tmpdir) / "OS-26-880-NO-SUST.pdf"),
+                exactitud=exac_rows,
+                digital=True,
+                force=True,
+                modo_preview_sin_firma=True,
+            )
+            txt_no = self._extract_pdf_text_bytes(Path(out_no).read_bytes())
+            self.assertIn("EXACTITUD", txt_no)
+            self.assertNotIn("AGUA + PESAS", txt_no)
+            self.assertIn("Tanque - pesaje de carga", txt_no)
+            self.assertNotIn("Tanque \u2014", txt_no)
+
+            # Caso B: Tanque / Silo con sustitución = True
+            data_con_sust = {
+                **base_data,
+                "aplica_cargas_sustitucion": True,
+                "aplica_enlaces_sustitucion": True,
+                "cantidad_enlaces": 5,
+            }
+            self.assertTrue(_es_modo_sustitucion(data_con_sust))
+            out_si = gen.generate_os_pdf(
+                data_con_sust,
+                output_path=str(Path(tmpdir) / "OS-26-880-CON-SUST.pdf"),
+                exactitud=exac_rows,
+                digital=True,
+                force=True,
+                modo_preview_sin_firma=True,
+            )
+            txt_si = self._extract_pdf_text_bytes(Path(out_si).read_bytes())
+            self.assertIn("AGUA + PESAS", txt_si)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

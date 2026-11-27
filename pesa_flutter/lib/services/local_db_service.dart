@@ -402,6 +402,7 @@ class LocalDbService {
             'geometria_puntos': 'TEXT',
             'usa_sustitucion': 'INTEGER DEFAULT 0',
             'aplica_sustitucion': 'INTEGER DEFAULT 0',
+            'aplica_cargas_sustitucion': 'INTEGER DEFAULT 0',
             'aplica_enlaces_sustitucion': 'INTEGER DEFAULT 0',
             'cantidad_enlaces': 'INTEGER',
             'num_enlaces_sustitucion': 'INTEGER',
@@ -1039,26 +1040,34 @@ class LocalDbService {
           'puntos_exactitud': _toInt(raw['puntos_exactitud'] ?? raw['pts_exactitud'] ?? raw['filas_exactitud'], 5),
           'geometria_puntos': (raw['geometria_puntos'] ?? raw['geometria_plataforma'] ?? raw['geometria_excentricidad'])?.toString(),
           'geometria_plataforma': (raw['geometria_plataforma'] ?? raw['geometria_puntos'] ?? raw['geometria_excentricidad'])?.toString(),
-          'usa_sustitucion': (_toBoolInt(raw['usa_sustitucion']) > 0 ||
-                  _toBoolInt(raw['aplica_sustitucion']) > 0 ||
-                  _toBoolInt(raw['aplica_enlaces_sustitucion']) > 0 ||
-                  (raw['datos_tecnicos_json'] != null &&
-                      (raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion":true') ||
-                          raw['datos_tecnicos_json'].toString().contains('"es_enlace_sustitucion": true') ||
-                          raw['datos_tecnicos_json'].toString().contains('"aplica_enlaces_sustitucion":true') ||
-                          raw['datos_tecnicos_json'].toString().contains('"aplica_enlaces_sustitucion": true'))))
-              ? 1
-              : 0,
-          'aplica_sustitucion': (_toBoolInt(raw['aplica_sustitucion']) > 0 ||
-                  _toBoolInt(raw['usa_sustitucion']) > 0 ||
-                  _toBoolInt(raw['aplica_enlaces_sustitucion']) > 0)
-              ? 1
-              : 0,
-          'aplica_enlaces_sustitucion': (_toBoolInt(raw['aplica_enlaces_sustitucion']) > 0 ||
-                  _toBoolInt(raw['aplica_sustitucion']) > 0 ||
-                  _toBoolInt(raw['usa_sustitucion']) > 0)
-              ? 1
-              : 0,
+          'aplica_cargas_sustitucion': (() {
+            final prim = raw['aplica_cargas_sustitucion'] ?? raw['aplica_enlaces_sustitucion'];
+            if (prim != null) return _toBoolInt(prim) > 0 ? 1 : 0;
+            final sec = raw['aplica_sustitucion'] ?? raw['usa_sustitucion'];
+            if (sec != null) return _toBoolInt(sec) > 0 ? 1 : 0;
+            return 0;
+          })(),
+          'usa_sustitucion': (() {
+            final prim = raw['aplica_cargas_sustitucion'] ?? raw['aplica_enlaces_sustitucion'];
+            if (prim != null) return _toBoolInt(prim) > 0 ? 1 : 0;
+            final sec = raw['aplica_sustitucion'] ?? raw['usa_sustitucion'];
+            if (sec != null) return _toBoolInt(sec) > 0 ? 1 : 0;
+            return 0;
+          })(),
+          'aplica_sustitucion': (() {
+            final prim = raw['aplica_cargas_sustitucion'] ?? raw['aplica_enlaces_sustitucion'];
+            if (prim != null) return _toBoolInt(prim) > 0 ? 1 : 0;
+            final sec = raw['aplica_sustitucion'] ?? raw['usa_sustitucion'];
+            if (sec != null) return _toBoolInt(sec) > 0 ? 1 : 0;
+            return 0;
+          })(),
+          'aplica_enlaces_sustitucion': (() {
+            final prim = raw['aplica_cargas_sustitucion'] ?? raw['aplica_enlaces_sustitucion'];
+            if (prim != null) return _toBoolInt(prim) > 0 ? 1 : 0;
+            final sec = raw['aplica_sustitucion'] ?? raw['usa_sustitucion'];
+            if (sec != null) return _toBoolInt(sec) > 0 ? 1 : 0;
+            return 0;
+          })(),
           if (_toIntOrNull(raw['cantidad_enlaces'] ?? raw['num_enlaces_sustitucion'] ?? raw['num_enlaces']) != null) ...{
             'cantidad_enlaces': _toIntOrNull(raw['cantidad_enlaces'] ?? raw['num_enlaces_sustitucion'] ?? raw['num_enlaces']),
             'num_enlaces_sustitucion': _toIntOrNull(raw['cantidad_enlaces'] ?? raw['num_enlaces_sustitucion'] ?? raw['num_enlaces']),
@@ -1530,10 +1539,14 @@ class LocalDbService {
         'geometria_puntos': (data['geometria_puntos'] ?? data['geometria_plataforma'] ?? data['geometria_excentricidad']).toString(),
         'geometria_plataforma': (data['geometria_plataforma'] ?? data['geometria_puntos'] ?? data['geometria_excentricidad']).toString(),
       },
-      if (data['usa_sustitucion'] != null || data['aplica_sustitucion'] != null || data['aplica_enlaces_sustitucion'] != null) ...{
-        'usa_sustitucion': _toBoolInt(data['usa_sustitucion'] ?? data['aplica_sustitucion'] ?? data['aplica_enlaces_sustitucion']),
-        'aplica_sustitucion': _toBoolInt(data['aplica_sustitucion'] ?? data['usa_sustitucion'] ?? data['aplica_enlaces_sustitucion']),
-        'aplica_enlaces_sustitucion': _toBoolInt(data['aplica_enlaces_sustitucion'] ?? data['aplica_sustitucion'] ?? data['usa_sustitucion']),
+      if (data['aplica_cargas_sustitucion'] != null ||
+          data['aplica_enlaces_sustitucion'] != null ||
+          data['aplica_sustitucion'] != null ||
+          data['usa_sustitucion'] != null) ...{
+        'aplica_cargas_sustitucion': _toBoolInt(data['aplica_cargas_sustitucion'] ?? data['aplica_enlaces_sustitucion'] ?? data['aplica_sustitucion'] ?? data['usa_sustitucion']),
+        'aplica_enlaces_sustitucion': _toBoolInt(data['aplica_enlaces_sustitucion'] ?? data['aplica_cargas_sustitucion'] ?? data['aplica_sustitucion'] ?? data['usa_sustitucion']),
+        'aplica_sustitucion': _toBoolInt(data['aplica_cargas_sustitucion'] ?? data['aplica_enlaces_sustitucion'] ?? data['aplica_sustitucion'] ?? data['usa_sustitucion']),
+        'usa_sustitucion': _toBoolInt(data['aplica_cargas_sustitucion'] ?? data['aplica_enlaces_sustitucion'] ?? data['aplica_sustitucion'] ?? data['usa_sustitucion']),
       },
       if (_toIntOrNull(data['cantidad_enlaces'] ?? data['num_enlaces_sustitucion'] ?? data['num_enlaces']) != null) ...{
         'cantidad_enlaces': _toIntOrNull(data['cantidad_enlaces'] ?? data['num_enlaces_sustitucion'] ?? data['num_enlaces']),
