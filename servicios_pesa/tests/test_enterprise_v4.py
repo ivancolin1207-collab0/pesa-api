@@ -585,6 +585,89 @@ class TestRehacerYVistaPreviaSinFirma(unittest.TestCase):
             txt_si = self._extract_pdf_text_bytes(Path(out_si).read_bytes())
             self.assertIn("AGUA + PESAS", txt_si)
 
+    def test_cargas_sustitucion_error_regreso_vs_agua_y_pdf(self):
+        """
+        v4.0.4:
+          - Fila 3 (pesas=2000, agua=6005, ind=8005, reg=6000) -> error == -5
+          - Fila 5 typo foto (pesas=2000, agua=10000, ind=12005, reg=1000) -> error == -9000
+          - Fila 5 corregida (pesas=2000, agua=10000, ind=12005, reg=10000) -> error == 5
+          - Error maximo encontrado con Filas 1..5 corregidas -> 5
+          - Normalizacion sin '-0' ni ceros decimales innecesarios (-5, 5, 0, 0.02, -0.02)
+          - Paridad 100% en PDF generado por OsPdfGenerator (preview y final).
+        """
+        from services.metrology import calcular_error_sustitucion, formatear_error_sin_ceros
+        from services.os_pdf_generator import OsPdfGenerator, calcular_error_sustitucion as pdf_calc_err
+
+        self.assertIs(calcular_error_sustitucion, pdf_calc_err)
+
+        # Casos exactos de la evidencia
+        err_f1 = calcular_error_sustitucion(2000, 2000, 4000, 2000)
+        err_f2 = calcular_error_sustitucion(2000, 4005, 6005, 4005)
+        err_f3 = calcular_error_sustitucion(2000, 6005, 8005, 6000)
+        err_f4 = calcular_error_sustitucion(2000, 7990, 9990, 7990)
+        err_f5_typo = calcular_error_sustitucion(2000, 10000, 12005, 1000)
+        err_f5_ok = calcular_error_sustitucion(2000, 10000, 12005, 10000)
+
+        self.assertEqual(err_f1, 0.0)
+        self.assertEqual(err_f2, 0.0)
+        self.assertEqual(err_f3, -5.0)
+        self.assertEqual(err_f4, 0.0)
+        self.assertEqual(err_f5_typo, -9000.0)
+        self.assertEqual(err_f5_ok, 5.0)
+
+        max_err = max(abs(e) for e in [err_f1, err_f2, err_f3, err_f4, err_f5_ok])
+        self.assertEqual(max_err, 5.0)
+
+        # Formateo limpio sin '-0' ni ceros decimales innecesarios
+        self.assertEqual(formatear_error_sin_ceros(-0.0), "0")
+        self.assertEqual(formatear_error_sin_ceros(0.0), "0")
+        self.assertEqual(formatear_error_sin_ceros(-5.0), "-5")
+        self.assertEqual(formatear_error_sin_ceros(5.0), "5")
+        self.assertEqual(formatear_error_sin_ceros(0.02), "0.02")
+        self.assertEqual(formatear_error_sin_ceros(-0.02), "-0.02")
+        self.assertEqual(formatear_error_sin_ceros(-9000.0), "-9 000")
+
+        # Paridad en PDF generado por OsPdfGenerator (preview y final)
+        os_data = {
+            "folio_os": "OS-26-875",
+            "fecha": "2026-11-27",
+            "cliente": "Pemex Transformacion Industrial",
+            "tipo_servicio": "Ajuste",
+            "tipo_instrumento": "Tanque / Silo",
+            "marca": "Sartorius",
+            "modelo": "PR1612/02",
+            "alcance_max": "15000 kg",
+            "div_minima": "5 kg",
+            "aplica_excentricidad": False,
+            "motivo_no_excentricidad": "Tanque",
+            "aplica_cargas_sustitucion": True,
+            "aplica_enlaces_sustitucion": True,
+            "cantidad_enlaces": 5,
+        }
+        filas_sust = [
+            {"pesas": 2000, "agua": 2000, "agua_pesas": 4000, "indicacion": 4000, "regreso": 2000},
+            {"pesas": 2000, "agua": 4005, "agua_pesas": 6005, "indicacion": 6005, "regreso": 4005},
+            {"pesas": 2000, "agua": 6005, "agua_pesas": 8005, "indicacion": 8005, "regreso": 6000},
+            {"pesas": 2000, "agua": 7990, "agua_pesas": 9990, "indicacion": 9990, "regreso": 7990},
+            {"pesas": 2000, "agua": 10000, "agua_pesas": 12000, "indicacion": 12005, "regreso": 10000},
+        ]
+        with tempfile.TemporaryDirectory() as tmpdir:
+            gen = OsPdfGenerator()
+            for preview_flag in (True, False):
+                pdf_out = gen.generate_os_pdf(
+                    os_data,
+                    exactitud=filas_sust,
+                    output_path=str(Path(tmpdir) / f"OS-26-875-{preview_flag}.pdf"),
+                    digital=True,
+                    force=True,
+                    modo_preview_sin_firma=preview_flag,
+                )
+                txt = self._extract_pdf_text_bytes(Path(pdf_out).read_bytes())
+                self.assertIn("AGUA + PESAS", txt)
+                self.assertIn("(-5)", txt, "PDF debe mostrar error -5 en fila 3 (REGRESO 6000 vs AGUA 6005)")
+                self.assertIn("(5)", txt, "PDF debe mostrar error 5 en fila 5 y ERROR MÁXIMO ENCONTRADO")
+                self.assertNotIn("(-0)", txt)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

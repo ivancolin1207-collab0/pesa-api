@@ -113,11 +113,11 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
     }
     _rowFocusNodes.add(fns);
 
-    pCtrl.addListener(() => _onPesasOrAguaChanged(idx));
-    aCtrl.addListener(() => _onPesasOrAguaChanged(idx));
-    apCtrl.addListener(() => _onAguaPesasChanged(idx));
-    indCtrl.addListener(() => _onIndicacionChanged(idx));
-    regCtrl.addListener(_notify);
+    pCtrl.addListener(() => _onPesasOrAguaChanged(_pesasCtrls.indexOf(pCtrl)));
+    aCtrl.addListener(() => _onPesasOrAguaChanged(_aguaCtrls.indexOf(aCtrl)));
+    apCtrl.addListener(() => _onAguaPesasChanged(_aguaPesasCtrls.indexOf(apCtrl)));
+    indCtrl.addListener(() => _onIndicacionChanged(_indicacionCtrls.indexOf(indCtrl)));
+    regCtrl.addListener(() => _onRegresoChanged(_regresoCtrls.indexOf(regCtrl)));
 
     _pesasCtrls.add(pCtrl);
     _aguaCtrls.add(aCtrl);
@@ -140,7 +140,7 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
   }
 
   void _onPesasOrAguaChanged(int i) {
-    if (_isAutoCalculating || i >= _pesasCtrls.length) return;
+    if (_isAutoCalculating || i < 0 || i >= _pesasCtrls.length) return;
     _isAutoCalculating = true;
 
     final p = _parseDouble(_pesasCtrls[i].text);
@@ -148,8 +148,9 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
 
     if (p != null || a != null) {
       final ap = (p ?? 0.0) + (a ?? 0.0);
-      final dec = getDecimalsFromD(widget.divMin);
-      _aguaPesasCtrls[i].text = dec > 0 ? ap.toStringAsFixed(dec) : (ap == ap.roundToDouble() ? ap.round().toString() : ap.toString());
+      _aguaPesasCtrls[i].text = formatearErrorSinCeros(ap);
+    } else {
+      _aguaPesasCtrls[i].text = '';
     }
 
     _isAutoCalculating = false;
@@ -158,15 +159,41 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
   }
 
   void _onAguaPesasChanged(int i) {
-    if (_isAutoCalculating || i >= _aguaPesasCtrls.length) return;
+    if (_isAutoCalculating || i < 0 || i >= _aguaPesasCtrls.length) return;
     setState(() {});
     _notify();
   }
 
   void _onIndicacionChanged(int i) {
-    if (_isAutoCalculating || i >= _indicacionCtrls.length) return;
+    if (_isAutoCalculating || i < 0 || i >= _indicacionCtrls.length) return;
     setState(() {});
     _notify();
+  }
+
+  void _onRegresoChanged(int i) {
+    if (_isAutoCalculating || i < 0 || i >= _regresoCtrls.length) return;
+    setState(() {});
+    _notify();
+  }
+
+  double? _calcularErrorFila(int i) {
+    final p = _parseDouble(_pesasCtrls[i].text);
+    final a = _parseDouble(_aguaCtrls[i].text);
+    double? ap = _parseDouble(_aguaPesasCtrls[i].text);
+    if (p != null && a != null) {
+      ap = p + a;
+    } else if (ap == null && (p != null || a != null)) {
+      ap = (p ?? 0.0) + (a ?? 0.0);
+    }
+    final ind = _parseDouble(_indicacionCtrls[i].text);
+    final reg = _parseDouble(_regresoCtrls[i].text);
+    return calcularErrorSustitucion(
+      pesas: p,
+      agua: a,
+      indicacion: ind,
+      regreso: reg,
+      aguaMasPesasOverride: (p != null && a != null) ? null : ap,
+    );
   }
 
   double? _parseDouble(String s) {
@@ -251,30 +278,27 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
   void _notify() => widget.onChanged(_serialize());
 
   List<Map<String, dynamic>> _serialize() {
-    final dec = getDecimalsFromD(widget.divMin);
     return List.generate(_pesasCtrls.length, (i) {
       final p = _parseDouble(_pesasCtrls[i].text);
       final a = _parseDouble(_aguaCtrls[i].text);
       double? ap = _parseDouble(_aguaPesasCtrls[i].text);
-      if (ap == null && (p != null || a != null)) {
+      if (p != null && a != null) {
+        ap = p + a;
+      } else if (ap == null && (p != null || a != null)) {
         ap = (p ?? 0.0) + (a ?? 0.0);
       }
-      final ind = _parseDouble(_indicacionCtrls[i].text);
-      double? err;
-      if (ind != null && ap != null) {
-        err = ind - ap; // ERROR = INDICACIÓN - (AGUA + PESAS)
-      }
+      final err = _calcularErrorFila(i);
 
       return {
         'punto_id': i + 1,
         'pesas': _pesasCtrls[i].text.trim(),
         'agua': _aguaCtrls[i].text.trim(),
-        'agua_pesas': _aguaPesasCtrls[i].text.trim(),
+        'agua_pesas': ap != null ? formatearErrorSinCeros(ap) : _aguaPesasCtrls[i].text.trim(),
         'indicacion': _indicacionCtrls[i].text.trim(),
         'regreso': _regresoCtrls[i].text.trim(),
-        'error': err != null ? (dec > 0 ? err.toStringAsFixed(dec) : err.round().toString()) : null,
+        'error': err != null ? formatearErrorSinCeros(err) : null,
         // Compatibilidad con campos estándar
-        'valor_nominal': ap != null ? (dec > 0 ? ap.toStringAsFixed(dec) : ap.round().toString()) : _pesasCtrls[i].text.trim(),
+        'valor_nominal': ap != null ? formatearErrorSinCeros(ap) : _pesasCtrls[i].text.trim(),
         'lectura_inicial': _indicacionCtrls[i].text.trim(),
         'lectura_final': _regresoCtrls[i].text.trim(),
       };
@@ -284,16 +308,10 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
   double _calcularMaxError() {
     double maxErr = 0;
     for (int i = 0; i < _pesasCtrls.length; i++) {
-      final p = _parseDouble(_pesasCtrls[i].text);
-      final a = _parseDouble(_aguaCtrls[i].text);
-      double? ap = _parseDouble(_aguaPesasCtrls[i].text);
-      if (ap == null && (p != null || a != null)) {
-        ap = (p ?? 0.0) + (a ?? 0.0);
-      }
-      final ind = _parseDouble(_indicacionCtrls[i].text);
-      if (ind != null && ap != null) {
-        final err = (ind - ap).abs();
-        if (err > maxErr) maxErr = err;
+      final err = _calcularErrorFila(i);
+      if (err != null) {
+        final absErr = err.abs();
+        if (absErr > maxErr) maxErr = absErr;
       }
     }
     return maxErr;
@@ -329,7 +347,7 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
   Widget build(BuildContext context) {
     final maxErr = _calcularMaxError();
     final dec = getDecimalsFromD(widget.divMin);
-    final maxErrStr = formatoMilesEspacio(dec > 0 ? maxErr.toStringAsFixed(dec) : maxErr.round().toString());
+    final maxErrStr = formatoMilesEspacio(formatearErrorSinCeros(maxErr));
     final totalSustituto = _calcularTotalSustituto();
 
     return SingleChildScrollView(
@@ -562,22 +580,9 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
       );
 
   TableRow _row(int i) {
-    final p = _parseDouble(_pesasCtrls[i].text);
-    final a = _parseDouble(_aguaCtrls[i].text);
-    double? ap = _parseDouble(_aguaPesasCtrls[i].text);
-    if (ap == null && (p != null || a != null)) {
-      ap = (p ?? 0.0) + (a ?? 0.0);
-    }
-    final ind = _parseDouble(_indicacionCtrls[i].text);
-
-    double? err;
-    if (ind != null && ap != null) {
-      err = ind - ap; // ERROR = INDICACIÓN - (AGUA + PESAS)
-    }
-
-    final dec = getDecimalsFromD(widget.divMin);
+    final err = _calcularErrorFila(i);
     final errStr = err != null
-        ? formatoMilesEspacio(dec > 0 ? err.toStringAsFixed(dec) : err.round().toString())
+        ? formatoMilesEspacio(formatearErrorSinCeros(err))
         : '—';
 
     final key = i < _rowKeys.length ? _rowKeys[i] : null;
@@ -605,7 +610,7 @@ class _EnlacesSustitucionTableState extends State<EnlacesSustitucionTable> {
             style: TextStyle(
               fontWeight: FontWeight.w700,
               fontSize: 12,
-              color: err != null ? (err.abs() > (widget.divMin ?? 0) * 3 ? _kRed : Colors.green.shade700) : Colors.black87,
+              color: err != null ? (err.abs() > 0 ? _kRed : Colors.green.shade700) : Colors.black87,
             ),
           ),
         ),

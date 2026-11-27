@@ -93,7 +93,7 @@ def formato_miles_espacio(valor) -> str:
         try:
             ent_val = abs(int(entera))
             entera_fmt = f"{ent_val:,}".replace(',', ' ')
-            if is_neg:
+            if is_neg and (ent_val != 0 or any(ch in '123456789' for ch in decimal)):
                 entera_fmt = f"-{entera_fmt}"
             res = f"{entera_fmt}.{decimal}"
         except ValueError:
@@ -110,6 +110,48 @@ def formato_miles_espacio(valor) -> str:
             res = num_part
 
     return f"{res} {sufijo}".strip() if sufijo else res
+
+
+def calcular_error_sustitucion(pesas, agua, indicacion, regreso, agua_mas_pesas_override=None):
+    """
+    Calcula el error metrológico en una fila de "EXACTITUD - CARGAS DE SUSTITUCIÓN".
+    Evalúa tanto el error de indicación en carga `INDICACIÓN - (AGUA + PESAS)`
+    como el error en regreso `REGRESO - AGUA`, tomando el de mayor magnitud con su signo.
+    Normaliza `-0.0` a `0.0`.
+    """
+    if agua is not None and pesas is not None:
+        agua_mas_pesas = agua + pesas
+    else:
+        agua_mas_pesas = agua_mas_pesas_override
+    e_carga = round(indicacion - agua_mas_pesas, 6) if (indicacion is not None and agua_mas_pesas is not None) else None
+    e_regreso = round(regreso - agua, 6) if (regreso is not None and agua is not None) else None
+    if e_carga is None and e_regreso is None:
+        return None
+    if e_carga is not None and e_regreso is None:
+        return 0.0 if e_carga == 0 else e_carga
+    if e_carga is None and e_regreso is not None:
+        return 0.0 if e_regreso == 0 else e_regreso
+    res = e_regreso if abs(e_regreso) > abs(e_carga) else e_carga
+    return 0.0 if res == 0 else res
+
+
+def formatear_error_sin_ceros(val) -> str:
+    """
+    Formatea un error o valor numérico eliminando ceros decimales innecesarios
+    y garantizando que cero nunca se muestre como '-0' (ej. '-5', '5', '0', '0.02').
+    """
+    if val is None or str(val).strip() == "":
+        return ""
+    try:
+        v = round(float(str(val).strip().replace(",", ".").replace(" ", "")), 6)
+    except (TypeError, ValueError):
+        return formato_miles_espacio(val)
+    if v == 0:
+        return "0"
+    s = f"{v:.6f}".rstrip("0").rstrip(".")
+    if s == "-0":
+        s = "0"
+    return formato_miles_espacio(s)
 
 
 def formatear_division_minima(raw_div) -> str:

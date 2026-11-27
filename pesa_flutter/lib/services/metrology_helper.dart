@@ -68,6 +68,50 @@ double? calcularErrorExcentricidad({
   return fin - carga;
 }
 
+/// Calcula el error metrológico en una fila de "EXACTITUD - CARGAS DE SUSTITUCIÓN".
+/// Evalúa tanto el error de indicación en carga `INDICACIÓN - (AGUA + PESAS)`
+/// como el error en regreso `REGRESO - AGUA`, tomando el de mayor magnitud con su signo.
+/// Nunca retorna `-0.0` (normaliza a `0.0`).
+double? calcularErrorSustitucion({
+  required double? pesas,
+  required double? agua,
+  required double? indicacion,
+  required double? regreso,
+  double? aguaMasPesasOverride,
+}) {
+  final double? aguaMasPesas = (agua != null && pesas != null)
+      ? (agua + pesas)
+      : aguaMasPesasOverride;
+  final double? eCarga = (indicacion != null && aguaMasPesas != null)
+      ? double.parse((indicacion - aguaMasPesas).toStringAsFixed(6))
+      : null;
+  final double? eRegreso = (regreso != null && agua != null)
+      ? double.parse((regreso - agua).toStringAsFixed(6))
+      : null;
+
+  if (eCarga == null && eRegreso == null) return null;
+  final double res;
+  if (eCarga != null && eRegreso == null) {
+    res = eCarga;
+  } else if (eCarga == null && eRegreso != null) {
+    res = eRegreso;
+  } else {
+    res = eRegreso!.abs() > eCarga!.abs() ? eRegreso : eCarga;
+  }
+  return res == 0 ? 0.0 : res;
+}
+
+/// Formatea un error o valor numérico eliminando ceros decimales innecesarios
+/// y garantizando que cero nunca se muestre como `-0` (ej. `-5`, `5`, `0`, `0.02`).
+String formatearErrorSinCeros(double? val) {
+  if (val == null) return '';
+  final double norm = double.parse(val.toStringAsFixed(6));
+  final double clean = norm == 0 ? 0.0 : norm;
+  String s = clean.toStringAsFixed(6).replaceAll(RegExp(r'\.?0+$'), '');
+  if (s == '-0') s = '0';
+  return s;
+}
+
 /// Determina la geometría de excentricidad por defecto a partir del tipo de instrumento.
 /// - "Camionera": si contiene camionera, ferrocarril, puente, ffcc, ferrovi
 /// - "Circular": si contiene circular

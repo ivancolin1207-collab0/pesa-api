@@ -27,6 +27,7 @@ String formatoMilesEspacio(dynamic valor) {
 
   String numPart = match.group(1)!;
   String sufijo = match.group(2) ?? '';
+  final bool isNeg = numPart.startsWith('-');
 
   String res = numPart;
   if (numPart.contains('.')) {
@@ -35,20 +36,30 @@ String formatoMilesEspacio(dynamic valor) {
     String decimal = partes[1];
     int? entNum = int.tryParse(entera);
     if (entNum != null) {
-      String entFmt = entNum.toString().replaceAllMapped(
+      final int absEnt = entNum.abs();
+      final bool decNonZero = RegExp(r'[1-9]').hasMatch(decimal);
+      String entFmt = absEnt.toString().replaceAllMapped(
         RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
         (Match m) => '${m[1]} ',
       );
+      if (isNeg && (absEnt != 0 || decNonZero)) {
+        entFmt = '-$entFmt';
+      }
       res = '$entFmt.$decimal';
     }
   } else {
     String entera = numPart.replaceAll(',', '').replaceAll(' ', '');
     int? entNum = int.tryParse(entera);
     if (entNum != null) {
-      res = entNum.toString().replaceAllMapped(
+      final int absEnt = entNum.abs();
+      String entFmt = absEnt.toString().replaceAllMapped(
         RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
         (Match m) => '${m[1]} ',
       );
+      if (isNeg && absEnt != 0) {
+        entFmt = '-$entFmt';
+      }
+      res = entFmt;
     }
   }
 
@@ -1163,7 +1174,8 @@ class PdfService {
       final pesas = p['pesas']?.toString().trim() ?? '';
       final agua  = p['agua']?.toString().trim() ?? '';
       final ind   = (p['indicacion'] ?? p['lectura_inicial'])?.toString().trim() ?? '';
-      return pesas.isNotEmpty || agua.isNotEmpty || ind.isNotEmpty;
+      final reg   = (p['regreso'] ?? p['lectura_final'])?.toString().trim() ?? '';
+      return pesas.isNotEmpty || agua.isNotEmpty || ind.isNotEmpty || reg.isNotEmpty;
     }).toList();
 
     // ── Bifurcación FÍSICO vs DIGITAL ──
@@ -1193,21 +1205,31 @@ class PdfService {
 
     final headers = ['N', 'PESAS', 'AGUA', 'AGUA + PESAS', 'INDICACIÓN', 'REGRESO', 'ERROR'];
 
-    double maxErr = 0;
-    for (final r in display) {
+    double? calcFilaError(Map<String, dynamic> r) {
       final p = _toNum(r['pesas']);
       final a = _toNum(r['agua']);
       double? ap = _toNum(r['agua_pesas']);
-      if (ap == null && (p != null || a != null)) {
+      if (p != null && a != null) {
+        ap = p + a;
+      } else if (ap == null && (p != null || a != null)) {
         ap = (p ?? 0) + (a ?? 0);
       }
       final ind = _toNum(r['indicacion'] ?? r['lectura_inicial']);
-      double? err;
-      if (ind != null && ap != null) {
-        err = ind - ap;
-      } else if (r['error'] != null) {
-        err = _toNum(r['error']);
-      }
+      final reg = _toNum(r['regreso'] ?? r['lectura_final']);
+      final calc = calcularErrorSustitucion(
+        pesas: p,
+        agua: a,
+        indicacion: ind,
+        regreso: reg,
+        aguaMasPesasOverride: (p != null && a != null) ? null : ap,
+      );
+      if (calc != null) return calc;
+      return r['error'] != null ? _toNum(r['error']) : null;
+    }
+
+    double maxErr = 0;
+    for (final r in display) {
+      final err = calcFilaError(r);
       if (err != null && err.abs() > maxErr) {
         maxErr = err.abs();
       }
@@ -1245,19 +1267,16 @@ class PdfService {
           final p = _toNum(r['pesas']);
           final a = _toNum(r['agua']);
           double? ap = _toNum(r['agua_pesas']);
-          if (ap == null && (p != null || a != null)) {
+          if (p != null && a != null) {
+            ap = p + a;
+          } else if (ap == null && (p != null || a != null)) {
             ap = (p ?? 0) + (a ?? 0);
           }
           final ind = _toNum(r['indicacion'] ?? r['lectura_inicial']);
           final reg = _toNum(r['regreso'] ?? r['lectura_final']);
-          double? err;
-          if (ind != null && ap != null) {
-            err = ind - ap;
-          } else if (r['error'] != null) {
-            err = _toNum(r['error']);
-          }
+          final err = calcFilaError(r);
 
-          final bool hasData = p != null || a != null || ind != null || ap != null;
+          final bool hasData = p != null || a != null || ind != null || reg != null || ap != null;
 
           final vals = [
             n,
@@ -1266,7 +1285,7 @@ class PdfService {
             ap != null ? formatoMilesEspacio(_fmtDec(ap, dec)) : '',
             ind != null ? formatoMilesEspacio(_fmtDec(ind, dec)) : '',
             reg != null ? formatoMilesEspacio(_fmtDec(reg, dec)) : '',
-            err != null ? formatoMilesEspacio(_fmtDec(err, dec)) : (hasData && !esFisico ? '0' : ''),
+            err != null ? formatoMilesEspacio(formatearErrorSinCeros(err)) : (hasData && !esFisico ? '0' : ''),
           ];
 
           return pw.Container(
@@ -1331,7 +1350,7 @@ class PdfService {
               pw.Padding(
                 padding: const pw.EdgeInsets.only(right: 6),
                 child: pw.Text(
-                  esFisico && maxErr == 0 ? '' : formatoMilesEspacio(_fmtDec(maxErr, dec)),
+                  esFisico && maxErr == 0 ? '' : formatoMilesEspacio(formatearErrorSinCeros(maxErr)),
                   style: pw.TextStyle(fontSize: 7.0, fontWeight: pw.FontWeight.bold, color: PdfColors.black),
                 ),
               ),

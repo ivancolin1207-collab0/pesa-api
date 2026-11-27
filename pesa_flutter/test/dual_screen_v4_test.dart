@@ -24,6 +24,7 @@ import 'package:pesa_tablet/services/sync_service.dart';
 import 'package:pesa_tablet/services/tipo_servicio_rules.dart';
 import 'package:pesa_tablet/theme/pesa_theme.dart';
 import 'package:pesa_tablet/widgets/cliente_correo_poka_yoke.dart';
+import 'package:pesa_tablet/widgets/enlaces_sustitucion_table.dart';
 import 'package:pesa_tablet/widgets/pesa_components.dart';
 
 void main() {
@@ -157,6 +158,120 @@ void main() {
           reason: 'Debe imprimir tabla de sustitución cuando aplica_cargas_sustitucion == true');
       expect(txtConSust.contains('PESAS'), isTrue);
       expect(txtConSust.contains('AGUA'), isTrue);
+    });
+
+    test('v4.0.4 calcularErrorSustitucion evalua INDICACION-(AGUA+PESAS) y REGRESO-AGUA (Fila 3=-5, Fila 5=5/-9000)', () {
+      // Fila 1..5 evidencia real
+      final e1 = calcularErrorSustitucion(pesas: 2000, agua: 2000, indicacion: 4000, regreso: 2000);
+      final e2 = calcularErrorSustitucion(pesas: 2000, agua: 4005, indicacion: 6005, regreso: 4005);
+      final e3 = calcularErrorSustitucion(pesas: 2000, agua: 6005, indicacion: 8005, regreso: 6000);
+      final e4 = calcularErrorSustitucion(pesas: 2000, agua: 7990, indicacion: 9990, regreso: 7990);
+      final e5Typo = calcularErrorSustitucion(pesas: 2000, agua: 10000, indicacion: 12005, regreso: 1000);
+      final e5Ok = calcularErrorSustitucion(pesas: 2000, agua: 10000, indicacion: 12005, regreso: 10000);
+
+      expect(e1, 0.0);
+      expect(e2, 0.0);
+      expect(e3, -5.0);
+      expect(e4, 0.0);
+      expect(e5Typo, -9000.0);
+      expect(e5Ok, 5.0);
+
+      final maxErr = [e1!, e2!, e3!, e4!, e5Ok!]
+          .map((e) => e.abs())
+          .reduce((a, b) => a > b ? a : b);
+      expect(maxErr, 5.0);
+
+      // Formateo sin ceros decimales innecesarios ni '-0'
+      expect(formatearErrorSinCeros(-0.0), '0');
+      expect(formatearErrorSinCeros(0.0), '0');
+      expect(formatearErrorSinCeros(-5.0), '-5');
+      expect(formatearErrorSinCeros(5.0), '5');
+      expect(formatearErrorSinCeros(0.02), '0.02');
+      expect(formatearErrorSinCeros(-0.02), '-0.02');
+      expect(formatoMilesEspacio(formatearErrorSinCeros(-0.02)), '-0.02');
+      expect(formatoMilesEspacio(formatearErrorSinCeros(-9000.0)), '-9 000');
+    });
+
+    test('v4.0.4 PDF sustitución (preview y final) refleja -5 en Fila 3 y 5 en Fila 5 / Error Máximo', () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final osSust = <String, dynamic>{
+        'folio_os': 'OS-26-875',
+        'fecha': '2026-11-27',
+        'cliente': 'Pemex Transformacion Industrial',
+        'tipo_servicio': 'Ajuste',
+        'tipo_instrumento': 'Tanque / Silo',
+        'marca': 'Sartorius',
+        'modelo': 'PR1612/02',
+        'alcance_max': '15000',
+        'div_minima': '5',
+        'unidad_medida': 'kg',
+        'aplica_excentricidad': false,
+        'motivo_no_excentricidad': 'Tanque',
+        'aplica_cargas_sustitucion': true,
+        'aplica_enlaces_sustitucion': true,
+        'cantidad_enlaces': 5,
+      };
+      final exacSustRows = <Map<String, dynamic>>[
+        {'pesas': 2000, 'agua': 2000, 'agua_pesas': 4000, 'indicacion': 4000, 'regreso': 2000},
+        {'pesas': 2000, 'agua': 4005, 'agua_pesas': 6005, 'indicacion': 6005, 'regreso': 4005},
+        {'pesas': 2000, 'agua': 6005, 'agua_pesas': 8005, 'indicacion': 8005, 'regreso': 6000},
+        {'pesas': 2000, 'agua': 7990, 'agua_pesas': 9990, 'indicacion': 9990, 'regreso': 7990},
+        {'pesas': 2000, 'agua': 10000, 'agua_pesas': 12000, 'indicacion': 12005, 'regreso': 10000},
+      ];
+      for (final preview in [true, false]) {
+        final pdfBytes = await PdfService.instance.buildPdfBytes(
+          osData: Map<String, dynamic>.from(osSust),
+          repRows: const [],
+          excRows: const [],
+          exacRows: exacSustRows,
+          modoPreviewSinFirma: preview,
+        );
+        final txt = extractPdfText(pdfBytes);
+        expect(txt.contains('AGUA + PESAS'), isTrue);
+        expect(txt.contains('-5'), isTrue,
+            reason: 'PDF (preview=$preview) debe mostrar -5 en fila 3. Extraído: $txt');
+        expect(txt.contains('ERROR M'), isTrue);
+      }
+    });
+
+    testWidgets('v4.0.4 EnlacesSustitucionTable recalcula en tiempo real al modificar REGRESO', (tester) async {
+      List<Map<String, dynamic>> latestRows = const [];
+      final initialRows = <Map<String, dynamic>>[
+        {'pesas': '2000', 'agua': '2000', 'agua_pesas': '4000', 'indicacion': '4000', 'regreso': '2000'},
+        {'pesas': '2000', 'agua': '4005', 'agua_pesas': '6005', 'indicacion': '6005', 'regreso': '4005'},
+        {'pesas': '2000', 'agua': '6005', 'agua_pesas': '8005', 'indicacion': '8005', 'regreso': '6000'},
+        {'pesas': '2000', 'agua': '7990', 'agua_pesas': '9990', 'indicacion': '9990', 'regreso': '7990'},
+        {'pesas': '2000', 'agua': '10000', 'agua_pesas': '12000', 'indicacion': '12005', 'regreso': '1000'},
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: EnlacesSustitucionTable(
+              rows: initialRows,
+              divMin: 5,
+              numEnlaces: 5,
+              onChanged: (r) => latestRows = r,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      // Estado inicial con typo 1000 en fila 5 -> Fila 3 = -5, Fila 5 = -9 000, Max = 9 000
+      expect(find.text('-5'), findsOneWidget);
+      expect(find.text('-9 000'), findsOneWidget);
+      expect(find.text('9 000'), findsOneWidget);
+
+      // Corregir REGRESO de fila 5 (índice de campo: 5 filas x 5 inputs -> último TextField es idx 24)
+      final regFila5Field = find.byType(TextField).at(24);
+      await tester.enterText(regFila5Field, '10000');
+      await tester.pumpAndSettle(const Duration(milliseconds: 400));
+
+      expect(find.text('-9 000'), findsNothing);
+      expect(find.text('-5'), findsOneWidget);
+      expect(find.text('5'), findsAtLeastNWidgets(2)); // Error fila 5 = 5 y ERROR MÁXIMO = 5
+      expect(latestRows[2]['error'], '-5');
+      expect(latestRows[4]['error'], '5');
     });
   });
 

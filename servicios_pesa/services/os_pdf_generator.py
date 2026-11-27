@@ -27,6 +27,7 @@ try:
     from services.metrology import (
         decimals_from_d, fmt, fmt_patron, calc_emt,
         parse_d, clase_desde_os, clase_label, formato_miles_espacio,
+        calcular_error_sustitucion, formatear_error_sin_ceros,
     )
     _METRO_OK = True
 except ImportError:
@@ -38,6 +39,36 @@ except ImportError:
     def parse_d(t): return None
     def clase_desde_os(os_data): return 3
     def clase_label(clase): return f'Clase {["I","II","III","IIII"][clase-1]} (OIML R 76)'
+
+    def calcular_error_sustitucion(pesas, agua, indicacion, regreso, agua_mas_pesas_override=None):
+        if agua is not None and pesas is not None:
+            agua_mas_pesas = agua + pesas
+        else:
+            agua_mas_pesas = agua_mas_pesas_override
+        e_carga = round(indicacion - agua_mas_pesas, 6) if (indicacion is not None and agua_mas_pesas is not None) else None
+        e_regreso = round(regreso - agua, 6) if (regreso is not None and agua is not None) else None
+        if e_carga is None and e_regreso is None:
+            return None
+        if e_carga is not None and e_regreso is None:
+            return 0.0 if e_carga == 0 else e_carga
+        if e_carga is None and e_regreso is not None:
+            return 0.0 if e_regreso == 0 else e_regreso
+        res = e_regreso if abs(e_regreso) > abs(e_carga) else e_carga
+        return 0.0 if res == 0 else res
+
+    def formatear_error_sin_ceros(val) -> str:
+        if val is None or str(val).strip() == "":
+            return ""
+        try:
+            v = round(float(str(val).strip().replace(",", ".").replace(" ", "")), 6)
+        except (TypeError, ValueError):
+            return formato_miles_espacio(val)
+        if v == 0:
+            return "0"
+        s = f"{v:.6f}".rstrip("0").rstrip(".")
+        if s == "-0":
+            s = "0"
+        return formato_miles_espacio(s)
 
 def formato_miles_espacio(valor) -> str:
     """
@@ -60,7 +91,7 @@ def formato_miles_espacio(valor) -> str:
         try:
             ent_val = abs(int(entera))
             entera_fmt = f"{ent_val:,}".replace(',', ' ')
-            if is_neg:
+            if is_neg and (ent_val != 0 or any(ch in '123456789' for ch in decimal)):
                 entera_fmt = f"-{entera_fmt}"
             res = f"{entera_fmt}.{decimal}"
         except ValueError:
@@ -2322,10 +2353,12 @@ class OsPdfGenerator:
             pesas_raw      = r.get("pesas")
             agua_raw       = r.get("agua")
             indicacion_raw = r.get("indicacion") if r.get("indicacion") is not None else r.get("lectura_inicial")
+            regreso_raw    = r.get("regreso") if r.get("regreso") is not None else r.get("lectura_final")
             if (
                 (pesas_raw is not None and str(pesas_raw).strip() != "") or
                 (agua_raw is not None and str(agua_raw).strip() != "") or
-                (indicacion_raw is not None and str(indicacion_raw).strip() != "")
+                (indicacion_raw is not None and str(indicacion_raw).strip() != "") or
+                (regreso_raw is not None and str(regreso_raw).strip() != "")
             ):
                 puntos_validos.append(r)
 
@@ -2416,7 +2449,9 @@ class OsPdfGenerator:
             a_val = _sf(agua_raw) if has_agua else None
 
             # (AGUA + PESAS) = Pesas + Agua
-            if has_ap:
+            if p_val is not None and a_val is not None:
+                ap_val = p_val + a_val
+            elif has_ap:
                 ap_val = _sf(agua_pesas_raw)
             elif has_pesas or has_agua:
                 ap_val = (p_val or 0.0) + (a_val or 0.0)
@@ -2426,13 +2461,16 @@ class OsPdfGenerator:
             ind_val = _sf(indicacion_raw) if has_ind else None
             reg_val = _sf(regreso_raw) if (regreso_raw is not None and str(regreso_raw).strip() != "") else None
 
-            # ERROR = INDICACIÓN - (AGUA + PESAS)
-            if ind_val is not None and ap_val is not None:
-                err_val = ind_val - ap_val
-            elif error_raw is not None and str(error_raw).strip() != "":
+            # ERROR unificado: mayor magnitud entre INDICACIÓN-(AGUA+PESAS) y REGRESO-AGUA
+            err_val = calcular_error_sustitucion(
+                p_val,
+                a_val,
+                ind_val,
+                reg_val,
+                agua_mas_pesas_override=(None if (p_val is not None and a_val is not None) else ap_val),
+            )
+            if err_val is None and error_raw is not None and str(error_raw).strip() != "":
                 err_val = _sf(error_raw)
-            else:
-                err_val = None
 
             if err_val is not None:
                 errors.append(abs(err_val))
@@ -2444,7 +2482,7 @@ class OsPdfGenerator:
                 self._fmt(ap_val) if ap_val is not None else "",
                 self._fmt(ind_val) if ind_val is not None else "",
                 self._fmt(reg_val) if reg_val is not None else "",
-                self._fmt(err_val) if err_val is not None else ""
+                formatear_error_sin_ceros(err_val) if err_val is not None else ""
             ]
             
             c.setFillColor(_LBL)
@@ -2468,7 +2506,7 @@ class OsPdfGenerator:
         c.drawString(x + 5, y - row_h + 4, "ERROR MÁXIMO ENCONTRADO:")
         
         if errors:
-            c.drawRightString(x + w - 5, y - row_h + 4, self._fmt(max(errors)))
+            c.drawRightString(x + w - 5, y - row_h + 4, formatear_error_sin_ceros(max(errors)))
             
         y -= row_h
         return y

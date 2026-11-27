@@ -31,13 +31,38 @@ import logging
 from typing import Optional
 
 try:
-    from services.metrology import decimals_from_d, fmt, calc_emt, emt_para_fila
+    from services.metrology import (
+        decimals_from_d, fmt, calc_emt, emt_para_fila,
+        calcular_error_sustitucion, formatear_error_sin_ceros,
+    )
 except ImportError:
     # Fallback si el módulo aún no está disponible (tests aislados)
     def decimals_from_d(d): return 4
     def fmt(v, d, **kw): return '' if v is None else f'{v:.4f}'
     def calc_emt(m, e, clase=3): return e
     def emt_para_fila(m, d): return d
+
+    def calcular_error_sustitucion(pesas, agua, indicacion, regreso, agua_mas_pesas_override=None):
+        agua_mas_pesas = (agua + pesas) if (agua is not None and pesas is not None) else agua_mas_pesas_override
+        e_carga = round(indicacion - agua_mas_pesas, 6) if (indicacion is not None and agua_mas_pesas is not None) else None
+        e_regreso = round(regreso - agua, 6) if (regreso is not None and agua is not None) else None
+        if e_carga is None and e_regreso is None:
+            return None
+        if e_carga is not None and e_regreso is None:
+            return 0.0 if e_carga == 0 else e_carga
+        if e_carga is None and e_regreso is not None:
+            return 0.0 if e_regreso == 0 else e_regreso
+        res = e_regreso if abs(e_regreso) > abs(e_carga) else e_carga
+        return 0.0 if res == 0 else res
+
+    def formatear_error_sin_ceros(val) -> str:
+        if val is None or str(val).strip() == "":
+            return ""
+        v = round(float(val), 6)
+        if v == 0:
+            return "0"
+        s = f"{v:.6f}".rstrip("0").rstrip(".")
+        return "0" if s == "-0" else s
 
 try:
     from services.os_pdf_generator import formato_miles_espacio
@@ -1451,6 +1476,7 @@ class ExactitudWidget(MetrologicaTableWidget):
         # Col 1: PESAS, Col 2: AGUA, Col 3: AGUA+PESAS, Col 4: INDICACIÓN, Col 5: REGRESO
         for col in range(1, 6):
             sb = _make_cell_spinbox(dec)
+            sb.valueChanged.connect(lambda _v, r=row, c=col: self._on_sustitucion_changed(r, c))
             sb.editingFinished.connect(lambda r=row, c=col: self._on_sustitucion_changed(r, c))
             self._table.setCellWidget(row, col, sb)
 
@@ -1463,13 +1489,12 @@ class ExactitudWidget(MetrologicaTableWidget):
     def _on_sustitucion_changed(self, row: int, col: int) -> None:
         if self._blocking:
             return
-        d = getattr(self, '_d', None)
-        decimals = decimals_from_d(d) if d else 4
 
         sb_pesas = self._table.cellWidget(row, 1)
         sb_agua  = self._table.cellWidget(row, 2)
         sb_ap    = self._table.cellWidget(row, 3)
         sb_ind   = self._table.cellWidget(row, 4)
+        sb_reg   = self._table.cellWidget(row, 5)
         err_it   = self._table.item(row, 6)
         if not all([sb_pesas, sb_agua, sb_ap, sb_ind, err_it]):
             return
@@ -1478,16 +1503,29 @@ class ExactitudWidget(MetrologicaTableWidget):
         a_v = _val_or_none(sb_agua)
 
         if col in (1, 2):
-            if p_v is not None or a_v is not None:
-                total_ap = (p_v or 0.0) + (a_v or 0.0)
-                sb_ap.setValue(total_ap)
+            self._blocking = True
+            try:
+                if p_v is not None or a_v is not None:
+                    total_ap = (p_v or 0.0) + (a_v or 0.0)
+                    sb_ap.setValue(total_ap)
+                else:
+                    sb_ap.setValue(sb_ap.minimum())
+            finally:
+                self._blocking = False
 
-        ap_v  = _val_or_none(sb_ap)
+        ap_v  = (p_v + a_v) if (p_v is not None and a_v is not None) else _val_or_none(sb_ap)
         ind_v = _val_or_none(sb_ind)
+        reg_v = _val_or_none(sb_reg) if sb_reg else None
 
-        if ind_v is not None and ap_v is not None:
-            err_v = ind_v - ap_v
-            txt = formato_miles_espacio(f"{err_v:.{decimals}f}")
+        err_v = calcular_error_sustitucion(
+            p_v,
+            a_v,
+            ind_v,
+            reg_v,
+            agua_mas_pesas_override=(None if (p_v is not None and a_v is not None) else ap_v),
+        )
+        if err_v is not None:
+            txt = formatear_error_sin_ceros(err_v)
             err_it.setText(txt)
             color = _RED if abs(err_v) > 0 else _GREEN
             err_it.setForeground(QBrush(QColor(color)))
@@ -1549,12 +1587,32 @@ class ExactitudWidget(MetrologicaTableWidget):
         errors = []
         if self._modo_sustitucion:
             for row in range(self._table.rowCount()):
+                sb_p   = self._table.cellWidget(row, 1)
+                sb_a   = self._table.cellWidget(row, 2)
                 sb_ap  = self._table.cellWidget(row, 3)
                 sb_ind = self._table.cellWidget(row, 4)
-                ap_v   = _val_or_none(sb_ap) if sb_ap else None
+                sb_reg = self._table.cellWidget(row, 5)
+                err_it = self._table.item(row, 6)
+                p_v    = _val_or_none(sb_p) if sb_p else None
+                a_v    = _val_or_none(sb_a) if sb_a else None
+                ap_v   = (p_v + a_v) if (p_v is not None and a_v is not None) else (_val_or_none(sb_ap) if sb_ap else None)
                 ind_v  = _val_or_none(sb_ind) if sb_ind else None
-                if ap_v is not None and ind_v is not None:
-                    errors.append(abs(ind_v - ap_v))
+                reg_v  = _val_or_none(sb_reg) if sb_reg else None
+                err_v  = calcular_error_sustitucion(
+                    p_v,
+                    a_v,
+                    ind_v,
+                    reg_v,
+                    agua_mas_pesas_override=(None if (p_v is not None and a_v is not None) else ap_v),
+                )
+                if err_it is not None:
+                    if err_v is not None:
+                        err_it.setText(formatear_error_sin_ceros(err_v))
+                        err_it.setForeground(QBrush(QColor(_RED if abs(err_v) > 0 else _GREEN)))
+                    else:
+                        err_it.setText("—")
+                if err_v is not None:
+                    errors.append(abs(err_v))
         else:
             for row in range(self._table.rowCount()):
                 sb_nom = self._table.cellWidget(row, 1)
@@ -1567,7 +1625,10 @@ class ExactitudWidget(MetrologicaTableWidget):
         if errors:
             max_err = max(errors)
             style = _ERROR_MAX_VALUE_STYLE if max_err > 0 else _ERROR_MAX_OK_STYLE
-            self._lbl_error_max.setText(formato_miles_espacio(f"{max_err:.{decimals}f}"))
+            if self._modo_sustitucion:
+                self._lbl_error_max.setText(formatear_error_sin_ceros(max_err))
+            else:
+                self._lbl_error_max.setText(formato_miles_espacio(f"{max_err:.{decimals}f}"))
             self._lbl_error_max.setStyleSheet(style)
         else:
             self._lbl_error_max.setText("—")
@@ -1673,18 +1734,16 @@ class ExactitudWidget(MetrologicaTableWidget):
             for i in range(self._table.rowCount()):
                 p   = _val_or_none(self._table.cellWidget(i, 1))
                 a   = _val_or_none(self._table.cellWidget(i, 2))
-                ap  = _val_or_none(self._table.cellWidget(i, 3))
+                ap  = (p + a) if (p is not None and a is not None) else _val_or_none(self._table.cellWidget(i, 3))
                 ind = _val_or_none(self._table.cellWidget(i, 4))
                 reg = _val_or_none(self._table.cellWidget(i, 5))
-                err_it = self._table.item(i, 6)
-                err = None
-                if err_it and err_it.text() != "—":
-                    try:
-                        err = float(err_it.text().replace(' ', ''))
-                    except ValueError:
-                        err = None
-                if err is None and ind is not None and ap is not None:
-                    err = ind - ap
+                err = calcular_error_sustitucion(
+                    p,
+                    a,
+                    ind,
+                    reg,
+                    agua_mas_pesas_override=(None if (p is not None and a is not None) else ap),
+                )
                 if any(v is not None for v in [p, a, ap, ind, reg]):
                     rows.append({
                         "punto_id":        i + 1,
